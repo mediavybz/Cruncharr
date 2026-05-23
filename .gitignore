@@ -1,0 +1,53 @@
+# Build outputs
+bin/
+obj/
+out/
+publish/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Sensitive files - NEVER commit these
+widevine/*.pem
+widevine/*.bin
+test-data/widevine/*.pem
+test-data/widevine/*.bin
+test-data/lib/device_private_key
+test-data/tools/device_private_key
+*.key
+*.pem
+
+# Original reference code (separate repo)
+crunchy-downloader/
+
+# Test data (binaries and sensitive files)
+test-data/
+
+# Test credentials
+test-data/credentials*
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Test output files
+test_output*.txt
+test_cookies.txt
+
+# Binary archives
+tools/*.zip
+tools/*.7z
+tools/*.tar.gz

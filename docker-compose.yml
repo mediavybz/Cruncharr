@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  cruncharr:
+    build: .
+    image: ghcr.io/YOUR_USERNAME/cruncharr:latest
+    container_name: cruncharr
+    restart: unless-stopped
+    ports:
+      - "8585:8585"
+    volumes:
+      # Configuration directory - stores cruncharr.yaml, history.json, queue.json
+      - ./config:/config
+      
+      # Downloads output directory - where completed files go
+      - ./downloads:/downloads
+      
+      # Temporary directory for processing
+      - ./tmp:/tmp/cruncharr
+      
+      # Widevine DRM files (REQUIRED - ONLY external dependency)
+      # Place device_client_id_blob.bin and device_private_key.pem here
+      - ./widevine:/widevine
+      
+      # Custom ffmpeg encoding presets (optional)
+      # - ./presets:/app/presets
+      
+      # Subtitle fonts for muxing (optional)
+      # - ./fonts:/app/fonts
+      
+      # Optional: Mount your media library if *arr apps manage it
+      # - /path/to/media:/media
+    environment:
+      # Crunchyroll credentials (optional - can also be in config file)
+      - CRUNCHYROLL_EMAIL=${CRUNCHYROLL_EMAIL:-}
+      - CRUNCHYROLL_PASSWORD=${CRUNCHYROLL_PASSWORD:-}
+      
+      # Output configuration
+      - CRUNCHYROLL_OUTPUT_DIR=/downloads
+      - CRUNCHYROLL_TEMP_DIR=/tmp/cruncharr
+      
+      # Queue configuration
+      - CRUNCHYROLL_QUEUE_PERSIST=true
+      - CRUNCHYROLL_QUEUE_AUTO_DOWNLOAD=true
+      
+      # Webhook for notifications (optional)
+      - CRUNCHYROLL_WEBHOOK_URL=${CRUNCHYROLL_WEBHOOK_URL:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8585/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Sonarr integration example
+  # sonarr:
+  #   image: lscr.io/linuxserver/sonarr:latest
+  #   container_name: sonarr
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8989:8989"
+  #   volumes:
+  #     - ./sonarr/config:/config
+  #     - ./downloads:/downloads
+  #     - /path/to/anime:/tv
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #   depends_on:
+  #     - cruncharr
+
+  # Optional: Radarr integration example
+  # radarr:
+  #   image: lscr.io/linuxserver/radarr:latest
+  #   container_name: radarr
+  #   restart: unless-stopped
+  #   ports:
+  #     - "7878:7878"
+  #   volumes:
+  #     - ./radarr/config:/config
+  #     - ./downloads:/downloads
+  #     - /path/to/movies:/movies
+  #   environment:
+  #     - PUID=1000
+  #     - PGID=1000
+  #   depends_on:
+  #     - cruncharr

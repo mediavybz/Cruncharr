@@ -1,0 +1,95 @@
+using System.Net.Http.Json;
+using Cruncharr.Core.Configuration;
+using Cruncharr.Core.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Cruncharr.Core.Services;
+
+public interface INotificationService{
+    Task NotifyCompleteAsync(DownloadResult result, CruncharrConfig config);
+    Task NotifyErrorAsync(DownloadResult result, CruncharrConfig config);
+    Task NotifyQueueCompleteAsync(List<DownloadResult> results, CruncharrConfig config);
+}
+
+public class NotificationService : INotificationService{
+    private readonly ILogger<NotificationService>? _logger;
+    private readonly HttpClient _httpClient;
+    
+    public NotificationService(ILogger<NotificationService>? logger = null){
+        _logger = logger;
+        _httpClient = new HttpClient();
+    }
+    
+    public async Task NotifyCompleteAsync(DownloadResult result, CruncharrConfig config){
+        if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
+        if (!config.Notifications.OnComplete) return;
+        
+        _logger?.LogInformation("Sending completion notification to {WebhookUrl}", config.Notifications.WebhookUrl);
+        
+        var payload = new{
+            event_type = "download_complete",
+            success = result.Success,
+            episode = result.Episode,
+            output_path = result.OutputPath,
+            timestamp = DateTime.UtcNow
+        };
+        
+        await SendWebhookAsync(config, payload);
+    }
+    
+    public async Task NotifyErrorAsync(DownloadResult result, CruncharrConfig config){
+        if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
+        if (!config.Notifications.OnError) return;
+        
+        _logger?.LogError("Sending error notification to {WebhookUrl}: {Error}", config.Notifications.WebhookUrl, result.ErrorMessage);
+        
+        var payload = new{
+            event_type = "download_error",
+            success = false,
+            error = result.ErrorMessage,
+            episode = result.Episode,
+            timestamp = DateTime.UtcNow
+        };
+        
+        await SendWebhookAsync(config, payload);
+    }
+    
+    public async Task NotifyQueueCompleteAsync(List<DownloadResult> results, CruncharrConfig config){
+        if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
+        if (!config.Notifications.OnComplete) return;
+        
+        var successCount = results.Count(r => r.Success);
+        var errorCount = results.Count - successCount;
+        
+        _logger?.LogInformation("Sending queue completion notification: {Success} succeeded, {Errors} failed", successCount, errorCount);
+        
+        var payload = new{
+            event_type = "queue_complete",
+            total = results.Count,
+            succeeded = successCount,
+            failed = errorCount,
+            results = results.Select(r => new{
+                success = r.Success,
+                error = r.ErrorMessage,
+                episode = r.Episode?.Title
+            }),
+            timestamp = DateTime.UtcNow
+        };
+        
+        await SendWebhookAsync(config, payload);
+    }
+    
+    private async Task SendWebhookAsync(CruncharrConfig config, object payload){
+        try{
+            var method = new HttpMethod(config.Notifications.WebhookMethod);
+            var request = new HttpRequestMessage(method, config.Notifications.WebhookUrl){
+                Content = JsonContent.Create(payload)
+            };
+            
+            var response = await _httpClient.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to send webhook notification");
+        }
+    }
+}

@@ -1,0 +1,2139 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+CRUNCHARR WEB UI - PORTED FROM CRUNCHY-DOWNLOADER
+================================================================================
+
+PORTING GUIDE:
+This file is a manual port of the Crunchy-Downloader desktop UI (Avalonia/FluentAvalonia)
+to a web-based single-page application. When updating from new versions of the original
+app, use this mapping to find what needs to be updated:
+
+ORIGINAL FILE → WEB UI SECTION:
+- MainWindow.axaml → Navigation sidebar layout (lines ~860-920)
+- DownloadsPageView.axaml → renderDownloads() function
+- AddDownloadPageView.axaml → renderAddDownload() function  
+- CalendarPageView.axaml → renderCalendar() function
+- SeriesPageView.axaml → renderSeries() / renderSeasons() functions
+- HistoryPageView.axaml → renderHistory() function
+- AccountPageView.axaml → renderAccount() function
+- SettingsPageView.axaml → renderSettings() function
+- ToastNotification.axaml → showToast() function
+
+COLOR SCHEME:
+Uses WinUI 3 / Fluent Design System dark theme colors (ported from FluentAvalonia):
+- ApplicationPageBackgroundThemeBrush → --bg-primary (#202020)
+- ControlAltFillColorQuarternary → --bg-secondary (#2c2c2c)
+- ComboBoxDropDownBackground → --bg-card (#1e1e1e)
+- TextFillColorPrimaryBrush → --text-primary (#ffffff)
+- TextFillColorSecondaryBrush → --text-secondary (#a0a0a0)
+- SystemAccentColor → --accent-blue (#4cc2ff)
+- Crunchyroll brand color kept as --accent-orange (#f47521)
+
+ICONS:
+Original uses Fluent System Icons (SymbolIcon). We use inline SVGs matching the
+same icon shapes: Download, Add, Calendar, Clock, Library, Contact, Settings.
+
+DATA MODEL MAPPING:
+Original ViewModels → API endpoints:
+- DownloadsPageViewModel → GET/POST /api/v1/queue
+- AddDownloadPageViewModel → GET /api/v1/series/search, GET /api/v1/series/{id}/episodes
+- CalendarPageViewModel → GET /api/v1/calendar
+- HistoryPageViewModel → GET /api/v1/history
+- AccountPageViewModel → GET/POST /api/v1/auth/*
+- SettingsPageViewModel → GET/POST /api/v1/config
+
+MAINTENANCE NOTES:
+- This is a manual port - future updates to Crunchy-Downloader require manual syncing
+- Keep API response shapes similar to original ViewModels to minimize UI changes
+- When original adds new features, check the corresponding ViewModel and View files
+- Update this comment block with any new mappings
+================================================================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cruncharr - Crunchyroll Downloader</title>
+    <style>
+        /* WinUI 3 / Fluent Design Dark Theme - Ported from Crunchy-Downloader */
+        /* Original uses FluentAvalonia with WinUI 3 system colors */
+        :root {
+            /* WinUI 3 Dark Theme Colors */
+            --bg-primary: #202020;              /* ApplicationPageBackgroundThemeBrush */
+            --bg-secondary: #2c2c2c;            /* ControlAltFillColorQuarternary (sidebar/toolbar) */
+            --bg-tertiary: #2d2d2d;             /* Layer elevation */
+            --bg-hover: #3a3a3a;                /* ControlFillColorSecondary */
+            --bg-card: #1e1e1e;                 /* ComboBoxDropDownBackground / Card backgrounds */
+            --text-primary: #ffffff;            /* TextFillColorPrimaryBrush */
+            --text-secondary: #a0a0a0;          /* TextFillColorSecondaryBrush */
+            --text-muted: #606060;              /* TextFillColorTertiaryBrush */
+            --accent-orange: #f47521;           /* Crunchyroll brand color (kept from original) */
+            --accent-blue: #4cc2ff;             /* SystemAccentColor (WinUI default blue) */
+            --accent-green: #6ccb5f;            /* SystemFillColorSuccess */
+            --accent-red: #ff99a4;              /* SystemFillColorCritical */
+            --accent-yellow: #fce100;           /* SystemFillColorCaution */
+            --border-color: #3a3a3a;            /* CardStrokeColorDefaultBrush */
+            --sidebar-width: 220px;
+            --header-height: 60px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+        }
+
+        .app-container { display: flex; height: 100vh; }
+
+        /* Sidebar */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-logo {
+            width: 32px;
+            height: 32px;
+            background: var(--accent-orange);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #000;
+        }
+
+        .sidebar-title { font-size: 1.2em; font-weight: 600; }
+
+        .sidebar-nav { flex: 1; padding: 10px 0; }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            cursor: pointer;
+            transition: background 0.2s;
+            gap: 12px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-left: 3px solid transparent;
+        }
+
+        .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .nav-item.active { background: var(--bg-tertiary); color: var(--accent-orange); border-left-color: var(--accent-orange); }
+
+        .nav-icon { width: 20px; text-align: center; }
+
+        .sidebar-footer {
+            padding: 15px 20px;
+            border-top: 1px solid var(--border-color);
+            font-size: 0.8em;
+            color: var(--text-muted);
+        }
+
+        .nav-section-title {
+            padding: 8px 20px;
+            font-size: 0.7em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        /* Main Content */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* Header */
+        .header {
+            height: var(--header-height);
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 25px;
+            justify-content: space-between;
+        }
+
+        .header-search {
+            display: flex;
+            align-items: center;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 15px;
+            width: 400px;
+            gap: 10px;
+        }
+
+        .header-search input {
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            outline: none;
+            width: 100%;
+            font-size: 0.95em;
+        }
+
+        .header-search input::placeholder { color: var(--text-muted); }
+
+        .header-actions { display: flex; gap: 15px; align-items: center; }
+
+        .header-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.2s;
+        }
+
+        .header-btn:hover { background: var(--bg-hover); }
+        .header-btn.primary { background: var(--accent-orange); color: #000; border: none; font-weight: 600; }
+        .header-btn.primary:hover { background: #ff8c42; }
+        .header-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Content Area */
+        .content { flex: 1; overflow-y: auto; padding: 25px; }
+
+        .page-title { font-size: 1.8em; font-weight: 600; margin-bottom: 5px; }
+        .page-subtitle { color: var(--text-secondary); margin-bottom: 25px; }
+
+        /* Cards */
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .card-title { font-size: 1.1em; font-weight: 600; }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+            color: var(--text-secondary);
+        }
+
+        .toggle-switch input { display: none; }
+
+        .toggle-slider {
+            width: 36px;
+            height: 20px;
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            position: relative;
+            transition: background 0.2s;
+            border: 1px solid var(--border-color);
+        }
+
+        .toggle-slider::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            background: var(--text-secondary);
+            border-radius: 50%;
+            top: 1px;
+            left: 1px;
+            transition: all 0.2s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider { background: var(--accent-orange); border-color: var(--accent-orange); }
+        .toggle-switch input:checked + .toggle-slider::after { left: 17px; background: #fff; }
+
+        /* Buttons */
+        .btn-icon {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .btn-icon.danger:hover { background: rgba(231, 76, 60, 0.2); color: var(--accent-red); border-color: var(--accent-red); }
+        .btn-icon.success:hover { background: rgba(78, 204, 163, 0.2); color: var(--accent-green); border-color: var(--accent-green); }
+
+        /* Progress Bars */
+        .progress-container {
+            width: 100%;
+            height: 5px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--accent-orange);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        /* Status Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 600;
+            gap: 5px;
+        }
+
+        .badge-queued { background: rgba(93, 173, 226, 0.2); color: var(--accent-blue); }
+        .badge-downloading { background: rgba(244, 117, 33, 0.2); color: var(--accent-orange); }
+        .badge-done { background: rgba(78, 204, 163, 0.2); color: var(--accent-green); }
+        .badge-error { background: rgba(231, 76, 60, 0.2); color: var(--accent-red); }
+        .badge-retry { background: rgba(243, 156, 18, 0.2); color: var(--accent-yellow); }
+        .badge-premium { background: rgba(244, 117, 33, 0.2); color: var(--accent-orange); }
+
+        /* Download Item */
+        .download-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .download-thumb {
+            width: 208px;
+            height: 117px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            overflow: hidden;
+        }
+
+        .download-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+        .download-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+        .download-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 5px;
+        }
+
+        .download-title {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 4px;
+            word-break: break-word;
+        }
+
+        .download-title.highlight { color: var(--accent-orange); }
+
+        .download-info {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+
+        .download-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .download-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: auto;
+            font-size: 0.85em;
+            color: var(--text-secondary);
+        }
+
+        /* Search Popup */
+        .search-popup {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-top: 5px;
+            max-height: 400px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+
+        .search-result-item {
+            display: flex;
+            gap: 15px;
+            padding: 12px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--border-color);
+            transition: background 0.2s;
+        }
+
+        .search-result-item:hover { background: var(--bg-hover); }
+
+        .search-result-poster {
+            width: 120px;
+            height: 180px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            overflow: hidden;
+        }
+
+        .search-result-poster img { width: 100%; height: 100%; object-fit: cover; }
+
+        .search-result-info { flex: 1; min-width: 0; }
+        .search-result-title { font-size: 1.3em; font-weight: 600; margin-bottom: 8px; }
+        .search-result-desc { font-size: 0.9em; color: var(--text-secondary); line-height: 1.4; }
+
+        /* Episode Item */
+        .episode-item {
+            display: flex;
+            gap: 12px;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            background: var(--bg-secondary);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .episode-item:hover { background: var(--bg-hover); }
+        .episode-item.selected { border-color: var(--accent-orange); }
+
+        .episode-thumb {
+            width: 208px;
+            height: 117px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            overflow: hidden;
+        }
+
+        .episode-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+        .episode-content { flex: 1; min-width: 0; }
+        .episode-title { font-weight: 600; margin-bottom: 4px; }
+        .episode-desc { font-size: 0.85em; color: var(--text-secondary); margin-bottom: 4px; }
+        .episode-dubs { font-size: 0.8em; color: var(--text-muted); font-style: italic; }
+
+        /* Calendar */
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 10px;
+        }
+
+        .calendar-day {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .calendar-day-header {
+            padding: 10px;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            border-radius: 8px 8px 0 0;
+        }
+
+        .calendar-day-date { font-weight: bold; }
+        .calendar-day-name { font-size: 0.85em; color: var(--text-secondary); }
+
+        .calendar-day-content {
+            flex: 1;
+            padding: 8px;
+            overflow-y: auto;
+        }
+
+        .calendar-episode {
+            background: var(--bg-primary);
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: background 0.2s;
+            position: relative;
+        }
+
+        .calendar-episode:hover { background: var(--bg-hover); }
+        .calendar-episode.premiere { background: rgba(244, 117, 33, 0.15); }
+
+        .calendar-episode-time { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px; }
+
+        .calendar-episode-thumb {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .calendar-episode-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+        .calendar-episode-number {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: var(--accent-orange);
+            color: #000;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.8em;
+            border-radius: 0 0 0 8px;
+        }
+
+        .calendar-episode-title {
+            font-size: 0.8em;
+            font-weight: 500;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* History */
+        .history-toolbar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .toolbar-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 12px;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.75em;
+            transition: all 0.2s;
+            min-width: 70px;
+        }
+
+        .toolbar-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .toolbar-btn.active { background: var(--bg-tertiary); color: var(--accent-orange); border-color: var(--accent-orange); }
+        .toolbar-btn .icon { font-size: 1.5em; }
+
+        .history-poster-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 15px;
+        }
+
+        .history-poster {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s;
+            position: relative;
+        }
+
+        .history-poster:hover { transform: translateY(-2px); }
+
+        .history-poster-img {
+            width: 100%;
+            aspect-ratio: 2/3;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .history-poster-img img { width: 100%; height: 100%; object-fit: cover; }
+
+        .history-poster-badge {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: var(--accent-orange);
+            color: #000;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.85em;
+            border-radius: 0 0 0 8px;
+        }
+
+        .history-poster-info { padding: 10px; text-align: center; }
+        .history-poster-title { font-weight: 600; font-size: 0.9em; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .history-poster-meta { font-size: 0.8em; color: var(--text-secondary); }
+
+        .history-table table { width: 100%; border-collapse: collapse; }
+        .history-table th { padding: 12px 15px; text-align: left; font-weight: 600; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); background: var(--bg-tertiary); }
+        .history-table td { padding: 12px 15px; border-bottom: 1px solid var(--border-color); }
+        .history-table tbody tr:hover { background: var(--bg-hover); }
+
+        /* Account */
+        .account-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 60px;
+        }
+
+        .account-avatar {
+            width: 170px;
+            height: 170px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4em;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .account-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+        .account-name { font-size: 1.4em; font-weight: 600; margin-bottom: 10px; }
+        .account-subscription { font-size: 1.2em; color: var(--text-secondary); margin-bottom: 25px; }
+
+        /* Settings Tabs */
+        .settings-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+
+        .settings-tab {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.95em;
+            transition: all 0.2s;
+        }
+
+        .settings-tab:hover { color: var(--text-primary); }
+        .settings-tab.active { color: var(--accent-orange); border-bottom-color: var(--accent-orange); }
+
+        .settings-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+
+        .settings-section-header {
+            padding: 15px 20px;
+            background: var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+
+        .settings-section-title { font-weight: 600; }
+        .settings-section-desc { font-size: 0.85em; color: var(--text-secondary); margin-left: auto; }
+
+        .settings-section-body { padding: 15px 20px; }
+
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .setting-row:last-child { border-bottom: none; }
+
+        .setting-label { font-weight: 500; }
+        .setting-desc { font-size: 0.85em; color: var(--text-secondary); margin-top: 2px; }
+
+        .setting-control { display: flex; align-items: center; gap: 10px; }
+
+        /* Form Elements */
+        .form-group { margin-bottom: 15px; }
+        .form-label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 0.9em; }
+
+        .form-input, .form-select {
+            width: 100%;
+            padding: 10px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.95em;
+        }
+
+        .form-input:focus, .form-select:focus { outline: none; border-color: var(--accent-orange); }
+
+        .form-input[type="number"] { width: 120px; }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active { display: flex; }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title { font-size: 1.2em; font-weight: 600; }
+        .modal-close { background: none; border: none; color: var(--text-secondary); font-size: 1.5em; cursor: pointer; }
+
+        .modal-body { padding: 20px; }
+        .modal-footer { padding: 15px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px; }
+
+        /* Loading */
+        .loading { display: flex; align-items: center; justify-content: center; padding: 40px; color: var(--text-secondary); }
+        .spinner {
+            width: 20px; height: 20px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-orange);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Empty State */
+        .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+        .empty-state-icon { font-size: 4em; margin-bottom: 20px; }
+        .empty-state-title { font-size: 1.2em; color: var(--text-secondary); margin-bottom: 10px; }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 20px; right: 20px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .toast {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 300px;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.success { border-left: 4px solid var(--accent-green); }
+        .toast.error { border-left: 4px solid var(--accent-red); }
+        .toast.warning { border-left: 4px solid var(--accent-yellow); }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Dropdown / Popup */
+        .dropdown-menu {
+            position: absolute;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            z-index: 500;
+            min-width: 200px;
+            display: none;
+        }
+
+        .dropdown-menu.active { display: block; }
+
+        .dropdown-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.2s;
+        }
+
+        .dropdown-item:hover { background: var(--bg-hover); }
+
+        /* Checkbox */
+        .checkbox-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .checkbox-label input { width: 16px; height: 16px; accent-color: var(--accent-orange); }
+
+        .changelog-block {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 12px;
+        }
+
+        .changelog-version { font-weight: 600; margin-bottom: 8px; }
+        .changelog-item { font-size: 0.9em; color: var(--text-secondary); padding: 3px 0; }
+
+        /* Season dropdown container */
+        .season-selector { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; }
+
+        /* Sonarr icon placeholder */
+        .sonarr-icon { width: 24px; height: 24px; background: var(--accent-green); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7em; color: #fff; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar { width: 60px; }
+            .sidebar-title, .nav-item span, .nav-section-title { display: none; }
+            .header-search { width: 200px; }
+            .calendar-grid { grid-template-columns: 1fr; }
+            .download-item { flex-direction: column; }
+            .download-thumb { width: 100%; height: auto; aspect-ratio: 16/9; }
+            .episode-item { flex-direction: column; }
+            .episode-thumb { width: 100%; height: auto; aspect-ratio: 16/9; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">C</div>
+                <div class="sidebar-title">Cruncharr</div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-page="downloads">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/></svg></span>
+                    <span>Downloads</span>
+                </a>
+                <a href="#" class="nav-item" data-page="add-download">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8m-4-4h8"/></svg></span>
+                    <span>Add Download</span>
+                </a>
+                <a href="#" class="nav-item" data-page="calendar">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+                    <span>Calendar</span>
+                </a>
+                <a href="#" class="nav-item" data-page="seasons">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+                    <span>Seasons</span>
+                </a>
+                <a href="#" class="nav-item" data-page="history">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
+                    <span>History</span>
+                </a>
+            </nav>
+            <div>
+                <div class="nav-section-title">System</div>
+                <a href="#" class="nav-item" data-page="account">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+                    <span>Account</span>
+                </a>
+                <a href="#" class="nav-item" data-page="settings">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+                    <span>Settings</span>
+                </a>
+            </div>
+            <div class="sidebar-footer">
+                <div id="version-info">v1.0.0</div>
+                <div id="connection-status" style="color: var(--accent-green);">Connected</div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="header">
+                <div class="header-search">
+                    <span>&#128269;</span>
+                    <input type="text" placeholder="Search series..." id="global-search">
+                </div>
+                <div class="header-actions">
+                    <button class="header-btn" onclick="refreshData()">&#128260; Refresh</button>
+                    <button class="header-btn primary" onclick="navigateTo('add-download')">+ Add Download</button>
+                </div>
+            </header>
+
+            <div class="content" id="content"></div>
+        </main>
+    </div>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title" id="modal-title">Title</div>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer" id="modal-footer"></div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let currentPage = 'downloads';
+        let queueData = [];
+        let historyData = [];
+        let seriesData = [];
+        let stats = {};
+        let config = {};
+        let authStatus = {};
+        let calendarWeekOffset = 0;
+        let historyViewMode = 'poster';
+        let settingsTab = 'general';
+        let selectedEpisodes = new Set();
+        let addDownloadSearchResults = [];
+        let addDownloadSelectedSeries = null;
+        let addDownloadEpisodes = [];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPage('downloads');
+            startPolling();
+            setupNavigation();
+        });
+
+        function setupNavigation() {
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const page = item.dataset.page;
+                    navigateTo(page);
+                });
+            });
+        }
+
+        function navigateTo(page) {
+            loadPage(page);
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
+            if (navItem) navItem.classList.add('active');
+        }
+
+        function loadPage(page) {
+            currentPage = page;
+            const content = document.getElementById('content');
+            switch(page) {
+                case 'downloads': renderDownloads(content); break;
+                case 'add-download': renderAddDownload(content); break;
+                case 'calendar': renderCalendar(content); break;
+                case 'seasons': renderSeasons(content); break;
+                case 'history': renderHistory(content); break;
+                case 'account': renderAccount(content); break;
+                case 'settings': renderSettings(content); break;
+            }
+        }
+
+        // ================== DOWNLOADS ==================
+        function renderDownloads(container) {
+            container.innerHTML = `
+                <div class="page-title">Downloads</div>
+                <div class="page-subtitle">Manage your download queue</div>
+                <div style="display:flex; gap:15px; align-items:center; flex-wrap:wrap; margin-bottom:20px;">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-remove-finished" onchange="toggleSetting('removeFinished', this.checked)">
+                        <span class="toggle-slider"></span>
+                        Remove Finished
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-auto-download" onchange="toggleSetting('autoDownload', this.checked)">
+                        <span class="toggle-slider"></span>
+                        Auto Download
+                    </label>
+
+                    <div style="margin-left:auto; display:flex; gap:8px;">
+                        <button class="btn-icon" id="btn-retry-failed" onclick="retryFailed()" title="Retry Failed" disabled>
+                            &#8635; Retry
+                        </button>
+                        <button class="btn-icon" id="btn-pause-running" onclick="pauseRunning()" title="Pause Running" disabled>
+                            &#10074;&#10074; Pause
+                        </button>
+                        <button class="btn-icon danger" onclick="clearQueue()" title="Clear Queue">
+                            &#128465; Clear
+                        </button>
+                    </div>
+                </div>
+                <div id="downloads-list">
+                    <div class="loading"><div class="spinner"></div>Loading queue...</div>
+                </div>
+            `;
+            fetchDownloads();
+        }
+
+        async function fetchDownloads() {
+            try {
+                const res = await fetch('/api/v1/queue');
+                const data = await res.json();
+                queueData = data.items || [];
+                const list = document.getElementById('downloads-list');
+
+                const hasFailed = queueData.some(i => (i.downloadProgress?.state || '').toLowerCase() === 'error');
+                const hasActive = queueData.some(i => (i.downloadProgress?.state || '').toLowerCase() === 'downloading');
+                const retryBtn = document.getElementById('btn-retry-failed');
+                const pauseBtn = document.getElementById('btn-pause-running');
+                if (retryBtn) retryBtn.disabled = !hasFailed;
+                if (pauseBtn) pauseBtn.disabled = !hasActive;
+
+                if (queueData.length === 0) {
+                    list.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">&#128229;</div>
+                            <div class="empty-state-title">Queue is empty</div>
+                            <div>Add episodes to start downloading</div>
+                        </div>`;
+                    return;
+                }
+
+                list.innerHTML = queueData.map(item => {
+                    const state = (item.downloadProgress?.state || 'queued').toLowerCase();
+                    const isError = state === 'error';
+                    const isDownloading = state === 'downloading';
+                    const isPaused = state === 'paused';
+                    return `
+                        <div class="download-item">
+                            <div class="download-thumb">
+                                ${item.episode?.thumbnailUrl ? `<img src="${item.episode.thumbnailUrl}" alt="">` : '📺'}
+                            </div>
+                            <div class="download-content">
+                                <div class="download-header">
+                                    <div style="min-width:0;">
+                                        <div class="download-title ${item.episode?.highlightAllAvailable ? 'highlight' : ''}">${item.episode?.title || 'Unknown'}</div>
+                                        <div class="download-info" title="${item.infoTextHover || item.episode?.description || ''}">${item.infoText || item.episode?.seriesTitle || ''}</div>
+                                    </div>
+                                    <div class="download-actions">
+                                        ${isError
+                                            ? `<button class="btn-icon" onclick="retryDownload('${item.id}')" title="Retry">&#8635;</button>`
+                                            : `<button class="btn-icon" onclick="togglePauseResume('${item.id}', ${isDownloading})" title="${isDownloading ? 'Pause' : 'Resume'}">${isDownloading ? '&#10074;&#10074;' : '&#9654;'}</button>`
+                                        }
+                                        <button class="btn-icon danger" onclick="removeFromQueue('${item.id}')" title="Remove">&#128465;</button>
+                                    </div>
+                                </div>
+                                <div class="progress-container">
+                                    <div class="progress-bar" style="width: ${item.downloadProgress?.percent || 0}%"></div>
+                                </div>
+                                <div class="download-footer">
+                                    <span>${item.downloadProgress?.doing || item.status || 'Queued'}</span>
+                                    <span>${item.time || ''}</span>
+                                    <span>${item.downloadSpeed || ''}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('Failed to load downloads:', e);
+            }
+        }
+
+        // ================== ADD DOWNLOAD ==================
+        function renderAddDownload(container) {
+            container.innerHTML = `
+                <div class="page-title">Add Download</div>
+                <div class="page-subtitle">Search and add episodes to the queue</div>
+                <div style="position:relative; margin-bottom:10px;">
+                    <div class="header-search" style="width:100%;">
+                        <span>&#128269;</span>
+                        <input type="text" id="add-search-input" placeholder="Enter series or episode URL..." oninput="onAddSearchInput(this.value)">
+                    </div>
+                    <div class="search-popup" id="search-popup"></div>
+                </div>
+                <div class="season-selector">
+                    <button class="header-btn primary" id="add-btn" onclick="addSelectedToQueue()" disabled>Add</button>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="add-all-checkbox" onchange="toggleAddAll(this.checked)">
+                        All
+                    </label>
+                    <div style="margin-left:auto;">
+                        <select class="form-select" id="season-dropdown" style="min-width:200px;" onchange="onSeasonChange(this.value)">
+                            <option>Select Season</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="add-episodes-list">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#128270;</div>
+                        <div class="empty-state-title">Search for a series</div>
+                        <div>Type a series name or URL to find episodes</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        let searchDebounce;
+        function onAddSearchInput(value) {
+            clearTimeout(searchDebounce);
+            const popup = document.getElementById('search-popup');
+            if (!value.trim()) { popup.innerHTML = ''; popup.style.display = 'none'; return; }
+            searchDebounce = setTimeout(() => doAddSearch(value), 400);
+        }
+
+        async function doAddSearch(query) {
+            const popup = document.getElementById('search-popup');
+            try {
+                const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`);
+                const results = await res.json();
+                addDownloadSearchResults = results || [];
+                if (addDownloadSearchResults.length === 0) {
+                    popup.innerHTML = '<div style="padding:15px; color:var(--text-muted);">No results found</div>';
+                    popup.style.display = 'block';
+                    return;
+                }
+                popup.innerHTML = addDownloadSearchResults.map(s => `
+                    <div class="search-result-item" onclick="selectSearchResult('${s.id}')">
+                        <div class="search-result-poster">
+                            ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${s.coverArtUrl || s.thumbnailUrl}" alt="">` : '📺'}
+                        </div>
+                        <div class="search-result-info">
+                            <div class="search-result-title">${s.title}</div>
+                            <div class="search-result-desc">${s.description || ''}</div>
+                        </div>
+                    </div>
+                `).join('');
+                popup.style.display = 'block';
+            } catch (e) {
+                popup.innerHTML = '<div style="padding:15px; color:var(--accent-red);">Search failed</div>';
+                popup.style.display = 'block';
+            }
+        }
+
+        async function selectSearchResult(seriesId) {
+            document.getElementById('search-popup').style.display = 'none';
+            const series = addDownloadSearchResults.find(s => s.id === seriesId);
+            addDownloadSelectedSeries = series;
+            if (!series) return;
+            document.getElementById('add-search-input').value = series.title;
+            try {
+                // Use existing endpoint: get all episodes then extract seasons
+                const res = await fetch(`/api/v1/series/${seriesId}/episodes`);
+                const episodes = await res.json();
+                addDownloadEpisodes = episodes || [];
+                
+                // Extract unique seasons from episodes
+                const seasonMap = new Map();
+                episodes.forEach(ep => {
+                    if (ep.seasonId && !seasonMap.has(ep.seasonId)) {
+                        seasonMap.set(ep.seasonId, {
+                            id: ep.seasonId,
+                            title: ep.seasonTitle || `Season ${ep.seasonNumber || ep.seasonId}`
+                        });
+                    }
+                });
+                const seasons = Array.from(seasonMap.values());
+                
+                const dropdown = document.getElementById('season-dropdown');
+                dropdown.innerHTML = seasons.map(season => `<option value="${season.id}">${season.title}</option>`).join('');
+                if (seasons.length > 0) {
+                    dropdown.value = seasons[0].id;
+                    onSeasonChange(seasons[0].id);
+                } else {
+                    // No seasons found, show all episodes
+                    selectedEpisodes.clear();
+                    renderAddEpisodes();
+                }
+            } catch (e) {
+                showToast('Failed to load seasons', 'error');
+            }
+        }
+
+        async function onSeasonChange(seasonId) {
+            if (!seasonId || !addDownloadSelectedSeries) return;
+            // Filter episodes by selected season
+            const filtered = addDownloadEpisodes.filter(ep => ep.seasonId === seasonId);
+            selectedEpisodes.clear();
+            renderAddEpisodes(filtered);
+        }
+
+        function renderAddEpisodes(episodesToRender) {
+            const list = document.getElementById('add-episodes-list');
+            const episodes = episodesToRender || addDownloadEpisodes;
+            const allChecked = selectedEpisodes.size === episodes.length && episodes.length > 0;
+            document.getElementById('add-all-checkbox').checked = allChecked;
+            document.getElementById('add-btn').disabled = selectedEpisodes.size === 0;
+
+            if (episodes.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#128270;</div>
+                        <div class="empty-state-title">No episodes found</div>
+                    </div>`;
+                return;
+            }
+
+            list.innerHTML = episodes.map(ep => {
+                const isSelected = selectedEpisodes.has(ep.id);
+                return `
+                    <div class="episode-item ${isSelected ? 'selected' : ''}" onclick="toggleEpisodeSelection('${ep.id}')">
+                        <div class="episode-thumb">
+                            ${ep.thumbnailUrl ? `<img src="${ep.thumbnailUrl}" alt="">` : '📺'}
+                        </div>
+                        <div class="episode-content">
+                            <div class="episode-title">${ep.title || 'Unknown Episode'}</div>
+                            <div class="episode-desc">${ep.description || ''}</div>
+                            ${ep.availableAudios && ep.availableAudios.length > 0 ? `<div class="episode-dubs">Dubs: ${ep.availableAudios.join(', ')}</div>` : ''}
+                        </div>
+                        <div style="display:flex; align-items:center;">
+                            <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleEpisodeSelection('${ep.id}')">
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleEpisodeSelection(epId) {
+            if (selectedEpisodes.has(epId)) selectedEpisodes.delete(epId);
+            else selectedEpisodes.add(epId);
+            renderAddEpisodes();
+        }
+
+        function toggleAddAll(checked) {
+            if (checked) addDownloadEpisodes.forEach(ep => selectedEpisodes.add(ep.id));
+            else selectedEpisodes.clear();
+            renderAddEpisodes();
+        }
+
+        async function addSelectedToQueue() {
+            const ids = Array.from(selectedEpisodes);
+            if (ids.length === 0) return;
+            try {
+                for (const id of ids) {
+                    await fetch('/api/v1/queue', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ episodeId: id })
+                    });
+                }
+                showToast(`Added ${ids.length} episode(s) to queue`, 'success');
+                selectedEpisodes.clear();
+                renderAddEpisodes();
+            } catch (e) {
+                showToast('Failed to add to queue', 'error');
+            }
+        }
+
+        // ================== CALENDAR ==================
+        function renderCalendar(container) {
+            container.innerHTML = `
+                <div class="page-title">Calendar</div>
+                <div class="page-subtitle">Upcoming episode releases</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <button class="header-btn" onclick="changeWeek(-1)">&#9664; Prev</button>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <button class="header-btn" onclick="fetchCalendar()">&#128260; Refresh</button>
+                        <select class="form-select" id="calendar-lang" style="min-width:150px;">
+                            <option>English</option>
+                            <option>Japanese</option>
+                        </select>
+                    </div>
+                    <button class="header-btn" onclick="changeWeek(1)">Next &#9654;</button>
+                </div>
+                <div id="calendar-grid">
+                    <div class="loading"><div class="spinner"></div>Loading calendar...</div>
+                </div>
+            `;
+            fetchCalendar();
+        }
+
+        function changeWeek(offset) {
+            calendarWeekOffset += offset;
+            fetchCalendar();
+        }
+
+        async function fetchCalendar() {
+            try {
+                const res = await fetch(`/api/v1/calendar?weekOffset=${calendarWeekOffset}`);
+                const data = await res.json();
+                const grid = document.getElementById('calendar-grid');
+                if (!data.days || data.days.length === 0) {
+                    grid.innerHTML = `
+                        <div class="empty-state" style="grid-column:1/-1;">
+                            <div class="empty-state-icon">&#128197;</div>
+                            <div class="empty-state-title">No calendar data</div>
+                        </div>`;
+                    return;
+                }
+
+                const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+                grid.innerHTML = '<div class="calendar-grid">' + data.days.map((day, idx) => {
+                    const date = new Date(day.date);
+                    const dayName = day.dayName || dayNames[date.getDay()] || 'Day';
+                    return `
+                        <div class="calendar-day">
+                            <div class="calendar-day-header">
+                                <div class="calendar-day-date">${date.toLocaleDateString()}</div>
+                                <div class="calendar-day-name">${dayName}</div>
+                            </div>
+                            <div class="calendar-day-content">
+                                ${day.episodes && day.episodes.length > 0 ? day.episodes.map(ep => `
+                                    <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''}">
+                                        <div class="calendar-episode-time">${ep.time || ''}</div>
+                                        <div class="calendar-episode-thumb">
+                                            ${ep.thumbnailUrl ? `<img src="${ep.thumbnailUrl}" alt="">` : '📺'}
+                                            <div class="calendar-episode-number">${ep.episodeNumber || ''}</div>
+                                        </div>
+                                        <div class="calendar-episode-title">${ep.seriesTitle || ep.seasonName || ''}</div>
+                                        ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
+                                        ${ep.hasPassed ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${ep.id}')">Download</button>` : ''}
+                                    </div>
+                                `).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
+                            </div>
+                        </div>
+                    `;
+                }).join('') + '</div>';
+            } catch (e) {
+                document.getElementById('calendar-grid').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#10060;</div>
+                        <div class="empty-state-title">Failed to load calendar</div>
+                    </div>`;
+            }
+        }
+
+        async function addEpisodeToQueue(episodeId) {
+            try {
+                await fetch('/api/v1/queue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ episodeId })
+                });
+                showToast('Added to queue', 'success');
+            } catch (e) {
+                showToast('Failed to add', 'error');
+            }
+        }
+
+        // ================== SEASONS ==================
+        function renderSeasons(container) {
+            container.innerHTML = `
+                <div class="page-title">Seasons</div>
+                <div class="page-subtitle">Browse anime series</div>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Browse Series</div>
+                    </div>
+                    <div id="seasons-grid" class="history-poster-grid">
+                        <div class="empty-state" style="grid-column:1/-1;">
+                            <div class="empty-state-icon">&#128270;</div>
+                            <div class="empty-state-title">Use the search bar to find series</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ================== HISTORY ==================
+        function renderHistory(container) {
+            container.innerHTML = `
+                <div class="page-title">History</div>
+                <div class="page-subtitle">Download history and tracked series</div>
+                <div class="history-toolbar">
+                    <button class="toolbar-btn" onclick="refreshHistory()">
+                        <span class="icon">&#128260;</span>
+                        <span>Refresh Filtered</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="addMissingToQueue()">
+                        <span class="icon">&#128229;</span>
+                        <span>Add To Queue</span>
+                    </button>
+                    <button class="toolbar-btn" id="btn-edit-mode" onclick="toggleEditMode()">
+                        <span class="icon">&#9998;</span>
+                        <span>Edit</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="toggleSearchDropdown()">
+                        <span class="icon">&#128269;</span>
+                        <span>Search</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="openSonarrMenu()">
+                        <span class="icon">&#127758;</span>
+                        <span>Sonarr</span>
+                    </button>
+                    <div style="margin-left:auto; display:flex; gap:5px;">
+                        <button class="toolbar-btn ${historyViewMode === 'poster' ? 'active' : ''}" onclick="setHistoryView('poster')">
+                            <span class="icon">&#9645;</span>
+                            <span>Poster</span>
+                        </button>
+                        <button class="toolbar-btn ${historyViewMode === 'table' ? 'active' : ''}" onclick="setHistoryView('table')">
+                            <span class="icon">&#9776;</span>
+                            <span>Table</span>
+                        </button>
+                    </div>
+                    <button class="toolbar-btn" onclick="toggleSortMenu()">
+                        <span class="icon">&#8645;</span>
+                        <span>Sort</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="toggleFilterMenu()">
+                        <span class="icon">&#9642;</span>
+                        <span>Filter</span>
+                    </button>
+                </div>
+                <div id="history-content">
+                    <div class="loading"><div class="spinner"></div>Loading history...</div>
+                </div>
+            `;
+            fetchHistoryData();
+        }
+
+        async function fetchHistoryData() {
+            try {
+                const res = await fetch('/api/v1/history');
+                const data = await res.json();
+                historyData = data || [];
+                renderHistoryContent();
+            } catch (e) {
+                document.getElementById('history-content').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#10060;</div>
+                        <div class="empty-state-title">Failed to load history</div>
+                    </div>`;
+            }
+        }
+
+        function renderHistoryContent() {
+            const content = document.getElementById('history-content');
+            if (historyData.length === 0) {
+                content.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#128218;</div>
+                        <div class="empty-state-title">No history yet</div>
+                        <div>Completed downloads will appear here</div>
+                    </div>`;
+                return;
+            }
+
+            if (historyViewMode === 'poster') {
+                content.innerHTML = '<div class="history-poster-grid">' + historyData.map(item => `
+                    <div class="history-poster">
+                        <div class="history-poster-img">
+                            ${item.thumbnailUrl ? `<img src="${item.thumbnailUrl}" alt="">` : '📺'}
+                            ${item.newEpisodes ? `<div class="history-poster-badge">${item.newEpisodes}</div>` : ''}
+                        </div>
+                        <div class="history-poster-info">
+                            <div class="history-poster-title" title="${item.seriesTitle || ''}">${item.seriesTitle || 'Unknown'}</div>
+                            <div class="history-poster-meta">${item.sonarrNextAirDate || ''}</div>
+                        </div>
+                    </div>
+                `).join('') + '</div>';
+            } else {
+                content.innerHTML = `
+                    <div class="history-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Series</th>
+                                    <th>Status</th>
+                                    <th>Dubs</th>
+                                    <th>Subs</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${historyData.map(item => `
+                                    <tr>
+                                        <td>
+                                            <strong>${item.seriesTitle || 'Unknown'}</strong>
+                                            <br><small style="color:var(--text-secondary);">${item.seriesDescription ? item.seriesDescription.substring(0, 80) + '...' : ''}</small>
+                                        </td>
+                                        <td>${getStatusBadge(item.downloadStatus || 'done')}</td>
+                                        <td>${item.availableDubs ? item.availableDubs.join(', ') : '-'}</td>
+                                        <td>${item.availableSubs ? item.availableSubs.join(', ') : '-'}</td>
+                                        <td>
+                                            <button class="btn-icon" onclick="refreshSeries('${item.seriesId}')">&#128260;</button>
+                                            <button class="btn-icon" onclick="downloadSeries('${item.seriesId}')">&#9660;</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+            }
+        }
+
+        function setHistoryView(mode) {
+            historyViewMode = mode;
+            renderHistoryContent();
+        }
+
+        // ================== ACCOUNT ==================
+        function renderAccount(container) {
+            container.innerHTML = `
+                <div class="page-title">Account</div>
+                <div class="page-subtitle">Crunchyroll account details</div>
+                <div class="account-container">
+                    <div class="account-avatar" id="account-avatar">
+                        <span>&#128100;</span>
+                    </div>
+                    <div class="account-name" id="account-name">Not logged in</div>
+                    <div class="account-subscription" id="account-subscription">-</div>
+                    <div style="display:flex; gap:15px;">
+                        <button class="header-btn primary" id="btn-login" onclick="showLoginModal()">Login</button>
+                        <button class="header-btn" id="btn-logout" onclick="logout()" style="display:none;">Logout</button>
+                    </div>
+                </div>
+            `;
+            fetchAuthStatus();
+        }
+
+        async function fetchAuthStatus() {
+            try {
+                const res = await fetch('/api/v1/auth/status');
+                authStatus = await res.json();
+                const nameEl = document.getElementById('account-name');
+                const subEl = document.getElementById('account-subscription');
+                const avatarEl = document.getElementById('account-avatar');
+                const loginBtn = document.getElementById('btn-login');
+                const logoutBtn = document.getElementById('btn-logout');
+
+                if (authStatus.isAuthenticated) {
+                    if (nameEl) nameEl.textContent = authStatus.username || 'User';
+                    if (subEl) subEl.textContent = authStatus.remainingTime || (authStatus.hasPremium ? 'Premium' : 'Free');
+                    if (avatarEl) avatarEl.innerHTML = authStatus.profileImageUrl ? `<img src="${authStatus.profileImageUrl}" alt="">` : '<span>&#128100;</span>';
+                    if (loginBtn) loginBtn.style.display = 'none';
+                    if (logoutBtn) logoutBtn.style.display = 'inline-block';
+                } else {
+                    if (nameEl) nameEl.textContent = 'Not logged in';
+                    if (subEl) subEl.textContent = 'Anonymous mode';
+                    if (avatarEl) avatarEl.innerHTML = '<span>&#128100;</span>';
+                    if (loginBtn) loginBtn.style.display = 'inline-block';
+                    if (logoutBtn) logoutBtn.style.display = 'none';
+                }
+            } catch (e) { console.error('Auth status failed:', e); }
+        }
+
+        function showLoginModal() {
+            document.getElementById('modal-title').textContent = 'Login to Crunchyroll';
+            document.getElementById('modal-body').innerHTML = `
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" class="form-input" id="login-email" placeholder="your@email.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-input" id="login-password" placeholder="Password">
+                </div>
+            `;
+            document.getElementById('modal-footer').innerHTML = `
+                <button class="header-btn" onclick="closeModal()">Cancel</button>
+                <button class="header-btn primary" onclick="doLogin()">Login</button>
+            `;
+            document.getElementById('modal').classList.add('active');
+        }
+
+        async function doLogin() {
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            if (!email || !password) { showToast('Email and password required', 'error'); return; }
+            try {
+                const res = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showToast('Logged in successfully', 'success');
+                    closeModal();
+                    fetchAuthStatus();
+                } else {
+                    showToast(data.message || 'Login failed', 'error');
+                }
+            } catch (e) { showToast('Login error: ' + e.message, 'error'); }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/v1/auth/logout', { method: 'POST' });
+                showToast('Logged out', 'success');
+                fetchAuthStatus();
+            } catch (e) { showToast('Logout failed', 'error'); }
+        }
+
+        // ================== SETTINGS ==================
+        function renderSettings(container) {
+            container.innerHTML = `
+                <div class="page-title">Settings</div>
+                <div class="page-subtitle">Configure Cruncharr</div>
+                <div class="settings-tabs">
+                    <button class="settings-tab ${settingsTab === 'general' ? 'active' : ''}" onclick="setSettingsTab('general')">General</button>
+                    <button class="settings-tab ${settingsTab === 'download' ? 'active' : ''}" onclick="setSettingsTab('download')">Download</button>
+                    <button class="settings-tab ${settingsTab === 'queue' ? 'active' : ''}" onclick="setSettingsTab('queue')">Queue</button>
+                    <button class="settings-tab ${settingsTab === 'sonarr' ? 'active' : ''}" onclick="setSettingsTab('sonarr')">Sonarr</button>
+                    <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications')">Notifications</button>
+                </div>
+                <div id="settings-content">
+                    <div class="loading"><div class="spinner"></div>Loading settings...</div>
+                </div>
+                <div style="margin-top:20px;">
+                    <button class="header-btn primary" onclick="saveSettings()">Save Settings</button>
+                </div>
+            `;
+            fetchConfig().then(() => renderSettingsTab());
+        }
+
+        function setSettingsTab(tab) {
+            settingsTab = tab;
+            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            renderSettingsTab();
+        }
+
+        function renderSettingsTab() {
+            const content = document.getElementById('settings-content');
+            const c = config || {};
+            switch(settingsTab) {
+                case 'general':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <span class="settings-section-title">General</span>
+                                <span class="settings-section-desc">General application settings</span>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">History</div>
+                                        <div class="setting-desc">Record download history</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-history" ${c.history ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">History Language</div>
+                                        <div class="setting-desc">Language for history entries</div>
+                                    </div>
+                                    <select class="form-select" id="setting-history-lang" style="min-width:150px;">
+                                        <option value="en" ${c.historyLang === 'en' ? 'selected' : ''}>English</option>
+                                        <option value="ja" ${c.historyLang === 'ja' ? 'selected' : ''}>Japanese</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Proxy</div>
+                                        <div class="setting-desc">Use proxy for requests</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-proxy" ${c.proxyEnabled ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Proxy Host</div>
+                                    </div>
+                                    <input type="text" class="form-input" id="setting-proxy-host" value="${c.proxyHost || ''}" style="width:200px;">
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Proxy Port</div>
+                                    </div>
+                                    <input type="number" class="form-input" id="setting-proxy-port" value="${c.proxyPort || ''}" style="width:100px;">
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'download':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <span class="settings-section-title">Download Settings</span>
+                                <span class="settings-section-desc">Adjust download behavior</span>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Output Directory</div>
+                                        <div class="setting-desc">Where downloads are saved</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <input type="text" class="form-input" id="setting-output-dir" value="${c.download?.outputDirectory || '/downloads'}" style="width:250px;">
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Quality Preference</div>
+                                    </div>
+                                    <select class="form-select" id="setting-quality" style="min-width:150px;">
+                                        <option value="best" ${c.download?.quality === 'best' ? 'selected' : ''}>Best Available</option>
+                                        <option value="1080p" ${c.download?.quality === '1080p' ? 'selected' : ''}>1080p</option>
+                                        <option value="720p" ${c.download?.quality === '720p' ? 'selected' : ''}>720p</option>
+                                        <option value="worst" ${c.download?.quality === 'worst' ? 'selected' : ''}>Worst</option>
+                                    </select>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Simultaneous Downloads</div>
+                                    </div>
+                                    <input type="number" class="form-input" id="setting-concurrent" value="${c.download?.simultaneousDownloads || 2}" min="1" max="10" style="width:80px;">
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Max Download Speed (KB/s)</div>
+                                        <div class="setting-desc">0 = unlimited</div>
+                                    </div>
+                                    <input type="number" class="form-input" id="setting-max-speed" value="${c.download?.maxSpeed || 0}" min="0" style="width:120px;">
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Retry Attempts</div>
+                                    </div>
+                                    <input type="number" class="form-input" id="setting-retry" value="${c.download?.retryAttempts || 3}" min="1" max="10" style="width:80px;">
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'queue':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <span class="settings-section-title">Queue Settings</span>
+                                <span class="settings-section-desc">Queue behavior options</span>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Persist Queue</div>
+                                        <div class="setting-desc">Save queue on exit</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-persist-queue" ${c.persistQueue ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Allow Early Start</div>
+                                        <div class="setting-desc">Start next download early</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-early-start" ${c.downloadAllowEarlyStart ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Skip Missing Languages</div>
+                                        <div class="setting-desc">Only queue if all selected languages available</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-skip-missing" ${c.downloadOnlyWithAllSelectedDubSub ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'sonarr':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <span class="settings-section-title">Sonarr Settings</span>
+                                <span class="settings-section-desc">Sonarr integration</span>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Host</div>
+                                    </div>
+                                    <input type="text" class="form-input" id="setting-sonarr-host" value="${c.sonarr?.host || ''}" style="width:200px;">
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Port</div>
+                                    </div>
+                                    <input type="text" class="form-input" id="setting-sonarr-port" value="${c.sonarr?.port || ''}" style="width:100px;">
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">API Key</div>
+                                    </div>
+                                    <input type="text" class="form-input" id="setting-sonarr-apikey" value="${c.sonarr?.apiKey || ''}" style="width:250px;">
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Use SSL</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-sonarr-ssl" ${c.sonarr?.useSsl ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Use Sonarr Numbering</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-sonarr-numbering" ${c.sonarr?.useSonarrNumbering ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'notifications':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <span class="settings-section-title">Notifications</span>
+                                <span class="settings-section-desc">Configure notifications</span>
+                            </div>
+                            <div class="settings-section-body">
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Webhook URL</div>
+                                    </div>
+                                    <input type="text" class="form-input" id="setting-webhook-url" value="${c.webhook?.url || ''}" style="width:300px;">
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Webhook Enabled</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-webhook-enabled" ${c.webhook?.enabled ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Queue Finished</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-notify-queue" ${c.webhook?.notifyQueueFinished ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Download Finished</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-notify-download" ${c.webhook?.notifyDownloadFinished ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="setting-row">
+                                    <div>
+                                        <div class="setting-label">Download Failed</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="setting-notify-failed" ${c.webhook?.notifyDownloadFailed ? 'checked' : ''}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+            }
+        }
+
+        // ================== API / ACTIONS ==================
+        async function fetchConfig() {
+            try {
+                const res = await fetch('/api/v1/config');
+                config = await res.json();
+            } catch (e) { console.error('Failed to load config:', e); }
+        }
+
+        async function saveSettings() {
+            const newConfig = {
+                history: document.getElementById('setting-history')?.checked || false,
+                historyLang: document.getElementById('setting-history-lang')?.value || 'en',
+                proxyEnabled: document.getElementById('setting-proxy')?.checked || false,
+                proxyHost: document.getElementById('setting-proxy-host')?.value || '',
+                proxyPort: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
+                persistQueue: document.getElementById('setting-persist-queue')?.checked || false,
+                downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
+                downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
+                download: {
+                    outputDirectory: document.getElementById('setting-output-dir')?.value || '/downloads',
+                    quality: document.getElementById('setting-quality')?.value || 'best',
+                    simultaneousDownloads: parseInt(document.getElementById('setting-concurrent')?.value) || 2,
+                    maxSpeed: parseInt(document.getElementById('setting-max-speed')?.value) || 0,
+                    retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 3
+                },
+                sonarr: {
+                    host: document.getElementById('setting-sonarr-host')?.value || '',
+                    port: document.getElementById('setting-sonarr-port')?.value || '',
+                    apiKey: document.getElementById('setting-sonarr-apikey')?.value || '',
+                    useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
+                    useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
+                },
+                webhook: {
+                    url: document.getElementById('setting-webhook-url')?.value || '',
+                    enabled: document.getElementById('setting-webhook-enabled')?.checked || false,
+                    notifyQueueFinished: document.getElementById('setting-notify-queue')?.checked || false,
+                    notifyDownloadFinished: document.getElementById('setting-notify-download')?.checked || false,
+                    notifyDownloadFailed: document.getElementById('setting-notify-failed')?.checked || false
+                }
+            };
+            try {
+                const res = await fetch('/api/v1/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newConfig)
+                });
+                if (res.ok) showToast('Settings saved', 'success');
+                else showToast('Failed to save settings', 'error');
+            } catch (e) { showToast('Error saving settings', 'error'); }
+        }
+
+        function toggleSetting(key, value) {
+            console.log('Toggle', key, value);
+        }
+
+        async function retryFailed() {
+            try {
+                await fetch('/api/v1/queue/retry-failed', { method: 'POST' });
+                showToast('Retrying failed downloads', 'success');
+                fetchDownloads();
+            } catch (e) { showToast('Retry failed', 'error'); }
+        }
+
+        async function pauseRunning() {
+            try {
+                await fetch('/api/v1/queue/pause-all', { method: 'POST' });
+                showToast('Paused running downloads', 'success');
+                fetchDownloads();
+            } catch (e) { showToast('Pause failed', 'error'); }
+        }
+
+        async function clearQueue() {
+            if (!confirm('Clear all items from queue?')) return;
+            try {
+                await fetch('/api/v1/queue', { method: 'DELETE' });
+                showToast('Queue cleared', 'success');
+                fetchDownloads();
+            } catch (e) { showToast('Clear failed', 'error'); }
+        }
+
+        async function retryDownload(id) {
+            try {
+                await fetch(`/api/v1/queue/${id}/retry`, { method: 'POST' });
+                showToast('Retrying download', 'success');
+                fetchDownloads();
+            } catch (e) { showToast('Retry failed', 'error'); }
+        }
+
+        async function togglePauseResume(id, isDownloading) {
+            try {
+                const endpoint = isDownloading ? 'pause' : 'resume';
+                await fetch(`/api/v1/queue/${id}/${endpoint}`, { method: 'POST' });
+                fetchDownloads();
+            } catch (e) { showToast('Action failed', 'error'); }
+        }
+
+        async function removeFromQueue(id) {
+            if (!confirm('Remove this item from queue?')) return;
+            try {
+                await fetch(`/api/v1/queue/${id}`, { method: 'DELETE' });
+                showToast('Removed from queue', 'success');
+                if (currentPage === 'downloads') fetchDownloads();
+            } catch (e) { showToast('Remove failed', 'error'); }
+        }
+
+        function refreshHistory() { fetchHistoryData(); }
+        function addMissingToQueue() { showToast('Add missing to queue not yet implemented', 'warning'); }
+        function toggleEditMode() { showToast('Edit mode toggled', 'success'); }
+        function toggleSearchDropdown() { showToast('Search dropdown', 'warning'); }
+        function openSonarrMenu() { showToast('Sonarr menu', 'warning'); }
+        function toggleSortMenu() { showToast('Sort menu', 'warning'); }
+        function toggleFilterMenu() { showToast('Filter menu', 'warning'); }
+        function refreshSeries(id) { showToast('Refreshing series...', 'success'); }
+        function downloadSeries(id) { showToast('Downloading series...', 'success'); }
+
+        function refreshData() {
+            showToast('Refreshing...', 'success');
+            if (currentPage === 'downloads') fetchDownloads();
+            if (currentPage === 'history') fetchHistoryData();
+            if (currentPage === 'calendar') fetchCalendar();
+        }
+
+        function closeModal() { document.getElementById('modal').classList.remove('active'); }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `<span>${type === 'success' ? '&#10004;' : type === 'error' ? '&#10060;' : '&#9888;'}</span><span>${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; setTimeout(() => toast.remove(), 300); }, 3000);
+        }
+
+        function getStatusBadge(state) {
+            const badges = {
+                'queued': '<span class="badge badge-queued">Queued</span>',
+                'downloading': '<span class="badge badge-downloading">Downloading</span>',
+                'processing': '<span class="badge badge-downloading">Processing</span>',
+                'done': '<span class="badge badge-done">Done</span>',
+                'error': '<span class="badge badge-error">Error</span>',
+                'paused': '<span class="badge badge-retry">Paused</span>'
+            };
+            return badges[state?.toLowerCase()] || `<span class="badge badge-queued">${state}</span>`;
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function startPolling() {
+            setInterval(() => {
+                if (currentPage === 'downloads') fetchDownloads();
+                if (currentPage === 'history') fetchHistoryData();
+            }, 5000);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const searchInput = document.getElementById('global-search');
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const query = searchInput.value;
+                    if (query) {
+                        navigateTo('seasons');
+                        setTimeout(() => {
+                            const grid = document.getElementById('seasons-grid');
+                            if (grid) {
+                                grid.innerHTML = '<div class="loading"><div class="spinner"></div>Searching...</div>';
+                                fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`)
+                                    .then(r => r.json())
+                                    .then(series => {
+                                        if (series.length === 0) {
+                                            grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">No results found</div></div>';
+                                            return;
+                                        }
+                                        grid.innerHTML = series.map(s => `
+                                            <div class="history-poster">
+                                                <div class="history-poster-img">
+                                                    ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${s.coverArtUrl || s.thumbnailUrl}" alt="">` : '&#127909;'}
+                                                </div>
+                                                <div class="history-poster-info">
+                                                    <div class="history-poster-title" title="${s.title}">${s.title}</div>
+                                                    <div class="history-poster-meta">${s.description ? s.description.substring(0, 60) + '...' : ''}</div>
+                                                </div>
+                                            </div>
+                                        `).join('');
+                                    })
+                                    .catch(() => grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-icon">&#10060;</div><div class="empty-state-title">Search failed</div></div>');
+                            }
+                        }, 100);
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>

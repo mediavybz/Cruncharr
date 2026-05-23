@@ -1,0 +1,60 @@
+name: .NET CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore
+    
+    - name: Build
+      run: dotnet build --no-restore --configuration Release
+    
+    - name: Test
+      run: dotnet test --no-build --verbosity normal
+    
+    - name: Publish
+      run: dotnet publish src/Cruncharr.CLI/Cruncharr.CLI.csproj -c Release -r linux-x64 --self-contained false -o ./publish
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cruncharr-linux-x64
+        path: ./publish/
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Docker image
+      run: docker build -t cruncharr:test .
+    
+    - name: Test Docker image
+      run: docker run --rm cruncharr:test --help
+    
+    - name: Check image size
+      run: |
+        docker images cruncharr:test --format "{{.Size}}"
+        # Verify under 300MB
+        SIZE=$(docker images cruncharr:test --format "{{.Size}}" | sed 's/MB//')
+        if (( $(echo "$SIZE > 300" | bc -l) )); then
+          echo "Image size exceeds 300MB"
+          exit 1
+        fi

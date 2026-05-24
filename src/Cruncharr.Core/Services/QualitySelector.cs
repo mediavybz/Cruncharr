@@ -75,4 +75,29 @@ public static class QualitySelector{
             .OrderByDescending(a => a.Bandwidth)
             .FirstOrDefault();
     }
+    
+    /// <summary>
+    /// Selects audio tracks matching the specified languages.
+    /// Returns one track per language (highest bandwidth per language).
+    /// </summary>
+    public static List<(DashTrack Track, string Language)> SelectAudioTracks(List<DashTrack> audioTracks, List<string> languages){
+        if (audioTracks.Count == 0 || languages.Count == 0) return [];
+        
+        var result = new List<(DashTrack, string)>();
+        var normalizedLangs = languages.Select(l => l.ToLowerInvariant().Replace("-", "")).ToList();
+        
+        // Group by language and pick best per language
+        var byLanguage = audioTracks
+            .GroupBy(a => a.Language?.ToLowerInvariant().Replace("-", "") ?? "unknown")
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(a => a.Bandwidth).First());
+        
+        foreach (var lang in normalizedLangs){
+            if (byLanguage.TryGetValue(lang, out var track)){
+                var originalLang = languages[normalizedLangs.IndexOf(lang)];
+                result.Add((track, originalLang));
+            }
+        }
+        
+        return result;
+    }
 }

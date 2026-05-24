@@ -105,7 +105,7 @@ public class WidevineCdm{
             var (isOk, responseContent, error) = await SendWithRetryAsync(httpClient, playbackRequest);
 
             if (!isOk){
-                Console.Error.WriteLine("Failed to get Keys!");
+                Console.Error.WriteLine($"Failed to get Keys! Error: {error}, Response: {responseContent}");
                 return new List<ContentKey>();
             }
 

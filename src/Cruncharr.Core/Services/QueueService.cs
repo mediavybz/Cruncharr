@@ -32,6 +32,9 @@ public class QueueService : IQueueService, IDisposable{
     private readonly ILogger<QueueService>? _logger;
     private SemaphoreSlim _downloadSemaphore;
     private ProcessingSlotManager? _processingSlots;
+    private CruncharrConfig? _config;
+    private IProgress<DownloadProgress>? _progress;
+    private CancellationToken _cancellationToken;
     
     private int _pumpScheduled;
     private int _pumpDirty;
@@ -201,6 +204,9 @@ public class QueueService : IQueueService, IDisposable{
     }
     
     public async Task ProcessQueueAsync(CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default){
+        _config = config;
+        _progress = progress;
+        _cancellationToken = cancellationToken;
         _downloadSemaphore = new SemaphoreSlim(config.Download.SimultaneousDownloads, int.MaxValue);
         _processingSlots = new ProcessingSlotManager(config.Queue.SimultaneousProcessingJobs);
 
@@ -208,7 +214,7 @@ public class QueueService : IQueueService, IDisposable{
             config.Download.SimultaneousDownloads, config.Queue.SimultaneousProcessingJobs);
 
         // Start the pump loop
-        _ = Task.Run(() => PumpLoopAsync(config, progress, cancellationToken), cancellationToken);
+        _ = Task.Run(() => PumpLoopAsync(cancellationToken), cancellationToken);
 
         // Keep running until cancellation
         try{
@@ -218,16 +224,18 @@ public class QueueService : IQueueService, IDisposable{
         }
     }
 
-    private async Task PumpLoopAsync(CruncharrConfig config, IProgress<DownloadProgress>? progress, CancellationToken cancellationToken){
+    private async Task PumpLoopAsync(CancellationToken cancellationToken){
         while (!cancellationToken.IsCancellationRequested){
-            if (config.Queue.AutoDownload){
-                await PumpQueueAsync(config, progress, cancellationToken);
+            if (_config?.Queue.AutoDownload == true){
+                await PumpQueueAsync(cancellationToken);
             }
             await Task.Delay(1000, cancellationToken);
         }
     }
 
-    private async Task PumpQueueAsync(CruncharrConfig config, IProgress<DownloadProgress>? progress, CancellationToken cancellationToken){
+    private async Task PumpQueueAsync(CancellationToken cancellationToken){
+        if (_config == null) return;
+        
         lock (_autoDownloadBlockLock){
             if (_autoDownloadBlockedUntilUtc.HasValue && !HasPendingRetryItems()){
                 _autoDownloadBlockedUntilUtc = null;
@@ -245,7 +253,7 @@ public class QueueService : IQueueService, IDisposable{
         var toStart = new List<QueueItem>();
         
         foreach (var item in _queue.Values.OrderBy(q => q.AddedAt)){
-            if (_activeDownloads.Count >= config.Download.SimultaneousDownloads)
+            if (_activeDownloads.Count >= _config.Download.SimultaneousDownloads)
                 break;
 
             if (item.DownloadProgress.IsError)
@@ -282,16 +290,63 @@ public class QueueService : IQueueService, IDisposable{
                     _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
 
                     try{
-                        var result = await _downloadService.DownloadEpisodeAsync(item.Episode.Id, config, progress, cancellationToken);
+                        // Create progress reporter that updates queue item
+                        var queueProgress = new Progress<DownloadProgress>(p =>{
+                            item.DownloadProgress.State = p.State;
+                            item.DownloadProgress.Percent = p.Percent;
+                            item.DownloadProgress.Doing = p.Doing;
+                            item.DownloadProgress.DownloadSpeedBytes = p.DownloadSpeedBytes;
+                            OnQueueStateChanged();
+                        });
+                        
+                        var result = await _downloadService.DownloadEpisodeAsync(item.Episode, _config, queueProgress, cancellationToken);
                         
                         if (!result.Success){
-                            throw new Exception(result.ErrorMessage ?? "Download failed");
+                            // Check for specific error types and provide better messages
+                            string errorMessage = result.ErrorMessage ?? "Download failed";
+                            if (result.ErrorType == DownloadErrorType.NotAuthenticated){
+                                errorMessage = "Not logged in. Please go to Account tab and log in.";
+                            } else if (result.ErrorType == DownloadErrorType.SubscriptionExpired){
+                                errorMessage = "Subscription expired. Please renew your Crunchyroll subscription.";
+                            } else if (result.ErrorType == DownloadErrorType.PremiumContent){
+                                errorMessage = "Premium content. A Crunchyroll subscription is required.";
+                            } else if (result.ErrorType == DownloadErrorType.TooManyActiveStreams){
+                                errorMessage = "Too many active streams. Close Crunchyroll tabs and try again.";
+                            } else if (result.ErrorType == DownloadErrorType.MaturityRating){
+                                errorMessage = "Maturity rating too low. Update your account settings.";
+                            } else if (result.ErrorType == DownloadErrorType.RateLimited){
+                                errorMessage = "Rate limited. Please wait a few minutes.";
+                            }
+                            
+                            throw new Exception(errorMessage);
                         }
                         
                         item.DownloadProgress.State = DownloadState.Done;
                         item.DownloadProgress.Percent = 100;
                         item.DownloadProgress.Doing = "Complete";
                         _logger?.LogInformation("Download complete: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+                        
+                        // Remove finished download if configured
+                        if (_config.RemoveFinishedDownload){
+                            _queue.TryRemove(item.Id, out _);
+                            _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
+                        }
+                    } catch (DownloadException dex){
+                        _logger?.LogError("Download failed with specific error: {ErrorType} - {Message}", dex.ErrorType, dex.Message);
+                        
+                        // Don't retry auth/subscription errors - they're not transient
+                        bool isAuthError = dex.ErrorType == DownloadErrorType.NotAuthenticated ||
+                                          dex.ErrorType == DownloadErrorType.SubscriptionExpired ||
+                                          dex.ErrorType == DownloadErrorType.PremiumContent ||
+                                          dex.ErrorType == DownloadErrorType.MaturityRating;
+                        
+                        if (!isAuthError && item.DownloadProgress.RetryAttemptCount < _config.Download.RetryAttempts){
+                            var delay = TimeSpan.FromSeconds(_config.Download.RetryDelaySeconds * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
+                            ScheduleRetry(item.Id, delay, $"Error: {dex.Message}");
+                        } else{
+                            item.DownloadProgress.State = DownloadState.Error;
+                            item.DownloadProgress.Doing = $"Error: {dex.Message}";
+                        }
                     } catch (OperationCanceledException){
                         item.DownloadProgress.State = DownloadState.Cancelled;
                         item.DownloadProgress.Doing = "Cancelled";
@@ -299,8 +354,8 @@ public class QueueService : IQueueService, IDisposable{
                     } catch (Exception ex){
                         _logger?.LogError(ex, "Download failed: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
                         
-                        if (item.DownloadProgress.RetryAttemptCount < config.Download.RetryAttempts){
-                            var delay = TimeSpan.FromSeconds(config.Download.RetryDelaySeconds * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
+                        if (item.DownloadProgress.RetryAttemptCount < _config.Download.RetryAttempts){
+                            var delay = TimeSpan.FromSeconds(_config.Download.RetryDelaySeconds * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
                             ScheduleRetry(item.Id, delay, $"Error: {ex.Message}");
                         } else{
                             item.DownloadProgress.State = DownloadState.Error;
@@ -313,7 +368,7 @@ public class QueueService : IQueueService, IDisposable{
                     OnQueueStateChanged();
                     ScheduleSave();
                     
-                    if (config.Queue.AutoDownload){
+                    if (_config?.Queue.AutoDownload == true){
                         RequestPump();
                     }
                 }
@@ -326,6 +381,8 @@ public class QueueService : IQueueService, IDisposable{
     }
 
     private void RequestPump(){
+        if (_config?.Queue.AutoDownload != true) return;
+        
         Interlocked.Exchange(ref _pumpDirty, 1);
 
         if (Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) != 0)
@@ -334,6 +391,7 @@ public class QueueService : IQueueService, IDisposable{
         _ = Task.Run(async () =>{
             try{
                 while (Interlocked.Exchange(ref _pumpDirty, 0) == 1){
+                    await PumpQueueAsync(_cancellationToken);
                     await Task.Delay(100);
                 }
             } finally{

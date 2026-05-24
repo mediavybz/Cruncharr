@@ -101,7 +101,16 @@ class Program{
             });
             
             try{
-                var result = await downloadService.DownloadEpisodeAsync(url, config, progress);
+                // Fetch episode info first
+                var api = provider.GetRequiredService<ICrunchyrollApiService>();
+                var episode = await api.GetEpisodeAsync(url, true);
+                if (episode == null){
+                    Console.Error.WriteLine("Failed to fetch episode info");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+                
+                var result = await downloadService.DownloadEpisodeAsync(episode, config, progress);
                 if (format == "json"){
                     Console.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
                 } else if (!quiet){

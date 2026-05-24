@@ -118,6 +118,7 @@ public class DownloadHistory{
 public class EpisodeVersion{
     public string AudioLocale{ get; set; } = "";
     public string Guid{ get; set; } = "";
+    public string? MediaGuid{ get; set; }
     public bool Original{ get; set; }
     public string SeasonGuid{ get; set; } = "";
 }
@@ -127,4 +128,25 @@ public class DownloadResult{
     public string? ErrorMessage { get; set; }
     public string? OutputPath { get; set; }
     public EpisodeInfo? Episode { get; set; }
+    public DownloadErrorType? ErrorType { get; set; }
+}
+
+public enum DownloadErrorType{
+    Unknown,
+    NotAuthenticated,
+    SubscriptionExpired,
+    PremiumContent,
+    TooManyActiveStreams,
+    MaturityRating,
+    RateLimited,
+    NetworkError,
+    ParseError
+}
+
+public class DownloadException : Exception{
+    public DownloadErrorType ErrorType { get; }
+    
+    public DownloadException(string message, DownloadErrorType errorType) : base(message){
+        ErrorType = errorType;
+    }
 }

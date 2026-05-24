@@ -261,7 +261,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
                 }
                 // Check direct Crunchyroll subscriptions
                 else if (sub.SubscriptionProducts?.Count > 0){
-                    Profile.HasPremium = true;
+                    var directSub = sub.SubscriptionProducts.First();
+                    Profile.HasPremium = !directSub.IsCancelled;
+                    Subscription.IsActive = Profile.HasPremium;
+                    Subscription.NextRenewalDate = directSub.EffectiveDate;
                 }
                 else{
                     Profile.HasPremium = false;

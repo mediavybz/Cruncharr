@@ -174,7 +174,18 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 Description = ep.Description,
                 SeriesTitle = ep.SeriesTitle,
                 Locale = ep.AudioLocale ?? "ja-JP",
-                IsPremium = ep.IsPremiumOnly
+                AudioLocale = ep.AudioLocale,
+                IsPremium = ep.IsPremiumOnly,
+                Versions = ep.Versions?.Select(v => new EpisodeVersion{
+                    AudioLocale = v.AudioLocale,
+                    Guid = v.Guid,
+                    MediaGuid = v.MediaGuid,
+                    Original = v.Original,
+                    SeasonGuid = v.SeasonGuid
+                }).ToList(),
+                Images = ExtractImageUrls(ep.Images),
+                ThumbnailUrl = ExtractBestImage(ep.Images, "thumbnail") ?? ExtractBestImage(ep.Images, "episode_thumbnail"),
+                SubtitleLocales = ep.SubtitleLocales ?? new List<string>()
             };
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to parse episode data");
@@ -383,6 +394,17 @@ public class CrSeasonDetail{
     public int SeasonNumber{ get; set; }
 }
 
+public class CrEpisodeVersion{
+    [JsonProperty("audio_locale")]
+    public string AudioLocale{ get; set; } = "";
+    public string Guid{ get; set; } = "";
+    [JsonProperty("media_guid")]
+    public string? MediaGuid{ get; set; }
+    public bool Original{ get; set; }
+    [JsonProperty("season_guid")]
+    public string SeasonGuid{ get; set; } = "";
+}
+
 public class CrEpisodeDetail{
     public string Id{ get; set; } = "";
     public string Guid{ get; set; } = "";
@@ -404,7 +426,7 @@ public class CrEpisodeDetail{
     public bool IsPremiumOnly{ get; set; }
     [JsonProperty("subtitle_locales")]
     public List<string>? SubtitleLocales{ get; set; }
-    public List<EpisodeVersion>? Versions{ get; set; }
+    public List<CrEpisodeVersion>? Versions{ get; set; }
     public Dictionary<string, List<List<object>>>? Images{ get; set; }
 }
 

@@ -7,13 +7,19 @@ namespace Cruncharr.Core.Utils;
 
 public class HttpClientWrapper{
     private readonly HttpClient _client;
+    private readonly CookieContainer _cookieContainer;
     private readonly Dictionary<string, CookieCollection> _cookieStore = new();
     
     public HttpClient Client => _client;
+    public CookieContainer CookieContainer => _cookieContainer;
     
     public HttpClientWrapper(){
+        _cookieContainer = new CookieContainer();
+        
         var handler = new SocketsHttpHandler{
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+            CookieContainer = _cookieContainer,
+            UseCookies = true,
             ConnectCallback = async (context, cancellationToken) => {
                 var entry = await Dns.GetHostEntryAsync(context.DnsEndPoint.Host, AddressFamily.InterNetwork, cancellationToken).ConfigureAwait(false);
                 var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -122,6 +128,13 @@ public class HttpClientWrapper{
         var existing = _cookieStore[domain].FirstOrDefault(c => c.Name == cookie.Name);
         if (existing != null) _cookieStore[domain].Remove(existing);
         _cookieStore[domain].Add(cookie);
+        
+        // Also add to CookieContainer for automatic handling
+        try{
+            _cookieContainer.Add(new Uri($"https://{domain}"), cookie);
+        } catch{
+            // Ignore invalid cookie domains
+        }
     }
     
     public string? GetCookieValue(string domain, string cookieName){

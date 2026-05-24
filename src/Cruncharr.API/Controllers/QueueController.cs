@@ -43,7 +43,11 @@ public class QueueController : ControllerBase{
             SeriesTitle = request.SeriesTitle ?? "Unknown",
             SeasonNumber = request.SeasonNumber ?? 1,
             EpisodeNumber = request.EpisodeNumber ?? 1,
-            Locale = request.Locale ?? "ja-JP"
+            Locale = request.Locale ?? "ja-JP",
+            AudioLocale = request.AudioLocale ?? request.Locale ?? "ja-JP",
+            ThumbnailUrl = request.ThumbnailUrl,
+            CoverArtUrl = request.CoverArtUrl,
+            Description = request.Description
         };
 
         _queueService.AddToQueue(episode);
@@ -136,6 +140,10 @@ public class QueueRequest{
     public int? SeasonNumber { get; set; }
     public int? EpisodeNumber { get; set; }
     public string? Locale { get; set; }
+    public string? AudioLocale { get; set; }
+    public string? ThumbnailUrl { get; set; }
+    public string? CoverArtUrl { get; set; }
+    public string? Description { get; set; }
 }
 
 public class QueueResponse{

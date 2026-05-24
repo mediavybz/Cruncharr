@@ -39,9 +39,9 @@ services:
       - CRUNCHYROLL_OUTPUT_DIR=/downloads
       - CRUNCHYROLL_TEMP_DIR=/tmp/cruncharr
       
-      # Queue configuration
-      - CRUNCHYROLL_QUEUE_PERSIST=true
-      - CRUNCHYROLL_QUEUE_AUTO_DOWNLOAD=true
+      # Queue configuration (optional - can also be set in config file)
+      # - CRUNCHYROLL_QUEUE_PERSIST=true
+      # - CRUNCHYROLL_QUEUE_AUTO_DOWNLOAD=true
       
       # Webhook for notifications (optional)
       - CRUNCHYROLL_WEBHOOK_URL=${CRUNCHYROLL_WEBHOOK_URL:-}

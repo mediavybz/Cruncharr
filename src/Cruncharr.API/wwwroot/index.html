@@ -55,27 +55,65 @@ MAINTENANCE NOTES:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cruncharr - Crunchyroll Downloader</title>
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <style>
         /* WinUI 3 / Fluent Design Dark Theme - Ported from Crunchy-Downloader */
         /* Original uses FluentAvalonia with WinUI 3 system colors */
         :root {
-            /* WinUI 3 Dark Theme Colors */
-            --bg-primary: #202020;              /* ApplicationPageBackgroundThemeBrush */
-            --bg-secondary: #2c2c2c;            /* ControlAltFillColorQuarternary (sidebar/toolbar) */
-            --bg-tertiary: #2d2d2d;             /* Layer elevation */
-            --bg-hover: #3a3a3a;                /* ControlFillColorSecondary */
-            --bg-card: #1e1e1e;                 /* ComboBoxDropDownBackground / Card backgrounds */
-            --text-primary: #ffffff;            /* TextFillColorPrimaryBrush */
-            --text-secondary: #a0a0a0;          /* TextFillColorSecondaryBrush */
-            --text-muted: #606060;              /* TextFillColorTertiaryBrush */
-            --accent-orange: #f47521;           /* Crunchyroll brand color (kept from original) */
-            --accent-blue: #4cc2ff;             /* SystemAccentColor (WinUI default blue) */
-            --accent-green: #6ccb5f;            /* SystemFillColorSuccess */
-            --accent-red: #ff99a4;              /* SystemFillColorCritical */
-            --accent-yellow: #fce100;           /* SystemFillColorCaution */
-            --border-color: #3a3a3a;            /* CardStrokeColorDefaultBrush */
+            /* Crunchyroll Theme - Dark Mode (Default) */
+            --cr-orange: #ff5e00;
+            --cr-orange-classic: #F47521;
+            --cr-hero-bg: #151515;
+            --cr-dark: #0a0a0a;
+            --cr-charcoal: #1f1f1f;
+            --cr-gray-900: #232323;
+            --cr-gray-800: #2a2a2a;
+            --cr-gray-700: #3a3a3a;
+            --cr-gray-600: #555555;
+            --cr-gray-500: #777777;
+            --cr-gray-400: #999999;
+            --cr-gray-300: #bbbbbb;
+            --cr-gray-200: #dddddd;
+            --cr-gray-100: #eeeeee;
+            --cr-white: #ffffff;
+            --cr-success: #00c853;
+            --cr-error: #ff1744;
+            --cr-warning: #ffab00;
+            --cr-info: #00b0ff;
+            
+            /* Mapped UI Variables */
+            --bg-primary: var(--cr-hero-bg);
+            --bg-secondary: var(--cr-charcoal);
+            --bg-tertiary: var(--cr-gray-900);
+            --bg-hover: var(--cr-gray-800);
+            --bg-card: var(--cr-dark);
+            --text-primary: var(--cr-white);
+            --text-secondary: var(--cr-gray-300);
+            --text-muted: var(--cr-gray-500);
+            --accent-orange: var(--cr-orange);
+            --accent-blue: var(--cr-info);
+            --accent-green: var(--cr-success);
+            --accent-red: var(--cr-error);
+            --accent-yellow: var(--cr-warning);
+            --border-color: var(--cr-gray-700);
             --sidebar-width: 220px;
             --header-height: 60px;
+        }
+
+        [data-theme="light"] {
+            --bg-primary: var(--cr-white);
+            --bg-secondary: var(--cr-gray-100);
+            --bg-tertiary: var(--cr-gray-200);
+            --bg-hover: var(--cr-gray-200);
+            --bg-card: var(--cr-white);
+            --text-primary: #000000;
+            --text-secondary: var(--cr-gray-600);
+            --text-muted: var(--cr-gray-400);
+            --border-color: var(--cr-gray-200);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -752,6 +790,14 @@ MAINTENANCE NOTES:
 
         .form-input[type="number"] { width: 120px; }
 
+        .multi-select { display: flex; flex-wrap: wrap; gap: 8px; max-height: 200px; overflow-y: auto; padding: 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; }
+        .multi-opt { display: flex; align-items: center; gap: 4px; font-size: 0.85em; cursor: pointer; }
+        .multi-opt input { cursor: pointer; }
+
+        .list-input { display: flex; flex-direction: column; gap: 6px; }
+        .list-row { display: flex; gap: 6px; align-items: center; }
+        .list-row .form-input { flex: 1; }
+
         /* Modal */
         .modal-overlay {
             display: none;
@@ -906,7 +952,7 @@ MAINTENANCE NOTES:
     <div class="app-container">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-logo">C</div>
+                <img src="/favicon.svg" alt="Cruncharr" style="width:32px;height:32px;">
                 <div class="sidebar-title">Cruncharr</div>
             </div>
             <nav class="sidebar-nav">
@@ -950,13 +996,8 @@ MAINTENANCE NOTES:
 
         <main class="main-content">
             <header class="header">
-                <div class="header-search">
-                    <span>&#128269;</span>
-                    <input type="text" placeholder="Search series..." id="global-search">
-                </div>
                 <div class="header-actions">
-                    <button class="header-btn" onclick="refreshData()">&#128260; Refresh</button>
-                    <button class="header-btn primary" onclick="navigateTo('add-download')">+ Add Download</button>
+                    <!-- Actions moved to specific tabs -->
                 </div>
             </header>
 
@@ -1066,12 +1107,39 @@ MAINTENANCE NOTES:
             fetchDownloads();
         }
 
+        let lastAuthNotification = 0;
+        
         async function fetchDownloads() {
             try {
                 const res = await fetch('/api/v1/queue');
                 const data = await res.json();
                 queueData = data.items || [];
                 const list = document.getElementById('downloads-list');
+
+                // Check for auth/subscription errors and show notifications
+                const authErrors = queueData.filter(i => {
+                    const doing = (i.downloadProgress?.doing || '').toLowerCase();
+                    return doing.includes('not logged in') || 
+                           doing.includes('subscription expired') ||
+                           doing.includes('premium content') ||
+                           doing.includes('subscription required');
+                });
+                
+                if (authErrors.length > 0) {
+                    const now = Date.now();
+                    if (now - lastAuthNotification > 30000) { // Show at most every 30 seconds
+                        lastAuthNotification = now;
+                        const error = authErrors[0];
+                        const doing = error.downloadProgress?.doing || '';
+                        if (doing.includes('Not logged in')) {
+                            showToast('You are not logged in. Please go to Account tab and log in.', 'error');
+                        } else if (doing.includes('Subscription expired')) {
+                            showToast('Your Crunchyroll subscription has expired. Please renew it.', 'error');
+                        } else if (doing.includes('Premium content') || doing.includes('subscription required')) {
+                            showToast('Premium subscription required for this content.', 'error');
+                        }
+                    }
+                }
 
                 const hasFailed = queueData.some(i => (i.downloadProgress?.state || '').toLowerCase() === 'error');
                 const hasActive = queueData.some(i => (i.downloadProgress?.state || '').toLowerCase() === 'downloading');
@@ -1302,10 +1370,20 @@ MAINTENANCE NOTES:
             if (ids.length === 0) return;
             try {
                 for (const id of ids) {
+                    const ep = addDownloadEpisodes.find(e => e.id === id);
                     await fetch('/api/v1/queue', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ episodeId: id })
+                        body: JSON.stringify({
+                            episodeId: id,
+                            title: ep?.title || ep?.episodeTitle || '',
+                            seriesTitle: ep?.seriesTitle || currentSeries?.title || '',
+                            seasonNumber: ep?.seasonNumber || 1,
+                            episodeNumber: ep?.episodeNumber || ep?.number || 1,
+                            locale: ep?.locale || ep?.audioLocale || 'ja-JP',
+                            thumbnailUrl: ep?.thumbnailUrl || ep?.images?.[0] || '',
+                            coverArtUrl: ep?.coverArtUrl || ep?.poster || ''
+                        })
                     });
                 }
                 showToast(`Added ${ids.length} episode(s) to queue`, 'success');
@@ -1325,9 +1403,19 @@ MAINTENANCE NOTES:
                     <button class="header-btn" onclick="changeWeek(-1)">&#9664; Prev</button>
                     <div style="display:flex; gap:10px; align-items:center;">
                         <button class="header-btn" onclick="fetchCalendar()">&#128260; Refresh</button>
-                        <select class="form-select" id="calendar-lang" style="min-width:150px;">
-                            <option>English</option>
-                            <option>Japanese</option>
+                        <select class="form-select" id="calendar-lang" style="min-width:150px;" onchange="fetchCalendar()">
+                            <option value="en-us">English</option>
+                            <option value="ja-jp">Japanese</option>
+                            <option value="es">Spanish</option>
+                            <option value="es-es">Spanish (Spain)</option>
+                            <option value="pt-br">Portuguese (Brazil)</option>
+                            <option value="pt-pt">Portuguese (Portugal)</option>
+                            <option value="fr">French</option>
+                            <option value="de">German</option>
+                            <option value="it">Italian</option>
+                            <option value="ru">Russian</option>
+                            <option value="ar">Arabic</option>
+                            <option value="hi">Hindi</option>
                         </select>
                     </div>
                     <button class="header-btn" onclick="changeWeek(1)">Next &#9654;</button>
@@ -1346,7 +1434,19 @@ MAINTENANCE NOTES:
 
         async function fetchCalendar() {
             try {
-                const res = await fetch(`/api/v1/calendar?weekOffset=${calendarWeekOffset}`);
+                // Compute Monday of target week
+                const now = new Date();
+                const dayOfWeek = now.getDay();
+                const monday = new Date(now);
+                monday.setDate(now.getDate() - dayOfWeek + 1);
+                if (dayOfWeek === 0) monday.setDate(monday.getDate() - 7);
+                monday.setDate(monday.getDate() + (calendarWeekOffset * 7));
+                const dateStr = monday.toISOString().split('T')[0];
+                
+                const langSelect = document.getElementById('calendar-lang');
+                const language = langSelect ? langSelect.value : 'en-us';
+                
+                const res = await fetch(`/api/v1/calendar?date=${dateStr}&language=${language}`);
                 const data = await res.json();
                 const grid = document.getElementById('calendar-grid');
                 if (!data.days || data.days.length === 0) {
@@ -1653,16 +1753,55 @@ MAINTENANCE NOTES:
         }
 
         // ================== SETTINGS ==================
+        const LANG_OPTIONS = [
+            {value:'ja-JP',label:'Japanese'},{value:'en-US',label:'English'},{value:'de-DE',label:'German'},
+            {value:'es-ES',label:'Spanish (Spain)'},{value:'es-419',label:'Spanish (Latin America)'},
+            {value:'fr-FR',label:'French'},{value:'it-IT',label:'Italian'},{value:'pt-BR',label:'Portuguese (Brazil)'},
+            {value:'pt-PT',label:'Portuguese (Portugal)'},{value:'ru-RU',label:'Russian'},{value:'hi-IN',label:'Hindi'},
+            {value:'ar-SA',label:'Arabic'},{value:'zh-CN',label:'Chinese (Simplified)'},{value:'ko-KR',label:'Korean'},
+            {value:'pl-PL',label:'Polish'},{value:'tr-TR',label:'Turkish'},{value:'th-TH',label:'Thai'},
+            {value:'vi-VN',label:'Vietnamese'},{value:'id-ID',label:'Indonesian'},{value:'ms-MY',label:'Malay'},
+            {value:'ta-IN',label:'Tamil'},{value:'te-IN',label:'Telugu'}
+        ];
+
+        function renderMultiSelect(id, selected, options) {
+            const sel = new Set(selected || []);
+            return `<div class="multi-select" id="${id}">` +
+                options.map(o => `<label class="multi-opt"><input type="checkbox" value="${o.value}" ${sel.has(o.value)?'checked':''}> ${o.label}</label>`).join('') +
+                `</div>`;
+        }
+        function getMultiSelect(id) {
+            const el = document.getElementById(id);
+            return el ? Array.from(el.querySelectorAll('input:checked')).map(i => i.value) : [];
+        }
+        function renderListInput(id, items, placeholder) {
+            const vals = items || [];
+            return `<div class="list-input" id="${id}">` +
+                vals.map((v,i) => `<div class="list-row"><input type="text" class="form-input list-item" value="${v||''}" placeholder="${placeholder||''}"><button class="header-btn" onclick="this.parentElement.remove()">Remove</button></div>`).join('') +
+                `<button class="header-btn" onclick="const d=document.getElementById('${id}');const r=document.createElement('div');r.className='list-row';r.innerHTML='<input type=\\'text\\' class=\\'form-input list-item\\' placeholder=\\'${placeholder||''}\\'><button class=\\'header-btn\\' onclick=\\'this.parentElement.remove()\\'>Remove</button>';d.insertBefore(r,d.lastElementChild)">Add</button></div>`;
+        }
+        function getListInput(id) {
+            const el = document.getElementById(id);
+            return el ? Array.from(el.querySelectorAll('.list-item')).map(i => i.value).filter(v => v) : [];
+        }
+
         function renderSettings(container) {
             container.innerHTML = `
                 <div class="page-title">Settings</div>
                 <div class="page-subtitle">Configure Cruncharr</div>
                 <div class="settings-tabs">
                     <button class="settings-tab ${settingsTab === 'general' ? 'active' : ''}" onclick="setSettingsTab('general')">General</button>
+                    <button class="settings-tab ${settingsTab === 'crunchyroll' ? 'active' : ''}" onclick="setSettingsTab('crunchyroll')">Crunchyroll</button>
                     <button class="settings-tab ${settingsTab === 'download' ? 'active' : ''}" onclick="setSettingsTab('download')">Download</button>
+                    <button class="settings-tab ${settingsTab === 'filename' ? 'active' : ''}" onclick="setSettingsTab('filename')">Filename</button>
+                    <button class="settings-tab ${settingsTab === 'muxing' ? 'active' : ''}" onclick="setSettingsTab('muxing')">Muxing</button>
                     <button class="settings-tab ${settingsTab === 'queue' ? 'active' : ''}" onclick="setSettingsTab('queue')">Queue</button>
+                    <button class="settings-tab ${settingsTab === 'history' ? 'active' : ''}" onclick="setSettingsTab('history')">History</button>
                     <button class="settings-tab ${settingsTab === 'sonarr' ? 'active' : ''}" onclick="setSettingsTab('sonarr')">Sonarr</button>
                     <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications')">Notifications</button>
+                    <button class="settings-tab ${settingsTab === 'proxy' ? 'active' : ''}" onclick="setSettingsTab('proxy')">Proxy</button>
+                    <button class="settings-tab ${settingsTab === 'flaresolverr' ? 'active' : ''}" onclick="setSettingsTab('flaresolverr')">FlareSolverr</button>
+                    <button class="settings-tab ${settingsTab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Appearance</button>
                 </div>
                 <div id="settings-content">
                     <div class="loading"><div class="spinner"></div>Loading settings...</div>
@@ -1684,57 +1823,68 @@ MAINTENANCE NOTES:
         function renderSettingsTab() {
             const content = document.getElementById('settings-content');
             const c = config || {};
+            const cr = c.crunchyroll || {};
+            const dl = c.download || {};
+            const q = c.queue || {};
+            const h = c.history || {};
+            const n = c.notifications || {};
+            const s = c.sonarr || {};
+            const p = c.proxy || {};
+            const f = c.flareSolverr || {};
+            const a = c.appearance || {};
+            const g = c.general || {};
             switch(settingsTab) {
                 case 'general':
                     content.innerHTML = `
                         <div class="settings-section">
-                            <div class="settings-section-header">
-                                <span class="settings-section-title">General</span>
-                                <span class="settings-section-desc">General application settings</span>
-                            </div>
+                            <div class="settings-section-header"><span class="settings-section-title">General</span><span class="settings-section-desc">General application settings</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">History</div>
-                                        <div class="setting-desc">Record download history</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-history" ${c.history ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">History Language</div>
-                                        <div class="setting-desc">Language for history entries</div>
-                                    </div>
-                                    <select class="form-select" id="setting-history-lang" style="min-width:150px;">
-                                        <option value="en" ${c.historyLang === 'en' ? 'selected' : ''}>English</option>
-                                        <option value="ja" ${c.historyLang === 'ja' ? 'selected' : ''}>Japanese</option>
-                                    </select>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Proxy</div>
-                                        <div class="setting-desc">Use proxy for requests</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-proxy" ${c.proxyEnabled ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Proxy Host</div>
-                                    </div>
-                                    <input type="text" class="form-input" id="setting-proxy-host" value="${c.proxyHost || ''}" style="width:200px;">
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Proxy Port</div>
-                                    </div>
-                                    <input type="number" class="form-input" id="setting-proxy-port" value="${c.proxyPort || ''}" style="width:100px;">
-                                </div>
+                                <div class="setting-row"><div><div class="setting-label">Log Mode</div><div class="setting-desc">Enable verbose logging</div></div><label class="toggle-switch"><input type="checkbox" id="setting-log-mode" ${g.logMode?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Remove Finished Downloads</div><div class="setting-desc">Auto-remove completed items from queue</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-finished" ${g.removeFinishedDownload?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Token File Path</div></div><input type="text" class="form-input" id="setting-token-path" value="${g.tokenFilePath||''}" style="width:300px;"></div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'crunchyroll':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Crunchyroll Settings</span><span class="settings-section-desc">Crunchyroll-specific options</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Use Beta API</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-beta-api" ${cr.useBetaApi?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Mark as Watched</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mark-watched" ${cr.markAsWatched?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Search: Include Featured Music</div></div><label class="toggle-switch"><input type="checkbox" id="setting-search-music" ${cr.searchFetchFeaturedMusic?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Dub Languages</span><span class="settings-section-desc">Select languages to download</span></div>
+                            <div class="settings-section-body">
+                                ${renderMultiSelect('setting-dub-langs', dl.dubLanguages||['ja-JP'], LANG_OPTIONS)}
+                                <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Download AD for Selected Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-ad" ${dl.downloadDescriptionAudio?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download First Available Dub</div></div><label class="toggle-switch"><input type="checkbox" id="setting-first-dub" ${dl.downloadFirstAvailableDub?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Hardsubs</span><span class="settings-section-desc">Hardsub language settings</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Hardsubs Language</div></div><select class="form-select" id="setting-hard-sub" style="min-width:150px;"><option value="none" ${dl.hardSubLang==='none'?'selected':''}>none</option>${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.hardSubLang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">No hardsubs fallback</div></div><label class="toggle-switch"><input type="checkbox" id="setting-hard-fallback" ${dl.hardSubRawFallback?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Softsubs</span><span class="settings-section-desc">Subtitle download options</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Softsubs Languages</div></div></div>
+                                ${renderMultiSelect('setting-soft-subs', dl.softSubs||['en-US'], LANG_OPTIONS)}
+                                <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Fix CCC Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-fix-ccc" ${dl.fixCccSubtitles?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Duplicate</div></div><label class="toggle-switch"><input type="checkbox" id="setting-subs-dup" ${dl.subsDownloadDuplicate?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Add ScaledBorderAndShadow</div></div><select class="form-select" id="setting-scaled-border" style="min-width:150px;"><option value="DontAdd" ${dl.subsAddScaledBorder==='DontAdd'?'selected':''}>Don't Add</option><option value="ScaledBorderAndShadowYes" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowYes'?'selected':''}>yes</option><option value="ScaledBorderAndShadowNo" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowNo'?'selected':''}>no</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Signs Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-signs-subs" ${dl.includeSignsSubs?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Signs as forced in mkv</div></div><label class="toggle-switch"><input type="checkbox" id="setting-signs-forced" ${dl.signsSubsAsForced?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">CC Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-subs" ${dl.includeCcSubs?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">CC as hearing impaired in mkv</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-hi" ${dl.ccSubsMuxingFlag?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Convert CC VTT to ASS</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-convert" ${dl.convertVtt2Ass?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">CC Font</div></div><input type="text" class="form-input" id="setting-cc-font" value="${dl.ccSubsFont||'Trebuchet MS'}" style="width:200px;"></div>
                             </div>
                         </div>
                     `;
@@ -1742,50 +1892,102 @@ MAINTENANCE NOTES:
                 case 'download':
                     content.innerHTML = `
                         <div class="settings-section">
-                            <div class="settings-section-header">
-                                <span class="settings-section-title">Download Settings</span>
-                                <span class="settings-section-desc">Adjust download behavior</span>
-                            </div>
+                            <div class="settings-section-header"><span class="settings-section-title">Download Settings</span><span class="settings-section-desc">Adjust download behavior</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Output Directory</div>
-                                        <div class="setting-desc">Where downloads are saved</div>
-                                    </div>
-                                    <div class="setting-control">
-                                        <input type="text" class="form-input" id="setting-output-dir" value="${c.download?.outputDirectory || '/downloads'}" style="width:250px;">
-                                    </div>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Quality Preference</div>
-                                    </div>
-                                    <select class="form-select" id="setting-quality" style="min-width:150px;">
-                                        <option value="best" ${c.download?.quality === 'best' ? 'selected' : ''}>Best Available</option>
-                                        <option value="1080p" ${c.download?.quality === '1080p' ? 'selected' : ''}>1080p</option>
-                                        <option value="720p" ${c.download?.quality === '720p' ? 'selected' : ''}>720p</option>
-                                        <option value="worst" ${c.download?.quality === 'worst' ? 'selected' : ''}>Worst</option>
-                                    </select>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Simultaneous Downloads</div>
-                                    </div>
-                                    <input type="number" class="form-input" id="setting-concurrent" value="${c.download?.simultaneousDownloads || 2}" min="1" max="10" style="width:80px;">
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Max Download Speed (KB/s)</div>
-                                        <div class="setting-desc">0 = unlimited</div>
-                                    </div>
-                                    <input type="number" class="form-input" id="setting-max-speed" value="${c.download?.maxSpeed || 0}" min="0" style="width:120px;">
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Retry Attempts</div>
-                                    </div>
-                                    <input type="number" class="form-input" id="setting-retry" value="${c.download?.retryAttempts || 3}" min="1" max="10" style="width:80px;">
-                                </div>
+                                <div class="setting-row"><div><div class="setting-label">Output Directory</div><div class="setting-desc">Where downloads are saved</div></div><input type="text" class="form-input" id="setting-output-dir" value="${dl.outputDirectory||'/downloads'}" style="width:250px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Temp Directory</div></div><input type="text" class="form-input" id="setting-temp-dir" value="${dl.tempDirectory||'/tmp/cruncharr'}" style="width:250px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Use Temp Folder</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-temp" ${dl.useTempFolder?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Part Size</div></div><input type="number" class="form-input" id="setting-part-size" value="${dl.partSize||10}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Dub Download Delay (seconds)</div></div><input type="number" class="form-input" id="setting-dub-delay" value="${dl.dubDownloadDelaySeconds||0}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Downloads</div></div><input type="number" class="form-input" id="setting-concurrent" value="${dl.simultaneousDownloads||2}" min="1" max="10" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-proc-jobs" value="${dl.simultaneousProcessingJobs||2}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Speed Limit (KB/s)</div><div class="setting-desc">0 = unlimited</div></div><input type="number" class="form-input" id="setting-speed-limit" value="${dl.downloadSpeedLimit||0}" min="0" style="width:120px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Speed in Bits</div></div><label class="toggle-switch"><input type="checkbox" id="setting-speed-bits" ${dl.downloadSpeedInBits?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Retry Attempts</div></div><input type="number" class="form-input" id="setting-retry" value="${dl.retryAttempts||5}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-delay" value="${dl.retryDelay||5}" min="0" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Playback Rate Limit Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-rate-limit-delay" value="${dl.playbackRateLimitRetryDelaySeconds||30}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Retry Max Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-max-delay" value="${dl.retryMaxDelaySeconds||3600}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Use New Download Method</div></div><label class="toggle-switch"><input type="checkbox" id="setting-new-method" ${dl.downloadMethodeNew?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Stream Endpoints</span><span class="settings-section-desc">Stream endpoint configuration</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Primary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint" style="min-width:150px;"><option value="tv/android_tv" ${(cr.streamEndpoint?.endpoint||'tv/android_tv')==='tv/android_tv'?'selected':''}>tv/android_tv</option><option value="web/firefox" ${(cr.streamEndpoint?.endpoint||'')==='web/firefox'?'selected':''}>web/firefox</option><option value="web/chrome" ${(cr.streamEndpoint?.endpoint||'')==='web/chrome'?'selected':''}>web/chrome</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth" value="${cr.streamEndpoint?.authorization||''}" style="width:200px;" placeholder="Authorization"></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua" value="${cr.streamEndpoint?.userAgent||''}" style="width:250px;" placeholder="User-Agent"></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type" value="${cr.streamEndpoint?.deviceType||''}" style="width:200px;" placeholder="Device Type"></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name" value="${cr.streamEndpoint?.deviceName||''}" style="width:200px;" placeholder="Device Name"></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video" ${cr.streamEndpoint?.video!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio" ${cr.streamEndpoint?.audio!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default" ${cr.streamEndpoint?.useDefault?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint-2" style="min-width:150px;"><option value="" ${!cr.streamEndpointSecondary?.endpoint?'selected':''}>None</option><option value="tv/android_tv" ${(cr.streamEndpointSecondary?.endpoint||'')==='tv/android_tv'?'selected':''}>tv/android_tv</option><option value="web/firefox" ${(cr.streamEndpointSecondary?.endpoint||'')==='web/firefox'?'selected':''}>web/firefox</option><option value="web/chrome" ${(cr.streamEndpointSecondary?.endpoint||'')==='web/chrome'?'selected':''}>web/chrome</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth-2" value="${cr.streamEndpointSecondary?.authorization||''}" style="width:200px;" placeholder="Authorization"></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua-2" value="${cr.streamEndpointSecondary?.userAgent||''}" style="width:250px;" placeholder="User-Agent"></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type-2" value="${cr.streamEndpointSecondary?.deviceType||''}" style="width:200px;" placeholder="Device Type"></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name-2" value="${cr.streamEndpointSecondary?.deviceName||''}" style="width:200px;" placeholder="Device Name"></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video-2" ${cr.streamEndpointSecondary?.video!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio-2" ${cr.streamEndpointSecondary?.audio!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default-2" ${cr.streamEndpointSecondary?.useDefault?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Video / Audio</span><span class="settings-section-desc">Media download options</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Download Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-video" ${!dl.noVideo?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Video for every dub</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-video-every" ${!dl.dlVideoOnce?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Keep files separate</div></div><label class="toggle-switch"><input type="checkbox" id="setting-keep-separate" ${dl.keepDubsSeparate?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Video Quality</div></div><select class="form-select" id="setting-quality-video" style="min-width:150px;"><option value="best" ${dl.qualityVideo==='best'?'selected':''}>Best Available</option><option value="1080" ${dl.qualityVideo==='1080'?'selected':''}>1080</option><option value="720" ${dl.qualityVideo==='720'?'selected':''}>720</option><option value="480" ${dl.qualityVideo==='480'?'selected':''}>480</option><option value="360" ${dl.qualityVideo==='360'?'selected':''}>360</option><option value="240" ${dl.qualityVideo==='240'?'selected':''}>240</option><option value="worst" ${dl.qualityVideo==='worst'?'selected':''}>Worst</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-audio" ${!dl.noAudio?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Audio Quality</div></div><select class="form-select" id="setting-quality-audio" style="min-width:150px;"><option value="best" ${dl.qualityAudio==='best'?'selected':''}>Best Available</option><option value="192kB/s" ${dl.qualityAudio==='192kB/s'?'selected':''}>192kB/s</option><option value="128kB/s" ${dl.qualityAudio==='128kB/s'?'selected':''}>128kB/s</option><option value="96kB/s" ${dl.qualityAudio==='96kB/s'?'selected':''}>96kB/s</option><option value="64kB/s" ${dl.qualityAudio==='64kB/s'?'selected':''}>64kB/s</option><option value="worst" ${dl.qualityAudio==='worst'?'selected':''}>Worst</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Chapters</div></div><label class="toggle-switch"><input type="checkbox" id="setting-chapters" ${dl.chapters?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'filename':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Filename Settings</span><span class="settings-section-desc">Configure output filenames</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Leading zeros for seasons/episodes</div></div><input type="number" class="form-input" id="setting-leading-zeros" value="${dl.leadingNumbers||2}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Filename Whitespace Substitute</div></div><input type="text" class="form-input" id="setting-whitespace-sub" value="${dl.filenameWhitespaceSubstitute||''}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Filename Template</div><div class="setting-desc">Variables: \${seriesTitle}, \${season}, \${episode}, \${height}, \${width}, \${videoBitrate}, \${audioBitrate}, \${episodeTitle}, \${seasonTitle}, \${seriesId}, \${episodeId}</div></div><input type="text" class="form-input" id="setting-filename" value="${dl.filename||'${seriesTitle} - S${season}E${episode} [${height}p]'}" style="width:400px;"></div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'muxing':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Muxing Settings</span><span class="settings-section-desc">Output and muxing options</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Skip Muxing</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-mux" ${dl.skipMuxing?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">MP4 output</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-mp4" ${dl.muxMp4?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">MP3 output</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-mp3" ${dl.muxAudioOnlyToMp3?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Keep Subtitles separate</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-sub-mux" ${dl.skipSubMux?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Default Audio</div></div><select class="form-select" id="setting-mux-default-dub" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.muxDefaultDub===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Default Subtitle</div></div><select class="form-select" id="setting-mux-default-sub" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.muxDefaultSub===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Forced Display</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-forced" ${dl.muxDefaultSubForcedDisplay?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Default Subtitle Signs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-default-signs" ${dl.muxDefaultSubSigns?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Include Fonts</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-fonts" ${dl.muxFonts?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Include Typesetting Fonts</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-ts-fonts" ${dl.muxTypesettingFonts?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Include episode thumbnail</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-cover" ${dl.muxCover?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">File title</div></div><input type="text" class="form-input" id="setting-video-title" value="${dl.videoTitle||''}" style="width:300px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Include Episode description</div></div><label class="toggle-switch"><input type="checkbox" id="setting-include-desc" ${dl.includeVideoDescription?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Episode description Language</div></div><select class="form-select" id="setting-desc-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.descriptionLang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Sync Timings</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sync-timing" ${dl.syncTiming?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Additional Options</span><span class="settings-section-desc">Extra muxing options</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Additional MKVMerge Options</div></div></div>
+                                ${renderListInput('setting-mkvmerge', dl.mkvmergeOptions, '--option')}
+                                <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
+                                ${renderListInput('setting-ffmpeg', dl.ffmpegOptions, '-option')}
+                                <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><input type="text" class="form-input" id="setting-encode-preset" value="${dl.encodePreset||''}" style="width:200px;"></div>
                             </div>
                         </div>
                     `;
@@ -1793,41 +1995,32 @@ MAINTENANCE NOTES:
                 case 'queue':
                     content.innerHTML = `
                         <div class="settings-section">
-                            <div class="settings-section-header">
-                                <span class="settings-section-title">Queue Settings</span>
-                                <span class="settings-section-desc">Queue behavior options</span>
-                            </div>
+                            <div class="settings-section-header"><span class="settings-section-title">Queue Settings</span><span class="settings-section-desc">Queue behavior options</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Persist Queue</div>
-                                        <div class="setting-desc">Save queue on exit</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-persist-queue" ${c.persistQueue ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Allow Early Start</div>
-                                        <div class="setting-desc">Start next download early</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-early-start" ${c.downloadAllowEarlyStart ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Skip Missing Languages</div>
-                                        <div class="setting-desc">Only queue if all selected languages available</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-skip-missing" ${c.downloadOnlyWithAllSelectedDubSub ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
+                                <div class="setting-row"><div><div class="setting-label">Persist Queue</div><div class="setting-desc">Save queue on exit</div></div><label class="toggle-switch"><input type="checkbox" id="setting-persist-queue" ${q.persistQueue?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'history':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">History Settings</span><span class="settings-section-desc">History tracking options</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-enabled" ${h.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Count Missing</div></div><label class="toggle-switch"><input type="checkbox" id="setting-count-missing" ${h.countMissing?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Include CR Artists</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cr-artists" ${h.includeCrArtists?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Remove Missing Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-missing" ${h.removeMissingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Add Specials</div></div><label class="toggle-switch"><input type="checkbox" id="setting-add-specials" ${h.addSpecials?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Skip Unmonitored</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-unmonitored" ${h.skipUnmonitored?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Count Sonarr</div></div><label class="toggle-switch"><input type="checkbox" id="setting-count-sonarr" ${h.countSonarr?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">History Language</div></div><select class="form-select" id="setting-history-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${h.lang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div></div><input type="number" class="form-input" id="setting-history-interval" value="${h.autoRefreshIntervalMinutes||0}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div></div><select class="form-select" id="setting-history-mode" style="min-width:150px;"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Add to Queue</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-queue" ${h.autoRefreshAddToQueue?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -1835,47 +2028,15 @@ MAINTENANCE NOTES:
                 case 'sonarr':
                     content.innerHTML = `
                         <div class="settings-section">
-                            <div class="settings-section-header">
-                                <span class="settings-section-title">Sonarr Settings</span>
-                                <span class="settings-section-desc">Sonarr integration</span>
-                            </div>
+                            <div class="settings-section-header"><span class="settings-section-title">Sonarr Settings</span><span class="settings-section-desc">Sonarr integration</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Host</div>
-                                    </div>
-                                    <input type="text" class="form-input" id="setting-sonarr-host" value="${c.sonarr?.host || ''}" style="width:200px;">
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Port</div>
-                                    </div>
-                                    <input type="text" class="form-input" id="setting-sonarr-port" value="${c.sonarr?.port || ''}" style="width:100px;">
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">API Key</div>
-                                    </div>
-                                    <input type="text" class="form-input" id="setting-sonarr-apikey" value="${c.sonarr?.apiKey || ''}" style="width:250px;">
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Use SSL</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-sonarr-ssl" ${c.sonarr?.useSsl ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Use Sonarr Numbering</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-sonarr-numbering" ${c.sonarr?.useSonarrNumbering ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
+                                <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-enabled" ${s.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-sonarr-host" value="${s.host||''}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-sonarr-port" value="${s.port||0}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">API Key</div></div><input type="text" class="form-input" id="setting-sonarr-apikey" value="${s.apiKey||''}" style="width:250px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-ssl" ${s.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input" id="setting-sonarr-urlbase" value="${s.urlBase||''}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Use Sonarr Numbering</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-numbering" ${s.useSonarrNumbering?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -1883,53 +2044,69 @@ MAINTENANCE NOTES:
                 case 'notifications':
                     content.innerHTML = `
                         <div class="settings-section">
-                            <div class="settings-section-header">
-                                <span class="settings-section-title">Notifications</span>
-                                <span class="settings-section-desc">Configure notifications</span>
-                            </div>
+                            <div class="settings-section-header"><span class="settings-section-title">Notifications</span><span class="settings-section-desc">Configure notifications</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Webhook URL</div>
-                                    </div>
-                                    <input type="text" class="form-input" id="setting-webhook-url" value="${c.webhook?.url || ''}" style="width:300px;">
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Webhook Enabled</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-webhook-enabled" ${c.webhook?.enabled ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Queue Finished</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-notify-queue" ${c.webhook?.notifyQueueFinished ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Download Finished</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-notify-download" ${c.webhook?.notifyDownloadFinished ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="setting-row">
-                                    <div>
-                                        <div class="setting-label">Download Failed</div>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" id="setting-notify-failed" ${c.webhook?.notifyDownloadFailed ? 'checked' : ''}>
-                                        <span class="toggle-slider"></span>
-                                    </label>
-                                </div>
+                                <div class="setting-row"><div><div class="setting-label">Webhook URL</div></div><input type="text" class="form-input" id="setting-webhook-url" value="${n.webhookUrl||''}" style="width:300px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-webhook-enabled" ${n.webhookEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Method</div></div><select class="form-select" id="setting-webhook-method" style="min-width:100px;"><option value="POST" ${n.webhookMethod==='POST'?'selected':''}>POST</option><option value="GET" ${n.webhookMethod==='GET'?'selected':''}>GET</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Content-Type</div></div><input type="text" class="form-input" id="setting-webhook-ct" value="${n.webhookContentType||'application/json'}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Body Template</div></div><textarea class="form-input" id="setting-webhook-body" rows="3" style="width:300px;">${n.webhookBodyTemplate||''}</textarea></div>
+                                <div class="setting-row"><div><div class="setting-label">Queue Finished</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-queue" ${n.notifyQueueFinished?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Finished</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-download" ${n.notifyDownloadFinished?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Failed</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-failed" ${n.notifyDownloadFailed?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Tracked Series Released</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-tracked" ${n.notifyTrackedSeriesReleased?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Login Expired</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-login" ${n.notifyLoginExpired?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Update Available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-update" ${n.notifyUpdateAvailable?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Play Sound on Finish</div></div><label class="toggle-switch"><input type="checkbox" id="setting-play-sound" ${n.downloadFinishedPlaySound?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Sound File Path</div></div><input type="text" class="form-input" id="setting-sound-path" value="${n.downloadFinishedSoundPath||''}" style="width:250px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Execute on Finish</div></div><label class="toggle-switch"><input type="checkbox" id="setting-exec-finish" ${n.downloadFinishedExecute?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Execute Path</div></div><input type="text" class="form-input" id="setting-exec-path" value="${n.downloadFinishedExecutePath||''}" style="width:250px;"></div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'proxy':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Proxy Settings</span><span class="settings-section-desc">Configure proxy connection</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-proxy-enabled" ${p.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">SOCKS Proxy</div></div><label class="toggle-switch"><input type="checkbox" id="setting-proxy-socks" ${p.socks?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-proxy-host" value="${p.host||''}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-proxy-port" value="${p.port||0}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Username</div></div><input type="text" class="form-input" id="setting-proxy-user" value="${p.username||''}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Password</div></div><input type="password" class="form-input" id="setting-proxy-pass" value="${p.password||''}" style="width:200px;"></div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'flaresolverr':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">FlareSolverr Settings</span><span class="settings-section-desc">Cloudflare bypass configuration</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-enabled" ${f.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-flare-host" value="${f.host||'localhost'}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-flare-port" value="${f.port||0}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-ssl" ${f.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">MITM Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-mitm" ${f.mitmEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">MITM Host</div></div><input type="text" class="form-input" id="setting-flare-mitm-host" value="${f.mitmHost||'localhost'}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">MITM Port</div></div><input type="number" class="form-input" id="setting-flare-mitm-port" value="${f.mitmPort||8080}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">MITM Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-mitm-ssl" ${f.mitmUseSsl?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'appearance':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Appearance</span><span class="settings-section-desc">UI customization</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="text" class="form-input" id="setting-accent" value="${a.accentColor||''}" style="width:150px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input" id="setting-bg-path" value="${a.backgroundImagePath||''}" style="width:300px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${a.backgroundImageOpacity??0.5}" min="0" max="1" step="0.1" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input" id="setting-bg-blur" value="${a.backgroundImageBlurRadius??10}" min="0" style="width:100px;"></div>
                             </div>
                         </div>
                     `;
@@ -1942,39 +2119,199 @@ MAINTENANCE NOTES:
             try {
                 const res = await fetch('/api/v1/config');
                 config = await res.json();
+                applyTheme();
             } catch (e) { console.error('Failed to load config:', e); }
         }
 
+        function applyTheme() {
+            const theme = config?.appearance?.theme || 'System';
+            const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const isDark = theme === 'Dark' || (theme === 'System' && systemDark);
+            
+            if (isDark) {
+                document.documentElement.removeAttribute('data-theme');
+            } else {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+            
+            // Apply accent color if set
+            const accentColor = config?.appearance?.accentColor;
+            if (accentColor) {
+                document.documentElement.style.setProperty('--accent-orange', accentColor);
+            }
+        }
+        
+        // Listen for system theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (config?.appearance?.theme === 'System') applyTheme();
+        });
+
         async function saveSettings() {
             const newConfig = {
-                history: document.getElementById('setting-history')?.checked || false,
-                historyLang: document.getElementById('setting-history-lang')?.value || 'en',
-                proxyEnabled: document.getElementById('setting-proxy')?.checked || false,
-                proxyHost: document.getElementById('setting-proxy-host')?.value || '',
-                proxyPort: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
-                persistQueue: document.getElementById('setting-persist-queue')?.checked || false,
-                downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
-                downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
+                general: {
+                    logMode: document.getElementById('setting-log-mode')?.checked || false,
+                    removeFinishedDownload: document.getElementById('setting-remove-finished')?.checked || false,
+                    tokenFilePath: document.getElementById('setting-token-path')?.value || ''
+                },
+                crunchyroll: {
+                    useBetaApi: document.getElementById('setting-use-beta-api')?.checked ?? true,
+                    markAsWatched: document.getElementById('setting-mark-watched')?.checked || false,
+                    searchFetchFeaturedMusic: document.getElementById('setting-search-music')?.checked || false,
+                    streamEndpoint: {
+                        endpoint: document.getElementById('setting-stream-endpoint')?.value || 'tv/android_tv',
+                        authorization: document.getElementById('setting-stream-auth')?.value || '',
+                        userAgent: document.getElementById('setting-stream-ua')?.value || '',
+                        deviceType: document.getElementById('setting-stream-device-type')?.value || '',
+                        deviceName: document.getElementById('setting-stream-device-name')?.value || '',
+                        video: document.getElementById('setting-stream-video')?.checked ?? true,
+                        audio: document.getElementById('setting-stream-audio')?.checked ?? true,
+                        useDefault: document.getElementById('setting-stream-use-default')?.checked ?? false
+                    },
+                    streamEndpointSecondary: {
+                        endpoint: document.getElementById('setting-stream-endpoint-2')?.value || '',
+                        authorization: document.getElementById('setting-stream-auth-2')?.value || '',
+                        userAgent: document.getElementById('setting-stream-ua-2')?.value || '',
+                        deviceType: document.getElementById('setting-stream-device-type-2')?.value || '',
+                        deviceName: document.getElementById('setting-stream-device-name-2')?.value || '',
+                        video: document.getElementById('setting-stream-video-2')?.checked ?? true,
+                        audio: document.getElementById('setting-stream-audio-2')?.checked ?? true,
+                        useDefault: document.getElementById('setting-stream-use-default-2')?.checked ?? false
+                    }
+                },
                 download: {
                     outputDirectory: document.getElementById('setting-output-dir')?.value || '/downloads',
-                    quality: document.getElementById('setting-quality')?.value || 'best',
+                    tempDirectory: document.getElementById('setting-temp-dir')?.value || '/tmp/cruncharr',
+                    useTempFolder: document.getElementById('setting-use-temp')?.checked || false,
+                    filename: document.getElementById('setting-filename')?.value || '${seriesTitle} - S${season}E${episode} [${height}p]',
+                    filenameWhitespaceSubstitute: document.getElementById('setting-whitespace-sub')?.value || '',
+                    videoTitle: document.getElementById('setting-video-title')?.value || null,
+                    includeVideoDescription: document.getElementById('setting-include-desc')?.checked || false,
+                    descriptionLang: document.getElementById('setting-desc-lang')?.value || 'en-US',
+                    leadingNumbers: parseInt(document.getElementById('setting-leading-zeros')?.value) || 2,
+                    qualityVideo: document.getElementById('setting-quality-video')?.value || 'best',
+                    qualityAudio: document.getElementById('setting-quality-audio')?.value || 'best',
+                    dubLanguages: getMultiSelect('setting-dub-langs'),
+                    defaultAudio: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
+                    downloadDescriptionAudio: document.getElementById('setting-dl-ad')?.checked ?? true,
+                    downloadFirstAvailableDub: document.getElementById('setting-first-dub')?.checked || false,
+                    dlVideoOnce: !(document.getElementById('setting-dl-video-every')?.checked ?? true),
+                    keepDubsSeparate: document.getElementById('setting-keep-separate')?.checked || false,
+                    dubDownloadDelaySeconds: parseInt(document.getElementById('setting-dub-delay')?.value) || 0,
+                    hardSubLang: document.getElementById('setting-hard-sub')?.value || 'none',
+                    hardSubRawFallback: document.getElementById('setting-hard-fallback')?.checked || false,
+                    softSubs: getMultiSelect('setting-soft-subs'),
+                    defaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
+                    includeSignsSubs: document.getElementById('setting-signs-subs')?.checked || false,
+                    signsSubsAsForced: document.getElementById('setting-signs-forced')?.checked || false,
+                    includeCcSubs: document.getElementById('setting-cc-subs')?.checked || false,
+                    ccSubsMuxingFlag: document.getElementById('setting-cc-hi')?.checked || false,
+                    subsDownloadDuplicate: document.getElementById('setting-subs-dup')?.checked || false,
+                    fixCccSubtitles: document.getElementById('setting-fix-ccc')?.checked ?? true,
+                    convertVtt2Ass: document.getElementById('setting-cc-convert')?.checked ?? true,
+                    ccSubsFont: document.getElementById('setting-cc-font')?.value || 'Trebuchet MS',
+                    subsAddScaledBorder: document.getElementById('setting-scaled-border')?.value || 'DontAdd',
                     simultaneousDownloads: parseInt(document.getElementById('setting-concurrent')?.value) || 2,
-                    maxSpeed: parseInt(document.getElementById('setting-max-speed')?.value) || 0,
-                    retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 3
+                    simultaneousProcessingJobs: parseInt(document.getElementById('setting-proc-jobs')?.value) || 2,
+                    downloadMethodeNew: document.getElementById('setting-new-method')?.checked || false,
+                    downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
+                    downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
+                    downloadSpeedLimit: parseInt(document.getElementById('setting-speed-limit')?.value) || 0,
+                    downloadSpeedInBits: document.getElementById('setting-speed-bits')?.checked || false,
+                    retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 5,
+                    retryDelay: parseInt(document.getElementById('setting-retry-delay')?.value) || 5,
+                    playbackRateLimitRetryDelaySeconds: parseInt(document.getElementById('setting-rate-limit-delay')?.value) || 30,
+                    retryMaxDelaySeconds: parseInt(document.getElementById('setting-retry-max-delay')?.value) || 3600,
+                    partSize: parseInt(document.getElementById('setting-part-size')?.value) || 10,
+                    noVideo: !(document.getElementById('setting-dl-video')?.checked ?? true),
+                    noAudio: !(document.getElementById('setting-dl-audio')?.checked ?? true),
+                    chapters: document.getElementById('setting-chapters')?.checked ?? true,
+                    skipMuxing: document.getElementById('setting-skip-mux')?.checked || false,
+                    muxMp4: document.getElementById('setting-mux-mp4')?.checked || false,
+                    muxAudioOnlyToMp3: document.getElementById('setting-mux-mp3')?.checked || false,
+                    skipSubMux: document.getElementById('setting-skip-sub-mux')?.checked || false,
+                    muxFonts: document.getElementById('setting-mux-fonts')?.checked || false,
+                    muxTypesettingFonts: document.getElementById('setting-mux-ts-fonts')?.checked || false,
+                    muxCover: document.getElementById('setting-mux-cover')?.checked || false,
+                    muxDefaultDub: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
+                    muxDefaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
+                    muxDefaultSubSigns: document.getElementById('setting-mux-default-signs')?.checked || false,
+                    muxDefaultSubForcedDisplay: document.getElementById('setting-mux-forced')?.checked || false,
+                    syncTiming: document.getElementById('setting-sync-timing')?.checked || false,
+                    syncTimingFullQualityFallback: false,
+                    syncHwAccel: null,
+                    mkvmergeOptions: getListInput('setting-mkvmerge'),
+                    ffmpegOptions: getListInput('setting-ffmpeg'),
+                    encodeEnabled: document.getElementById('setting-encode')?.checked || false,
+                    encodePreset: document.getElementById('setting-encode-preset')?.value || null
+                },
+                queue: {
+                    persistQueue: document.getElementById('setting-persist-queue')?.checked || false,
+                    autoDownload: document.getElementById('setting-auto-download')?.checked || false
+                },
+                history: {
+                    enabled: document.getElementById('setting-history-enabled')?.checked ?? true,
+                    countMissing: document.getElementById('setting-count-missing')?.checked || false,
+                    includeCrArtists: document.getElementById('setting-cr-artists')?.checked || false,
+                    removeMissingEpisodes: document.getElementById('setting-remove-missing')?.checked ?? true,
+                    addSpecials: document.getElementById('setting-add-specials')?.checked || false,
+                    skipUnmonitored: document.getElementById('setting-skip-unmonitored')?.checked || false,
+                    countSonarr: document.getElementById('setting-count-sonarr')?.checked || false,
+                    lang: document.getElementById('setting-history-lang')?.value || 'en-US',
+                    autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
+                    autoRefreshMode: parseInt(document.getElementById('setting-history-mode')?.value) || 50,
+                    autoRefreshAddToQueue: document.getElementById('setting-history-queue')?.checked ?? true
                 },
                 sonarr: {
-                    host: document.getElementById('setting-sonarr-host')?.value || '',
-                    port: document.getElementById('setting-sonarr-port')?.value || '',
-                    apiKey: document.getElementById('setting-sonarr-apikey')?.value || '',
+                    enabled: document.getElementById('setting-sonarr-enabled')?.checked || false,
+                    host: document.getElementById('setting-sonarr-host')?.value || null,
+                    port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
+                    apiKey: document.getElementById('setting-sonarr-apikey')?.value || null,
                     useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
+                    urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null,
                     useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
                 },
-                webhook: {
-                    url: document.getElementById('setting-webhook-url')?.value || '',
-                    enabled: document.getElementById('setting-webhook-enabled')?.checked || false,
+                notifications: {
+                    webhookUrl: document.getElementById('setting-webhook-url')?.value || null,
+                    webhookEnabled: document.getElementById('setting-webhook-enabled')?.checked || false,
+                    webhookMethod: document.getElementById('setting-webhook-method')?.value || 'POST',
+                    webhookContentType: document.getElementById('setting-webhook-ct')?.value || 'application/json',
+                    webhookHeaders: {},
+                    webhookBodyTemplate: document.getElementById('setting-webhook-body')?.value || '',
                     notifyQueueFinished: document.getElementById('setting-notify-queue')?.checked || false,
                     notifyDownloadFinished: document.getElementById('setting-notify-download')?.checked || false,
-                    notifyDownloadFailed: document.getElementById('setting-notify-failed')?.checked || false
+                    notifyDownloadFailed: document.getElementById('setting-notify-failed')?.checked || false,
+                    notifyTrackedSeriesReleased: document.getElementById('setting-notify-tracked')?.checked || false,
+                    notifyLoginExpired: document.getElementById('setting-notify-login')?.checked || false,
+                    notifyUpdateAvailable: document.getElementById('setting-notify-update')?.checked || false,
+                    downloadFinishedPlaySound: document.getElementById('setting-play-sound')?.checked || false,
+                    downloadFinishedSoundPath: document.getElementById('setting-sound-path')?.value || null,
+                    downloadFinishedExecute: document.getElementById('setting-exec-finish')?.checked || false,
+                    downloadFinishedExecutePath: document.getElementById('setting-exec-path')?.value || null
+                },
+                proxy: {
+                    enabled: document.getElementById('setting-proxy-enabled')?.checked || false,
+                    socks: document.getElementById('setting-proxy-socks')?.checked || false,
+                    host: document.getElementById('setting-proxy-host')?.value || null,
+                    port: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
+                    username: document.getElementById('setting-proxy-user')?.value || null,
+                    password: document.getElementById('setting-proxy-pass')?.value || null
+                },
+                flareSolverr: {
+                    enabled: document.getElementById('setting-flare-enabled')?.checked || false,
+                    host: document.getElementById('setting-flare-host')?.value || 'localhost',
+                    port: parseInt(document.getElementById('setting-flare-port')?.value) || 0,
+                    useSsl: document.getElementById('setting-flare-ssl')?.checked || false,
+                    mitmEnabled: document.getElementById('setting-flare-mitm')?.checked || false,
+                    mitmHost: document.getElementById('setting-flare-mitm-host')?.value || 'localhost',
+                    mitmPort: parseInt(document.getElementById('setting-flare-mitm-port')?.value) || 8080,
+                    mitmUseSsl: document.getElementById('setting-flare-mitm-ssl')?.checked || false
+                },
+                appearance: {
+                    theme: document.getElementById('setting-theme')?.value || 'System',
+                    accentColor: document.getElementById('setting-accent')?.value || null,
+                    backgroundImagePath: document.getElementById('setting-bg-path')?.value || null,
+                    backgroundImageOpacity: parseFloat(document.getElementById('setting-bg-opacity')?.value) ?? 0.5,
+                    backgroundImageBlurRadius: parseFloat(document.getElementById('setting-bg-blur')?.value) ?? 10
                 }
             };
             try {
@@ -1983,7 +2320,11 @@ MAINTENANCE NOTES:
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(newConfig)
                 });
-                if (res.ok) showToast('Settings saved', 'success');
+                if (res.ok) {
+                    showToast('Settings saved', 'success');
+                    config = newConfig;
+                    applyTheme();
+                }
                 else showToast('Failed to save settings', 'error');
             } catch (e) { showToast('Error saving settings', 'error'); }
         }
@@ -2091,48 +2432,44 @@ MAINTENANCE NOTES:
         }
 
         function startPolling() {
+            // Check auth status periodically
+            checkAuthStatus();
+            setInterval(checkAuthStatus, 30000);
+            
             setInterval(() => {
                 if (currentPage === 'downloads') fetchDownloads();
                 if (currentPage === 'history') fetchHistoryData();
             }, 5000);
         }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const searchInput = document.getElementById('global-search');
-            searchInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    const query = searchInput.value;
-                    if (query) {
-                        navigateTo('seasons');
-                        setTimeout(() => {
-                            const grid = document.getElementById('seasons-grid');
-                            if (grid) {
-                                grid.innerHTML = '<div class="loading"><div class="spinner"></div>Searching...</div>';
-                                fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`)
-                                    .then(r => r.json())
-                                    .then(series => {
-                                        if (series.length === 0) {
-                                            grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-icon">&#128269;</div><div class="empty-state-title">No results found</div></div>';
-                                            return;
-                                        }
-                                        grid.innerHTML = series.map(s => `
-                                            <div class="history-poster">
-                                                <div class="history-poster-img">
-                                                    ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${s.coverArtUrl || s.thumbnailUrl}" alt="">` : '&#127909;'}
-                                                </div>
-                                                <div class="history-poster-info">
-                                                    <div class="history-poster-title" title="${s.title}">${s.title}</div>
-                                                    <div class="history-poster-meta">${s.description ? s.description.substring(0, 60) + '...' : ''}</div>
-                                                </div>
-                                            </div>
-                                        `).join('');
-                                    })
-                                    .catch(() => grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-icon">&#10060;</div><div class="empty-state-title">Search failed</div></div>');
-                            }
-                        }, 100);
+        
+        let lastAuthWarning = 0;
+        async function checkAuthStatus() {
+            try {
+                const res = await fetch('/api/v1/auth/status');
+                const status = await res.json();
+                authStatus = status;
+                
+                const now = Date.now();
+                if (!status.isAuthenticated) {
+                    if (now - lastAuthWarning > 60000) { // Warn every 60 seconds
+                        lastAuthWarning = now;
+                        showToast('You are not logged in. Please go to Account tab to log in.', 'warning');
+                    }
+                } else if (!status.hasPremium) {
+                    // Check if there are premium items in queue
+                    const hasPremiumItems = queueData.some(i => i.episode?.isPremium);
+                    if (hasPremiumItems && now - lastAuthWarning > 60000) {
+                        lastAuthWarning = now;
+                        showToast('No premium subscription detected. Premium content will fail to download.', 'warning');
                     }
                 }
-            });
+            } catch (e) {
+                console.error('Failed to check auth status:', e);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // App initialized
         });
     </script>
 </body>

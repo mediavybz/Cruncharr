@@ -43,7 +43,24 @@ RUN apk add --no-cache \
     libgcc \
     ffmpeg \
     mkvtoolnix \
-    curl
+    curl \
+    unzip
+
+# Build mp4decrypt (Bento4) from source for Widevine decryption
+RUN apk add --no-cache --virtual .build-deps \
+    cmake \
+    make \
+    g++ \
+    git \
+    && git clone --depth 1 https://github.com/axiomatic-systems/Bento4.git /tmp/bento4 \
+    && cd /tmp/bento4 \
+    && mkdir build && cd build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release \
+    && make -j$(nproc) \
+    && cp /tmp/bento4/build/mp4decrypt /usr/local/bin/ \
+    && chmod +x /usr/local/bin/mp4decrypt \
+    && rm -rf /tmp/bento4 \
+    && apk del .build-deps
 
 # Create directories (matching original app structure)
 RUN mkdir -p /downloads /config /tools /widevine /tmp/cruncharr /app/presets /app/fonts /app/video

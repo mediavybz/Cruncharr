@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.Xml;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 
 namespace Cruncharr.Core.Utils;
 
@@ -12,7 +10,7 @@ public class DashManifest{
 
 public class DashTrack{
     public string Id { get; set; } = "";
-    public string Type { get; set; } = ""; // video or audio
+    public string Type { get; set; } = "";
     public int Bandwidth { get; set; }
     public int? Width { get; set; }
     public int? Height { get; set; }
@@ -31,34 +29,43 @@ public class DashSegment{
     public double Duration { get; set; }
 }
 
-public class DashSegmentDownloader{
-    private readonly HttpClient _httpClient;
+public class DashDownloader{
+    private readonly HttpClientWrapper _httpClient;
     private readonly ILogger? _logger;
     private readonly int _threads;
     private readonly int _maxRetries;
-    private readonly int _timeoutMs;
     
-    public DashSegmentDownloader(HttpClient httpClient, int threads = 5, int maxRetries = 3, int timeoutMs = 15000, ILogger? logger = null){
+    public DashDownloader(HttpClientWrapper httpClient, int threads = 5, int maxRetries = 3, ILogger? logger = null){
         _httpClient = httpClient;
         _logger = logger;
         _threads = threads;
         _maxRetries = maxRetries;
-        _timeoutMs = timeoutMs;
     }
     
     public static DashManifest ParseManifest(string manifestXml, string manifestUrl){
-        var doc = new XmlDocument();
-        doc.LoadXml(manifestXml);
+        // Inject BaseURL if missing (like original does)
+        if (!manifestXml.Contains("BaseURL") && !string.IsNullOrEmpty(manifestUrl)){
+            XmlDocument doc = new XmlDocument();
+            doc.LoadXml(manifestXml);
+            XmlElement? mpd = doc.DocumentElement;
+            if (mpd != null && mpd.Name == "MPD"){
+                string dashNs = "urn:mpeg:dash:schema:mpd:2011";
+                XmlElement baseUrlElement = doc.CreateElement("BaseURL", dashNs);
+                baseUrlElement.InnerText = manifestUrl;
+                mpd.InsertBefore(baseUrlElement, mpd.FirstChild);
+                manifestXml = doc.OuterXml;
+            }
+        }
+        
+        XmlDocument xmlDoc = new XmlDocument();
+        xmlDoc.LoadXml(manifestXml);
         
         var manifest = new DashManifest();
-        var baseUri = new Uri(manifestUrl);
-        var baseUrl = $"{baseUri.Scheme}://{baseUri.Host}{baseUri.AbsolutePath.Substring(0, baseUri.AbsolutePath.LastIndexOf('/') + 1)}";
-        
-        var nsManager = new XmlNamespaceManager(doc.NameTable);
+        var nsManager = new XmlNamespaceManager(xmlDoc.NameTable);
         nsManager.AddNamespace("dash", "urn:mpeg:dash:schema:mpd:2011");
         nsManager.AddNamespace("cenc", "urn:mpeg:cenc:2013");
         
-        var period = doc.SelectSingleNode("//dash:Period", nsManager);
+        var period = xmlDoc.SelectSingleNode("//dash:Period", nsManager);
         if (period == null) return manifest;
         
         var adaptationSets = period.SelectNodes("dash:AdaptationSet", nsManager);
@@ -78,7 +85,6 @@ public class DashSegmentDownloader{
             if (representations == null) continue;
             
             foreach (XmlNode representation in representations){
-                // Inherit attributes from AdaptationSet if not present on Representation
                 var track = new DashTrack{
                     Type = isVideo ? "video" : "audio",
                     Id = representation.Attributes?["id"]?.Value ?? "",
@@ -89,17 +95,15 @@ public class DashSegmentDownloader{
                     Language = lang
                 };
                 
-                // Get PSSH from ContentProtection (check Representation first, then AdaptationSet)
+                // Get PSSH from ContentProtection
                 var contentProtections = representation.SelectNodes("dash:ContentProtection", nsManager);
                 if (contentProtections == null || contentProtections.Count == 0){
                     contentProtections = adaptationSet.SelectNodes("dash:ContentProtection", nsManager);
                 }
                 if (contentProtections != null){
                     foreach (XmlNode cp in contentProtections){
-                        // Try XPath with namespace first
                         var cencPssh = cp.SelectSingleNode("cenc:pssh", nsManager);
                         if (cencPssh == null){
-                            // Fallback: iterate child nodes manually
                             foreach (XmlNode child in cp.ChildNodes){
                                 if (child.LocalName == "pssh" && child.NamespaceURI == "urn:mpeg:cenc:2013"){
                                     cencPssh = child;
@@ -114,39 +118,29 @@ public class DashSegmentDownloader{
                     }
                 }
                 
-                // Get BaseURL
-                var baseUrlNode = representation.SelectSingleNode("dash:BaseURL", nsManager);
-                var repBaseUrl = baseUrlNode?.InnerText ?? "";
-                
-                if (!string.IsNullOrEmpty(repBaseUrl)){
-                    if (repBaseUrl.StartsWith("http")){
-                        track.BaseUrl = repBaseUrl;
-                    } else{
-                        track.BaseUrl = baseUrl + repBaseUrl;
-                    }
-                } else{
-                    track.BaseUrl = baseUrl;
-                }
+                // Get BaseURL - use the full manifest URL as base (injected above)
+                var baseUrlNode = xmlDoc.SelectSingleNode("//dash:BaseURL", nsManager);
+                string baseUrl = baseUrlNode?.InnerText ?? manifestUrl;
                 
                 // Get segments
                 var segmentList = representation.SelectSingleNode("dash:SegmentList", nsManager);
                 var segmentTemplate = adaptationSet.SelectSingleNode("dash:SegmentTemplate", nsManager);
                 var repSegmentTemplate = representation.SelectSingleNode("dash:SegmentTemplate", nsManager);
                 
-                // Prefer representation-level template over adaptation set level
                 if (repSegmentTemplate != null) segmentTemplate = repSegmentTemplate;
                 
                 if (segmentList != null){
-                    ParseSegmentList(segmentList, track, nsManager);
+                    ParseSegmentList(segmentList, track, nsManager, baseUrl);
                 } else if (segmentTemplate != null){
-                    ParseSegmentTemplate(segmentTemplate, track, nsManager);
+                    ParseSegmentTemplate(segmentTemplate, track, nsManager, baseUrl);
                 } else{
-                    // Try SegmentBase with sidx
                     var segmentBase = representation.SelectSingleNode("dash:SegmentBase", nsManager);
                     if (segmentBase != null){
-                        ParseSegmentBase(segmentBase, track, nsManager);
+                        ParseSegmentBase(segmentBase, track, nsManager, baseUrl);
                     }
                 }
+                
+                track.BaseUrl = baseUrl;
                 
                 if (isVideo){
                     manifest.VideoTracks.Add(track);
@@ -159,12 +153,12 @@ public class DashSegmentDownloader{
         return manifest;
     }
     
-    private static void ParseSegmentList(XmlNode segmentList, DashTrack track, XmlNamespaceManager nsManager){
+    private static void ParseSegmentList(XmlNode segmentList, DashTrack track, XmlNamespaceManager nsManager, string baseUrl){
         var initNode = segmentList.SelectSingleNode("dash:Initialization", nsManager);
         if (initNode != null){
             var sourceUrl = initNode.Attributes?["sourceURL"]?.Value;
             if (!string.IsNullOrEmpty(sourceUrl)){
-                track.InitSegment = new DashSegment{ Url = ResolveUrl(sourceUrl, track.BaseUrl) };
+                track.InitSegment = new DashSegment{ Url = UrlUtils.ResolveUrl(baseUrl, sourceUrl) };
             }
         }
         
@@ -175,7 +169,7 @@ public class DashSegmentDownloader{
                 var mediaRange = seg.Attributes?["mediaRange"]?.Value;
                 
                 if (!string.IsNullOrEmpty(media)){
-                    var segment = new DashSegment{ Url = ResolveUrl(media, track.BaseUrl) };
+                    var segment = new DashSegment{ Url = UrlUtils.ResolveUrl(baseUrl, media) };
                     if (!string.IsNullOrEmpty(mediaRange)){
                         var parts = mediaRange.Split('-');
                         if (parts.Length == 2){
@@ -189,7 +183,7 @@ public class DashSegmentDownloader{
         }
     }
     
-    private static void ParseSegmentTemplate(XmlNode segmentTemplate, DashTrack track, XmlNamespaceManager nsManager){
+    private static void ParseSegmentTemplate(XmlNode segmentTemplate, DashTrack track, XmlNamespaceManager nsManager, string baseUrl){
         var media = segmentTemplate.Attributes?["media"]?.Value;
         var initialization = segmentTemplate.Attributes?["initialization"]?.Value;
         var timescale = ParseInt(segmentTemplate.Attributes?["timescale"]?.Value);
@@ -201,32 +195,25 @@ public class DashSegmentDownloader{
         var duration = ParseInt(segmentTemplate.Attributes?["duration"]?.Value);
         
         if (!string.IsNullOrEmpty(initialization)){
-            var initUrl = initialization.Replace("$RepresentationID$", track.Id);
-            track.InitSegment = new DashSegment{ Url = ResolveUrl(initUrl, track.BaseUrl) };
+            var initUrl = ReplaceTemplateVariables(initialization, track.Id, startNumber);
+            track.InitSegment = new DashSegment{ Url = UrlUtils.ResolveUrl(baseUrl, initUrl) };
         }
         
         if (!string.IsNullOrEmpty(media)){
-            // For template-based segments, we need to know how many segments
-            // This is typically determined by the total duration / segment duration
-            // For now, we'll need to fetch the segments list or calculate
-            // A common pattern is to use SegmentTimeline
             var segmentTimeline = segmentTemplate.SelectSingleNode("dash:SegmentTimeline", nsManager);
             if (segmentTimeline != null){
                 var sNodes = segmentTimeline.SelectNodes("dash:S", nsManager);
                 if (sNodes != null){
                     int currentNumber = startNumber;
                     foreach (XmlNode s in sNodes){
-                        var t = ParseInt(s.Attributes?["t"]?.Value);
                         var d = ParseInt(s.Attributes?["d"]?.Value);
                         var r = ParseInt(s.Attributes?["r"]?.Value);
-                        // r attribute means additional repeats, so total count = r + 1
-                        // r=0 means 1 segment, r=2 means 3 segments
                         var repeatCount = r + 1;
                         
                         for (int i = 0; i < repeatCount; i++){
-                            var segUrl = media.Replace("$RepresentationID$", track.Id).Replace("$Number$", currentNumber.ToString()).Replace("$Number%04d$", currentNumber.ToString("D4"));
+                            var segUrl = ReplaceTemplateVariables(media, track.Id, currentNumber);
                             track.Segments.Add(new DashSegment{
-                                Url = ResolveUrl(segUrl, track.BaseUrl),
+                                Url = UrlUtils.ResolveUrl(baseUrl, segUrl),
                                 Duration = d / (double)timescale
                             });
                             currentNumber++;
@@ -234,83 +221,42 @@ public class DashSegmentDownloader{
                     }
                 }
             } else if (duration > 0){
-                // Without timeline, we can't know segment count from manifest alone
-                // This is a limitation - we'd need to calculate from Period duration
-                // For now, create placeholder that needs to be resolved differently
+                // Without timeline, can't determine segment count from manifest alone
             }
         }
     }
     
-    private static void ParseSegmentBase(XmlNode segmentBase, DashTrack track, XmlNamespaceManager nsManager){
+    private static void ParseSegmentBase(XmlNode segmentBase, DashTrack track, XmlNamespaceManager nsManager, string baseUrl){
         var initNode = segmentBase.SelectSingleNode("dash:Initialization", nsManager);
         if (initNode != null){
             var sourceUrl = initNode.Attributes?["sourceURL"]?.Value;
             if (!string.IsNullOrEmpty(sourceUrl)){
-                track.InitSegment = new DashSegment{ Url = ResolveUrl(sourceUrl, track.BaseUrl) };
+                track.InitSegment = new DashSegment{ Url = UrlUtils.ResolveUrl(baseUrl, sourceUrl) };
             }
         }
-        
-        // SegmentBase with sidx requires fetching and parsing sidx
-        // This is more complex and would need SIDX parsing
     }
     
     public async Task<bool> DownloadTrackAsync(DashTrack track, string outputPath, IProgress<double>? progress = null, CancellationToken cancellationToken = default){
         try{
-            _logger?.LogInformation("Downloading DASH {Type} track: {Bandwidth}bps, {Segments} segments", 
-                track.Type, track.Bandwidth, track.Segments.Count);
+            _logger?.LogInformation("Starting DASH download: {Segments} segments to {Path}", track.Segments.Count, outputPath);
             
-            if (track.Segments.Count == 0 && track.InitSegment == null){
-                _logger?.LogError("No segments or init segment found for track");
-                return false;
-            }
-            
-            var resumePath = outputPath + ".resume";
-            var resumeData = LoadResumeData(resumePath);
-            
-            // Check if we can resume
-            if (resumeData != null && 
-                resumeData.TotalSegments == track.Segments.Count &&
-                resumeData.OutputPath == outputPath){
-                _logger?.LogInformation("Resuming download from segment {Completed}/{Total}", resumeData.CompletedSegments.Count, resumeData.TotalSegments);
-            } else{
-                resumeData = new ResumeData{
-                    TotalSegments = track.Segments.Count,
-                    CompletedSegments = new HashSet<int>(),
-                    OutputPath = outputPath,
-                    InitSegmentDownloaded = false
-                };
-            }
-            
-            // Download init segment first (if not already downloaded)
-            if (track.InitSegment != null && !resumeData.InitSegmentDownloaded){
+            // Download init segment first
+            if (track.InitSegment != null){
                 _logger?.LogInformation("Downloading init segment");
                 var initData = await DownloadSegmentAsync(track.InitSegment, cancellationToken);
                 if (initData != null){
                     await File.WriteAllBytesAsync(outputPath, initData, cancellationToken);
-                    resumeData.InitSegmentDownloaded = true;
-                    SaveResumeData(resumePath, resumeData);
                 }
             }
             
             // Download segments in parallel
             if (track.Segments.Count > 0){
-                var pendingSegments = Enumerable.Range(0, track.Segments.Count)
-                    .Where(i => !resumeData.CompletedSegments.Contains(i))
-                    .ToList();
-                
-                if (pendingSegments.Count == 0){
-                    _logger?.LogInformation("All segments already downloaded");
-                    File.Delete(resumePath);
-                    return true;
-                }
-                
                 var segmentData = new byte[track.Segments.Count][];
-                var completedCount = resumeData.CompletedSegments.Count;
+                var completedCount = 0;
                 var semaphore = new SemaphoreSlim(_threads);
                 var tasks = new List<Task>();
-                var resumeLock = new object();
                 
-                foreach (var index in pendingSegments){
+                foreach (var index in Enumerable.Range(0, track.Segments.Count)){
                     var segment = track.Segments[index];
                     
                     tasks.Add(Task.Run(async () =>{
@@ -322,14 +268,6 @@ public class DashSegmentDownloader{
                             var completed = Interlocked.Increment(ref completedCount);
                             var percent = (double)completed / track.Segments.Count * 100;
                             progress?.Report(percent);
-                            
-                            // Update resume data periodically
-                            lock (resumeLock){
-                                resumeData.CompletedSegments.Add(index);
-                                if (completed % 10 == 0 || completed == track.Segments.Count){
-                                    SaveResumeData(resumePath, resumeData);
-                                }
-                            }
                             
                             if (completed % 10 == 0 || completed == track.Segments.Count){
                                 _logger?.LogInformation("Downloaded {Completed}/{Total} segments ({Percent:F1}%)", completed, track.Segments.Count, percent);
@@ -352,11 +290,6 @@ public class DashSegmentDownloader{
                 }
             }
             
-            // Delete resume file on success
-            if (File.Exists(resumePath)){
-                File.Delete(resumePath);
-            }
-            
             _logger?.LogInformation("Download complete: {Path}", outputPath);
             return true;
         } catch (Exception ex){
@@ -365,59 +298,37 @@ public class DashSegmentDownloader{
         }
     }
     
-    private static ResumeData? LoadResumeData(string resumePath){
-        try{
-            if (!File.Exists(resumePath)) return null;
-            var json = File.ReadAllText(resumePath);
-            return JsonConvert.DeserializeObject<ResumeData>(json);
-        } catch{
-            return null;
-        }
-    }
-    
-    private static void SaveResumeData(string resumePath, ResumeData data){
-        try{
-            var json = JsonConvert.SerializeObject(data);
-            File.WriteAllText(resumePath, json);
-        } catch{
-            // Ignore resume save errors
-        }
-    }
-    
     private async Task<byte[]?> DownloadSegmentAsync(DashSegment segment, CancellationToken cancellationToken){
         for (int attempt = 0; attempt <= _maxRetries; attempt++){
             try{
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(_timeoutMs);
+                cts.CancelAfter(15000);
                 
-                var request = new HttpRequestMessage(HttpMethod.Get, segment.Url);
+                var request = HttpClientWrapper.CreateRequest(segment.Url, HttpMethod.Get, false);
                 
                 if (segment.StartByte.HasValue && segment.EndByte.HasValue){
                     request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(segment.StartByte.Value, segment.EndByte.Value);
                 }
                 
-                var response = await _httpClient.SendAsync(request, cts.Token);
+                _logger?.LogDebug("Downloading segment: {Url}", segment.Url);
+                // Use raw HttpClient like original HLSDownloader does for segments
+                var response = await _httpClient.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                
+                if (!response.IsSuccessStatusCode){
+                    var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                    _logger?.LogWarning("Segment download failed: {Status} - {Body} - URL: {Url}", response.StatusCode, body.Substring(0, Math.Min(200, body.Length)), segment.Url);
+                }
+                
                 response.EnsureSuccessStatusCode();
                 
                 return await response.Content.ReadAsByteArrayAsync(cancellationToken);
             } catch (Exception ex) when (attempt < _maxRetries){
-                _logger?.LogWarning("Segment download failed (attempt {Attempt}/{Max}): {Error}", attempt + 1, _maxRetries + 1, ex.Message);
+                _logger?.LogWarning("Segment download failed (attempt {Attempt}/{Max}): {Error} - URL: {Url}", attempt + 1, _maxRetries + 1, ex.Message, segment.Url);
                 await Task.Delay(1000 * (attempt + 1), cancellationToken);
             }
         }
         
         return null;
-    }
-    
-    private static string ResolveUrl(string url, string baseUrl){
-        if (url.StartsWith("http://") || url.StartsWith("https://")){
-            return url;
-        }
-        if (url.StartsWith("/")){
-            var uri = new Uri(baseUrl);
-            return $"{uri.Scheme}://{uri.Host}{url}";
-        }
-        return baseUrl + url;
     }
     
     private static int ParseInt(string? value){
@@ -431,11 +342,39 @@ public class DashSegmentDownloader{
         if (int.TryParse(value, out var result)) return result;
         return null;
     }
-}
-
-public class ResumeData{
-    public int TotalSegments { get; set; }
-    public HashSet<int> CompletedSegments { get; set; } = new();
-    public string OutputPath { get; set; } = "";
-    public bool InitSegmentDownloaded { get; set; }
+    
+    // Ported from CRD.Utils.Parser.Segments.SegmentTemplate - handles $Identifier$ and $Identifier%0Xd$ patterns
+    private static readonly System.Text.RegularExpressions.Regex TemplatePattern = new(
+        @"\$([A-Za-z]*)(?:(%0)([0-9]+)d)?\$",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+    
+    private static string ReplaceTemplateVariables(string template, string representationId, int number){
+        return TemplatePattern.Replace(template, match =>{
+            if (match.Value == "$$") return "$"; // escape sequence
+            
+            var identifier = match.Groups[1].Value;
+            var format = match.Groups[2].Value; // %0
+            var widthStr = match.Groups[3].Value; // e.g. 4, 5
+            
+            string value;
+            if (identifier == "RepresentationID"){
+                value = representationId;
+            } else if (identifier == "Number"){
+                value = number.ToString();
+            } else if (identifier == "Time"){
+                value = number.ToString(); // simplified
+            } else{
+                return match.Value; // unknown identifier, keep as-is
+            }
+            
+            // Handle zero-padding if format specified
+            if (!string.IsNullOrEmpty(format) && int.TryParse(widthStr, out var width)){
+                if (value.Length < width){
+                    value = value.PadLeft(width, '0');
+                }
+            }
+            
+            return value;
+        });
+    }
 }

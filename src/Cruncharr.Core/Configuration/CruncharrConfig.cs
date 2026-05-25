@@ -335,6 +335,9 @@ public class DownloadConfig{
     [YamlMember(Alias = "mux_cover", ApplyNamingConventions = false)]
     public bool MuxCover { get; set; } = false;
     
+    [YamlMember(Alias = "mux_default_video", ApplyNamingConventions = false)]
+    public string DefaultVideo { get; set; } = "ja-JP";
+    
     [YamlMember(Alias = "mux_default_dub", ApplyNamingConventions = false)]
     public string MuxDefaultDub { get; set; } = "ja-JP";
     

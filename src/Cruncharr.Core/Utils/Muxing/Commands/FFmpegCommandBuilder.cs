@@ -13,6 +13,7 @@ public class FFmpegCommandBuilder : CommandBuilder{
     private readonly List<string> metaData = new();
 
     private int index;
+    private int videoIndex;
     private int audioIndex;
     private bool hasVideo;
 
@@ -55,11 +56,22 @@ public class FFmpegCommandBuilder : CommandBuilder{
                 Add($"-i \"{vid.Path}\"");
 
                 metaData.Add($"-map {index}:v");
-                metaData.Add($"-metadata:s:v:{index} title=\"{vid.Language.Name}\"");
+                metaData.Add($"-metadata:s:v:{videoIndex} title=\"{vid.Language.Name}\"");
+                AddVideoDisposition(vid);
 
                 hasVideo = true;
                 index++;
+                videoIndex++;
             }
+        }
+    }
+
+    private void AddVideoDisposition(MergerInput vid){
+        if (Options.Defaults.Video?.Code == vid.Language.Code &&
+            Options.Defaults.Video != Languages.DEFAULT_lang){
+            metaData.Add($"-disposition:v:{videoIndex} default");
+        } else{
+            metaData.Add($"-disposition:v:{videoIndex} 0");
         }
     }
 

@@ -29,6 +29,7 @@ public class MergerOptions{
 }
 
 public class Defaults{
+    public LanguageItem? Video{ get; set; }
     public LanguageItem? Audio{ get; set; }
     public LanguageItem? Sub{ get; set; }
 }

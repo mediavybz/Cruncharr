@@ -117,6 +117,16 @@ public class QueueController : ControllerBase{
     }
 
     /// <summary>
+    /// Start specific item immediately (bypass AutoDownload)
+    /// </summary>
+    [HttpPost("{id}/start")]
+    public IActionResult StartItem(string id){
+        _queueService.StartItem(id);
+        _logger.LogInformation("Started item {QueueItemId}", id);
+        return Ok(new { Message = "Started item", Id = id });
+    }
+
+    /// <summary>
     /// Get queue statistics
     /// </summary>
     [HttpGet("stats")]

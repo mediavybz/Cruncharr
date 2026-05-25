@@ -1,3 +1,4 @@
+using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,8 +10,11 @@ public class AuthController : ControllerBase{
     private readonly ICrunchyrollAuthService _auth;
     private readonly ILogger<AuthController>? _logger;
 
-    public AuthController(ICrunchyrollAuthService auth, ILogger<AuthController>? logger = null){
+    private readonly CruncharrConfig? _config;
+
+    public AuthController(ICrunchyrollAuthService auth, CruncharrConfig? config = null, ILogger<AuthController>? logger = null){
         _auth = auth;
+        _config = config;
         _logger = logger;
     }
 
@@ -18,7 +22,16 @@ public class AuthController : ControllerBase{
     /// Get current authentication status and profile
     /// </summary>
     [HttpGet("status")]
-    public ActionResult<AuthStatusResponse> GetStatus(){
+    public async Task<ActionResult<AuthStatusResponse>> GetStatus(){
+        // Try to refresh token if needed before returning status
+        if (_auth.IsAuthenticated){
+            try{
+                await _auth.RefreshTokenAsync(_config?.Crunchyroll?.UseBetaApi ?? true);
+            } catch (Exception ex){
+                _logger?.LogWarning(ex, "Token refresh failed during status check");
+            }
+        }
+        
         return Ok(new AuthStatusResponse{
             IsAuthenticated = _auth.IsAuthenticated,
             Username = _auth.Profile.Username,
@@ -84,7 +97,7 @@ public class AuthController : ControllerBase{
         }
 
         try{
-            var success = await _auth.LoginAsync(request.Email, request.Password, useBetaApi: false);
+            var success = await _auth.LoginAsync(request.Email, request.Password, useBetaApi: _config?.Crunchyroll?.UseBetaApi ?? true);
 
             if (success){
                 return Ok(new LoginResponse{

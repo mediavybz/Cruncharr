@@ -19,6 +19,7 @@ public interface IQueueService{
     void RetryItem(string queueItemId);
     void PauseItem(string queueItemId);
     void ResumeItem(string queueItemId);
+    void StartItem(string queueItemId);
     int ActiveDownloads { get; }
     bool HasActiveDownloads { get; }
     event EventHandler? QueueStateChanged;
@@ -146,6 +147,130 @@ public class QueueService : IQueueService, IDisposable{
             OnQueueStateChanged();
             ScheduleSave();
             RequestPump();
+        }
+    }
+
+    public void StartItem(string queueItemId){
+        if (_queue.TryGetValue(queueItemId, out var item)){
+            // Check if item can be started
+            if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing){
+                _logger?.LogWarning("Item {QueueItemId} is already downloading", queueItemId);
+                return;
+            }
+            if (item.DownloadProgress.IsDone){
+                _logger?.LogWarning("Item {QueueItemId} is already complete", queueItemId);
+                return;
+            }
+            if (_activeDownloads.ContainsKey(item.Id)){
+                _logger?.LogWarning("Item {QueueItemId} is already active", queueItemId);
+                return;
+            }
+            if (_activeDownloads.Count >= (_config?.Download.SimultaneousDownloads ?? 2)){
+                _logger?.LogWarning("Cannot start {QueueItemId} - max concurrent downloads reached", queueItemId);
+                item.DownloadProgress.State = DownloadState.Queued;
+                item.DownloadProgress.Doing = "Waiting for download slot...";
+                OnQueueStateChanged();
+                ScheduleSave();
+                return;
+            }
+
+            // Start the download immediately (bypass AutoDownload check)
+            _ = Task.Run(async () =>{
+                bool semaphoreAcquired = false;
+                try{
+                    await _downloadSemaphore.WaitAsync(_cancellationToken);
+                    semaphoreAcquired = true;
+                    
+                    _activeDownloads[item.Id] = item;
+                    item.DownloadProgress.State = DownloadState.Downloading;
+                    item.DownloadProgress.Doing = "Starting download...";
+                    OnQueueStateChanged();
+                    ScheduleSave();
+
+                    _logger?.LogInformation("Manually starting download: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+
+                    try{
+                        var queueProgress = new Progress<DownloadProgress>(p =>{
+                            item.DownloadProgress.State = p.State;
+                            item.DownloadProgress.Percent = p.Percent;
+                            item.DownloadProgress.Doing = p.Doing;
+                            item.DownloadProgress.DownloadSpeedBytes = p.DownloadSpeedBytes;
+                            item.DownloadProgress.Time = p.Time;
+                            OnQueueStateChanged();
+                        });
+                        
+                        var result = await _downloadService.DownloadEpisodeAsync(item.Episode, _config, queueProgress, _cancellationToken);
+                        
+                        if (!result.Success){
+                            string errorMessage = result.ErrorMessage ?? "Download failed";
+                            if (result.ErrorType == DownloadErrorType.NotAuthenticated){
+                                errorMessage = "Not logged in. Please go to Account tab and log in.";
+                            } else if (result.ErrorType == DownloadErrorType.SubscriptionExpired){
+                                errorMessage = "Subscription expired. Please renew your Crunchyroll subscription.";
+                            } else if (result.ErrorType == DownloadErrorType.PremiumContent){
+                                errorMessage = "Premium content. A Crunchyroll subscription is required.";
+                            } else if (result.ErrorType == DownloadErrorType.TooManyActiveStreams){
+                                errorMessage = "Too many active streams. Close Crunchyroll tabs and try again.";
+                            } else if (result.ErrorType == DownloadErrorType.MaturityRating){
+                                errorMessage = "Maturity rating too low. Update your account settings.";
+                            } else if (result.ErrorType == DownloadErrorType.RateLimited){
+                                errorMessage = "Rate limited. Please wait a few minutes.";
+                            }
+                            throw new Exception(errorMessage);
+                        }
+                        
+                        item.DownloadProgress.State = DownloadState.Done;
+                        item.DownloadProgress.Percent = 100;
+                        item.DownloadProgress.Doing = "Complete";
+                        _logger?.LogInformation("Download complete: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+                        
+                        if (_config?.RemoveFinishedDownload == true){
+                            _queue.TryRemove(item.Id, out _);
+                            _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
+                        }
+                    } catch (DownloadException dex){
+                        _logger?.LogError("Download failed with specific error: {ErrorType} - {Message}", dex.ErrorType, dex.Message);
+                        bool isAuthError = dex.ErrorType == DownloadErrorType.NotAuthenticated ||
+                                          dex.ErrorType == DownloadErrorType.SubscriptionExpired ||
+                                          dex.ErrorType == DownloadErrorType.PremiumContent ||
+                                          dex.ErrorType == DownloadErrorType.MaturityRating;
+                        
+                        if (!isAuthError && item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 3)){
+                            var delay = TimeSpan.FromSeconds((_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
+                            ScheduleRetry(item.Id, delay, $"Error: {dex.Message}");
+                        } else{
+                            item.DownloadProgress.State = DownloadState.Error;
+                            item.DownloadProgress.Doing = $"Error: {dex.Message}";
+                        }
+                    } catch (OperationCanceledException){
+                        item.DownloadProgress.State = DownloadState.Cancelled;
+                        item.DownloadProgress.Doing = "Cancelled";
+                        _logger?.LogInformation("Download cancelled: {EpisodeId}", item.Episode.Id);
+                    } catch (Exception ex){
+                        _logger?.LogError(ex, "Download failed: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+                        
+                        if (item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 3)){
+                            var delay = TimeSpan.FromSeconds((_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
+                            ScheduleRetry(item.Id, delay, $"Error: {ex.Message}");
+                        } else{
+                            item.DownloadProgress.State = DownloadState.Error;
+                            item.DownloadProgress.Doing = $"Error: {ex.Message}";
+                        }
+                    }
+                } finally{
+                    _activeDownloads.TryRemove(item.Id, out _);
+                    if (semaphoreAcquired){
+                        _downloadSemaphore.Release();
+                    }
+                    OnQueueStateChanged();
+                    ScheduleSave();
+                    
+                    // Trigger pump to start next item if AutoDownload is on
+                    if (_config?.Queue.AutoDownload == true){
+                        RequestPump();
+                    }
+                }
+            }, _cancellationToken);
         }
     }
 
@@ -279,8 +404,11 @@ public class QueueService : IQueueService, IDisposable{
 
         foreach (var item in toStart){
             _ = Task.Run(async () =>{
-                await _downloadSemaphore.WaitAsync(cancellationToken);
+                bool semaphoreAcquired = false;
                 try{
+                    await _downloadSemaphore.WaitAsync(cancellationToken);
+                    semaphoreAcquired = true;
+                    
                     _activeDownloads[item.Id] = item;
                     item.DownloadProgress.State = DownloadState.Downloading;
                     item.DownloadProgress.Doing = "Starting download...";
@@ -296,6 +424,7 @@ public class QueueService : IQueueService, IDisposable{
                             item.DownloadProgress.Percent = p.Percent;
                             item.DownloadProgress.Doing = p.Doing;
                             item.DownloadProgress.DownloadSpeedBytes = p.DownloadSpeedBytes;
+                            item.DownloadProgress.Time = p.Time;
                             OnQueueStateChanged();
                         });
                         
@@ -364,7 +493,9 @@ public class QueueService : IQueueService, IDisposable{
                     }
                 } finally{
                     _activeDownloads.TryRemove(item.Id, out _);
-                    _downloadSemaphore.Release();
+                    if (semaphoreAcquired){
+                        _downloadSemaphore.Release();
+                    }
                     OnQueueStateChanged();
                     ScheduleSave();
                     

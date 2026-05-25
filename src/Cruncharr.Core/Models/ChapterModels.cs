@@ -20,12 +20,3 @@ public class CrunchyChapter{
     public string type { get; set; } = "";
 }
 
-public class CrunchyOldChapter{
-    public string media_id { get; set; } = "";
-    public double startTime { get; set; }
-    public double endTime { get; set; }
-    public double duration { get; set; }
-    public string comparedWith { get; set; } = "";
-    public string ordering { get; set; } = "";
-    public DateTime last_updated { get; set; }
-}

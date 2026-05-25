@@ -22,15 +22,7 @@ public class ChapterService : IChapterService{
 
     public async Task<List<string>> GetChaptersAsync(string mediaId, string? accessToken, CancellationToken cancellationToken = default){
         var compiledChapters = new List<string>();
-
-        // Try new skip-events API first
-        var newApiSuccess = await TryGetNewApiChaptersAsync(mediaId, accessToken, compiledChapters, cancellationToken);
-        
-        if (!newApiSuccess){
-            // Fallback to old datalab API
-            await TryGetOldApiChaptersAsync(mediaId, accessToken, compiledChapters, cancellationToken);
-        }
-
+        await TryGetNewApiChaptersAsync(mediaId, accessToken, compiledChapters, cancellationToken);
         return compiledChapters;
     }
 
@@ -138,52 +130,6 @@ public class ChapterService : IChapterService{
         } catch (Exception ex){
             _logger?.LogError(ex, "Error fetching skip-events for {MediaId}", mediaId);
             return false;
-        }
-    }
-
-    private async Task TryGetOldApiChaptersAsync(string mediaId, string? accessToken, List<string> compiledChapters, CancellationToken cancellationToken){
-        try{
-            var request = HttpClientWrapper.CreateRequest(
-                $"https://static.crunchyroll.com/datalab-intro-v2/{mediaId}.json",
-                HttpMethod.Get,
-                true,
-                accessToken);
-
-            var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
-
-            if (!isOk){
-                _logger?.LogWarning("Old chapter API failed for {MediaId}: {Error}", mediaId, error);
-                return;
-            }
-
-            var chapterData = JObject.Parse(content).ToObject<CrunchyOldChapter>() ?? new CrunchyOldChapter();
-
-            if (chapterData.startTime <= 0 && chapterData.endTime <= 0){
-                return;
-            }
-
-            var startTime = TimeSpan.FromSeconds(chapterData.startTime);
-            var endTime = TimeSpan.FromSeconds(chapterData.endTime);
-
-            var startFormatted = startTime.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture);
-            var endFormatted = endTime.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture);
-
-            int chapterNumber = (compiledChapters.Count / 2) + 1;
-            if (chapterData.startTime > 1){
-                compiledChapters.Add($"CHAPTER{chapterNumber}=00:00:00.00");
-                compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Prologue");
-            }
-
-            chapterNumber = (compiledChapters.Count / 2) + 1;
-            compiledChapters.Add($"CHAPTER{chapterNumber}={startFormatted}");
-            compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Opening");
-            chapterNumber = (compiledChapters.Count / 2) + 1;
-            compiledChapters.Add($"CHAPTER{chapterNumber}={endFormatted}");
-            compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Episode");
-
-            _logger?.LogInformation("Found old-style chapters for {MediaId}", mediaId);
-        } catch (Exception ex){
-            _logger?.LogError(ex, "Error fetching old chapters for {MediaId}", mediaId);
         }
     }
 

@@ -273,7 +273,8 @@ public class ConfigController : ControllerBase{
             if (dl.LeadingNumbers.HasValue) _config.Download.LeadingNumbers = dl.LeadingNumbers.Value;
             if (!string.IsNullOrEmpty(dl.QualityVideo)) _config.Download.QualityVideo = dl.QualityVideo;
             if (!string.IsNullOrEmpty(dl.QualityAudio)) _config.Download.QualityAudio = dl.QualityAudio;
-            if (dl.DubLanguages != null) _config.Download.DubLanguages = dl.DubLanguages;
+            if (dl.DubLanguages != null && dl.DubLanguages.Count > 0) _config.Download.DubLanguages = dl.DubLanguages;
+            else if (dl.DubLanguages != null && dl.DubLanguages.Count == 0) _config.Download.DubLanguages = new List<string>{ "ja-JP" }; // Prevent empty - default to Japanese
             if (!string.IsNullOrEmpty(dl.DefaultAudio)) _config.Download.DefaultAudio = dl.DefaultAudio;
             if (dl.DownloadDescriptionAudio.HasValue) _config.Download.DownloadDescriptionAudio = dl.DownloadDescriptionAudio.Value;
             if (dl.DownloadFirstAvailableDub.HasValue) _config.Download.DownloadFirstAvailableDub = dl.DownloadFirstAvailableDub.Value;
@@ -282,7 +283,8 @@ public class ConfigController : ControllerBase{
             if (dl.DubDownloadDelaySeconds.HasValue) _config.Download.DubDownloadDelaySeconds = dl.DubDownloadDelaySeconds.Value;
             if (!string.IsNullOrEmpty(dl.HardSubLang)) _config.Download.HardSubLang = dl.HardSubLang;
             if (dl.HardSubRawFallback.HasValue) _config.Download.HardSubRawFallback = dl.HardSubRawFallback.Value;
-            if (dl.SoftSubs != null) _config.Download.SoftSubs = dl.SoftSubs;
+            if (dl.SoftSubs != null && dl.SoftSubs.Count > 0) _config.Download.SoftSubs = dl.SoftSubs;
+            else if (dl.SoftSubs != null && dl.SoftSubs.Count == 0) _config.Download.SoftSubs = new List<string>{ "en-US" }; // Prevent empty - default to English
             if (!string.IsNullOrEmpty(dl.DefaultSub)) _config.Download.DefaultSub = dl.DefaultSub;
             if (dl.IncludeSignsSubs.HasValue) _config.Download.IncludeSignsSubs = dl.IncludeSignsSubs.Value;
             if (dl.SignsSubsAsForced.HasValue) _config.Download.SignsSubsAsForced = dl.SignsSubsAsForced.Value;
@@ -423,6 +425,7 @@ public class ConfigController : ControllerBase{
         if (request.General != null){
             if (request.General.LogMode.HasValue) _config.LogMode = request.General.LogMode.Value;
             if (request.General.RemoveFinishedDownload.HasValue) _config.RemoveFinishedDownload = request.General.RemoveFinishedDownload.Value;
+            if (request.General.TokenFilePath != null) _config.TokenFilePath = request.General.TokenFilePath;
         }
     }
 }
@@ -605,4 +608,5 @@ public class AppearanceUpdateConfig{
 public class GeneralUpdateConfig{
     public bool? LogMode { get; set; }
     public bool? RemoveFinishedDownload { get; set; }
+    public string? TokenFilePath { get; set; }
 }

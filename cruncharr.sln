@@ -6,8 +6,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cruncharr.Core", "src\Crunc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cruncharr.CLI", "src\Cruncharr.CLI\Cruncharr.CLI.csproj", "{CLI-PROJECT-GUID}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cruncharr.Core.Tests", "tests\Cruncharr.Core.Tests\Cruncharr.Core.Tests.csproj", "{TEST-PROJECT-GUID}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cruncharr.API", "src\Cruncharr.API\Cruncharr.API.csproj", "{API-PROJECT-GUID}"
 EndProject
 Global
@@ -24,10 +22,6 @@ Global
 		{CLI-PROJECT-GUID}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CLI-PROJECT-GUID}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CLI-PROJECT-GUID}.Release|Any CPU.Build.0 = Release|Any CPU
-		{TEST-PROJECT-GUID}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{TEST-PROJECT-GUID}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{TEST-PROJECT-GUID}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{TEST-PROJECT-GUID}.Release|Any CPU.Build.0 = Release|Any CPU
 		{API-PROJECT-GUID}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{API-PROJECT-GUID}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{API-PROJECT-GUID}.Release|Any CPU.ActiveCfg = Release|Any CPU

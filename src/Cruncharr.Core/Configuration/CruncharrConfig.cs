@@ -198,7 +198,7 @@ public class DownloadConfig{
     public string QualityAudio { get; set; } = "best";
     
     [YamlMember(Alias = "dub_languages", ApplyNamingConventions = false)]
-    public List<string> DubLanguages { get; set; } = new() { "ja-JP", "en-US", "de-DE", "es-ES", "es-419", "fr-FR", "it-IT", "pt-BR", "pt-PT", "ru-RU", "hi-IN", "ar-SA", "zh-CN", "ko-KR", "pl-PL", "tr-TR", "th-TH", "vi-VN", "id-ID", "ms-MY", "ta-IN", "te-IN" };
+    public List<string> DubLanguages { get; set; } = new() { "ja-JP" };
     
     [YamlMember(Alias = "default_audio", ApplyNamingConventions = false)]
     public string DefaultAudio { get; set; } = "ja-JP";
@@ -231,7 +231,7 @@ public class DownloadConfig{
     public List<string> SubtitleLanguages { get; set; } = new() { "en-US" };
     
     [YamlMember(Alias = "soft_subs", ApplyNamingConventions = false)]
-    public List<string> SoftSubs { get; set; } = new() { "ja-JP", "en-US", "de-DE", "es-ES", "es-419", "fr-FR", "it-IT", "pt-BR", "pt-PT", "ru-RU", "hi-IN", "ar-SA", "zh-CN", "ko-KR", "pl-PL", "tr-TR", "th-TH", "vi-VN", "id-ID", "ms-MY", "ta-IN", "te-IN" };
+    public List<string> SoftSubs { get; set; } = new() { "en-US" };
     
     [YamlMember(Alias = "default_sub", ApplyNamingConventions = false)]
     public string DefaultSub { get; set; } = "en-US";

@@ -352,6 +352,13 @@ public class DownloadService : IDownloadService{
             if (decryptionKeys != null && decryptionKeys.Count > 0){
                 progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 85, Doing = "Decrypting..." });
                 downloadedFiles = await DecryptFilesAsync(downloadedFiles, decryptionKeys, cancellationToken);
+                
+                // Update audio track paths after decryption (paths change from .enc.m4s to .m4s)
+                audioTrackLanguages = audioTrackLanguages.Select(a => {
+                    var decryptedPath = Path.Combine(Path.GetDirectoryName(a.Path)!, 
+                        Path.GetFileNameWithoutExtension(a.Path).Replace(".enc", "") + Path.GetExtension(a.Path));
+                    return File.Exists(decryptedPath) ? (decryptedPath, a.Lang) : a;
+                }).ToList();
             }
             
             // Mux
@@ -1110,6 +1117,7 @@ public class DownloadService : IDownloadService{
                 Mkvmerge = config.Download.MkvmergeOptions
             },
             Defaults = new Defaults{
+                Video = Languages.FindLang(config.Download.DefaultVideo),
                 Audio = Languages.FindLang(config.Download.DefaultAudio),
                 Sub = Languages.FindLang(config.Download.DefaultSub)
             }

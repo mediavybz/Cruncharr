@@ -295,6 +295,9 @@ This project is a port of the Crunchy-Downloader desktop application (Avalonia/F
 | 2026-05-25 | Fixed auth startup | Added `AuthenticateAsync` call on startup; was only loading token from disk | auto |
 | 2026-05-25 | Fixed token path handling | Empty `token_file` config value now treated as "not set" (was failing `??` null-coalescing) | auto |
 | 2026-05-25 | Fixed auth status stale data | Status endpoint now refreshes token before reporting; was returning expired token status | auto |
+| 2026-05-25 | Fixed missing audio tracks after decryption | Audio track paths not updated after DecryptFilesAsync changed .enc.m4s to .m4s; now updating audioTrackLanguages with decrypted paths | auto |
+| 2026-05-25 | Added DefaultVideo config option | Upstream added `mux_default_video` setting; ported to DownloadConfig and muxing builders | auto |
+| 2026-05-25 | Fixed cover attachment crash | Added File.Exists check in MkvMergeCommandBuilder.AddCover() before attaching cover | auto |
 
 ---
 

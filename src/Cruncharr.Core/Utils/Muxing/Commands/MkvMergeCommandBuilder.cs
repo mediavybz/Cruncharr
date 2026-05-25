@@ -119,6 +119,16 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
     private void AddTrackMetadata(string trackNum, LanguageItem lang){
         Add($"--track-name {trackNum}:\"{lang.Name}\"");
         Add($"--language {trackNum}:{lang.Code}");
+        AddDefaultVideo(trackNum, lang);
+    }
+
+    private void AddDefaultVideo(string trackNum, LanguageItem lang){
+        if (Options.Defaults.Video?.Code == lang.Code &&
+            Options.Defaults.Video != Languages.DEFAULT_lang){
+            Add($"--default-track {trackNum}");
+        } else{
+            Add($"--default-track {trackNum}:0");
+        }
     }
 
     private void AddAudioMetadata(string trackNum, MergerInput track){
@@ -236,6 +246,11 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
         var cover = Options.Cover.FirstOrDefault();
 
         if (cover?.Path != null){
+            if (!File.Exists(cover.Path)){
+                Console.Error.WriteLine($"Cover file not found, skipping attachment: {cover.Path}");
+                return;
+            }
+
             Add($"--attach-file \"{cover.Path}\"");
             Add("--attachment-mime-type image/png");
             Add("--attachment-name cover.png");

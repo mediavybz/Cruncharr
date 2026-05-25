@@ -127,6 +127,7 @@ public class EpisodeVersion{
     public string? MediaGuid{ get; set; }
     public bool Original{ get; set; }
     public string SeasonGuid{ get; set; } = "";
+    public List<string>? Roles{ get; set; }
 }
 
 public class CrBrowseEpisodeBase{

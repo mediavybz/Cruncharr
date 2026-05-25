@@ -345,6 +345,9 @@ This project is a port of the Crunchy-Downloader desktop application (Avalonia/F
 | 2026-05-26 | AUDIT: Removed dead code QualitySelector.cs | File was completely unused (0 references in codebase). Had different (incorrect) implementations of WidthBucket/SnapToAudioBucket that conflicted with DownloadService.cs. Removed. | audit |
 | 2026-05-26 | AUDIT: Fixed DecryptWithMp4Decrypt tool support | DASH decryption only supported mp4decrypt, while non-DASH `DecryptFilesAsync` supported both mp4decrypt and shaka-packager. Refactored to detect and use either tool. | audit |
 | 2026-05-26 | AUDIT: Added DASH AD track note | Audio Description tracks for DASH require episode-level preparation (adding AD versions to episode.Versions), same as upstream. Non-DASH AD tracks work correctly. | audit |
+| 2026-05-26 | AUDIT: Fixed WidthBucket implementation | Original implementation returned aspect ratio buckets (0-3). Fixed to match upstream: normalizes approximately 16:9 widths to expected width, keeps non-standard as-is. | audit |
+| 2026-05-26 | AUDIT: Removed unused imports | Removed System.Net and Newtonsoft.Json.Linq from DownloadService.cs (not used). | audit |
+| 2026-05-26 | AUDIT: Verified frontend-backend integration | All settings elements exist in frontend, config API saves/retrieves correctly, DownloadService uses settings properly. | audit |
 
 ---
 

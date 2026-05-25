@@ -1013,8 +1013,8 @@ public class DownloadService : IDownloadService{
                         segments = ap.segments,
                         pssh = ap.pssh,
                         encryptionKeys = ap.encryptionKeys,
-                        resolutionText = $"{ap.language?.CrLocale ?? "unknown"}_{ap.bandwidth}",
-                        resolutionTextSnap = $"{ap.language?.CrLocale ?? "unknown"}_{ap.bandwidth}"
+                        resolutionText = $"{Math.Round(ap.bandwidth / 1000.0)}kB/s",
+                        resolutionTextSnap = $"{SnapToAudioBucket(ToKbps(ap.bandwidth))}kB/s"
                     });
                 }
             }
@@ -1157,6 +1157,11 @@ public class DownloadService : IDownloadService{
                 }
             }
         }
+        
+        // NOTE: Audio Description (AD) tracks for DASH are handled at the episode preparation level
+        // (similar to upstream DownloadMediaList lines 1306-1332). The AD version should be added
+        // to episode.Versions before calling DownloadEpisodeAsync. When present in the manifest,
+        // they will be downloaded as part of the normal audio track selection above.
         
         return (videoPath, audioPaths);
     }
@@ -1306,32 +1311,45 @@ public class DownloadService : IDownloadService{
     private async Task DecryptWithMp4Decrypt(string inputPath, string outputPath, List<ContentKey> keys){
         if (keys.Count == 0) return;
         
-        var keyParam = string.Join(" ", keys.Select(k => $"--key {Convert.ToHexString(k.KeyID)}:{Convert.ToHexString(k.Bytes)}"));
-        var args = $"--show-progress {keyParam} \"{inputPath}\" \"{outputPath}\"";
+        // Find decryptor tool (prefer shaka-packager, fallback to mp4decrypt)
+        string? decryptToolPath = null;
+        bool useShaka = false;
         
-        _logger?.LogInformation("Decrypting {Input} -> {Output}", inputPath, outputPath);
+        var mp4decryptPath = FindExecutable("mp4decrypt");
+        var shakaPath = FindExecutable("shaka-packager");
         
-        var startInfo = new ProcessStartInfo{
-            FileName = "mp4decrypt",
-            Arguments = args,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        
-        using var process = Process.Start(startInfo);
-        if (process == null){
-            _logger?.LogError("Failed to start mp4decrypt");
+        if (shakaPath != null){
+            decryptToolPath = shakaPath;
+            useShaka = true;
+        } else if (mp4decryptPath != null){
+            decryptToolPath = mp4decryptPath;
+        } else{
+            _logger?.LogError("No decryptor found (mp4decrypt or shaka-packager). Cannot decrypt {Input}", inputPath);
             return;
         }
         
-        await process.WaitForExitAsync();
+        _logger?.LogInformation("Decrypting {Input} -> {Output} using {Tool}", inputPath, outputPath, useShaka ? "shaka-packager" : "mp4decrypt");
         
-        if (process.ExitCode != 0){
-            var error = await process.StandardError.ReadToEndAsync();
-            _logger?.LogError("mp4decrypt failed with exit code {ExitCode}: {Error}", process.ExitCode, error);
+        if (useShaka){
+            var shakaKeys = BuildShakaKeysParam(keys);
+            var streamType = inputPath.Contains("audio") ? "audio" : "video";
+            var args = new List<string>{
+                $"input=\"{inputPath}\",stream={streamType},output=\"{outputPath}\"",
+                shakaKeys
+            };
+            await RunProcessAsync(decryptToolPath!, args, CancellationToken.None);
         } else{
+            var args = new List<string>{ "--show-progress" };
+            foreach (var key in keys){
+                args.Add("--key");
+                args.Add($"{FormatKey(key.KeyID)}:{FormatKey(key.Bytes)}");
+            }
+            args.Add(inputPath);
+            args.Add(outputPath);
+            await RunProcessAsync(decryptToolPath!, args, CancellationToken.None);
+        }
+        
+        if (File.Exists(outputPath)){
             _logger?.LogInformation("Decryption complete: {Output}", outputPath);
             // Clean up encrypted file
             try{
@@ -1340,6 +1358,8 @@ public class DownloadService : IDownloadService{
             } catch{
                 // Ignore cleanup errors
             }
+        } else{
+            _logger?.LogError("Decryption failed for {Input} - output not found", inputPath);
         }
     }
     

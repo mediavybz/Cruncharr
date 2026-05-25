@@ -341,6 +341,10 @@ This project is a port of the Crunchy-Downloader desktop application (Avalonia/F
 | 2026-05-26 | Fixed QualityAudio setting | Added `FilterAudioByQuality()` method. Groups audio tracks by language, sorts by bandwidth, selects best/worst/specific quality per language. Previously always downloaded all qualities. | user |
 | 2026-05-26 | Fixed IncludeVideoDescription setting | Added AD track download logic. Checks `DownloadDescriptionAudio` config, finds version with "description" role, downloads as `_ad.m4a` track. Added `Roles` field to `EpisodeVersion`. | user |
 | 2026-05-26 | Ported WidthBucket video deduplication | Updated `DeduplicateVideoTracks()` to use `WidthBucket()` helper from upstream. Groups by height + aspect ratio bucket instead of just height+width. Handles anamorphic video properly. | user |
+| 2026-05-26 | AUDIT: Fixed resolutionTextSnap format | `DownloadDashTracksAsync` was setting `resolutionTextSnap` to `ja-JP_64000` instead of upstream format `64kB/s`. Broke QualityAudio specific matching. Fixed to use `SnapToAudioBucket(ToKbps(bandwidth))kB/s`. | audit |
+| 2026-05-26 | AUDIT: Removed dead code QualitySelector.cs | File was completely unused (0 references in codebase). Had different (incorrect) implementations of WidthBucket/SnapToAudioBucket that conflicted with DownloadService.cs. Removed. | audit |
+| 2026-05-26 | AUDIT: Fixed DecryptWithMp4Decrypt tool support | DASH decryption only supported mp4decrypt, while non-DASH `DecryptFilesAsync` supported both mp4decrypt and shaka-packager. Refactored to detect and use either tool. | audit |
+| 2026-05-26 | AUDIT: Added DASH AD track note | Audio Description tracks for DASH require episode-level preparation (adding AD versions to episode.Versions), same as upstream. Non-DASH AD tracks work correctly. | audit |
 
 ---
 

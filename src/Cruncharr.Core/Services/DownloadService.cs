@@ -882,9 +882,9 @@ public class DownloadService : IDownloadService{
         
         _logger?.LogInformation("Manifest has {VideoCount} video tracks and {AudioCount} audio tracks", videoItems.Count, audioItems.Count);
         
-        // Select video/audio tracks using ported quality selection logic
+        // Select video/audio tracks using ported upstream logic
         var chosenVideo = SelectVideoTrackQma(videoItems, config.Download.QualityVideo);
-        var chosenAudios = SelectAudioTracksQma(audioItems, config.Download.DubLanguages);
+        var chosenAudios = SelectAudioTracksUpstream(audioItems, config.Download.DubLanguages);
         
         _logger?.LogInformation("Selected {AudioCount} audio tracks for download", chosenAudios.Count);
         
@@ -1058,25 +1058,52 @@ public class DownloadService : IDownloadService{
         return deduped[chosenIndex - 1];
     }
     
-    private List<(Cruncharr.Core.Utils.Parser.AudioItem Track, string Language)> SelectAudioTracksQma(List<Cruncharr.Core.Utils.Parser.AudioItem> audioTracks, List<string> languages){
+    // Ported from upstream CrunchyrollManager.cs DownloadMediaList
+    // Selects audio tracks matching configured DubLanguages, deduplicated by language+bandwidth bucket
+    private List<(Cruncharr.Core.Utils.Parser.AudioItem Track, string Language)> SelectAudioTracksUpstream(
+        List<Cruncharr.Core.Utils.Parser.AudioItem> audioTracks, List<string> languages){
         if (audioTracks.Count == 0 || languages.Count == 0) return [];
         
-        var result = new List<(Cruncharr.Core.Utils.Parser.AudioItem, string)>();
-        var normalizedLangs = languages.Select(l => l.ToLowerInvariant().Replace("-", "")).ToList();
+        // Upstream deduplication: group by language + bandwidth bucket, pick best in each group
+        var deduped = audioTracks
+            .Select(a => new{
+                Item = a,
+                Lang = string.IsNullOrWhiteSpace(a.language?.CrLocale) ? "und" : a.language.CrLocale,
+                Bucket = SnapToAudioBucket(ToKbps(a.bandwidth))
+            })
+            .GroupBy(x => new{ x.Lang, x.Bucket })
+            .Select(g => g.OrderByDescending(x => x.Item.@default)
+                .ThenByDescending(x => x.Item.audioSamplingRate)
+                .ThenByDescending(x => x.Item.bandwidth)
+                .First().Item)
+            .ToList();
         
-        var byLanguage = audioTracks
-            .GroupBy(a => a.language?.CrLocale?.ToLowerInvariant().Replace("-", "") ?? "unknown")
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(a => a.bandwidth).First());
+        // Sort by configured DubLanguages order
+        var rank = languages
+            .Select((val, i) => new{ val, i })
+            .ToDictionary(x => x.val.ToLowerInvariant(), x => x.i, StringComparer.OrdinalIgnoreCase);
         
-        foreach (var lang in normalizedLangs){
-            if (byLanguage.TryGetValue(lang, out var track)){
-                var originalLang = languages[normalizedLangs.IndexOf(lang)];
-                result.Add((track, originalLang));
-            }
-        }
+        var sorted = deduped
+            .OrderBy(a => {
+                var key = a.language?.CrLocale ?? string.Empty;
+                return rank.TryGetValue(key, out var r) ? r : int.MaxValue;
+            })
+            .ToList();
         
-        return result;
+        return sorted.Select(a => (a, a.language?.CrLocale ?? "und")).ToList();
     }
+    
+    // Ported from upstream Helpers.SnapToAudioBucket
+    private static int SnapToAudioBucket(double kbps){
+        var buckets = new[]{ 32, 64, 96, 128, 160, 192, 256, 320, 500 };
+        foreach (var bucket in buckets.OrderBy(b => b)){
+            if (kbps <= bucket) return bucket;
+        }
+        return buckets.Last();
+    }
+    
+    // Ported from upstream Helpers.ToKbps
+    private static double ToKbps(long bandwidth) => bandwidth / 1000.0;
     
     private async Task DecryptWithMp4Decrypt(string inputPath, string outputPath, List<ContentKey> keys){
         if (keys.Count == 0) return;

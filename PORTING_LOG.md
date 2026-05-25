@@ -299,6 +299,10 @@ This project is a port of the Crunchy-Downloader desktop application (Avalonia/F
 | 2026-05-25 | Added DefaultVideo config option | Upstream added `mux_default_video` setting; ported to DownloadConfig and muxing builders | auto |
 | 2026-05-25 | Fixed cover attachment crash | Added File.Exists check in MkvMergeCommandBuilder.AddCover() before attaching cover | auto |
 | 2026-05-25 | Added ReplaceExistingFiles setting | Upstream added `replace_existing_files` setting; ported to DownloadConfig and output path handling | auto |
+| 2026-05-25 | Fixed queue auth race condition | Moved auth initialization BEFORE queue processing start; prevents downloads from starting before login is complete | auto |
+| 2026-05-25 | Added history dub/sub tracking | Added `DownloadedDubLang` and `DownloadedSoftSubs` to HistoryEpisode for partial download detection | auto |
+| 2026-05-25 | Added partial download handling | `UpdateNewEpisodes` now checks for missing selected dubs/subs on already-downloaded episodes | auto |
+| 2026-05-25 | Added fast history refresh metadata | `UpdateHistoryEpisode` now updates available dub/sub metadata for existing episodes | auto |
 
 ---
 

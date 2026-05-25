@@ -15,7 +15,7 @@ public interface IHistoryService{
     // New rich history methods
     Task<List<HistorySeries>> GetHistorySeriesAsync();
     Task UpdateWithSeasonDataAsync(List<EpisodeInfo> episodes);
-    Task SetAsDownloadedAsync(string? seriesId, string? seasonId, string episodeId);
+    Task SetAsDownloadedAsync(string? seriesId, string? seasonId, string episodeId, List<string>? downloadedDubs = null, List<string>? downloadedSubs = null);
     Task<HistoryEpisode?> GetHistoryEpisodeAsync(string? seriesId, string? seasonId, string episodeId);
     Task RemoveUnavailableEpisodesAsync();
 }
@@ -146,7 +146,7 @@ public class HistoryService : IHistoryService{
         }
     }
 
-    public async Task SetAsDownloadedAsync(string? seriesId, string? seasonId, string episodeId){
+    public async Task SetAsDownloadedAsync(string? seriesId, string? seasonId, string episodeId, List<string>? downloadedDubs = null, List<string>? downloadedSubs = null){
         await _lock.WaitAsync();
         try{
             await EnsureLoadedAsync();
@@ -158,6 +158,17 @@ public class HistoryService : IHistoryService{
                     var historyEpisode = historySeason.EpisodesList.Find(e => e.EpisodeId == episodeId);
                     if (historyEpisode != null){
                         historyEpisode.WasDownloaded = true;
+                        // Track downloaded dubs/subs for partial download detection
+                        if (downloadedDubs != null){
+                            foreach (var dub in downloadedDubs.Where(d => !historyEpisode.DownloadedDubLang.Contains(d))){
+                                historyEpisode.DownloadedDubLang.Add(dub);
+                            }
+                        }
+                        if (downloadedSubs != null){
+                            foreach (var sub in downloadedSubs.Where(s => !historyEpisode.DownloadedSoftSubs.Contains(s))){
+                                historyEpisode.DownloadedSoftSubs.Add(sub);
+                            }
+                        }
                         historySeason.UpdateDownloaded();
                         historySeries.UpdateNewEpisodes();
                         await SaveRichHistoryAsync();
@@ -238,7 +249,9 @@ public class HistoryService : IHistoryService{
             EpisodeSeasonNum = episode.SeasonNumber.ToString(),
             SpecialEpisode = false,
             IsEpisodeAvailableOnStreamingService = true,
-            ThumbnailImageUrl = episode.ThumbnailUrl
+            ThumbnailImageUrl = episode.ThumbnailUrl,
+            HistoryEpisodeAvailableDubLang = episode.AudioLocale != null ? new List<string>{ episode.AudioLocale } : new List<string>(),
+            HistoryEpisodeAvailableSoftSubs = episode.SubtitleLocales ?? new List<string>()
         };
     }
 
@@ -250,6 +263,15 @@ public class HistoryService : IHistoryService{
         historyEpisode.EpisodeSeasonNum = episode.SeasonNumber.ToString();
         historyEpisode.IsEpisodeAvailableOnStreamingService = true;
         historyEpisode.ThumbnailImageUrl = episode.ThumbnailUrl;
+        // Update available dub/sub metadata for existing episodes
+        if (episode.AudioLocale != null && !historyEpisode.HistoryEpisodeAvailableDubLang.Contains(episode.AudioLocale)){
+            historyEpisode.HistoryEpisodeAvailableDubLang.Add(episode.AudioLocale);
+        }
+        if (episode.SubtitleLocales != null){
+            foreach (var sub in episode.SubtitleLocales.Where(sub => !historyEpisode.HistoryEpisodeAvailableSoftSubs.Contains(sub))){
+                historyEpisode.HistoryEpisodeAvailableSoftSubs.Add(sub);
+            }
+        }
     }
 
     private static HistorySeason CreateHistorySeason(List<EpisodeInfo> episodes, EpisodeInfo firstEpisode){

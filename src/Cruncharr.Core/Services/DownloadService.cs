@@ -83,7 +83,8 @@ public class DownloadService : IDownloadService{
             }
         }
         
-        // Select correct episode version based on audio locale (ported from qma)
+        // Select correct episode version based on DubLanguages (ported from upstream CrunchyrollManager.DownloadMediaList)
+        // Upstream sorts data.Data by DubLang priority, then processes each version
         // Default to episode.Id (the actual version ID for this language)
         string mediaGuid = episode.Id;
         string mediaId = episode.Id;
@@ -97,35 +98,36 @@ public class DownloadService : IDownloadService{
         
         if (episode.Versions != null && episode.Versions.Count > 0){
             EpisodeVersion? currentVersion = null;
-            var dubLangs = config.Download.DubLanguages.Select(l => l.ToLowerInvariant()).ToList();
+            EpisodeVersion? primaryVersion = null;
             
-            // If DubLanguages is configured, prefer a version matching one of those languages
-            if (dubLangs.Count > 0){
-                // Try episode's current audio locale if it's in DubLanguages
-                if (!string.IsNullOrEmpty(episode.AudioLocale) && 
-                    dubLangs.Contains(episode.AudioLocale.ToLowerInvariant())){
-                    currentVersion = episode.Versions.FirstOrDefault(v => 
-                        v.AudioLocale.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
-                }
+            // Ported from upstream: find version matching episode's language
+            if (!string.IsNullOrEmpty(episode.AudioLocale)){
+                currentVersion = episode.Versions.FirstOrDefault(v => 
+                    v.AudioLocale.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
+            }
+            
+            // If episode's locale not found or not in DubLanguages, try DubLanguages priority
+            var dubLangs = config.Download.DubLanguages;
+            if (currentVersion == null || 
+                (dubLangs.Count > 0 && !dubLangs.Any(d => d.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase)))){
                 
-                // If not found, try to find any version matching DubLanguages
-                if (currentVersion == null){
-                    foreach (var dubLang in dubLangs){
-                        currentVersion = episode.Versions.FirstOrDefault(v => 
-                            v.AudioLocale.ToLowerInvariant() == dubLang);
-                        if (currentVersion != null) break;
+                // Try each DubLanguage in order
+                foreach (var dubLang in dubLangs){
+                    var matchingVersion = episode.Versions.FirstOrDefault(v => 
+                        v.AudioLocale.Equals(dubLang, StringComparison.OrdinalIgnoreCase));
+                    if (matchingVersion != null){
+                        currentVersion = matchingVersion;
+                        _logger?.LogInformation("DubLanguages override: selected {DubLang} version instead of {OriginalLocale}", 
+                            dubLang, episode.AudioLocale);
+                        break;
                     }
                 }
             }
             
             // Fallback: try config's default audio
             if (currentVersion == null && !string.IsNullOrEmpty(config.Download.DefaultAudio)){
-                currentVersion = episode.Versions.FirstOrDefault(v => v.AudioLocale.Equals(config.Download.DefaultAudio, StringComparison.OrdinalIgnoreCase));
-            }
-            
-            // Fallback: try episode's original audio locale
-            if (currentVersion == null && !string.IsNullOrEmpty(episode.AudioLocale)){
-                currentVersion = episode.Versions.FirstOrDefault(v => v.AudioLocale.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
+                currentVersion = episode.Versions.FirstOrDefault(v => 
+                    v.AudioLocale.Equals(config.Download.DefaultAudio, StringComparison.OrdinalIgnoreCase));
             }
             
             // Fallback: if only one version, use it
@@ -143,7 +145,17 @@ public class DownloadService : IDownloadService{
                 if (!string.IsNullOrEmpty(currentVersion.MediaGuid)){
                     mediaId = currentVersion.MediaGuid;
                 }
-                _logger?.LogInformation("Selected version: Guid={Guid}, MediaGuid={MediaGuid}, audio_locale={AudioLocale}, original={Original}", currentVersion.Guid, currentVersion.MediaGuid, currentVersion.AudioLocale, currentVersion.Original);
+                
+                // Track if this is the primary (original) version
+                bool isPrimary = currentVersion.Original;
+                if (!isPrimary){
+                    primaryVersion = episode.Versions.FirstOrDefault(v => v.Original) ?? currentVersion;
+                } else{
+                    primaryVersion = currentVersion;
+                }
+                
+                _logger?.LogInformation("Selected version: Guid={Guid}, MediaGuid={MediaGuid}, audio_locale={AudioLocale}, original={Original}, isPrimary={IsPrimary}", 
+                    currentVersion.Guid, currentVersion.MediaGuid, currentVersion.AudioLocale, currentVersion.Original, isPrimary);
             } else{
                 _logger?.LogWarning("Could not find matching version for audio locale {AudioLocale}, using default episode.Id", episode.AudioLocale);
             }

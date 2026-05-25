@@ -195,6 +195,12 @@ public class DownloadService : IDownloadService{
             }
         }
         
+        // Select stream based on HardSubLang setting (ported from upstream DownloadMediaList)
+        var streamSelection = SelectStreamWithHardsub(playbackData, config);
+        if (!streamSelection.Success){
+            return new DownloadResult{ Success = false, ErrorMessage = streamSelection.ErrorMessage };
+        }
+        
         _logger?.LogInformation("PSSH: {Pssh}", pssh ?? "(null)");
         if (!string.IsNullOrEmpty(pssh) && _widevine.CanDecrypt){
             progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 25, Doing = "Fetching decryption keys..." });
@@ -339,6 +345,55 @@ public class DownloadService : IDownloadService{
                             }
                         } catch (Exception ex){
                             _logger?.LogWarning(ex, "Failed to download additional dub: {Dub}", dub);
+                        }
+                    }
+                }
+                
+                // Download Audio Description (AD) track if configured
+                if (config.Download.DownloadDescriptionAudio && episode.Versions != null){
+                    var adVersion = episode.Versions.FirstOrDefault(v => 
+                        v.Roles?.Any(r => string.Equals(r, "description", StringComparison.OrdinalIgnoreCase)) == true);
+                    
+                    if (adVersion != null){
+                        var adLocale = adVersion.AudioLocale;
+                        // Skip if we already downloaded this locale (AD tracks share locale with main track)
+                        var alreadyDownloaded = audioTrackLanguages.Any(a => 
+                            a.Lang.Equals(adLocale, StringComparison.OrdinalIgnoreCase));
+                        
+                        if (!alreadyDownloaded){
+                            var adMediaGuid = adVersion.Guid;
+                            var adMediaId = adVersion.MediaGuid ?? adVersion.Guid;
+                            
+                            if (adMediaId.Contains(':')) adMediaId = adMediaId.Split(':')[1];
+                            if (adMediaGuid.Contains(':')) adMediaGuid = adMediaGuid.Split(':')[1];
+                            
+                            _logger?.LogInformation("Fetching playback data for Audio Description: {Locale} (Guid={Guid})", adLocale, adMediaGuid);
+                            
+                            try{
+                                var adPlayback = await GetPlaybackDataAsync(adMediaGuid, true, cancellationToken);
+                                if (adPlayback?.AudioUrl != null){
+                                    progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 67, Doing = $"Downloading audio description ({adLocale})..." });
+                                    
+                                    var adAudioPath = Path.Combine(tempDir, $"audio_{adLocale.Replace("-", "").ToLower()}_ad.m4a");
+                                    var adAudioIsHls = IsHlsUrl(adPlayback.AudioUrl);
+                                    
+                                    if (adAudioIsHls){
+                                        var hlsResult = await DownloadHlsStreamAsync(adPlayback.AudioUrl, adAudioPath, false, true, config, progress, 60, 80, cancellationToken);
+                                        if (hlsResult.Ok){
+                                            downloadedFiles.Add(adAudioPath);
+                                            audioTrackLanguages.Add((adAudioPath, adLocale));
+                                            _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
+                                        }
+                                    } else{
+                                        await DownloadStreamAsync(adPlayback.AudioUrl, adAudioPath, progress, 60, 80, cancellationToken, adPlayback.VideoToken);
+                                        downloadedFiles.Add(adAudioPath);
+                                        audioTrackLanguages.Add((adAudioPath, adLocale));
+                                        _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
+                                    }
+                                }
+                            } catch (Exception ex){
+                                _logger?.LogWarning(ex, "Failed to download audio description for {Locale}", adLocale);
+                            }
                         }
                     }
                 }
@@ -672,6 +727,75 @@ public class DownloadService : IDownloadService{
         return (int)(5 * Math.Pow(3, retryAttempt));
     }
     
+    private (bool Success, string? ErrorMessage) SelectStreamWithHardsub(PlaybackData playback, CruncharrConfig config){
+        var hsLang = config.Download.HardSubLang;
+        var rawFallback = config.Download.HardSubRawFallback;
+        
+        _logger?.LogInformation("Stream selection: HardSubLang={HardSubLang}, RawFallback={RawFallback}", hsLang, rawFallback);
+        
+        if (string.IsNullOrEmpty(hsLang) || hsLang == "none"){
+            // Use raw stream (no hardsubs)
+            if (playback.HardSubs != null){
+                _logger?.LogInformation("Using raw stream (no hardsubs). Available hardsubs: {Available}", 
+                    string.Join(", ", playback.HardSubs.Keys));
+            }
+            playback.IsHardsubbed = false;
+            playback.HardsubLang = null;
+            return (true, null);
+        }
+        
+        // Looking for hardsub stream
+        if (playback.HardSubs == null || playback.HardSubs.Count == 0){
+            if (rawFallback){
+                _logger?.LogWarning("No hardsubs available for {Lang}, falling back to raw stream", hsLang);
+                playback.IsHardsubbed = false;
+                playback.HardsubLang = null;
+                return (true, null);
+            }
+            _logger?.LogError("No hardsubs available for {Lang} and raw fallback is disabled", hsLang);
+            return (false, $"No hardsubs available for {hsLang}. Available: none. Enable 'Hard Sub Raw Fallback' to use raw stream.");
+        }
+        
+        // Try exact match
+        var exactMatch = playback.HardSubs.FirstOrDefault(kvp => 
+            kvp.Value.Hlang?.Equals(hsLang, StringComparison.OrdinalIgnoreCase) == true);
+        
+        if (exactMatch.Value != null){
+            _logger?.LogInformation("Found exact hardsub match: {Lang} -> {Url}", hsLang, exactMatch.Value.Url);
+            playback.VideoUrl = exactMatch.Value.Url;
+            playback.IsHardsubbed = true;
+            playback.HardsubLang = hsLang;
+            return (true, null);
+        }
+        
+        // Try language code match (e.g., "en" for "en-US")
+        var langPrefix = hsLang.Split('-')[0].ToLowerInvariant();
+        var prefixMatch = playback.HardSubs.FirstOrDefault(kvp =>
+            kvp.Value.Hlang?.Split('-')[0].ToLowerInvariant() == langPrefix);
+        
+        if (prefixMatch.Value != null){
+            _logger?.LogInformation("Found prefix hardsub match: {Lang} -> {ActualLang} -> {Url}", 
+                hsLang, prefixMatch.Value.Hlang, prefixMatch.Value.Url);
+            playback.VideoUrl = prefixMatch.Value.Url;
+            playback.IsHardsubbed = true;
+            playback.HardsubLang = prefixMatch.Value.Hlang;
+            return (true, null);
+        }
+        
+        // No match found
+        if (rawFallback){
+            _logger?.LogWarning("Hardsub {Lang} not available. Available: {Available}. Falling back to raw stream.", 
+                hsLang, string.Join(", ", playback.HardSubs.Values.Select(h => h.Hlang).Where(h => !string.IsNullOrEmpty(h))));
+            playback.IsHardsubbed = false;
+            playback.HardsubLang = null;
+            return (true, null);
+        }
+        
+        _logger?.LogError("Hardsub {Lang} not available. Available: {Available}", 
+            hsLang, string.Join(", ", playback.HardSubs.Values.Select(h => h.Hlang).Where(h => !string.IsNullOrEmpty(h))));
+        return (false, $"Hardsub {hsLang} not available. Available: {string.Join(", ", playback.HardSubs.Values.Select(h => h.Hlang).Where(h => !string.IsNullOrEmpty(h)))}. Enable 'Hard Sub Raw Fallback' to use raw stream.");
+    }
+    
     private async Task DeAuthVideoAsync(string contentId, string videoToken){
         try{
             var request = HttpClientWrapper.CreateRequest(
@@ -715,6 +839,11 @@ public class DownloadService : IDownloadService{
                         Format = sub.Value.Format ?? "vtt"
                     });
                 }
+            }
+            
+            // Extract hardsubs
+            if (playStream.HardSubs != null){
+                playback.HardSubs = playStream.HardSubs;
             }
             
             return playback;
@@ -898,6 +1027,9 @@ public class DownloadService : IDownloadService{
         var chosenVideo = SelectVideoTrackQma(videoItems, config.Download.QualityVideo);
         var chosenAudios = SelectAudioTracksUpstream(audioItems, config.Download.DubLanguages);
         
+        // Apply QualityAudio filter (ported from upstream DownloadMediaList lines 1874-1895)
+        chosenAudios = FilterAudioByQuality(chosenAudios, config.Download.QualityAudio);
+        
         _logger?.LogInformation("Selected {AudioCount} audio tracks for download", chosenAudios.Count);
         
         string? videoPath = null;
@@ -1028,10 +1160,21 @@ public class DownloadService : IDownloadService{
     
     private List<Cruncharr.Core.Utils.Parser.VideoItem> DeduplicateVideoTracks(List<Cruncharr.Core.Utils.Parser.VideoItem> videos){
         return videos
-            .GroupBy(v => new{ v.quality?.height, v.quality?.width })
+            .GroupBy(v => new{ v.quality?.height, WB = WidthBucket(v.quality?.width ?? 0, v.quality?.height ?? 0) })
             .Select(g => g.OrderByDescending(v => v.bandwidth).First())
             .OrderBy(v => v.quality?.height)
+            .ThenBy(v => v.bandwidth)
             .ToList();
+    }
+    
+    // Ported from upstream Helpers.WidthBucket
+    private static int WidthBucket(int width, int height){
+        if (height == 0) return 0;
+        var ratio = width / (double)height;
+        if (ratio >= 2.3) return 3; // ~21:9
+        if (ratio >= 1.7) return 2; // ~16:9
+        if (ratio >= 1.3) return 1; // ~4:3
+        return 0; // Other
     }
     
     private Cruncharr.Core.Utils.Parser.VideoItem? SelectVideoTrackQma(List<Cruncharr.Core.Utils.Parser.VideoItem> videos, string qualityPreference){
@@ -1116,6 +1259,46 @@ public class DownloadService : IDownloadService{
     
     // Ported from upstream Helpers.ToKbps
     private static double ToKbps(long bandwidth) => bandwidth / 1000.0;
+    
+    // Ported from upstream DownloadMediaList lines 1874-1895
+    // Filters audio tracks by QualityAudio setting (best, worst, or specific bandwidth)
+    private List<(Cruncharr.Core.Utils.Parser.AudioItem Track, string Language)> FilterAudioByQuality(
+        List<(Cruncharr.Core.Utils.Parser.AudioItem Track, string Language)> audioTracks, string qualityPreference){
+        if (audioTracks.Count == 0) return audioTracks;
+        
+        // Group by language
+        var grouped = audioTracks.GroupBy(a => a.Language).ToList();
+        var result = new List<(Cruncharr.Core.Utils.Parser.AudioItem Track, string Language)>();
+        
+        foreach (var group in grouped){
+            var tracks = group.OrderBy(a => a.Track.bandwidth).ToList();
+            
+            int chosenIndex;
+            if (qualityPreference == "best"){
+                chosenIndex = tracks.Count - 1; // Last = highest bandwidth
+            } else if (qualityPreference == "worst"){
+                chosenIndex = 0; // First = lowest bandwidth
+            } else{
+                // Try to match specific quality (e.g., "128kB/s" or bucket string)
+                var matchIndex = tracks.FindIndex(a => 
+                    a.Track.resolutionTextSnap?.Equals(qualityPreference, StringComparison.OrdinalIgnoreCase) == true ||
+                    a.Track.resolutionText?.Equals(qualityPreference, StringComparison.OrdinalIgnoreCase) == true);
+                if (matchIndex >= 0){
+                    chosenIndex = matchIndex;
+                } else{
+                    chosenIndex = tracks.Count - 1; // Fallback to best
+                }
+            }
+            
+            if (chosenIndex >= 0 && chosenIndex < tracks.Count){
+                result.Add(tracks[chosenIndex]);
+                _logger?.LogInformation("QualityAudio [{Quality}]: Selected {Bandwidth}kbps for {Language}", 
+                    qualityPreference, ToKbps(tracks[chosenIndex].Track.bandwidth), group.Key);
+            }
+        }
+        
+        return result;
+    }
     
     private async Task DecryptWithMp4Decrypt(string inputPath, string outputPath, List<ContentKey> keys){
         if (keys.Count == 0) return;
@@ -1543,6 +1726,9 @@ public class PlaybackData{
     public string? Pssh { get; set; }
     public string? VideoToken { get; set; }
     public List<SubtitleInfo>? Subtitles { get; set; }
+    public Dictionary<string, HardSub>? HardSubs { get; set; }
+    public bool IsHardsubbed { get; set; }
+    public string? HardsubLang { get; set; }
 }
 
 public class SubtitleInfo{

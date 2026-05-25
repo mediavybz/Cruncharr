@@ -332,6 +332,15 @@ This project is a port of the Crunchy-Downloader desktop application (Avalonia/F
 | 2026-05-26 | Added Featured Music Dialog | Frontend: showFeaturedMusic() in Add Download page, calls GET /api/v1/music/featured/{seriesId} | auto |
 | 2026-05-26 | Fixed multiple audio track download | DownloadService: Added `download_multiple_dubs` config (default: false). When enabled, downloads all configured dubs per episode. Fixed DASH encrypted audio file naming collision bug. | user |
 | 2026-05-26 | Fixed temp file cleanup | DownloadService: Cleaned up `.resume`, `.new.resume`, `.m4s`, `.mp4`, `.m4a`, subtitle, cover, and chapter files from output directory when not using temp folder. Prevents leftover files after muxing. | user |
+| 2026-05-26 | Fixed SSE camelCase serialization | QueueController: Added `_sseJsonSettings` with `CamelCasePropertyNamesContractResolver` to match REST API serialization. Fixed `updateQueueData([])` bug where SSE sent PascalCase (`Items`) but frontend expected camelCase (`items`). | auto |
+| 2026-05-26 | Fixed DubLanguages defaults | Reset from all 22 languages to `["ja-JP"]` to match upstream default. Prevents unintended bulk downloads. | user |
+| 2026-05-26 | Fixed SoftSubs defaults | Reset from all 22 languages to `["en-US"]` to match upstream default. | user |
+| 2026-05-26 | Ported upstream audio track selection | Replaced custom `SelectAudioTracksQma` with `SelectAudioTracksUpstream` ported from `CrunchyrollManager.DownloadMediaList`. Deduplicates by language+bandwidth bucket, sorts by DubLanguages priority. | user |
+| 2026-05-26 | Fixed version selection for DubLanguages | When episode's `AudioLocale` is not in `DubLanguages`, searches for matching version in `DubLanguages` order before falling back to `DefaultAudio` or original locale. | user |
+| 2026-05-26 | Fixed HardSubLang setting | Added `SelectStreamWithHardsub()` method to `DownloadService`. Parses `HardSubs` from playback data, selects stream by configured `HardSubLang`, supports raw fallback. Previously completely ignored. | user |
+| 2026-05-26 | Fixed QualityAudio setting | Added `FilterAudioByQuality()` method. Groups audio tracks by language, sorts by bandwidth, selects best/worst/specific quality per language. Previously always downloaded all qualities. | user |
+| 2026-05-26 | Fixed IncludeVideoDescription setting | Added AD track download logic. Checks `DownloadDescriptionAudio` config, finds version with "description" role, downloads as `_ad.m4a` track. Added `Roles` field to `EpisodeVersion`. | user |
+| 2026-05-26 | Ported WidthBucket video deduplication | Updated `DeduplicateVideoTracks()` to use `WidthBucket()` helper from upstream. Groups by height + aspect ratio bucket instead of just height+width. Handles anamorphic video properly. | user |
 
 ---
 

@@ -1,245 +1,195 @@
 # Cruncharr
 
-Headless Crunchyroll downloader for the *arr stack (Sonarr, Radarr, Lidarr, etc.)
+Dockerized Crunchyroll downloader with web UI. Headless backend with REST API + single-page web frontend.
 
-## Features
+## Quick Deploy
 
-- **Headless**: No GUI, no VNC, no desktop dependencies
-- **CLI-first**: Commands for login, download, search, series info
-- **JSON Output**: `--format json` for *arr integration
-- **Docker-native**: Minimal image with ffmpeg + mkvtoolnix
-- **Configuration**: YAML or JSON config with environment variable overrides
-- **Daemon Mode**: Continuous monitoring and download queue processing
-- **Webhook Notifications**: Notify on completion or error
-- **Queue Management**: Batch downloads with concurrent processing
-
-## Quick Start
-
-### Docker
+### Option 1: Docker Run (Recommended)
 
 ```bash
-# Run with docker
-docker run --rm \
-  -e CRUNCHYROLL_EMAIL=your@email.com \
-  -e CRUNCHYROLL_PASSWORD=yourpassword \
-  -v ./downloads:/downloads \
-  -v ./config:/config \
-  cruncharr download "https://www.crunchyroll.com/watch/episode-id"
+# Create directories
+mkdir -p cruncharr/config cruncharr/downloads cruncharr/widevine
 
-# Or use docker-compose
-docker-compose up
+# Run the container
+docker run -d \
+  --name cruncharr \
+  -p 8585:8585 \
+  -v $(pwd)/cruncharr/config:/config \
+  -v $(pwd)/cruncharr/downloads:/downloads \
+  -v $(pwd)/cruncharr/widevine:/widevine \
+  ghcr.io/mediavybz/cruncharr:latest
+
+# Access the web UI
+open http://localhost:8585
 ```
 
-### Local (Development)
+### Option 2: Docker Compose
+
+```yaml
+version: '3.8'
+
+services:
+  cruncharr:
+    image: ghcr.io/mediavybz/cruncharr:latest
+    container_name: cruncharr
+    ports:
+      - "8585:8585"
+    volumes:
+      - ./config:/config
+      - ./downloads:/downloads
+      - ./widevine:/widevine
+    environment:
+      - CRUNCHYROLL_CONFIG_PATH=/config/cruncharr.yaml
+    restart: unless-stopped
+```
 
 ```bash
-# Clone and build
-git clone https://github.com/yourusername/cruncharr.git
-cd cruncharr
-dotnet build
-
-# Run CLI
-dotnet run --project src/Cruncharr.CLI -- --help
-
-# Login
-dotnet run --project src/Cruncharr.CLI -- login --email your@email.com --password yourpassword
-
-# Download an episode
-dotnet run --project src/Cruncharr.CLI -- download "https://www.crunchyroll.com/watch/episode-id"
-
-# Search for a series
-dotnet run --project src/Cruncharr.CLI -- search "Attack on Titan" --format json
-
-# Run daemon mode
-dotnet run --project src/Cruncharr.CLI -- daemon --interval 300
+docker-compose up -d
 ```
 
-## Commands
+## First Time Setup
 
-```
-cruncharr login --email <email> --password <password>
-cruncharr logout
-cruncharr download <url> [--format json] [--quiet] [--output <dir>]
-cruncharr series <id> [--format json] [--download]
-cruncharr search <query> [--format json]
-cruncharr config get <key>
-cruncharr config set <key> <value>
-cruncharr daemon [--interval <seconds>]
-```
+1. **Access the web UI** at `http://your-server:8585`
+2. **Login** with your Crunchyroll credentials
+3. **Configure settings**:
+   - Download directory: `/downloads` (inside container)
+   - Temp directory: `/tmp/cruncharr`
+   - Stream endpoints: Use defaults (recommended)
+   - Languages: All languages selected by default
+
+## Volume Mounts
+
+| Path | Purpose | Required |
+|------|---------|----------|
+| `/config` | Config file, auth tokens, history | Yes |
+| `/downloads` | Downloaded videos | Yes |
+| `/widevine` | Widevine CDM files (device_private_key.pem, device_client_id_blob.bin) | For premium content |
 
 ## Configuration
 
-### YAML (Recommended)
+### Config File
 
-Create `/config/cruncharr.yml`:
+Create `config/cruncharr.yaml`:
 
 ```yaml
-cruncharr:
-  crunchyroll:
-    email: "your@email.com"
-    password: "yourpassword"
-  download:
-    output_dir: "/downloads"
-    filename_template: "{SeriesTitle} - S{season:00}E{episode:00} - {EpisodeTitle}"
-    quality: "best"
-    dub_languages:
-      - "ja-JP"
-    subtitle_languages:
-      - "en-US"
-    simultaneous_downloads: 2
-    retry_attempts: 5
-  history:
-    enabled: true
-  notifications:
-    webhook_url: "https://hooks.example.com/webhook"
-    on_complete: true
-    on_error: true
+crunchyroll:
+  email: "your@email.com"
+  password: "yourpassword"
+  use_beta_api: true
+  stream_endpoint:
+    endpoint: tv/android_tv
+    use_default: true
+    video: true
+    audio: true
+download:
+  output_dir: /downloads
+  temp_dir: /tmp/cruncharr
+  filename: "${seriesTitle} - S${season}E${episode} [${height}p]"
+  quality_video: best
+  quality_audio: best
+  dub_languages:
+    - ja-JP
+    - en-US
+    - de-DE
+    - es-ES
+    - es-419
+    - fr-FR
+    - it-IT
+    - pt-BR
+    - pt-PT
+    - ru-RU
+    - hi-IN
+    - ar-SA
+    - zh-CN
+    - ko-KR
+    - pl-PL
+    - tr-TR
+    - th-TH
+    - vi-VN
+    - id-ID
+    - ms-MY
+    - ta-IN
+    - te-IN
+  soft_subs:
+    - ja-JP
+    - en-US
+    - de-DE
+    - es-ES
+    - es-419
+    - fr-FR
+    - it-IT
+    - pt-BR
+    - pt-PT
+    - ru-RU
+    - hi-IN
+    - ar-SA
+    - zh-CN
+    - ko-KR
+    - pl-PL
+    - tr-TR
+    - th-TH
+    - vi-VN
+    - id-ID
+    - ms-MY
+    - ta-IN
+    - te-IN
+  simultaneous_downloads: 2
+  simultaneous_processing_jobs: 2
+queue:
+  auto_download: true
+history:
+  enabled: true
+  remove_missing_episodes: true
 ```
 
-### Environment Variables
-
-- `CRUNCHYROLL_EMAIL` - Crunchyroll account email
-- `CRUNCHYROLL_PASSWORD` - Crunchyroll account password
-- `CRUNCHYROLL_OUTPUT_DIR` - Download output directory
-- `CRUNCHYROLL_TEMP_DIR` - Temporary directory
-- `CRUNCHYROLL_CONFIG_DIR` - Configuration directory (default: `/config`)
-- `CRUNCHYROLL_WEBHOOK_URL` - Webhook URL for notifications
-
-Environment variables override config file values.
-
-## Filename Templates
-
-Use these placeholders in `filename_template`:
-
-- `{SeriesTitle}` - Series name
-- `{season}` - Season number
-- `{season:00}` - Zero-padded season number
-- `{episode}` - Episode number
-- `{episode:00}` - Zero-padded episode number
-- `{EpisodeTitle}` - Episode title
-- `{height}p` - Video resolution
-
-Example: `{SeriesTitle} - S{season:00}E{episode:00} - {EpisodeTitle}`
-
-## Docker
-
-### Build
+## Building from Source
 
 ```bash
+git clone https://github.com/mediavybz/Cruncharr.git
+cd Cruncharr
 docker build -t cruncharr .
+docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncharr
 ```
 
-### Run
+## API Endpoints
 
-```bash
-# Download single episode
-docker run --rm \
-  -e CRUNCHYROLL_EMAIL=... \
-  -e CRUNCHYROLL_PASSWORD=... \
-  -v ./downloads:/downloads \
-  cruncharr download "https://..."
+The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 
-# Daemon mode
-docker run -d \
-  --name cruncharr \
-  -e CRUNCHYROLL_EMAIL=... \
-  -e CRUNCHYROLL_PASSWORD=... \
-  -v ./downloads:/downloads \
-  -v ./config:/config \
-  cruncharr daemon
-```
+- `GET /api/v1/auth/status` - Auth status
+- `POST /api/v1/auth/login` - Login with credentials
+- `GET /api/v1/queue` - Download queue
+- `POST /api/v1/queue` - Add to queue
+- `GET /api/v1/series/search?q=QUERY` - Search series
+- `GET /api/v1/series/{id}/episodes` - Get episodes
+- `GET /api/v1/config` - Get configuration
+- `POST /api/v1/config` - Update configuration
 
-### Volumes
+## Features
 
-- `/downloads` - Downloaded videos
-- `/config` - Configuration and history
-- `/lib` - Decryption tools (mp4decrypt, shaka-packager)
-- `/widevine` - Widevine CDM files
+- **Web UI**: Single-page app at `/` - search, queue, settings, history
+- **Auth**: Automatic token refresh, profile switching
+- **Downloads**: Concurrent downloads with progress tracking
+- **Queue**: Auto-download, manual start, pause/resume
+- **History**: Track downloaded episodes, prevent duplicates
+- **Stream Endpoints**: Configurable device endpoints (Android TV, Web, Console)
+- **Languages**: All audio dubs and subtitle languages supported
+- **Muxing**: Automatic muxing with ffmpeg/mkvtoolnix
+- **Notifications**: Webhook support for completion/failure
 
-## *arr Integration
+## Troubleshooting
 
-### Sonarr Custom Script
+### No Audio Track
+- Check `dub_languages` in config includes the episode's audio language
+- Default is all 22 languages
 
-Create a custom script in Sonarr that calls Cruncharr when an episode is grabbed:
+### Auth Issues
+- Delete `config/token_tv.json` to force re-login
+- Check `stream_endpoint.use_default: true`
 
-```bash
-#!/bin/bash
-# Sonarr custom script
-
-# Environment variables provided by Sonarr:
-# $sonarr_series_title
-# $sonarr_episodefile_seasonnumber
-# $sonarr_episodefile_episodenumbers
-# $sonarr_episodefile_episodetitles
-
-# Download from Crunchyroll
-cruncharr search "$sonarr_series_title" --format json | \
-  jq -r '.[0].id' | \
-  xargs -I {} cruncharr series {} --download
-```
-
-### Webhook Integration
-
-Configure Cruncharr to send webhooks on completion:
-
-```yaml
-notifications:
-  webhook_url: "http://sonarr:8989/api/v3/command"
-  webhook_method: "POST"
-  on_complete: true
-```
-
-## Development
-
-### Project Structure
-
-```
-Cruncharr/
-├── src/
-│   ├── Cruncharr.Core/       # Core logic (models, services, config)
-│   └── Cruncharr.CLI/        # CLI application
-├── Dockerfile
-├── docker-compose.yml
-└── docs/
-    ├── PORTING.md            # Guide for porting core logic
-    ├── DEBUGGING.md          # Debugging and testing guide
-    └── BUILDARR-REFERENCE.md # Buildarr integration patterns
-```
-
-### Building
-
-```bash
-# Build
-dotnet build
-
-# Run tests
-dotnet test
-
-# Publish for Linux
-dotnet publish src/Cruncharr.CLI -c Release -r linux-x64 --self-contained false
-```
-
-### Porting Core Logic
-
-The core download logic needs to be ported from the original Crunchy-Downloader codebase. See [docs/PORTING.md](docs/PORTING.md) for detailed instructions.
-
-## Status
-
-- [x] Project structure created
-- [x] CLI framework implemented
-- [x] Configuration system (YAML/JSON + env vars)
-- [x] Docker infrastructure
-- [x] Queue management
-- [x] Webhook notifications
-- [x] Daemon mode
-- [ ] Core download logic (requires porting from original)
-- [ ] Docker image build verification (requires WSL2)
-- [ ] Integration tests
+### Widevine/DRM
+- Place `device_private_key.pem` and `device_client_id_blob.bin` in `widevine/` directory
+- Required for downloading premium/DRM content
 
 ## License
 
 MIT
-
-## Disclaimer
-
-This tool is for personal use only. Not affiliated with Crunchyroll. Use may violate Terms of Service.

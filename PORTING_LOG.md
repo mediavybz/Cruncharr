@@ -387,3 +387,55 @@ Web UI currently implements #1-8 plus toast notifications. Missing: #9-11.
 2. ~~**Muxing crash**: NullReferenceException in FFmpegCommandBuilder.AddVideoInputs()~~ - FIXED 2026-05-24
 3. ~~**Auth token expiry**: Token not refreshed on startup, causing downloads to fail after container restart~~ - FIXED 2026-05-25
 4. **Episode ID mismatch**: Some web GUIDs don't map directly to CMS episode IDs - minor, workaround exists
+
+---
+
+## Session Notes - 2026-05-25 Night Session
+
+### Completed Tonight
+- **Auth & Token Persistence**: Fixed startup auth refresh, empty token_file handling, stale status reporting
+- **Audio Track Fix**: Changed default dub/sub languages from single language to all 22 languages
+- **Stream Endpoint UI**: Added all 13 endpoint types with hardcoded default values (auth, user-agent, device)
+- **Settings Audit**: Verified all 14 settings categories are connected frontend→backend
+- **GitHub Deployment**: Pushed source, published Docker image to GHCR, created v1.0.0 release
+- **GitHub Actions**: Configured automated Docker build workflow
+
+### Docker Image
+- **Registry**: `ghcr.io/mediavybz/cruncharr:latest`
+- **Release**: https://github.com/mediavybz/Cruncharr/releases/tag/v1.0.0
+- **Deploy**: `docker pull ghcr.io/mediavybz/cruncharr:latest`
+
+### What's Working
+- Auth: Automatic login on startup, token refresh, profile switching
+- Search: Series search, episode listing
+- Downloads: Video + audio download, DASH manifest parsing, Widevine decryption
+- Queue: Add/remove/retry/pause/resume/start, auto-download toggle
+- Settings: All tabs saving/loading correctly
+- Stream Endpoints: 13 device types with default credentials
+
+### TODO for Next Session
+1. **Audio Verification**: Test that downloaded files actually contain audio tracks (not just "selected")
+2. **Download Completion**: Verify full end-to-end download produces playable MKV with audio
+3. **Subtitle Download**: Test softsubs/hardsubs are being downloaded and muxed
+4. **Queue Persistence**: Test queue survives container restart
+5. **Error Handling**: Test failed download retry logic
+6. **Frontend Polish**: Any UI issues from live testing
+7. **Performance**: Check download speed, concurrent downloads
+
+### Files Modified Tonight
+- `src/Cruncharr.Core/Configuration/CruncharrConfig.cs` - Default language lists
+- `src/Cruncharr.Core/Services/CrunchyrollAuthService.cs` - Token path fix
+- `src/Cruncharr.Core/Services/DownloadService.cs` - Audio debug logging
+- `src/Cruncharr.API/Program.cs` - Startup auth refresh
+- `src/Cruncharr.API/Controllers/AuthController.cs` - Status endpoint refresh
+- `src/Cruncharr.API/Controllers/QueueController.cs` - Start endpoint
+- `src/Cruncharr.API/wwwroot/index.html` - Stream endpoint UI, language defaults
+- `.gitignore` - Exclude runtime data
+- `README.md` - Deployment instructions
+- `.github/workflows/docker-build.yml` - CI/CD workflow
+
+### Context for Resume
+- Last test: Episode queued, "Selected 1 audio tracks for download", video downloading
+- Config file at `/config/cruncharr.yaml` has all 22 languages configured
+- Container running at `http://localhost:8585`
+- GitHub repo has latest code + Actions workflow

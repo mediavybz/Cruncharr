@@ -195,6 +195,12 @@ public class DownloadService : IDownloadService{
         var fileName = _filenameService.FormatFilename(config.Download.Filename, episode, filenameOptions);
         var outputPath = Path.Combine(outputDir, fileName + ".mkv");
         
+        // Replace existing file if configured
+        if (config.Download.ReplaceExistingFiles && File.Exists(outputPath)){
+            _logger?.LogInformation("Replacing existing file: {OutputPath}", outputPath);
+            File.Delete(outputPath);
+        }
+        
         // Download streams
         var tempDir = config.Download.UseTempFolder 
             ? Path.Combine(config.Download.TempDirectory, Guid.NewGuid().ToString())

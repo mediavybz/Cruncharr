@@ -379,6 +379,9 @@ public class DownloadConfig{
     
     [YamlMember(Alias = "force_override", ApplyNamingConventions = false)]
     public bool ForceOverride { get; set; } = false;
+    
+    [YamlMember(Alias = "replace_existing_files", ApplyNamingConventions = false)]
+    public bool ReplaceExistingFiles { get; set; } = false;
 }
 
 public class HistoryConfig{

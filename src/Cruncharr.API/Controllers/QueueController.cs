@@ -12,6 +12,11 @@ public class QueueController : ControllerBase{
     private readonly IQueueService _queueService;
     private readonly ILogger<QueueController> _logger;
     private static readonly Channel<string> _queueUpdatesChannel = Channel.CreateUnbounded<string>();
+    private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings{
+        ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver(),
+        Converters = { new Newtonsoft.Json.Converters.StringEnumConverter() },
+        NullValueHandling = NullValueHandling.Ignore
+    };
 
     public QueueController(IQueueService queueService, ILogger<QueueController> logger){
         _queueService = queueService;
@@ -27,7 +32,7 @@ public class QueueController : ControllerBase{
                 ActiveDownloads = _queueService.ActiveDownloads,
                 HasActiveDownloads = _queueService.HasActiveDownloads
             };
-            var json = JsonConvert.SerializeObject(response);
+            var json = JsonConvert.SerializeObject(response, _sseJsonSettings);
             _queueUpdatesChannel.Writer.TryWrite(json);
         } catch (Exception ex){
             _logger.LogError(ex, "Failed to broadcast queue update");
@@ -177,7 +182,7 @@ public class QueueController : ControllerBase{
             ActiveDownloads = _queueService.ActiveDownloads,
             HasActiveDownloads = _queueService.HasActiveDownloads
         };
-        await WriteSseEventAsync(JsonConvert.SerializeObject(initialResponse), cancellationToken);
+        await WriteSseEventAsync(JsonConvert.SerializeObject(initialResponse, _sseJsonSettings), cancellationToken);
 
         // Listen for updates
         await foreach (var update in _queueUpdatesChannel.Reader.ReadAllAsync(cancellationToken)){

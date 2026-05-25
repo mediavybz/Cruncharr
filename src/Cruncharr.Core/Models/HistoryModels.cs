@@ -23,10 +23,29 @@ public class HistorySeries{
     [JsonIgnore]
     public List<string> HistorySeriesAvailableSoftSubs { get; set; } = [];
     
-    public void UpdateNewEpisodes(){
+    public void UpdateNewEpisodes(List<string>? selectedDubs = null, List<string>? selectedSubs = null){
         TotalEpisodes = Seasons.Sum(s => s.EpisodesList.Count);
         DownloadedEpisodes = Seasons.Sum(s => s.EpisodesList.Count(e => e.WasDownloaded));
-        HasNewEpisodes = Seasons.Any(s => s.EpisodesList.Any(e => !e.WasDownloaded && e.IsEpisodeAvailableOnStreamingService));
+        
+        // Check for new episodes or episodes with newly available selected dubs/subs
+        HasNewEpisodes = Seasons.Any(s => s.EpisodesList.Any(e => {
+            if (!e.IsEpisodeAvailableOnStreamingService) return false;
+            
+            // Episode not downloaded at all
+            if (!e.WasDownloaded) return true;
+            
+            // Episode downloaded but selected dubs/subs may be missing
+            // Check if any selected dubs are newly available but not downloaded
+            var missingDubs = selectedDubs
+                .Where(dub => e.HistoryEpisodeAvailableDubLang.Contains(dub) && !e.DownloadedDubLang.Contains(dub))
+                .Any();
+            
+            var missingSubs = selectedSubs
+                .Where(sub => e.HistoryEpisodeAvailableSoftSubs.Contains(sub) && !e.DownloadedSoftSubs.Contains(sub))
+                .Any();
+            
+            return missingDubs || missingSubs;
+        }));
     }
 }
 
@@ -52,6 +71,11 @@ public class HistoryEpisode{
     public bool SpecialEpisode { get; set; }
     public List<string> HistoryEpisodeAvailableDubLang { get; set; } = [];
     public List<string> HistoryEpisodeAvailableSoftSubs { get; set; } = [];
+    
+    // Track which dubs/subs were actually downloaded (for partial download detection)
+    public List<string> DownloadedDubLang { get; set; } = [];
+    public List<string> DownloadedSoftSubs { get; set; } = [];
+    
     public DateTime? EpisodeCrPremiumAirDate { get; set; }
     public string EpisodeType { get; set; } = "Episode";
     public string EpisodeSeriesType { get; set; } = "Unknown";

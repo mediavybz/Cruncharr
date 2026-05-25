@@ -92,14 +92,7 @@ public class Program{
         Directory.CreateDirectory(config.Download.OutputDirectory);
         Directory.CreateDirectory(config.Download.TempDirectory);
 
-        // Start queue processing
-        using (var scope = app.Services.CreateScope()){
-            var queueService = scope.ServiceProvider.GetRequiredService<IQueueService>();
-            var configService = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
-            _ = queueService.ProcessQueueAsync(configService, null, CancellationToken.None);
-        }
-
-        // Initialize auth - try to authenticate with existing token or anonymous
+        // Initialize auth FIRST - queue auto-download must wait for auth to be ready
         using (var scope = app.Services.CreateScope()){
             var authService = scope.ServiceProvider.GetRequiredService<ICrunchyrollAuthService>();
             var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
@@ -114,6 +107,13 @@ public class Program{
             } catch (Exception ex){
                 logger?.LogError(ex, "Authentication initialization failed");
             }
+        }
+
+        // Start queue processing AFTER auth is initialized
+        using (var scope = app.Services.CreateScope()){
+            var queueService = scope.ServiceProvider.GetRequiredService<IQueueService>();
+            var configService = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
+            _ = queueService.ProcessQueueAsync(configService, null, CancellationToken.None);
         }
 
         app.Run();

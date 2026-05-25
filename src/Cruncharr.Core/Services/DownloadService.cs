@@ -385,6 +385,9 @@ public class DownloadService : IDownloadService{
             if (_history != null && config.Download.HistoryEnabled){
                 try{
                     var fileInfo = new FileInfo(outputPath);
+                    var downloadedDubs = audioTrackLanguages.Select(a => a.Lang).Distinct().ToList();
+                    var downloadedSubs = subtitleFiles.Select(s => s.Lang).Distinct().ToList();
+                    
                     await _history.AddAsync(new DownloadHistory{
                         EpisodeId = episode.Id,
                         SeriesId = episode.Guid,
@@ -393,11 +396,14 @@ public class DownloadService : IDownloadService{
                         SeasonNumber = episode.SeasonNumber,
                         EpisodeNumber = episode.EpisodeNumber,
                         AudioLanguage = episode.Locale,
-                        SubtitleLanguages = subtitleFiles.Select(s => s.Lang).ToList(),
+                        SubtitleLanguages = downloadedSubs,
                         DownloadedAt = DateTime.UtcNow,
                         OutputPath = outputPath,
                         FileSizeBytes = fileInfo.Exists ? fileInfo.Length : 0
                     });
+                    
+                    // Also update rich history with downloaded dubs/subs for partial download tracking
+                    await _history.SetAsDownloadedAsync(episode.Guid, episode.SeasonId, episode.Id, downloadedDubs, downloadedSubs);
                 } catch (Exception ex){
                     _logger?.LogWarning(ex, "Failed to record download history");
                 }

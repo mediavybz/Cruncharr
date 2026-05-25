@@ -97,15 +97,35 @@ public class DownloadService : IDownloadService{
         
         if (episode.Versions != null && episode.Versions.Count > 0){
             EpisodeVersion? currentVersion = null;
+            var dubLangs = config.Download.DubLanguages.Select(l => l.ToLowerInvariant()).ToList();
             
-            // Try to find version matching the episode's audio locale
-            if (!string.IsNullOrEmpty(episode.AudioLocale)){
-                currentVersion = episode.Versions.FirstOrDefault(v => v.AudioLocale.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
+            // If DubLanguages is configured, prefer a version matching one of those languages
+            if (dubLangs.Count > 0){
+                // Try episode's current audio locale if it's in DubLanguages
+                if (!string.IsNullOrEmpty(episode.AudioLocale) && 
+                    dubLangs.Contains(episode.AudioLocale.ToLowerInvariant())){
+                    currentVersion = episode.Versions.FirstOrDefault(v => 
+                        v.AudioLocale.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
+                }
+                
+                // If not found, try to find any version matching DubLanguages
+                if (currentVersion == null){
+                    foreach (var dubLang in dubLangs){
+                        currentVersion = episode.Versions.FirstOrDefault(v => 
+                            v.AudioLocale.ToLowerInvariant() == dubLang);
+                        if (currentVersion != null) break;
+                    }
+                }
             }
             
             // Fallback: try config's default audio
             if (currentVersion == null && !string.IsNullOrEmpty(config.Download.DefaultAudio)){
                 currentVersion = episode.Versions.FirstOrDefault(v => v.AudioLocale.Equals(config.Download.DefaultAudio, StringComparison.OrdinalIgnoreCase));
+            }
+            
+            // Fallback: try episode's original audio locale
+            if (currentVersion == null && !string.IsNullOrEmpty(episode.AudioLocale)){
+                currentVersion = episode.Versions.FirstOrDefault(v => v.AudioLocale.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
             }
             
             // Fallback: if only one version, use it

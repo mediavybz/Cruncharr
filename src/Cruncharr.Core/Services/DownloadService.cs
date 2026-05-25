@@ -301,11 +301,14 @@ public class DownloadService : IDownloadService{
                 }
                 
                 // Download additional dubs if configured
+                // Note: Video is only downloaded once (DlVideoOnce optimization). Additional dubs reuse the same video stream.
                 if (config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1){
                     var primaryLocale = episode.AudioLocale ?? config.Download.DefaultAudio;
                     var selectedDubs = config.Download.DubLanguages
                         .Where(dub => !string.Equals(dub, primaryLocale, StringComparison.OrdinalIgnoreCase))
                         .ToList();
+                    
+                    _logger?.LogInformation("DlVideoOnce: Reusing video from primary dub for {Count} additional dubs", selectedDubs.Count);
                     
                     foreach (var dub in selectedDubs){
                         var dubVersion = episode.Versions.FirstOrDefault(v => 

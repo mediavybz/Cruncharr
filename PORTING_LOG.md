@@ -582,6 +582,36 @@ Web UI currently implements #1-8 plus toast notifications. Missing: #9-11.
 
 ---
 
+## Session Notes - 2026-05-26 Download Disappearing Bug Fix
+
+### Critical Bug Fix: SSE Serialization Case Mismatch
+**Issue:** Downloads added to queue immediately disappeared from the Downloads tab. Items were still downloading in the background but the UI showed empty queue.
+**Root Cause:** The SSE endpoint used `JsonConvert.SerializeObject()` with default settings, which outputs PascalCase property names (`Items`, `ActiveDownloads`, `HasActiveDownloads`). The frontend JavaScript expects camelCase (`items`, `activeDownloads`, `hasActiveDownloads`) to match the REST API contract.
+
+When SSE messages arrived:
+- Frontend parsed: `data.items` → `undefined` (actual property was `data.Items`)
+- `updateQueueData(data.items || [])` → `updateQueueData([])` 
+- This immediately overwrote the queue with empty array, clearing all visible downloads
+
+**Fix:** Added `_sseJsonSettings` with `CamelCasePropertyNamesContractResolver` to ensure SSE JSON matches frontend expectations:
+```csharp
+private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings{
+    ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver(),
+    Converters = { new Newtonsoft.Json.Converters.StringEnumConverter() },
+    NullValueHandling = NullValueHandling.Ignore
+};
+```
+
+**Verification:**
+- SSE now returns: `{"items":[],"activeDownloads":0,"hasActiveDownloads":false}` (camelCase)
+- Previously returned: `{"Items":[],"ActiveDownloads":0,"HasActiveDownloads":false}` (PascalCase)
+
+### Files Modified
+- `src/Cruncharr.API/Controllers/QueueController.cs` - Added `_sseJsonSettings` and applied to all SSE serialization
+- Docker image rebuilt and pushed: `ghcr.io/mediavybz/cruncharr:latest`
+
+---
+
 ### Remaining Tasks (from summary)
 1. **Verify frontend fix works** - Awaiting user testing
 2. **Test multi-dub download** with `download_multiple_dubs: true`

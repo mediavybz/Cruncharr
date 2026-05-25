@@ -9,27 +9,29 @@ services:
     ports:
       - "8585:8585"
     volumes:
-      # Configuration directory - stores cruncharr.yaml, history.json, queue.json
+      # USER-FACING DIRECTORIES (mounted from host):
+      
+      # Configuration - stores cruncharr.yaml, history.json, queue.json, token, logs
       - ./config:/config
       
-      # Downloads output directory - where completed files go
+      # Downloads - where completed files go
       - ./downloads:/downloads
       
-      # Temporary directory for processing
-      - ./tmp:/tmp/cruncharr
-      
-      # Widevine DRM files (REQUIRED - ONLY external dependency)
+      # Widevine DRM files (REQUIRED for DRM content)
       # Place device_client_id_blob.bin and device_private_key.pem here
       - ./widevine:/widevine
       
-      # Custom ffmpeg encoding presets (optional)
-      # - ./presets:/app/presets
-      
-      # Subtitle fonts for muxing (optional)
-      # - ./fonts:/app/fonts
+      # Tools - custom tools or ffmpeg overrides (optional)
+      # - ./tools:/tools
       
       # Optional: Mount your media library if *arr apps manage it
       # - /path/to/media:/media
+      
+      # INTERNAL DIRECTORIES (stay inside container, not mounted):
+      # /tmp/cruncharr - temporary processing files
+      # /app/presets - built-in ffmpeg presets (included in image)
+      # /app/fonts - built-in subtitle fonts (included in image)
+      # /app/video - internal workspace
     environment:
       # Crunchyroll credentials (optional - can also be in config file)
       - CRUNCHYROLL_EMAIL=${CRUNCHYROLL_EMAIL:-}

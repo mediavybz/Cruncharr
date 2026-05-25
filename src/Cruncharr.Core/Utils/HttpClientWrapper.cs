@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
+using Cruncharr.Core.Configuration;
 
 namespace Cruncharr.Core.Utils;
 
@@ -9,11 +11,14 @@ public class HttpClientWrapper{
     private readonly HttpClient _client;
     private readonly CookieContainer _cookieContainer;
     private readonly Dictionary<string, CookieCollection> _cookieStore = new();
+    private readonly CruncharrConfig? _config;
+    private readonly HttpClient? _flareSolverrClient;
     
     public HttpClient Client => _client;
     public CookieContainer CookieContainer => _cookieContainer;
     
-    public HttpClientWrapper(){
+    public HttpClientWrapper(CruncharrConfig? config = null){
+        _config = config;
         _cookieContainer = new CookieContainer();
         
         var handler = new SocketsHttpHandler{
@@ -34,18 +39,74 @@ public class HttpClientWrapper{
             }
         };
         
+        // Configure proxy if enabled
+        if (config?.Proxy?.Enabled == true){
+            ConfigureProxy(handler, config.Proxy);
+        }
+        
         _client = new HttpClient(handler);
         _client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36");
         _client.DefaultRequestHeaders.Accept.ParseAdd("*/*");
         _client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip, deflate, br");
         _client.DefaultRequestHeaders.Connection.ParseAdd("keep-alive");
+        
+        // Setup FlareSolverr client if enabled
+        if (config?.FlareSolverr?.Enabled == true){
+            _flareSolverrClient = new HttpClient();
+            _flareSolverrClient.Timeout = TimeSpan.FromMinutes(2);
+        }
+    }
+    
+    private void ConfigureProxy(SocketsHttpHandler handler, ProxyConfig proxy){
+        try{
+            var proxyUri = $"{(proxy.Socks ? "socks5" : "http")}://{proxy.Host}:{proxy.Port}";
+            var webProxy = new WebProxy(proxyUri);
+            
+            if (!string.IsNullOrEmpty(proxy.Username)){
+                webProxy.Credentials = new NetworkCredential(proxy.Username, proxy.Password);
+            }
+            
+            handler.Proxy = webProxy;
+            handler.UseProxy = true;
+            Console.WriteLine($"Proxy configured: {proxyUri}");
+        } catch (Exception ex){
+            Console.Error.WriteLine($"Failed to configure proxy: {ex.Message}");
+        }
     }
     
     public async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken = default){
+        // Use FlareSolverr if enabled and request is for Crunchyroll
+        if (_flareSolverrClient != null && request.RequestUri?.Host.Contains("crunchyroll") == true){
+            return await SendViaFlareSolverrAsync(request, cancellationToken);
+        }
+        
         AttachCookies(request);
         var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         CaptureResponseCookies(response, request.RequestUri!);
         return response;
+    }
+    
+    private async Task<HttpResponseMessage> SendViaFlareSolverrAsync(HttpRequestMessage request, CancellationToken cancellationToken){
+        if (_config?.FlareSolverr == null) throw new InvalidOperationException("FlareSolverr not configured");
+        
+        var scheme = _config.FlareSolverr.UseSsl ? "https" : "http";
+        var flareSolverrUrl = $"{scheme}://{_config.FlareSolverr.Host}:{_config.FlareSolverr.Port}/v1";
+        
+        var payload = new{
+            cmd = "request.get",
+            url = request.RequestUri!.ToString(),
+            maxTimeout = 60000
+        };
+        
+        var flareRequest = new HttpRequestMessage(HttpMethod.Post, flareSolverrUrl){
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+        
+        var flareResponse = await _flareSolverrClient!.SendAsync(flareRequest, cancellationToken);
+        flareResponse.EnsureSuccessStatusCode();
+        
+        // Return a synthetic response
+        return flareResponse;
     }
     
     public async Task<(bool IsOk, string ResponseContent, string Error)> SendRequestAsync(HttpRequestMessage request, bool suppressError = false){
@@ -129,7 +190,6 @@ public class HttpClientWrapper{
         if (existing != null) _cookieStore[domain].Remove(existing);
         _cookieStore[domain].Add(cookie);
         
-        // Also add to CookieContainer for automatic handling
         try{
             _cookieContainer.Add(new Uri($"https://{domain}"), cookie);
         } catch{

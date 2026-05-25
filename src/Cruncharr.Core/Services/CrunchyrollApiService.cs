@@ -13,6 +13,7 @@ public interface ICrunchyrollApiService{
     Task<SeriesInfo?> GetSeriesAsync(string seriesId, bool useBetaApi, CancellationToken cancellationToken = default);
     Task<List<EpisodeInfo>> GetEpisodesAsync(string seriesId, bool useBetaApi, CancellationToken cancellationToken = default);
     Task<EpisodeInfo?> GetEpisodeAsync(string episodeId, bool useBetaApi, CancellationToken cancellationToken = default);
+    Task<CrBrowseEpisodeBase?> GetNewEpisodesAsync(string? crLocale, int requestAmount, bool forcedLang = false, CancellationToken cancellationToken = default);
 }
 
 public class CrunchyrollApiService : ICrunchyrollApiService{
@@ -189,6 +190,47 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
             };
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to parse episode data");
+            return null;
+        }
+    }
+    
+    public async Task<CrBrowseEpisodeBase?> GetNewEpisodesAsync(string? crLocale, int requestAmount, bool forcedLang = false, CancellationToken cancellationToken = default){
+        if (!await EnsureAuthenticatedAsync(true, cancellationToken)){
+            return null;
+        }
+        
+        if (string.IsNullOrEmpty(crLocale)){
+            crLocale = "en-US";
+        }
+        
+        var queryParams = new NameValueCollection();
+        queryParams["locale"] = crLocale;
+        if (forcedLang){
+            queryParams["force_locale"] = crLocale;
+        }
+        queryParams["n"] = requestAmount.ToString();
+        queryParams["sort_by"] = "newly_added";
+        queryParams["type"] = "episode";
+        
+        var uriBuilder = new UriBuilder(ApiUrls.Browse(true)){
+            Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
+        };
+        
+        var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+        
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        
+        if (!isOk){
+            _logger?.LogError("Get new episodes failed: {Error}", error);
+            return null;
+        }
+        
+        try{
+            var result = JsonConvert.DeserializeObject<CrBrowseEpisodeBase>(content);
+            result?.Data?.Sort((a, b) => b.EpisodeMetadata.PremiumAvailableDate.CompareTo(a.EpisodeMetadata.PremiumAvailableDate));
+            return result;
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to parse new episodes data");
             return null;
         }
     }
@@ -430,4 +472,141 @@ public class CrEpisodeDetail{
     public Dictionary<string, List<List<object>>>? Images{ get; set; }
 }
 
+// Browse Episode models for GetNewEpisodes
+public class CrBrowseEpisodeBase{
+    public int Total{ get; set; }
+    public List<CrBrowseEpisode>? Data{ get; set; }
+    public CrBrowseMeta? Meta{ get; set; }
+}
+
+public class CrBrowseEpisode{
+    [JsonProperty("external_id")]
+    public string? ExternalId{ get; set; }
+    [JsonProperty("last_public")]
+    public DateTime LastPublic{ get; set; }
+    public string? Description{ get; set; }
+    public bool New{ get; set; }
+    [JsonProperty("linked_resource_key")]
+    public string? LinkedResourceKey{ get; set; }
+    [JsonProperty("slug_title")]
+    public string? SlugTitle{ get; set; }
+    public string? Title{ get; set; }
+    [JsonProperty("promo_title")]
+    public string? PromoTitle{ get; set; }
+    [JsonProperty("episode_metadata")]
+    public CrBrowseEpisodeMetaData EpisodeMetadata{ get; set; } = new();
+    public string? Id{ get; set; }
+    public CrBrowseImages? Images{ get; set; }
+    [JsonProperty("promo_description")]
+    public string? PromoDescription{ get; set; }
+    public string? Slug{ get; set; }
+    public string? Type{ get; set; }
+    [JsonProperty("channel_id")]
+    public string? ChannelId{ get; set; }
+    [JsonProperty("streams_link")]
+    public string? StreamsLink{ get; set; }
+}
+
+public class CrBrowseEpisodeMetaData{
+    [JsonProperty("audio_locale")]
+    public string? AudioLocale{ get; set; }
+    [JsonProperty("content_descriptors")]
+    public List<string>? ContentDescriptors{ get; set; }
+    [JsonProperty("availability_notes")]
+    public string? AvailabilityNotes{ get; set; }
+    public string? Episode{ get; set; }
+    [JsonProperty("episode_air_date")]
+    public DateTime EpisodeAirDate{ get; set; }
+    [JsonProperty("episode_number")]
+    public int EpisodeCount{ get; set; }
+    [JsonProperty("duration_ms")]
+    public int DurationMs{ get; set; }
+    [JsonProperty("extended_maturity_rating")]
+    public Dictionary<object, object>? ExtendedMaturityRating{ get; set; }
+    [JsonProperty("is_dubbed")]
+    public bool IsDubbed{ get; set; }
+    [JsonProperty("is_mature")]
+    public bool IsMature{ get; set; }
+    [JsonProperty("is_subbed")]
+    public bool IsSubbed{ get; set; }
+    [JsonProperty("mature_blocked")]
+    public bool MatureBlocked{ get; set; }
+    [JsonProperty("is_premium_only")]
+    public bool IsPremiumOnly{ get; set; }
+    [JsonProperty("is_clip")]
+    public bool IsClip{ get; set; }
+    [JsonProperty("maturity_ratings")]
+    public List<string>? MaturityRatings{ get; set; }
+    [JsonProperty("season_number")]
+    public double SeasonNumber{ get; set; }
+    [JsonProperty("season_sequence_number")]
+    public double SeasonSequenceNumber{ get; set; }
+    [JsonProperty("sequence_number")]
+    public double SequenceNumber{ get; set; }
+    [JsonProperty("upload_date")]
+    public DateTime UploadDate{ get; set; }
+    [JsonProperty("subtitle_locales")]
+    public List<string>? SubtitleLocales{ get; set; }
+    [JsonProperty("premium_available_date")]
+    public DateTime PremiumAvailableDate{ get; set; }
+    [JsonProperty("availability_ends")]
+    public DateTime AvailabilityEnds{ get; set; }
+    [JsonProperty("availability_starts")]
+    public DateTime AvailabilityStarts{ get; set; }
+    [JsonProperty("free_available_date")]
+    public DateTime FreeAvailableDate{ get; set; }
+    [JsonProperty("identifier")]
+    public string? Identifier{ get; set; }
+    [JsonProperty("season_id")]
+    public string? SeasonId{ get; set; }
+    [JsonProperty("series_id")]
+    public string? SeriesId{ get; set; }
+    [JsonProperty("season_display_number")]
+    public string? SeasonDisplayNumber{ get; set; }
+    [JsonProperty("eligible_region")]
+    public string? EligibleRegion{ get; set; }
+    [JsonProperty("available_date")]
+    public DateTime AvailableDate{ get; set; }
+    [JsonProperty("premium_date")]
+    public DateTime PremiumDate{ get; set; }
+    [JsonProperty("available_offline")]
+    public bool AvailableOffline{ get; set; }
+    [JsonProperty("closed_captions_available")]
+    public bool ClosedCaptionsAvailable{ get; set; }
+    [JsonProperty("season_slug_title")]
+    public string? SeasonSlugTitle{ get; set; }
+    [JsonProperty("season_title")]
+    public string? SeasonTitle{ get; set; }
+    [JsonProperty("series_slug_title")]
+    public string? SeriesSlugTitle{ get; set; }
+    [JsonProperty("series_title")]
+    public string? SeriesTitle{ get; set; }
+    [JsonProperty("versions")]
+    public List<CrBrowseEpisodeVersion>? Versions{ get; set; }
+}
+
+public class CrBrowseEpisodeVersion{
+    [JsonProperty("audio_locale")]
+    public string? AudioLocale{ get; set; }
+    public string? Guid{ get; set; }
+    public bool Original{ get; set; }
+    public string? Variant{ get; set; }
+    [JsonProperty("season_guid")]
+    public string? SeasonGuid{ get; set; }
+    [JsonProperty("media_guid")]
+    public string? MediaGuid{ get; set; }
+}
+
+public class CrBrowseImages{
+    public List<List<CrBrowseThumbnail>>? Thumbnail{ get; set; }
+}
+
+public class CrBrowseThumbnail{
+    public string? Source{ get; set; }
+}
+
+public class CrBrowseMeta{
+    public int TotalBeforeFilter{ get; set; }
+    public int TotalAfterFilter{ get; set; }
+}
 

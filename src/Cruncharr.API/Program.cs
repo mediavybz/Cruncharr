@@ -1,13 +1,14 @@
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
+using Cruncharr.Core.Utils.Muxing.Syncing;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Serialization;
 
 namespace Cruncharr.API;
 
 public class Program{
-    public static void Main(string[] args){
+    public static async Task Main(string[] args){
         var builder = WebApplication.CreateBuilder(args);
 
         // Add services to the container
@@ -32,6 +33,11 @@ public class Program{
         var config = File.Exists(configPath) ? CruncharrConfig.Load(configPath) : new CruncharrConfig();
         config.ApplyEnvironmentVariables();
         builder.Services.AddSingleton(config);
+        
+        // Initialize log mode if enabled
+        if (config.LogMode){
+            LogManager.EnableLogMode("/config/logfile.txt");
+        }
 
         // Register Cruncharr services
         builder.Services.AddSingleton<ICrunchyrollAuthService>(sp =>
@@ -43,6 +49,12 @@ public class Program{
             _ => new QueuePersistenceService(config.Queue.QueueFilePath));
         builder.Services.AddSingleton<ICalendarService, CalendarService>();
         builder.Services.AddSingleton<IQueueService, QueueService>();
+        builder.Services.AddSingleton<ISonarrService, SonarrService>();
+        builder.Services.AddSingleton<ISyncingService, SyncingService>();
+        builder.Services.AddSingleton<IVideoSyncer, VideoSyncer>();
+        builder.Services.AddSingleton<IMovieService, MovieService>();
+        builder.Services.AddSingleton<IMusicService, MusicService>();
+        builder.Services.AddSingleton<IEncodingService, EncodingService>();
 
         // Add CORS for *arr integration
         builder.Services.AddCors(options =>{
@@ -85,6 +97,23 @@ public class Program{
             var queueService = scope.ServiceProvider.GetRequiredService<IQueueService>();
             var configService = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
             _ = queueService.ProcessQueueAsync(configService, null, CancellationToken.None);
+        }
+
+        // Initialize auth - try to authenticate with existing token or anonymous
+        using (var scope = app.Services.CreateScope()){
+            var authService = scope.ServiceProvider.GetRequiredService<ICrunchyrollAuthService>();
+            var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
+            try{
+                logger?.LogInformation("Initializing authentication...");
+                var authResult = await authService.AuthenticateAsync(config.Crunchyroll?.UseBetaApi ?? true);
+                if (authResult){
+                    logger?.LogInformation("Authentication successful - logged in as {User}", authService.Profile.Username);
+                } else{
+                    logger?.LogWarning("Authentication failed - anonymous mode");
+                }
+            } catch (Exception ex){
+                logger?.LogError(ex, "Authentication initialization failed");
+            }
         }
 
         app.Run();

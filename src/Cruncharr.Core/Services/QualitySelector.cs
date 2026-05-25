@@ -37,9 +37,10 @@ public static class QualitySelector{
             qualityPreference = "best";
         }
         
+        int dedupedCount = deduped.Count;
         int chosenIndex;
         if (qualityPreference == "best"){
-            chosenIndex = deduped.Count;
+            chosenIndex = dedupedCount;
         } else if (qualityPreference == "worst"){
             chosenIndex = 1;
         } else{
@@ -50,15 +51,15 @@ public static class QualitySelector{
                 if (matchIndex >= 0){
                     chosenIndex = matchIndex + 1;
                 } else{
-                    chosenIndex = deduped.Count;
+                    chosenIndex = dedupedCount;
                 }
             } else{
-                chosenIndex = deduped.Count;
+                chosenIndex = dedupedCount;
             }
         }
         
-        if (chosenIndex > deduped.Count){
-            chosenIndex = deduped.Count;
+        if (chosenIndex > dedupedCount){
+            chosenIndex = dedupedCount;
         }
         
         return deduped[chosenIndex - 1];

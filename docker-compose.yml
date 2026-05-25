@@ -3,7 +3,7 @@ version: '3.8'
 services:
   cruncharr:
     build: .
-    image: ghcr.io/YOUR_USERNAME/cruncharr:latest
+    image: cruncharr:latest
     container_name: cruncharr
     restart: unless-stopped
     ports:

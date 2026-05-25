@@ -1034,7 +1034,10 @@ MAINTENANCE NOTES:
         let addDownloadSelectedSeries = null;
         let addDownloadEpisodes = [];
 
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Load config first so toggles are initialized correctly
+            await fetchConfig();
+            // Now render the initial page with correct toggle states
             loadPage('downloads');
             startPolling();
             setupNavigation();
@@ -1073,17 +1076,20 @@ MAINTENANCE NOTES:
 
         // ================== DOWNLOADS ==================
         function renderDownloads(container) {
+            const removeFinished = config?.general?.removeFinishedDownload || false;
+            const autoDownload = config?.queue?.autoDownload || false;
+            
             container.innerHTML = `
                 <div class="page-title">Downloads</div>
                 <div class="page-subtitle">Manage your download queue</div>
                 <div style="display:flex; gap:15px; align-items:center; flex-wrap:wrap; margin-bottom:20px;">
                     <label class="toggle-switch">
-                        <input type="checkbox" id="toggle-remove-finished" onchange="toggleSetting('removeFinished', this.checked)">
+                        <input type="checkbox" id="toggle-remove-finished" ${removeFinished ? 'checked' : ''} onchange="toggleSetting('removeFinished', this.checked)">
                         <span class="toggle-slider"></span>
                         Remove Finished
                     </label>
                     <label class="toggle-switch">
-                        <input type="checkbox" id="toggle-auto-download" onchange="toggleSetting('autoDownload', this.checked)">
+                        <input type="checkbox" id="toggle-auto-download" ${autoDownload ? 'checked' : ''} onchange="toggleSetting('autoDownload', this.checked)">
                         <span class="toggle-slider"></span>
                         Auto Download
                     </label>
@@ -1175,9 +1181,11 @@ MAINTENANCE NOTES:
                                         <div class="download-info" title="${item.infoTextHover || item.episode?.description || ''}">${item.infoText || item.episode?.seriesTitle || ''}</div>
                                     </div>
                                     <div class="download-actions">
-                                        ${isError
-                                            ? `<button class="btn-icon" onclick="retryDownload('${item.id}')" title="Retry">&#8635;</button>`
-                                            : `<button class="btn-icon" onclick="togglePauseResume('${item.id}', ${isDownloading})" title="${isDownloading ? 'Pause' : 'Resume'}">${isDownloading ? '&#10074;&#10074;' : '&#9654;'}</button>`
+                                        ${state === 'queued' || state === 'waitingforretry'
+                                            ? `<button class="btn-icon primary" onclick="startDownload('${item.id}')" title="Start">&#9654;</button>`
+                                            : isError
+                                                ? `<button class="btn-icon" onclick="retryDownload('${item.id}')" title="Retry">&#8635;</button>`
+                                                : `<button class="btn-icon" onclick="togglePauseResume('${item.id}', ${isDownloading})" title="${isDownloading ? 'Pause' : 'Resume'}">${isDownloading ? '&#10074;&#10074;' : '&#9654;'}</button>`
                                         }
                                         <button class="btn-icon danger" onclick="removeFromQueue('${item.id}')" title="Remove">&#128465;</button>
                                     </div>
@@ -1186,9 +1194,9 @@ MAINTENANCE NOTES:
                                     <div class="progress-bar" style="width: ${item.downloadProgress?.percent || 0}%"></div>
                                 </div>
                                 <div class="download-footer">
-                                    <span>${item.downloadProgress?.doing || item.status || 'Queued'}</span>
-                                    <span>${item.time || ''}</span>
-                                    <span>${item.downloadSpeed || ''}</span>
+                                    <span>${getDoingText(item.downloadProgress)}</span>
+                                    <span>${formatETA(item.downloadProgress?.time)}</span>
+                                    <span>${formatDownloadSpeed(item.downloadProgress?.downloadSpeedBytes)}</span>
                                 </div>
                             </div>
                         </div>
@@ -1377,7 +1385,7 @@ MAINTENANCE NOTES:
                         body: JSON.stringify({
                             episodeId: id,
                             title: ep?.title || ep?.episodeTitle || '',
-                            seriesTitle: ep?.seriesTitle || currentSeries?.title || '',
+                            seriesTitle: ep?.seriesTitle || addDownloadSelectedSeries?.title || '',
                             seasonNumber: ep?.seasonNumber || 1,
                             episodeNumber: ep?.episodeNumber || ep?.number || 1,
                             locale: ep?.locale || ep?.audioLocale || 'ja-JP',
@@ -1690,8 +1698,8 @@ MAINTENANCE NOTES:
 
                 if (authStatus.isAuthenticated) {
                     if (nameEl) nameEl.textContent = authStatus.username || 'User';
-                    if (subEl) subEl.textContent = authStatus.remainingTime || (authStatus.hasPremium ? 'Premium' : 'Free');
-                    if (avatarEl) avatarEl.innerHTML = authStatus.profileImageUrl ? `<img src="${authStatus.profileImageUrl}" alt="">` : '<span>&#128100;</span>';
+                    if (subEl) subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free';
+                    if (avatarEl) avatarEl.innerHTML = authStatus.avatar ? `<img src="${authStatus.avatar}" alt="">` : '<span>&#128100;</span>';
                     if (loginBtn) loginBtn.style.display = 'none';
                     if (logoutBtn) logoutBtn.style.display = 'inline-block';
                 } else {
@@ -1764,6 +1772,59 @@ MAINTENANCE NOTES:
             {value:'ta-IN',label:'Tamil'},{value:'te-IN',label:'Telugu'}
         ];
 
+        const STREAM_ENDPOINT_OPTIONS = [
+            {value:'tv/android_tv',label:'Android TV'},
+            {value:'android/phone',label:'Android Phone'},
+            {value:'android/tablet',label:'Android Tablet'},
+            {value:'tv/samsung',label:'Samsung TV'},
+            {value:'tv/vidaa',label:'Vidaa TV'},
+            {value:'web/firefox',label:'Firefox'},
+            {value:'web/chrome',label:'Chrome'},
+            {value:'web/edge',label:'Edge'},
+            {value:'web/fallback',label:'Web Fallback'},
+            {value:'console/switch',label:'Nintendo Switch'},
+            {value:'console/ps4',label:'PlayStation 4'},
+            {value:'console/ps5',label:'PlayStation 5'},
+            {value:'console/xbox_one',label:'Xbox One'}
+        ];
+
+        const STREAM_DEFAULTS = {
+            'tv/android_tv': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'ANDROIDTV/3.59.0 Android/16', deviceType:'Android TV', deviceName:'Android TV'},
+            'android/phone': {auth:'Basic bzJhNndsamdub3FtdjloMWJ5bHI6Ujk3S3ExZm5faExZVFk0bDJxTjJIT2lDQnpfYnpBSUU=', ua:'Crunchyroll/3.97.0 Android/16 okhttp/4.12.0', deviceType:'OnePlus CPH2449', deviceName:'CPH2449'},
+            'android/tablet': {auth:'Basic bzJhNndsamdub3FtdjloMWJ5bHI6Ujk3S3ExZm5faExZVFk0bDJxTjJIT2lDQnpfYnpBSUU=', ua:'Crunchyroll/3.97.0 Android/16 okhttp/4.12.0', deviceType:'Android Tablet', deviceName:'Android Tablet'},
+            'tv/samsung': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'SAMSUNG-TV/1.0', deviceType:'Samsung TV', deviceName:'Samsung TV'},
+            'tv/vidaa': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'VIDAA-TV/1.0', deviceType:'Vidaa TV', deviceName:'Vidaa TV'},
+            'web/firefox': {auth:'Basic bm9haWhkZmNtb3R0YXR0dXU6Z2d0dW9odXJxZXZoaW1ubGtpaHRvbmV0bQ==', ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0', deviceType:'Firefox', deviceName:'Firefox'},
+            'web/chrome': {auth:'Basic bm9haWhkZmNtb3R0YXR0dXU6Z2d0dW9odXJxZXZoaW1ubGtpaHRvbmV0bQ==', ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36', deviceType:'Chrome', deviceName:'Chrome'},
+            'web/edge': {auth:'Basic bm9haWhkZmNtb3R0YXR0dXU6Z2d0dW9odXJxZXZoaW1ubGtpaHRvbmV0bQ==', ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0', deviceType:'Edge', deviceName:'Edge'},
+            'web/fallback': {auth:'Basic bm9haWhkZmNtb3R0YXR0dXU6Z2d0dW9odXJxZXZoaW1ubGtpaHRvbmV0bQ==', ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', deviceType:'Web', deviceName:'Web'},
+            'console/switch': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'NintendoSwitch/1.0', deviceType:'Nintendo Switch', deviceName:'Nintendo Switch'},
+            'console/ps4': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'PlayStation4/1.0', deviceType:'PlayStation 4', deviceName:'PlayStation 4'},
+            'console/ps5': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'PlayStation5/1.0', deviceType:'PlayStation 5', deviceName:'PlayStation 5'},
+            'console/xbox_one': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'XboxOne/1.0', deviceType:'Xbox One', deviceName:'Xbox One'}
+        };
+
+        function updateStreamDefaults(endpointNum){
+            const useDefault = document.getElementById('setting-stream-use-default' + (endpointNum===2?'-2':''))?.checked ?? true;
+            const fields = document.querySelectorAll('.stream-field-' + endpointNum);
+            fields.forEach(f => {
+                f.style.opacity = useDefault ? '0.5' : '1';
+                const input = f.querySelector('input');
+                if (input) input.disabled = useDefault;
+            });
+            
+            if (useDefault){
+                const endpoint = document.getElementById('setting-stream-endpoint' + (endpointNum===2?'-2':''))?.value || 'tv/android_tv';
+                const defaults = STREAM_DEFAULTS[endpoint];
+                if (defaults){
+                    document.getElementById('setting-stream-auth' + (endpointNum===2?'-2':'')).value = defaults.auth;
+                    document.getElementById('setting-stream-ua' + (endpointNum===2?'-2':'')).value = defaults.ua;
+                    document.getElementById('setting-stream-device-type' + (endpointNum===2?'-2':'')).value = defaults.deviceType;
+                    document.getElementById('setting-stream-device-name' + (endpointNum===2?'-2':'')).value = defaults.deviceName;
+                }
+            }
+        }
+
         function renderMultiSelect(id, selected, options) {
             const sel = new Set(selected || []);
             return `<div class="multi-select" id="${id}">` +
@@ -1801,6 +1862,7 @@ MAINTENANCE NOTES:
                     <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications')">Notifications</button>
                     <button class="settings-tab ${settingsTab === 'proxy' ? 'active' : ''}" onclick="setSettingsTab('proxy')">Proxy</button>
                     <button class="settings-tab ${settingsTab === 'flaresolverr' ? 'active' : ''}" onclick="setSettingsTab('flaresolverr')">FlareSolverr</button>
+                    <button class="settings-tab ${settingsTab === 'calendar' ? 'active' : ''}" onclick="setSettingsTab('calendar')">Calendar</button>
                     <button class="settings-tab ${settingsTab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Appearance</button>
                 </div>
                 <div id="settings-content">
@@ -1831,6 +1893,7 @@ MAINTENANCE NOTES:
             const s = c.sonarr || {};
             const p = c.proxy || {};
             const f = c.flareSolverr || {};
+            const cal = c.calendar || {};
             const a = c.appearance || {};
             const g = c.general || {};
             switch(settingsTab) {
@@ -1859,7 +1922,7 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Dub Languages</span><span class="settings-section-desc">Select languages to download</span></div>
                             <div class="settings-section-body">
-                                ${renderMultiSelect('setting-dub-langs', dl.dubLanguages||['ja-JP'], LANG_OPTIONS)}
+                                ${renderMultiSelect('setting-dub-langs', dl.dubLanguages||LANG_OPTIONS.map(o=>o.value), LANG_OPTIONS)}
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Download AD for Selected Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-ad" ${dl.downloadDescriptionAudio?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download First Available Dub</div></div><label class="toggle-switch"><input type="checkbox" id="setting-first-dub" ${dl.downloadFirstAvailableDub?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
@@ -1875,7 +1938,7 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">Softsubs</span><span class="settings-section-desc">Subtitle download options</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Softsubs Languages</div></div></div>
-                                ${renderMultiSelect('setting-soft-subs', dl.softSubs||['en-US'], LANG_OPTIONS)}
+                                ${renderMultiSelect('setting-soft-subs', dl.softSubs||LANG_OPTIONS.map(o=>o.value), LANG_OPTIONS)}
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Fix CCC Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-fix-ccc" ${dl.fixCccSubtitles?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Duplicate</div></div><label class="toggle-switch"><input type="checkbox" id="setting-subs-dup" ${dl.subsDownloadDuplicate?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Add ScaledBorderAndShadow</div></div><select class="form-select" id="setting-scaled-border" style="min-width:150px;"><option value="DontAdd" ${dl.subsAddScaledBorder==='DontAdd'?'selected':''}>Don't Add</option><option value="ScaledBorderAndShadowYes" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowYes'?'selected':''}>yes</option><option value="ScaledBorderAndShadowNo" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowNo'?'selected':''}>no</option></select></div>
@@ -1913,22 +1976,22 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Stream Endpoints</span><span class="settings-section-desc">Stream endpoint configuration</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Primary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint" style="min-width:150px;"><option value="tv/android_tv" ${(cr.streamEndpoint?.endpoint||'tv/android_tv')==='tv/android_tv'?'selected':''}>tv/android_tv</option><option value="web/firefox" ${(cr.streamEndpoint?.endpoint||'')==='web/firefox'?'selected':''}>web/firefox</option><option value="web/chrome" ${(cr.streamEndpoint?.endpoint||'')==='web/chrome'?'selected':''}>web/chrome</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Primary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth" value="${cr.streamEndpoint?.authorization||''}" style="width:200px;" placeholder="Authorization"></div>
-                                <div class="setting-row"><div><div class="setting-label">Primary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua" value="${cr.streamEndpoint?.userAgent||''}" style="width:250px;" placeholder="User-Agent"></div>
-                                <div class="setting-row"><div><div class="setting-label">Primary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type" value="${cr.streamEndpoint?.deviceType||''}" style="width:200px;" placeholder="Device Type"></div>
-                                <div class="setting-row"><div><div class="setting-label">Primary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name" value="${cr.streamEndpoint?.deviceName||''}" style="width:200px;" placeholder="Device Name"></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint" style="min-width:150px;" onchange="updateStreamDefaults(1)">${STREAM_ENDPOINT_OPTIONS.map(o=>`<option value="${o.value}" ${(cr.streamEndpoint?.endpoint||'tv/android_tv')===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default" ${cr.streamEndpoint?.useDefault!==false?'checked':''} onchange="updateStreamDefaults(1)"><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth" value="${cr.streamEndpoint?.authorization||''}" style="width:200px;" placeholder="Authorization" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua" value="${cr.streamEndpoint?.userAgent||''}" style="width:250px;" placeholder="User-Agent" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type" value="${cr.streamEndpoint?.deviceType||''}" style="width:200px;" placeholder="Device Type" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name" value="${cr.streamEndpoint?.deviceName||''}" style="width:200px;" placeholder="Device Name" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
                                 <div class="setting-row"><div><div class="setting-label">Primary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video" ${cr.streamEndpoint?.video!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Primary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio" ${cr.streamEndpoint?.audio!==false?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Primary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default" ${cr.streamEndpoint?.useDefault?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint-2" style="min-width:150px;"><option value="" ${!cr.streamEndpointSecondary?.endpoint?'selected':''}>None</option><option value="tv/android_tv" ${(cr.streamEndpointSecondary?.endpoint||'')==='tv/android_tv'?'selected':''}>tv/android_tv</option><option value="web/firefox" ${(cr.streamEndpointSecondary?.endpoint||'')==='web/firefox'?'selected':''}>web/firefox</option><option value="web/chrome" ${(cr.streamEndpointSecondary?.endpoint||'')==='web/chrome'?'selected':''}>web/chrome</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth-2" value="${cr.streamEndpointSecondary?.authorization||''}" style="width:200px;" placeholder="Authorization"></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua-2" value="${cr.streamEndpointSecondary?.userAgent||''}" style="width:250px;" placeholder="User-Agent"></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type-2" value="${cr.streamEndpointSecondary?.deviceType||''}" style="width:200px;" placeholder="Device Type"></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name-2" value="${cr.streamEndpointSecondary?.deviceName||''}" style="width:200px;" placeholder="Device Name"></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint-2" style="min-width:150px;" onchange="updateStreamDefaults(2)"><option value="" ${!cr.streamEndpointSecondary?.endpoint?'selected':''}>None</option>${STREAM_ENDPOINT_OPTIONS.map(o=>`<option value="${o.value}" ${(cr.streamEndpointSecondary?.endpoint||'')===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default-2" ${cr.streamEndpointSecondary?.useDefault!==false?'checked':''} onchange="updateStreamDefaults(2)"><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth-2" value="${cr.streamEndpointSecondary?.authorization||''}" style="width:200px;" placeholder="Authorization" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua-2" value="${cr.streamEndpointSecondary?.userAgent||''}" style="width:250px;" placeholder="User-Agent" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type-2" value="${cr.streamEndpointSecondary?.deviceType||''}" style="width:200px;" placeholder="Device Type" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name-2" value="${cr.streamEndpointSecondary?.deviceName||''}" style="width:200px;" placeholder="Device Name" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
                                 <div class="setting-row"><div><div class="setting-label">Secondary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video-2" ${cr.streamEndpointSecondary?.video!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Secondary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio-2" ${cr.streamEndpointSecondary?.audio!==false?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default-2" ${cr.streamEndpointSecondary?.useDefault?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                         <div class="settings-section">
@@ -1977,6 +2040,8 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Include Episode description</div></div><label class="toggle-switch"><input type="checkbox" id="setting-include-desc" ${dl.includeVideoDescription?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Episode description Language</div></div><select class="form-select" id="setting-desc-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.descriptionLang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Sync Timings</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sync-timing" ${dl.syncTiming?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Sync Full Quality Fallback</div><div class="setting-desc">Use full quality if sync fails</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sync-fallback" ${dl.syncTimingFullQualityFallback?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Sync HW Accel</div><div class="setting-desc">Hardware acceleration for sync</div></div><input type="text" class="form-input" id="setting-sync-hwaccel" value="${dl.syncHwAccel||''}" style="width:150px;" placeholder="none"></div>
                             </div>
                         </div>
                         <div class="settings-section">
@@ -2001,6 +2066,8 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-queue-proc-jobs" value="${q.simultaneousProcessingJobs||2}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Queue File Path</div></div><input type="text" class="form-input" id="setting-queue-path" value="${q.queueFilePath||'Cruncharr/queue.json'}" style="width:250px;"></div>
                             </div>
                         </div>
                     `;
@@ -2097,16 +2164,31 @@ MAINTENANCE NOTES:
                         </div>
                     `;
                     break;
+                case 'calendar':
+                    content.innerHTML = `
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Calendar Settings</span><span class="settings-section-desc">Calendar display options</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Calendar Language</div></div><select class="form-select" id="setting-cal-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${cal.language===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Dub Filter</div></div><select class="form-select" id="setting-cal-dub-filter" style="min-width:150px;"><option value="none" ${cal.dubFilter==='none'?'selected':''}>None</option><option value="dubbed" ${cal.dubFilter==='dubbed'?'selected':''}>Dubbed Only</option><option value="subbed" ${cal.dubFilter==='subbed'?'selected':''}>Subbed Only</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Custom Calendar</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-custom" ${cal.custom?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Hide Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-hide-dubs" ${cal.hideDubs?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Show Upcoming Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-upcoming" ${cal.showUpcomingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Update History</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-update-history" ${cal.updateHistory?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                    `;
+                    break;
                 case 'appearance':
                     content.innerHTML = `
                         <div class="settings-section">
-                            <div class="settings-section-header"><span class="settings-section-title">Appearance</span><span class="settings-section-desc">UI customization</span></div>
+                            <div class="settings-section-header"><span class="settings-section-title">Appearance Settings</span><span class="settings-section-desc">Customize the UI</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="text" class="form-input" id="setting-accent" value="${a.accentColor||''}" style="width:150px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input" id="setting-accent" value="${a.accentColor||'#F47521'}" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input" id="setting-bg-path" value="${a.backgroundImagePath||''}" style="width:300px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${a.backgroundImageOpacity??0.5}" min="0" max="1" step="0.1" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input" id="setting-bg-blur" value="${a.backgroundImageBlurRadius??10}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${a.backgroundImageOpacity||0.5}" min="0" max="1" step="0.1" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input" id="setting-bg-blur" value="${a.backgroundImageBlurRadius||10}" min="0" style="width:100px;"></div>
                             </div>
                         </div>
                     `;
@@ -2147,173 +2229,224 @@ MAINTENANCE NOTES:
         });
 
         async function saveSettings() {
-            const newConfig = {
-                general: {
-                    logMode: document.getElementById('setting-log-mode')?.checked || false,
-                    removeFinishedDownload: document.getElementById('setting-remove-finished')?.checked || false,
-                    tokenFilePath: document.getElementById('setting-token-path')?.value || ''
-                },
-                crunchyroll: {
-                    useBetaApi: document.getElementById('setting-use-beta-api')?.checked ?? true,
-                    markAsWatched: document.getElementById('setting-mark-watched')?.checked || false,
-                    searchFetchFeaturedMusic: document.getElementById('setting-search-music')?.checked || false,
-                    streamEndpoint: {
-                        endpoint: document.getElementById('setting-stream-endpoint')?.value || 'tv/android_tv',
-                        authorization: document.getElementById('setting-stream-auth')?.value || '',
-                        userAgent: document.getElementById('setting-stream-ua')?.value || '',
-                        deviceType: document.getElementById('setting-stream-device-type')?.value || '',
-                        deviceName: document.getElementById('setting-stream-device-name')?.value || '',
-                        video: document.getElementById('setting-stream-video')?.checked ?? true,
-                        audio: document.getElementById('setting-stream-audio')?.checked ?? true,
-                        useDefault: document.getElementById('setting-stream-use-default')?.checked ?? false
-                    },
-                    streamEndpointSecondary: {
-                        endpoint: document.getElementById('setting-stream-endpoint-2')?.value || '',
-                        authorization: document.getElementById('setting-stream-auth-2')?.value || '',
-                        userAgent: document.getElementById('setting-stream-ua-2')?.value || '',
-                        deviceType: document.getElementById('setting-stream-device-type-2')?.value || '',
-                        deviceName: document.getElementById('setting-stream-device-name-2')?.value || '',
-                        video: document.getElementById('setting-stream-video-2')?.checked ?? true,
-                        audio: document.getElementById('setting-stream-audio-2')?.checked ?? true,
-                        useDefault: document.getElementById('setting-stream-use-default-2')?.checked ?? false
-                    }
-                },
-                download: {
-                    outputDirectory: document.getElementById('setting-output-dir')?.value || '/downloads',
-                    tempDirectory: document.getElementById('setting-temp-dir')?.value || '/tmp/cruncharr',
-                    useTempFolder: document.getElementById('setting-use-temp')?.checked || false,
-                    filename: document.getElementById('setting-filename')?.value || '${seriesTitle} - S${season}E${episode} [${height}p]',
-                    filenameWhitespaceSubstitute: document.getElementById('setting-whitespace-sub')?.value || '',
-                    videoTitle: document.getElementById('setting-video-title')?.value || null,
-                    includeVideoDescription: document.getElementById('setting-include-desc')?.checked || false,
-                    descriptionLang: document.getElementById('setting-desc-lang')?.value || 'en-US',
-                    leadingNumbers: parseInt(document.getElementById('setting-leading-zeros')?.value) || 2,
-                    qualityVideo: document.getElementById('setting-quality-video')?.value || 'best',
-                    qualityAudio: document.getElementById('setting-quality-audio')?.value || 'best',
-                    dubLanguages: getMultiSelect('setting-dub-langs'),
-                    defaultAudio: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
-                    downloadDescriptionAudio: document.getElementById('setting-dl-ad')?.checked ?? true,
-                    downloadFirstAvailableDub: document.getElementById('setting-first-dub')?.checked || false,
-                    dlVideoOnce: !(document.getElementById('setting-dl-video-every')?.checked ?? true),
-                    keepDubsSeparate: document.getElementById('setting-keep-separate')?.checked || false,
-                    dubDownloadDelaySeconds: parseInt(document.getElementById('setting-dub-delay')?.value) || 0,
-                    hardSubLang: document.getElementById('setting-hard-sub')?.value || 'none',
-                    hardSubRawFallback: document.getElementById('setting-hard-fallback')?.checked || false,
-                    softSubs: getMultiSelect('setting-soft-subs'),
-                    defaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
-                    includeSignsSubs: document.getElementById('setting-signs-subs')?.checked || false,
-                    signsSubsAsForced: document.getElementById('setting-signs-forced')?.checked || false,
-                    includeCcSubs: document.getElementById('setting-cc-subs')?.checked || false,
-                    ccSubsMuxingFlag: document.getElementById('setting-cc-hi')?.checked || false,
-                    subsDownloadDuplicate: document.getElementById('setting-subs-dup')?.checked || false,
-                    fixCccSubtitles: document.getElementById('setting-fix-ccc')?.checked ?? true,
-                    convertVtt2Ass: document.getElementById('setting-cc-convert')?.checked ?? true,
-                    ccSubsFont: document.getElementById('setting-cc-font')?.value || 'Trebuchet MS',
-                    subsAddScaledBorder: document.getElementById('setting-scaled-border')?.value || 'DontAdd',
-                    simultaneousDownloads: parseInt(document.getElementById('setting-concurrent')?.value) || 2,
-                    simultaneousProcessingJobs: parseInt(document.getElementById('setting-proc-jobs')?.value) || 2,
-                    downloadMethodeNew: document.getElementById('setting-new-method')?.checked || false,
-                    downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
-                    downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
-                    downloadSpeedLimit: parseInt(document.getElementById('setting-speed-limit')?.value) || 0,
-                    downloadSpeedInBits: document.getElementById('setting-speed-bits')?.checked || false,
-                    retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 5,
-                    retryDelay: parseInt(document.getElementById('setting-retry-delay')?.value) || 5,
-                    playbackRateLimitRetryDelaySeconds: parseInt(document.getElementById('setting-rate-limit-delay')?.value) || 30,
-                    retryMaxDelaySeconds: parseInt(document.getElementById('setting-retry-max-delay')?.value) || 3600,
-                    partSize: parseInt(document.getElementById('setting-part-size')?.value) || 10,
-                    noVideo: !(document.getElementById('setting-dl-video')?.checked ?? true),
-                    noAudio: !(document.getElementById('setting-dl-audio')?.checked ?? true),
-                    chapters: document.getElementById('setting-chapters')?.checked ?? true,
-                    skipMuxing: document.getElementById('setting-skip-mux')?.checked || false,
-                    muxMp4: document.getElementById('setting-mux-mp4')?.checked || false,
-                    muxAudioOnlyToMp3: document.getElementById('setting-mux-mp3')?.checked || false,
-                    skipSubMux: document.getElementById('setting-skip-sub-mux')?.checked || false,
-                    muxFonts: document.getElementById('setting-mux-fonts')?.checked || false,
-                    muxTypesettingFonts: document.getElementById('setting-mux-ts-fonts')?.checked || false,
-                    muxCover: document.getElementById('setting-mux-cover')?.checked || false,
-                    muxDefaultDub: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
-                    muxDefaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
-                    muxDefaultSubSigns: document.getElementById('setting-mux-default-signs')?.checked || false,
-                    muxDefaultSubForcedDisplay: document.getElementById('setting-mux-forced')?.checked || false,
-                    syncTiming: document.getElementById('setting-sync-timing')?.checked || false,
-                    syncTimingFullQualityFallback: false,
-                    syncHwAccel: null,
-                    mkvmergeOptions: getListInput('setting-mkvmerge'),
-                    ffmpegOptions: getListInput('setting-ffmpeg'),
-                    encodeEnabled: document.getElementById('setting-encode')?.checked || false,
-                    encodePreset: document.getElementById('setting-encode-preset')?.value || null
-                },
-                queue: {
-                    persistQueue: document.getElementById('setting-persist-queue')?.checked || false,
-                    autoDownload: document.getElementById('setting-auto-download')?.checked || false
-                },
-                history: {
-                    enabled: document.getElementById('setting-history-enabled')?.checked ?? true,
-                    countMissing: document.getElementById('setting-count-missing')?.checked || false,
-                    includeCrArtists: document.getElementById('setting-cr-artists')?.checked || false,
-                    removeMissingEpisodes: document.getElementById('setting-remove-missing')?.checked ?? true,
-                    addSpecials: document.getElementById('setting-add-specials')?.checked || false,
-                    skipUnmonitored: document.getElementById('setting-skip-unmonitored')?.checked || false,
-                    countSonarr: document.getElementById('setting-count-sonarr')?.checked || false,
-                    lang: document.getElementById('setting-history-lang')?.value || 'en-US',
-                    autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
-                    autoRefreshMode: parseInt(document.getElementById('setting-history-mode')?.value) || 50,
-                    autoRefreshAddToQueue: document.getElementById('setting-history-queue')?.checked ?? true
-                },
-                sonarr: {
-                    enabled: document.getElementById('setting-sonarr-enabled')?.checked || false,
-                    host: document.getElementById('setting-sonarr-host')?.value || null,
-                    port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
-                    apiKey: document.getElementById('setting-sonarr-apikey')?.value || null,
-                    useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
-                    urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null,
-                    useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
-                },
-                notifications: {
-                    webhookUrl: document.getElementById('setting-webhook-url')?.value || null,
-                    webhookEnabled: document.getElementById('setting-webhook-enabled')?.checked || false,
-                    webhookMethod: document.getElementById('setting-webhook-method')?.value || 'POST',
-                    webhookContentType: document.getElementById('setting-webhook-ct')?.value || 'application/json',
-                    webhookHeaders: {},
-                    webhookBodyTemplate: document.getElementById('setting-webhook-body')?.value || '',
-                    notifyQueueFinished: document.getElementById('setting-notify-queue')?.checked || false,
-                    notifyDownloadFinished: document.getElementById('setting-notify-download')?.checked || false,
-                    notifyDownloadFailed: document.getElementById('setting-notify-failed')?.checked || false,
-                    notifyTrackedSeriesReleased: document.getElementById('setting-notify-tracked')?.checked || false,
-                    notifyLoginExpired: document.getElementById('setting-notify-login')?.checked || false,
-                    notifyUpdateAvailable: document.getElementById('setting-notify-update')?.checked || false,
-                    downloadFinishedPlaySound: document.getElementById('setting-play-sound')?.checked || false,
-                    downloadFinishedSoundPath: document.getElementById('setting-sound-path')?.value || null,
-                    downloadFinishedExecute: document.getElementById('setting-exec-finish')?.checked || false,
-                    downloadFinishedExecutePath: document.getElementById('setting-exec-path')?.value || null
-                },
-                proxy: {
-                    enabled: document.getElementById('setting-proxy-enabled')?.checked || false,
-                    socks: document.getElementById('setting-proxy-socks')?.checked || false,
-                    host: document.getElementById('setting-proxy-host')?.value || null,
-                    port: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
-                    username: document.getElementById('setting-proxy-user')?.value || null,
-                    password: document.getElementById('setting-proxy-pass')?.value || null
-                },
-                flareSolverr: {
-                    enabled: document.getElementById('setting-flare-enabled')?.checked || false,
-                    host: document.getElementById('setting-flare-host')?.value || 'localhost',
-                    port: parseInt(document.getElementById('setting-flare-port')?.value) || 0,
-                    useSsl: document.getElementById('setting-flare-ssl')?.checked || false,
-                    mitmEnabled: document.getElementById('setting-flare-mitm')?.checked || false,
-                    mitmHost: document.getElementById('setting-flare-mitm-host')?.value || 'localhost',
-                    mitmPort: parseInt(document.getElementById('setting-flare-mitm-port')?.value) || 8080,
-                    mitmUseSsl: document.getElementById('setting-flare-mitm-ssl')?.checked || false
-                },
-                appearance: {
-                    theme: document.getElementById('setting-theme')?.value || 'System',
-                    accentColor: document.getElementById('setting-accent')?.value || null,
-                    backgroundImagePath: document.getElementById('setting-bg-path')?.value || null,
-                    backgroundImageOpacity: parseFloat(document.getElementById('setting-bg-opacity')?.value) ?? 0.5,
-                    backgroundImageBlurRadius: parseFloat(document.getElementById('setting-bg-blur')?.value) ?? 10
-                }
-            };
+            // Build config update for ONLY the currently active tab
+            // This prevents overwriting settings from inactive tabs whose inputs don't exist in the DOM
+            let newConfig = {};
+            
+            switch(settingsTab) {
+                case 'general':
+                    newConfig.general = {
+                        logMode: document.getElementById('setting-log-mode')?.checked || false,
+                        removeFinishedDownload: document.getElementById('setting-remove-finished')?.checked || false,
+                        tokenFilePath: document.getElementById('setting-token-path')?.value || ''
+                    };
+                    break;
+                    
+                case 'crunchyroll':
+                    newConfig.crunchyroll = {
+                        useBetaApi: document.getElementById('setting-use-beta-api')?.checked ?? true,
+                        markAsWatched: document.getElementById('setting-mark-watched')?.checked || false,
+                        searchFetchFeaturedMusic: document.getElementById('setting-search-music')?.checked || false,
+                        streamEndpoint: {
+                            endpoint: document.getElementById('setting-stream-endpoint')?.value || 'tv/android_tv',
+                            authorization: document.getElementById('setting-stream-auth')?.value || '',
+                            userAgent: document.getElementById('setting-stream-ua')?.value || '',
+                            deviceType: document.getElementById('setting-stream-device-type')?.value || '',
+                            deviceName: document.getElementById('setting-stream-device-name')?.value || '',
+                            video: document.getElementById('setting-stream-video')?.checked ?? true,
+                            audio: document.getElementById('setting-stream-audio')?.checked ?? true,
+                            useDefault: document.getElementById('setting-stream-use-default')?.checked ?? false
+                        },
+                        streamEndpointSecondary: {
+                            endpoint: document.getElementById('setting-stream-endpoint-2')?.value || '',
+                            authorization: document.getElementById('setting-stream-auth-2')?.value || '',
+                            userAgent: document.getElementById('setting-stream-ua-2')?.value || '',
+                            deviceType: document.getElementById('setting-stream-device-type-2')?.value || '',
+                            deviceName: document.getElementById('setting-stream-device-name-2')?.value || '',
+                            video: document.getElementById('setting-stream-video-2')?.checked ?? true,
+                            audio: document.getElementById('setting-stream-audio-2')?.checked ?? true,
+                            useDefault: document.getElementById('setting-stream-use-default-2')?.checked ?? false
+                        }
+                    };
+                    break;
+                    
+                case 'download':
+                    newConfig.download = {
+                        outputDirectory: document.getElementById('setting-output-dir')?.value || '/downloads',
+                        tempDirectory: document.getElementById('setting-temp-dir')?.value || '/tmp/cruncharr',
+                        useTempFolder: document.getElementById('setting-use-temp')?.checked || false,
+                        filename: document.getElementById('setting-filename')?.value || '${seriesTitle} - S${season}E${episode} [${height}p]',
+                        filenameWhitespaceSubstitute: document.getElementById('setting-whitespace-sub')?.value || '',
+                        videoTitle: document.getElementById('setting-video-title')?.value || null,
+                        includeVideoDescription: document.getElementById('setting-include-desc')?.checked || false,
+                        descriptionLang: document.getElementById('setting-desc-lang')?.value || 'en-US',
+                        leadingNumbers: parseInt(document.getElementById('setting-leading-zeros')?.value) || 2,
+                        qualityVideo: document.getElementById('setting-quality-video')?.value || 'best',
+                        qualityAudio: document.getElementById('setting-quality-audio')?.value || 'best',
+                        dubLanguages: getMultiSelect('setting-dub-langs'),
+                        defaultAudio: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
+                        downloadDescriptionAudio: document.getElementById('setting-dl-ad')?.checked ?? true,
+                        downloadFirstAvailableDub: document.getElementById('setting-first-dub')?.checked || false,
+                        dlVideoOnce: !(document.getElementById('setting-dl-video-every')?.checked ?? true),
+                        keepDubsSeparate: document.getElementById('setting-keep-separate')?.checked || false,
+                        dubDownloadDelaySeconds: parseInt(document.getElementById('setting-dub-delay')?.value) || 0,
+                        hardSubLang: document.getElementById('setting-hard-sub')?.value || 'none',
+                        hardSubRawFallback: document.getElementById('setting-hard-fallback')?.checked || false,
+                        softSubs: getMultiSelect('setting-soft-subs'),
+                        defaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
+                        includeSignsSubs: document.getElementById('setting-signs-subs')?.checked || false,
+                        signsSubsAsForced: document.getElementById('setting-signs-forced')?.checked || false,
+                        includeCcSubs: document.getElementById('setting-cc-subs')?.checked || false,
+                        ccSubsMuxingFlag: document.getElementById('setting-cc-hi')?.checked || false,
+                        subsDownloadDuplicate: document.getElementById('setting-subs-dup')?.checked || false,
+                        fixCccSubtitles: document.getElementById('setting-fix-ccc')?.checked ?? true,
+                        convertVtt2Ass: document.getElementById('setting-cc-convert')?.checked ?? true,
+                        ccSubsFont: document.getElementById('setting-cc-font')?.value || 'Trebuchet MS',
+                        subsAddScaledBorder: document.getElementById('setting-scaled-border')?.value || 'DontAdd',
+                        simultaneousDownloads: parseInt(document.getElementById('setting-concurrent')?.value) || 2,
+                        simultaneousProcessingJobs: parseInt(document.getElementById('setting-proc-jobs')?.value) || 2,
+                        downloadMethodeNew: document.getElementById('setting-new-method')?.checked || false,
+                        downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
+                        downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
+                        downloadSpeedLimit: parseInt(document.getElementById('setting-speed-limit')?.value) || 0,
+                        downloadSpeedInBits: document.getElementById('setting-speed-bits')?.checked || false,
+                        retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 5,
+                        retryDelay: parseInt(document.getElementById('setting-retry-delay')?.value) || 5,
+                        playbackRateLimitRetryDelaySeconds: parseInt(document.getElementById('setting-rate-limit-delay')?.value) || 30,
+                        retryMaxDelaySeconds: parseInt(document.getElementById('setting-retry-max-delay')?.value) || 3600,
+                        partSize: parseInt(document.getElementById('setting-part-size')?.value) || 10,
+                        noVideo: !(document.getElementById('setting-dl-video')?.checked ?? true),
+                        noAudio: !(document.getElementById('setting-dl-audio')?.checked ?? true),
+                        chapters: document.getElementById('setting-chapters')?.checked ?? true,
+                        skipMuxing: document.getElementById('setting-skip-mux')?.checked || false,
+                        muxMp4: document.getElementById('setting-mux-mp4')?.checked || false,
+                        muxAudioOnlyToMp3: document.getElementById('setting-mux-mp3')?.checked || false,
+                        skipSubMux: document.getElementById('setting-skip-sub-mux')?.checked || false,
+                        muxFonts: document.getElementById('setting-mux-fonts')?.checked || false,
+                        muxTypesettingFonts: document.getElementById('setting-mux-ts-fonts')?.checked || false,
+                        muxCover: document.getElementById('setting-mux-cover')?.checked || false,
+                        muxDefaultDub: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
+                        muxDefaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
+                        muxDefaultSubSigns: document.getElementById('setting-mux-default-signs')?.checked || false,
+                        muxDefaultSubForcedDisplay: document.getElementById('setting-mux-forced')?.checked || false,
+                        syncTiming: document.getElementById('setting-sync-timing')?.checked || false,
+                        syncTimingFullQualityFallback: document.getElementById('setting-sync-fallback')?.checked || false,
+                        syncHwAccel: document.getElementById('setting-sync-hwaccel')?.value || null,
+                        mkvmergeOptions: getListInput('setting-mkvmerge'),
+                        ffmpegOptions: getListInput('setting-ffmpeg'),
+                        encodeEnabled: document.getElementById('setting-encode')?.checked || false,
+                        encodePreset: document.getElementById('setting-encode-preset')?.value || null
+                    };
+                    break;
+                    
+                case 'queue':
+                    newConfig.queue = {
+                        persistQueue: document.getElementById('setting-persist-queue')?.checked || false,
+                        autoDownload: document.getElementById('setting-auto-download')?.checked || false,
+                        simultaneousProcessingJobs: parseInt(document.getElementById('setting-queue-proc-jobs')?.value) || 2,
+                        queueFilePath: document.getElementById('setting-queue-path')?.value || 'Cruncharr/queue.json'
+                    };
+                    break;
+                    
+                case 'calendar':
+                    newConfig.calendar = {
+                        language: document.getElementById('setting-cal-lang')?.value || 'en-us',
+                        dubFilter: document.getElementById('setting-cal-dub-filter')?.value || 'none',
+                        custom: document.getElementById('setting-cal-custom')?.checked || false,
+                        hideDubs: document.getElementById('setting-cal-hide-dubs')?.checked || false,
+                        showUpcomingEpisodes: document.getElementById('setting-cal-upcoming')?.checked || false,
+                        updateHistory: document.getElementById('setting-cal-update-history')?.checked || false
+                    };
+                    break;
+                    
+                case 'history':
+                    newConfig.history = {
+                        enabled: document.getElementById('setting-history-enabled')?.checked ?? true,
+                        countMissing: document.getElementById('setting-count-missing')?.checked || false,
+                        includeCrArtists: document.getElementById('setting-cr-artists')?.checked || false,
+                        removeMissingEpisodes: document.getElementById('setting-remove-missing')?.checked ?? true,
+                        addSpecials: document.getElementById('setting-add-specials')?.checked || false,
+                        skipUnmonitored: document.getElementById('setting-skip-unmonitored')?.checked || false,
+                        countSonarr: document.getElementById('setting-count-sonarr')?.checked || false,
+                        lang: document.getElementById('setting-history-lang')?.value || 'en-US',
+                        autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
+                        autoRefreshMode: parseInt(document.getElementById('setting-history-mode')?.value) || 50,
+                        autoRefreshAddToQueue: document.getElementById('setting-history-queue')?.checked ?? true
+                    };
+                    break;
+                    
+                case 'sonarr':
+                    newConfig.sonarr = {
+                        enabled: document.getElementById('setting-sonarr-enabled')?.checked || false,
+                        host: document.getElementById('setting-sonarr-host')?.value || null,
+                        port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
+                        apiKey: document.getElementById('setting-sonarr-apikey')?.value || null,
+                        useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
+                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null,
+                        useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
+                    };
+                    break;
+                    
+                case 'notifications':
+                    newConfig.notifications = {
+                        webhookUrl: document.getElementById('setting-webhook-url')?.value || null,
+                        webhookEnabled: document.getElementById('setting-webhook-enabled')?.checked || false,
+                        webhookMethod: document.getElementById('setting-webhook-method')?.value || 'POST',
+                        webhookContentType: document.getElementById('setting-webhook-ct')?.value || 'application/json',
+                        webhookHeaders: {},
+                        webhookBodyTemplate: document.getElementById('setting-webhook-body')?.value || '',
+                        notifyQueueFinished: document.getElementById('setting-notify-queue')?.checked || false,
+                        notifyDownloadFinished: document.getElementById('setting-notify-download')?.checked || false,
+                        notifyDownloadFailed: document.getElementById('setting-notify-failed')?.checked || false,
+                        notifyTrackedSeriesReleased: document.getElementById('setting-notify-tracked')?.checked || false,
+                        notifyLoginExpired: document.getElementById('setting-notify-login')?.checked || false,
+                        notifyUpdateAvailable: document.getElementById('setting-notify-update')?.checked || false,
+                        downloadFinishedPlaySound: document.getElementById('setting-play-sound')?.checked || false,
+                        downloadFinishedSoundPath: document.getElementById('setting-sound-path')?.value || null,
+                        downloadFinishedExecute: document.getElementById('setting-exec-finish')?.checked || false,
+                        downloadFinishedExecutePath: document.getElementById('setting-exec-path')?.value || null
+                    };
+                    break;
+                    
+                case 'proxy':
+                    newConfig.proxy = {
+                        enabled: document.getElementById('setting-proxy-enabled')?.checked || false,
+                        socks: document.getElementById('setting-proxy-socks')?.checked || false,
+                        host: document.getElementById('setting-proxy-host')?.value || null,
+                        port: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
+                        username: document.getElementById('setting-proxy-user')?.value || null,
+                        password: document.getElementById('setting-proxy-pass')?.value || null
+                    };
+                    break;
+                    
+                case 'flare':
+                    newConfig.flareSolverr = {
+                        enabled: document.getElementById('setting-flare-enabled')?.checked || false,
+                        host: document.getElementById('setting-flare-host')?.value || 'localhost',
+                        port: parseInt(document.getElementById('setting-flare-port')?.value) || 0,
+                        useSsl: document.getElementById('setting-flare-ssl')?.checked || false,
+                        mitmEnabled: document.getElementById('setting-flare-mitm')?.checked || false,
+                        mitmHost: document.getElementById('setting-flare-mitm-host')?.value || 'localhost',
+                        mitmPort: parseInt(document.getElementById('setting-flare-mitm-port')?.value) || 8080,
+                        mitmUseSsl: document.getElementById('setting-flare-mitm-ssl')?.checked || false
+                    };
+                    break;
+                    
+                case 'appearance':
+                    newConfig.appearance = {
+                        theme: document.getElementById('setting-theme')?.value || 'System',
+                        accentColor: document.getElementById('setting-accent')?.value || null,
+                        backgroundImagePath: document.getElementById('setting-bg-path')?.value || null,
+                        backgroundImageOpacity: parseFloat(document.getElementById('setting-bg-opacity')?.value) ?? 0.5,
+                        backgroundImageBlurRadius: parseFloat(document.getElementById('setting-bg-blur')?.value) ?? 10
+                    };
+                    break;
+                    
+                default:
+                    showToast('Unknown settings tab', 'error');
+                    return;
+            }
+            
             try {
                 const res = await fetch('/api/v1/config', {
                     method: 'POST',
@@ -2322,15 +2455,53 @@ MAINTENANCE NOTES:
                 });
                 if (res.ok) {
                     showToast('Settings saved', 'success');
-                    config = newConfig;
+                    // Merge the saved section into our local config cache
+                    Object.assign(config, newConfig);
                     applyTheme();
                 }
                 else showToast('Failed to save settings', 'error');
             } catch (e) { showToast('Error saving settings', 'error'); }
         }
 
-        function toggleSetting(key, value) {
+        async function toggleSetting(key, value) {
             console.log('Toggle', key, value);
+            
+            let updateData = {};
+            
+            if (key === 'removeFinished') {
+                updateData = { general: { removeFinishedDownload: value } };
+            } else if (key === 'autoDownload') {
+                updateData = { queue: { autoDownload: value } };
+            }
+            
+            try {
+                const res = await fetch('/api/v1/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updateData)
+                });
+                if (res.ok) {
+                    showToast(`${key === 'removeFinished' ? 'Remove Finished' : 'Auto Download'} ${value ? 'enabled' : 'disabled'}`, 'success');
+                    // Update local config cache
+                    if (key === 'removeFinished') {
+                        config.general = config.general || {};
+                        config.general.removeFinishedDownload = value;
+                    } else if (key === 'autoDownload') {
+                        config.queue = config.queue || {};
+                        config.queue.autoDownload = value;
+                    }
+                } else {
+                    showToast('Failed to save setting', 'error');
+                    // Revert checkbox on failure
+                    const checkbox = document.getElementById(key === 'removeFinished' ? 'toggle-remove-finished' : 'toggle-auto-download');
+                    if (checkbox) checkbox.checked = !value;
+                }
+            } catch (e) {
+                showToast('Error saving setting', 'error');
+                // Revert checkbox on failure
+                const checkbox = document.getElementById(key === 'removeFinished' ? 'toggle-remove-finished' : 'toggle-auto-download');
+                if (checkbox) checkbox.checked = !value;
+            }
         }
 
         async function retryFailed() {
@@ -2343,8 +2514,18 @@ MAINTENANCE NOTES:
 
         async function pauseRunning() {
             try {
-                await fetch('/api/v1/queue/pause-all', { method: 'POST' });
-                showToast('Paused running downloads', 'success');
+                // Find all active/downloading items and pause them individually
+                const activeItems = queueData.filter(i => 
+                    (i.downloadProgress?.state || '').toLowerCase() === 'downloading'
+                );
+                if (activeItems.length === 0) {
+                    showToast('No active downloads to pause', 'warning');
+                    return;
+                }
+                for (const item of activeItems) {
+                    await fetch(`/api/v1/queue/${item.id}/pause`, { method: 'POST' });
+                }
+                showToast(`Paused ${activeItems.length} download(s)`, 'success');
                 fetchDownloads();
             } catch (e) { showToast('Pause failed', 'error'); }
         }
@@ -2366,6 +2547,14 @@ MAINTENANCE NOTES:
             } catch (e) { showToast('Retry failed', 'error'); }
         }
 
+        async function startDownload(id) {
+            try {
+                await fetch(`/api/v1/queue/${id}/start`, { method: 'POST' });
+                showToast('Starting download', 'success');
+                fetchDownloads();
+            } catch (e) { showToast('Start failed', 'error'); }
+        }
+
         async function togglePauseResume(id, isDownloading) {
             try {
                 const endpoint = isDownloading ? 'pause' : 'resume';
@@ -2384,14 +2573,92 @@ MAINTENANCE NOTES:
         }
 
         function refreshHistory() { fetchHistoryData(); }
-        function addMissingToQueue() { showToast('Add missing to queue not yet implemented', 'warning'); }
-        function toggleEditMode() { showToast('Edit mode toggled', 'success'); }
-        function toggleSearchDropdown() { showToast('Search dropdown', 'warning'); }
-        function openSonarrMenu() { showToast('Sonarr menu', 'warning'); }
-        function toggleSortMenu() { showToast('Sort menu', 'warning'); }
-        function toggleFilterMenu() { showToast('Filter menu', 'warning'); }
-        function refreshSeries(id) { showToast('Refreshing series...', 'success'); }
-        function downloadSeries(id) { showToast('Downloading series...', 'success'); }
+        async function addMissingToQueue() {
+            try {
+                // Fetch rich history to find series with missing episodes
+                const res = await fetch('/api/v1/history/rich');
+                const data = await res.json();
+                let added = 0;
+                
+                // Iterate through history and add missing episodes
+                for (const series of (data || [])) {
+                    for (const season of (series.seasons || [])) {
+                        for (const episode of (season.episodes || [])) {
+                            if (!episode.isDownloaded && episode.episodeId) {
+                                await fetch('/api/v1/queue', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        episodeId: episode.episodeId,
+                                        title: episode.title || 'Unknown',
+                                        seriesTitle: series.title || 'Unknown',
+                                        seasonNumber: season.seasonNumber || 1,
+                                        episodeNumber: episode.episodeNumber || 1
+                                    })
+                                });
+                                added++;
+                            }
+                        }
+                    }
+                }
+                
+                if (added > 0) {
+                    showToast(`Added ${added} missing episode(s) to queue`, 'success');
+                } else {
+                    showToast('No missing episodes found', 'info');
+                }
+            } catch (e) {
+                showToast('Failed to add missing episodes', 'error');
+            }
+        }
+        
+        function toggleEditMode() { /* UI toggle - no backend call needed */ }
+        function toggleSearchDropdown() { /* UI dropdown - no backend call needed */ }
+        function openSonarrMenu() { /* Sonarr menu - no backend call needed */ }
+        function toggleSortMenu() { /* UI sort - no backend call needed */ }
+        function toggleFilterMenu() { /* UI filter - no backend call needed */ }
+        
+        async function refreshSeries(id) {
+            try {
+                // Refresh series data by fetching episodes
+                await fetch(`/api/v1/series/${id}/episodes`);
+                showToast('Series refreshed', 'success');
+                if (currentPage === 'history') fetchHistoryData();
+            } catch (e) {
+                showToast('Failed to refresh series', 'error');
+            }
+        }
+        
+        async function downloadSeries(id) {
+            try {
+                // Get episodes and add all to queue
+                const res = await fetch(`/api/v1/series/${id}/episodes`);
+                const episodes = await res.json();
+                let added = 0;
+                
+                for (const ep of (episodes || [])) {
+                    if (ep.id) {
+                        await fetch('/api/v1/queue', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                episodeId: ep.id,
+                                title: ep.title || 'Unknown',
+                                seriesTitle: ep.seriesTitle || 'Unknown',
+                                seasonNumber: ep.seasonNumber || 1,
+                                episodeNumber: ep.episodeNumber || 1,
+                                locale: ep.locale || 'ja-JP'
+                            })
+                        });
+                        added++;
+                    }
+                }
+                
+                showToast(`Added ${added} episode(s) to queue`, 'success');
+            } catch (e) {
+                showToast('Failed to queue series', 'error');
+            }
+        }
 
         function refreshData() {
             showToast('Refreshing...', 'success');
@@ -2431,6 +2698,42 @@ MAINTENANCE NOTES:
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
+        function formatDownloadSpeed(bytesPerSec) {
+            if (!bytesPerSec || bytesPerSec === 0) return '';
+            // Use MB/s format (matching qma default DownloadSpeedInBits=false)
+            return (bytesPerSec / 1000000.0).toFixed(2) + ' MB/s';
+        }
+
+        function formatETA(seconds) {
+            if (!seconds || seconds <= 0) return '';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `ETA: ${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            return `ETA: ${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function getDoingText(progress) {
+            if (!progress) return 'Queued';
+            // Handle waiting for retry
+            if (progress.retryAtUtc && new Date(progress.retryAtUtc) > new Date()) {
+                const retryTime = new Date(progress.retryAtUtc).toLocaleTimeString();
+                return `Rate limited, retrying at ${retryTime}`;
+            }
+            // Use doing if not empty, otherwise derive from state
+            if (progress.doing && progress.doing.trim().length > 0) {
+                return progress.doing;
+            }
+            const state = (progress.state || 'queued').toLowerCase();
+            if (state === 'downloading') return 'Downloading...';
+            if (state === 'processing') return 'Processing...';
+            if (state === 'done') return 'Complete';
+            if (state === 'error') return 'Error';
+            if (state === 'paused') return 'Paused';
+            if (state === 'cancelled') return 'Cancelled';
+            return 'Queued';
+        }
+
         function startPolling() {
             // Check auth status periodically
             checkAuthStatus();
@@ -2468,9 +2771,7 @@ MAINTENANCE NOTES:
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            // App initialized
-        });
+
     </script>
 </body>
 </html>

@@ -1,0 +1,143 @@
+using Cruncharr.Core.Services;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Cruncharr.API.Controllers;
+
+[ApiController]
+[Route("api/v1/[controller]")]
+public class MoviesController : ControllerBase{
+    private readonly IMovieService _movieService;
+    private readonly ILogger<MoviesController> _logger;
+
+    public MoviesController(IMovieService movieService, ILogger<MoviesController> logger){
+        _movieService = movieService;
+        _logger = logger;
+    }
+
+    [HttpGet("{id}")]
+    public async Task<ActionResult> GetMovie(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        try{
+            var movie = await _movieService.GetMovieAsync(id, locale, forcedLang, cancellationToken);
+            if (movie == null){
+                return NotFound(new { Error = "Movie not found" });
+            }
+            return Ok(movie);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get movie {MovieId}", id);
+            return StatusCode(500, new { Error = "Failed to get movie", Message = ex.Message });
+        }
+    }
+}
+
+[ApiController]
+[Route("api/v1/[controller]")]
+public class MusicController : ControllerBase{
+    private readonly IMusicService _musicService;
+    private readonly ILogger<MusicController> _logger;
+
+    public MusicController(IMusicService musicService, ILogger<MusicController> logger){
+        _musicService = musicService;
+        _logger = logger;
+    }
+
+    [HttpGet("videos/{id}")]
+    public async Task<ActionResult> GetMusicVideo(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        try{
+            var video = await _musicService.GetMusicVideoAsync(id, locale, forcedLang, cancellationToken);
+            if (video == null){
+                return NotFound(new { Error = "Music video not found" });
+            }
+            return Ok(video);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get music video {VideoId}", id);
+            return StatusCode(500, new { Error = "Failed to get music video", Message = ex.Message });
+        }
+    }
+
+    [HttpGet("concerts/{id}")]
+    public async Task<ActionResult> GetConcert(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        try{
+            var concert = await _musicService.GetConcertAsync(id, locale, forcedLang, cancellationToken);
+            if (concert == null){
+                return NotFound(new { Error = "Concert not found" });
+            }
+            return Ok(concert);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get concert {ConcertId}", id);
+            return StatusCode(500, new { Error = "Failed to get concert", Message = ex.Message });
+        }
+    }
+
+    [HttpGet("artists/{id}")]
+    public async Task<ActionResult> GetArtist(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        try{
+            var artist = await _musicService.GetArtistAsync(id, locale, forcedLang, cancellationToken);
+            if (artist == null){
+                return NotFound(new { Error = "Artist not found" });
+            }
+            return Ok(artist);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get artist {ArtistId}", id);
+            return StatusCode(500, new { Error = "Failed to get artist", Message = ex.Message });
+        }
+    }
+
+    [HttpGet("artists/{id}/videos")]
+    public async Task<ActionResult> GetArtistVideos(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        try{
+            var videos = await _musicService.GetArtistVideosAsync(id, locale, forcedLang, cancellationToken);
+            return Ok(videos);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get artist videos {ArtistId}", id);
+            return StatusCode(500, new { Error = "Failed to get artist videos", Message = ex.Message });
+        }
+    }
+
+    [HttpGet("featured/{seriesId}")]
+    public async Task<ActionResult> GetFeaturedMusicVideos(string seriesId, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        try{
+            var videos = await _musicService.GetFeaturedMusicVideosAsync(seriesId, locale, forcedLang, cancellationToken);
+            return Ok(videos);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get featured music videos {SeriesId}", seriesId);
+            return StatusCode(500, new { Error = "Failed to get featured music videos", Message = ex.Message });
+        }
+    }
+}
+
+[ApiController]
+[Route("api/v1/[controller]")]
+public class EncodingController : ControllerBase{
+    private readonly IEncodingService _encodingService;
+    private readonly ILogger<EncodingController> _logger;
+
+    public EncodingController(IEncodingService encodingService, ILogger<EncodingController> logger){
+        _encodingService = encodingService;
+        _logger = logger;
+    }
+
+    [HttpGet("presets")]
+    public ActionResult GetPresets(){
+        try{
+            var presets = _encodingService.GetPresets();
+            return Ok(presets);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get encoding presets");
+            return StatusCode(500, new { Error = "Failed to get presets", Message = ex.Message });
+        }
+    }
+
+    [HttpGet("presets/{presetName}")]
+    public ActionResult GetPreset(string presetName){
+        try{
+            var preset = _encodingService.GetPreset(presetName);
+            if (preset == null){
+                return NotFound(new { Error = "Preset not found" });
+            }
+            return Ok(preset);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get preset {PresetName}", presetName);
+            return StatusCode(500, new { Error = "Failed to get preset", Message = ex.Message });
+        }
+    }
+}

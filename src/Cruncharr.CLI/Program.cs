@@ -19,6 +19,7 @@ class Program{
         services.AddSingleton<IDownloadService, DownloadService>();
         services.AddSingleton<IQueueService, QueueService>();
         services.AddSingleton<INotificationService, NotificationService>();
+        services.AddSingleton<ISonarrService, SonarrService>();
         
         var provider = services.BuildServiceProvider();
         

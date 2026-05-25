@@ -37,14 +37,13 @@ public class HistoryService : IHistoryService{
         Directory.CreateDirectory(Path.GetDirectoryName(_historyPath)!);
     }
     
-    // Legacy methods
     public async Task AddAsync(DownloadHistory entry){
         await _lock.WaitAsync();
         try{
-            var history = await LoadLegacyHistoryAsync();
+            var history = await LoadHistoryAsync();
             history.RemoveAll(h => h.EpisodeId == entry.EpisodeId && h.AudioLanguage == entry.AudioLanguage);
             history.Add(entry);
-            await SaveLegacyHistoryAsync(history);
+            await SaveHistoryAsync(history);
         } finally{
             _lock.Release();
         }
@@ -53,7 +52,7 @@ public class HistoryService : IHistoryService{
     public async Task<List<DownloadHistory>> GetAllAsync(){
         await _lock.WaitAsync();
         try{
-            return await LoadLegacyHistoryAsync();
+            return await LoadHistoryAsync();
         } finally{
             _lock.Release();
         }
@@ -67,9 +66,9 @@ public class HistoryService : IHistoryService{
     public async Task RemoveAsync(string episodeId){
         await _lock.WaitAsync();
         try{
-            var history = await LoadLegacyHistoryAsync();
+            var history = await LoadHistoryAsync();
             history.RemoveAll(h => h.EpisodeId == episodeId);
-            await SaveLegacyHistoryAsync(history);
+            await SaveHistoryAsync(history);
         } finally{
             _lock.Release();
         }
@@ -279,7 +278,7 @@ public class HistoryService : IHistoryService{
         
         try{
             var content = await File.ReadAllTextAsync(_historyPath);
-            _historyList = JsonSerializer.Deserialize<List<HistorySeries>>(content) ?? [];
+            _historyList = JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListHistorySeries) ?? [];
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to load rich history");
             _historyList = [];
@@ -288,30 +287,27 @@ public class HistoryService : IHistoryService{
 
     private async Task SaveRichHistoryAsync(){
         try{
-            var content = JsonSerializer.Serialize(_historyList, new JsonSerializerOptions{ WriteIndented = true });
+            var content = JsonSerializer.Serialize(_historyList, HistoryJsonContext.Default.ListHistorySeries);
             await File.WriteAllTextAsync(_historyPath, content);
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to save rich history");
         }
     }
 
-    // Legacy persistence
-    private async Task<List<DownloadHistory>> LoadLegacyHistoryAsync(){
-        var legacyPath = _historyPath.Replace(".json", "_legacy.json");
-        if (!File.Exists(legacyPath)) return new List<DownloadHistory>();
+    private async Task<List<DownloadHistory>> LoadHistoryAsync(){
+        if (!File.Exists(_historyPath)) return new List<DownloadHistory>();
         
         try{
-            var content = await File.ReadAllTextAsync(legacyPath);
-            return JsonSerializer.Deserialize<List<DownloadHistory>>(content) ?? new List<DownloadHistory>();
+            var content = await File.ReadAllTextAsync(_historyPath);
+            return JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListDownloadHistory) ?? new List<DownloadHistory>();
         } catch{
             return new List<DownloadHistory>();
         }
     }
 
-    private async Task SaveLegacyHistoryAsync(List<DownloadHistory> history){
-        var legacyPath = _historyPath.Replace(".json", "_legacy.json");
-        var content = JsonSerializer.Serialize(history, new JsonSerializerOptions{ WriteIndented = true });
-        await File.WriteAllTextAsync(legacyPath, content);
+    private async Task SaveHistoryAsync(List<DownloadHistory> history){
+        var content = JsonSerializer.Serialize(history, HistoryJsonContext.Default.ListDownloadHistory);
+        await File.WriteAllTextAsync(_historyPath, content);
     }
 }
 

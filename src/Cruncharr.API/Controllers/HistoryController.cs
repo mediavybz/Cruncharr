@@ -16,9 +16,9 @@ public class HistoryController : ControllerBase{
     }
 
     /// <summary>
-    /// Get download history (legacy format)
+    /// Get download history
     /// </summary>
-    [HttpGet("legacy")]
+    [HttpGet]
     public async Task<ActionResult<List<DownloadHistory>>> GetHistory(
         [FromQuery] int limit = 100,
         [FromQuery] int offset = 0){
@@ -34,7 +34,7 @@ public class HistoryController : ControllerBase{
     /// <summary>
     /// Get rich history with series/season/episode tree
     /// </summary>
-    [HttpGet]
+    [HttpGet("rich")]
     public async Task<ActionResult<List<HistorySeriesResponse>>> GetRichHistory(){
         var history = await _historyService.GetHistorySeriesAsync();
         var response = history.Select(MapToResponse).ToList();
@@ -55,9 +55,9 @@ public class HistoryController : ControllerBase{
     }
 
     /// <summary>
-    /// Add entry to history (legacy format)
+    /// Add entry to history
     /// </summary>
-    [HttpPost("legacy")]
+    [HttpPost]
     public async Task<IActionResult> AddToHistory([FromBody] DownloadHistory entry){
         await _historyService.AddAsync(entry);
         return Ok(new { Message = "Added to history" });

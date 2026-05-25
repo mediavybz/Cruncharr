@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -102,7 +103,18 @@ public class WidevineCdm{
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             playbackRequest.Content = content;
 
-            var (isOk, responseContent, error) = await SendWithRetryAsync(httpClient, playbackRequest);
+            // Use a clean HttpClient without cookies for Widevine license requests
+            // Cookies from Crunchyroll auth can cause 401 Forbidden on the license server
+            var cleanHandler = new SocketsHttpHandler{
+                UseCookies = false,
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+            };
+            using var cleanClient = new HttpClient(cleanHandler);
+            cleanClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36");
+            cleanClient.DefaultRequestHeaders.Accept.ParseAdd("*/*");
+            cleanClient.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip, deflate, br");
+
+            var (isOk, responseContent, error) = await SendWithRetryAsync(cleanClient, playbackRequest);
 
             if (!isOk){
                 Console.Error.WriteLine($"Failed to get Keys! Error: {error}, Response: {responseContent}");

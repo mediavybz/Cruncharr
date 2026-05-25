@@ -51,3 +51,10 @@ test_cookies.txt
 tools/*.zip
 tools/*.7z
 tools/*.tar.gz
+
+# Runtime data - contains credentials and downloaded content
+config/
+downloads/
+opencode.json
+status.md
+*.resume

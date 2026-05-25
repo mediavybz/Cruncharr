@@ -198,7 +198,42 @@ public class CalendarService : ICalendarService{
             foreach (var episode in newEpisodes){
                 var targetDay = week.CalendarDays.FirstOrDefault(d => d.DateTime.Date == episode.DateTime.Date);
                 if (targetDay != null){
-                    targetDay.CalendarEpisodes.Add(episode);
+                    // Check for existing episode with same series and locale
+                    var existingEpisode = targetDay.CalendarEpisodes
+                        .FirstOrDefault(e => e.CrSeriesID == episode.CrSeriesID && e.AudioLocale == episode.AudioLocale);
+                    
+                    if (existingEpisode != null){
+                        // Merge episode numbers
+                        if (!int.TryParse(existingEpisode.EpisodeNumber, out _)){
+                            existingEpisode.EpisodeNumber = "...";
+                        } else{
+                            var existingNumbers = existingEpisode.EpisodeNumber
+                                .Split('-')
+                                .Select(n => int.TryParse(n, out var num) ? num : 0)
+                                .Where(n => n > 0)
+                                .ToList();
+                            
+                            if (int.TryParse(episode.EpisodeNumber, out var newEpisodeNumber)){
+                                existingNumbers.Add(newEpisodeNumber);
+                            }
+                            
+                            existingNumbers.Sort();
+                            var lowest = existingNumbers.First();
+                            var highest = existingNumbers.Last();
+                            
+                            existingEpisode.EpisodeNumber = lowest == highest
+                                ? lowest.ToString()
+                                : $"{lowest}-{highest}";
+                            
+                            if (lowest == 1){
+                                existingEpisode.IsPremiere = true;
+                            }
+                        }
+                        
+                        existingEpisode.CalendarEpisodes.Add(episode);
+                    } else{
+                        targetDay.CalendarEpisodes.Add(episode);
+                    }
                 }
             }
         }
@@ -208,7 +243,8 @@ public class CalendarService : ICalendarService{
             if (day.CalendarEpisodes.Count > 0){
                 day.CalendarEpisodes = day.CalendarEpisodes
                     .Where(e => !e.FilteredOut)
-                    .OrderBy(e => e.DateTime)
+                    .OrderBy(e => e.AnilistEpisode) // False first, then true
+                    .ThenBy(e => e.DateTime)
                     .ThenBy(e => e.SeasonName)
                     .ThenBy(e => {
                         double parsedNumber;
@@ -224,14 +260,79 @@ public class CalendarService : ICalendarService{
 
     private async Task<List<CalendarEpisode>> GetNewEpisodesFromApiAsync(string language){
         try{
-            // This would need to be implemented based on the Crunchyroll API
-            // For now, return empty list
             _logger?.LogInformation("Fetching new episodes from API for calendar");
-            return new List<CalendarEpisode>();
+            
+            var newEpisodesBase = await _apiService.GetNewEpisodesAsync(language, 2000, true);
+            
+            if (newEpisodesBase?.Data == null || newEpisodesBase.Data.Count == 0){
+                return new List<CalendarEpisode>();
+            }
+            
+            var calendarEpisodes = new List<CalendarEpisode>();
+            
+            foreach (var crBrowseEpisode in newEpisodesBase.Data){
+                var metadata = crBrowseEpisode.EpisodeMetadata;
+                
+                // Determine target date for calendar placement
+                DateTime episodeAirDate = metadata.EpisodeAirDate.Kind == DateTimeKind.Utc
+                    ? metadata.EpisodeAirDate.ToLocalTime()
+                    : metadata.EpisodeAirDate;
+                
+                DateTime premiumAvailableStart = metadata.PremiumAvailableDate.Kind == DateTimeKind.Utc
+                    ? metadata.PremiumAvailableDate.ToLocalTime()
+                    : metadata.PremiumAvailableDate;
+                
+                DateTime targetDate = premiumAvailableStart;
+                DateTime oneYearFromNow = DateTime.Now.AddYears(1);
+                
+                if (targetDate >= oneYearFromNow){
+                    DateTime freeAvailableStart = metadata.FreeAvailableDate.Kind == DateTimeKind.Utc
+                        ? metadata.FreeAvailableDate.ToLocalTime()
+                        : metadata.FreeAvailableDate;
+                    
+                    if (freeAvailableStart <= oneYearFromNow){
+                        targetDate = freeAvailableStart;
+                    } else{
+                        targetDate = episodeAirDate;
+                    }
+                }
+                
+                // Build season title
+                string? seasonTitle = string.IsNullOrEmpty(metadata.SeasonTitle)
+                    ? metadata.SeriesTitle
+                    : LooksLikeGenericSeasonLabel(metadata.SeasonTitle, metadata.SeasonNumber)
+                        ? $"{metadata.SeriesTitle} {metadata.SeasonTitle}"
+                        : metadata.SeasonTitle;
+                
+                var calEpisode = new CalendarEpisode{
+                    DateTime = targetDate,
+                    HasPassed = DateTime.Now > targetDate,
+                    EpisodeName = crBrowseEpisode.Title,
+                    SeriesUrl = $"https://www.crunchyroll.com/{language}/series/" + metadata.SeriesId,
+                    EpisodeUrl = $"https://www.crunchyroll.com/{language}/watch/{crBrowseEpisode.Id}/",
+                    ThumbnailUrl = crBrowseEpisode.Images?.Thumbnail?.FirstOrDefault()?.FirstOrDefault()?.Source ?? "",
+                    IsPremiumOnly = metadata.IsPremiumOnly,
+                    IsPremiere = metadata.Episode == "1",
+                    SeasonName = seasonTitle,
+                    EpisodeNumber = metadata.Episode ?? "?",
+                    CrSeriesID = metadata.SeriesId,
+                    AudioLocale = metadata.AudioLocale
+                };
+                
+                calendarEpisodes.Add(calEpisode);
+            }
+            
+            return calendarEpisodes;
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to fetch new episodes for calendar");
             return new List<CalendarEpisode>();
         }
+    }
+    
+    private static bool LooksLikeGenericSeasonLabel(string? seasonTitle, double seasonNumber){
+        if (string.IsNullOrEmpty(seasonTitle)) return false;
+        var genericLabels = new[] { "Season", "Cour" };
+        return genericLabels.Any(label => seasonTitle.Contains(label, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language){

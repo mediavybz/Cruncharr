@@ -88,6 +88,12 @@ public class Subscription{
     [JsonProperty("nonrecurring_subscription_products")]
     public List<NonRecurringSubscriptionProduct>? NonrecurringSubscriptionProducts{ get; set; }
     
+    [JsonIgnore]
+    public bool IsPremium => IsActive || (SubscriptionProducts?.Any(p => !string.IsNullOrEmpty(p.Tier) && p.Tier != "free") ?? false);
+    
+    [JsonIgnore]
+    public string? Plan => SubscriptionProducts?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Tier))?.Tier ?? "free";
+    
     [JsonProperty("funimation_subscriptions")]
     public List<object>? FunimationSubscriptions{ get; set; }
 }
@@ -159,6 +165,9 @@ public class CrAuthSettings{
     public string Device_name{ get; set; } = "Android TV";
     public string UserAgent{ get; set; } = "ANDROIDTV/3.59.0 Android/16";
     public string Authorization{ get; set; } = "Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=";
+    public bool Video{ get; set; } = true;
+    public bool Audio{ get; set; } = true;
+    public bool UseDefault{ get; set; } = true;
 }
 
 public enum CrunchyrollEndpoints{

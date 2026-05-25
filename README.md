@@ -190,6 +190,13 @@ The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 - Place `device_private_key.pem` and `device_client_id_blob.bin` in `widevine/` directory
 - Required for downloading premium/DRM content
 
+## Credits
+
+This project is based on the original **Crunchy-Downloader** desktop application by [Crunchy-DL](https://github.com/Crunchy-DL/Crunchy-Downloader). All core download logic, Crunchyroll API integration, and media processing is ported from the upstream source.
+
+- **Upstream**: https://github.com/Crunchy-DL/Crunchy-Downloader
+- **Port**: Dockerized web UI version with REST API and headless backend
+
 ## License
 
 MIT

@@ -176,11 +176,11 @@ This project is a port of the Crunchy-Downloader desktop application (Avalonia/F
 | - showToast() | ToastNotification.axaml | N/A (client-side only) | [pre-protocol] |
 
 ### Infrastructure
-
 | File | Purpose | Date |
 |------|---------|------|
 | Dockerfile | Multi-stage build with ffmpeg, mkvtoolnix, mp4decrypt | [pre-protocol] |
 | docker-compose.yml | Compose setup with volume mounts | [pre-protocol] |
+| docker-entrypoint.sh | Runtime directory creation for all volume mounts | 2026-05-25 |
 
 ---
 
@@ -316,6 +316,7 @@ This project is a port of the Crunchy-Downloader desktop application (Avalonia/F
 | HistoryController.cs | HistoryController.cs | GetRichHistory route is `/api/v1/history/rich` (not `/api/v1/history`) to avoid ambiguous route match |
 | CrunchyrollAuthService.cs | CrunchyrollAuthService.cs | Token path: config `token_file` empty string = "not set" (not null). Docker default: `/config/token.json`. Desktop default: `workingDirectory/config/cr_token.json`. Must call `AuthenticateAsync` on startup - NOT just `LoadTokenFromDisk` |
 | AuthController.cs | AuthController.cs | Status endpoint MUST refresh token (`EnsureAuthenticatedAsync`) before reporting status. Cached token may be expired even if file exists |
+| Dockerfile | docker-entrypoint.sh | Entrypoint script creates all required directories at runtime AFTER volumes are mounted: `/config`, `/downloads`, `/tmp/cruncharr`, `/widevine`, `/tools`, `/app/presets`, `/app/fonts`, `/app/video`, `/config/logs` |
 
 ---
 

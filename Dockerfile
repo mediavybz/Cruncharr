@@ -71,6 +71,10 @@ COPY --from=build /app/publish/Cruncharr.API ./cruncharr-api
 COPY --from=build /app/cli/cruncharr /usr/local/bin/
 RUN chmod +x cruncharr-api && chmod +x /usr/local/bin/cruncharr
 
+# Copy entrypoint script
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
+
 # Copy web UI
 COPY --from=build /app/publish/wwwroot ./wwwroot
 
@@ -84,12 +88,13 @@ ENV PATH="/app:/tools:/usr/local/bin:${PATH}"
 # Expose API port (8585 - uncommon port to avoid conflicts)
 EXPOSE 8585
 
-# Volumes
-VOLUME ["/downloads", "/config", "/tools", "/widevine", "/tmp/cruncharr", "/app/presets", "/app/fonts"]
+# Volumes - only user-facing directories
+# Internal directories (/tmp/cruncharr, /app/presets, /app/fonts, /app/video) stay inside container
+VOLUME ["/downloads", "/config", "/tools", "/widevine"]
 
 # Health check using busybox wget (avoids curl ~5MB)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget -qO- http://localhost:8585/api/v1/health || exit 1
 
-# Entrypoint for API mode (default)
-ENTRYPOINT ["./cruncharr-api"]
+# Entrypoint script creates directories then starts API
+ENTRYPOINT ["./docker-entrypoint.sh"]

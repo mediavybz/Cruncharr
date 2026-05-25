@@ -1784,7 +1784,7 @@ MAINTENANCE NOTES:
                         <span class="icon">&#128269;</span>
                         <span>Search</span>
                     </button>
-                    <button class="toolbar-btn" onclick="openSonarrMenu()">
+                    <button class="toolbar-btn" id="btn-sonarr-menu" onclick="openSonarrMenu(event)">
                         <span class="icon">&#127758;</span>
                         <span>Sonarr</span>
                     </button>
@@ -2846,12 +2846,12 @@ MAINTENANCE NOTES:
         
         function toggleEditMode() { /* UI toggle - no backend call needed */ }
         function toggleSearchDropdown() { /* UI dropdown - no backend call needed */ }
-        function openSonarrMenu() {
+        function openSonarrMenu(e) {
             // Remove existing dropdown if any
             const existing = document.getElementById('sonarr-dropdown');
             if (existing) { existing.remove(); return; }
 
-            const btn = event.target.closest('.toolbar-btn');
+            const btn = e?.target?.closest('.toolbar-btn') || document.getElementById('btn-sonarr-menu') || event?.target?.closest('.toolbar-btn');
             const dropdown = document.createElement('div');
             dropdown.id = 'sonarr-dropdown';
             dropdown.className = 'dropdown-menu active';

@@ -58,3 +58,14 @@ downloads/
 opencode.json
 status.md
 *.resume
+
+# Local-only documentation (not for repo)
+AGENTS.md
+PORTING_LOG.md
+*.local.md
+
+# Upstream source reference (fetched on demand)
+upstream_src/
+
+# Binary image exports
+cruncharr-image.tar

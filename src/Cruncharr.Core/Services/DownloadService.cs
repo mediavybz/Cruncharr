@@ -244,10 +244,10 @@ public class DownloadService : IDownloadService{
                     }
                 }
                 
-                // Download audio
+                // Download primary audio
                 if (playbackData.AudioUrl != null){
-                    progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 60, Doing = "Downloading audio..." });
-                    var audioPath = Path.Combine(tempDir, "audio.m4a");
+                    progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 60, Doing = $"Downloading audio ({episode.AudioLocale ?? config.Download.DefaultAudio})..." });
+                    var audioPath = Path.Combine(tempDir, $"audio_{(episode.AudioLocale ?? config.Download.DefaultAudio).Replace("-", "").ToLower()}.m4a");
                     
                     if (audioIsHls){
                         var hlsResult = await DownloadHlsStreamAsync(playbackData.AudioUrl, audioPath, false, true, config, progress, 60, 80, cancellationToken);
@@ -259,6 +259,55 @@ public class DownloadService : IDownloadService{
                         await DownloadStreamAsync(playbackData.AudioUrl, audioPath, progress, 60, 80, cancellationToken, playbackData.VideoToken);
                         downloadedFiles.Add(audioPath);
                         audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? config.Download.DefaultAudio));
+                    }
+                }
+                
+                // Download additional dubs if configured
+                if (config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1){
+                    var primaryLocale = episode.AudioLocale ?? config.Download.DefaultAudio;
+                    var selectedDubs = config.Download.DubLanguages
+                        .Where(dub => !string.Equals(dub, primaryLocale, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    
+                    foreach (var dub in selectedDubs){
+                        var dubVersion = episode.Versions.FirstOrDefault(v => 
+                            v.AudioLocale.Equals(dub, StringComparison.OrdinalIgnoreCase));
+                        
+                        if (dubVersion == null) continue;
+                        
+                        var dubMediaGuid = dubVersion.Guid;
+                        var dubMediaId = dubVersion.MediaGuid ?? dubVersion.Guid;
+                        
+                        if (dubMediaId.Contains(':')) dubMediaId = dubMediaId.Split(':')[1];
+                        if (dubMediaGuid.Contains(':')) dubMediaGuid = dubMediaGuid.Split(':')[1];
+                        
+                        _logger?.LogInformation("Fetching playback data for additional dub: {Dub} (Guid={Guid})", dub, dubMediaGuid);
+                        
+                        try{
+                            var dubPlayback = await GetPlaybackDataAsync(dubMediaGuid, true, cancellationToken);
+                            if (dubPlayback?.AudioUrl != null){
+                                progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 65, Doing = $"Downloading audio ({dub})..." });
+                                
+                                var dubAudioPath = Path.Combine(tempDir, $"audio_{dub.Replace("-", "").ToLower()}.m4a");
+                                var dubAudioIsHls = IsHlsUrl(dubPlayback.AudioUrl);
+                                
+                                if (dubAudioIsHls){
+                                    var hlsResult = await DownloadHlsStreamAsync(dubPlayback.AudioUrl, dubAudioPath, false, true, config, progress, 60, 80, cancellationToken);
+                                    if (hlsResult.Ok){
+                                        downloadedFiles.Add(dubAudioPath);
+                                        audioTrackLanguages.Add((dubAudioPath, dub));
+                                        _logger?.LogInformation("Downloaded additional audio track: {Dub} -> {Path}", dub, dubAudioPath);
+                                    }
+                                } else{
+                                    await DownloadStreamAsync(dubPlayback.AudioUrl, dubAudioPath, progress, 60, 80, cancellationToken, dubPlayback.VideoToken);
+                                    downloadedFiles.Add(dubAudioPath);
+                                    audioTrackLanguages.Add((dubAudioPath, dub));
+                                    _logger?.LogInformation("Downloaded additional audio track: {Dub} -> {Path}", dub, dubAudioPath);
+                                }
+                            }
+                        } catch (Exception ex){
+                            _logger?.LogWarning(ex, "Failed to download additional dub: {Dub}", dub);
+                        }
                     }
                 }
             }
@@ -415,12 +464,27 @@ public class DownloadService : IDownloadService{
                 Episode = episode
             };
         } finally{
-            // Cleanup temp files (only if using temp folder)
+            // Cleanup temp files
             if (config.Download.UseTempFolder){
                 try{
                     if (Directory.Exists(tempDir)){
                         Directory.Delete(tempDir, true);
                     }
+                } catch{
+                    // Ignore cleanup errors
+                }
+            } else{
+                // Clean up individual temp files in output dir
+                try{
+                    foreach (var file in Directory.GetFiles(tempDir, "*.m4s")) File.Delete(file);
+                    foreach (var file in Directory.GetFiles(tempDir, "*.mp4")) File.Delete(file);
+                    foreach (var file in Directory.GetFiles(tempDir, "*.m4a")) File.Delete(file);
+                    foreach (var file in Directory.GetFiles(tempDir, "*.ass")) File.Delete(file);
+                    foreach (var file in Directory.GetFiles(tempDir, "*.vtt")) File.Delete(file);
+                    foreach (var file in Directory.GetFiles(tempDir, "*.resume")) File.Delete(file);
+                    foreach (var file in Directory.GetFiles(tempDir, "*.new.resume")) File.Delete(file);
+                    foreach (var file in Directory.GetFiles(tempDir, "cover.*")) File.Delete(file);
+                    foreach (var file in Directory.GetFiles(tempDir, "chapters.*")) File.Delete(file);
                 } catch{
                     // Ignore cleanup errors
                 }
@@ -869,8 +933,11 @@ public class DownloadService : IDownloadService{
                 var audioFileName = chosenAudios.Count(a => a.Item2 == lang) > 1 
                     ? $"audio_{langCode}_{i}.m4s" 
                     : $"audio_{langCode}.m4s";
+                var audioEncFileName = chosenAudios.Count(a => a.Item2 == lang) > 1 
+                    ? $"audio_{langCode}_{i}.enc.m4s" 
+                    : $"audio_{langCode}.enc.m4s";
                 var audioOutput = audioItem.pssh != null 
-                    ? Path.Combine(tempDir, $"audio_{langCode}.enc.m4s")
+                    ? Path.Combine(tempDir, audioEncFileName)
                     : Path.Combine(tempDir, audioFileName);
                 var audioFinalPath = Path.Combine(tempDir, audioFileName);
                 

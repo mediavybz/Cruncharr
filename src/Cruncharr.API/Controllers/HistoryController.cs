@@ -92,6 +92,24 @@ public class HistoryController : ControllerBase{
         return Ok(new { Message = "Cleaned up unavailable episodes" });
     }
 
+    /// <summary>
+    /// Match all history series with Sonarr
+    /// </summary>
+    [HttpPost("sonarr/match-series")]
+    public async Task<IActionResult> MatchHistorySeriesWithSonarr([FromQuery] bool updateAll = false){
+        await _historyService.MatchHistorySeriesWithSonarrAsync(updateAll);
+        return Ok(new { Message = "Series matching completed" });
+    }
+
+    /// <summary>
+    /// Match episodes for a specific series with Sonarr
+    /// </summary>
+    [HttpPost("sonarr/match-episodes/{seriesId}")]
+    public async Task<IActionResult> MatchHistoryEpisodesWithSonarr(string seriesId, [FromQuery] bool rematchAll = false){
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(seriesId, rematchAll);
+        return Ok(new { Message = "Episode matching completed" });
+    }
+
     private static HistorySeriesResponse MapToResponse(HistorySeries series){
         return new HistorySeriesResponse{
             SeriesId = series.SeriesId,
@@ -101,6 +119,10 @@ public class HistoryController : ControllerBase{
             HasNewEpisodes = series.HasNewEpisodes,
             DownloadedEpisodes = series.DownloadedEpisodes,
             TotalEpisodes = series.TotalEpisodes,
+            SonarrSeriesId = series.SonarrSeriesId,
+            SonarrTvDbId = series.SonarrTvDbId,
+            SonarrSlugTitle = series.SonarrSlugTitle,
+            SonarrNextAirDate = series.SonarrNextAirDate,
             Seasons = series.Seasons.Select(s => new HistorySeasonResponse{
                 SeasonId = s.SeasonId,
                 SeasonTitle = s.SeasonTitle,
@@ -117,7 +139,14 @@ public class HistoryController : ControllerBase{
                     WasDownloaded = e.WasDownloaded,
                     IsEpisodeAvailableOnStreamingService = e.IsEpisodeAvailableOnStreamingService,
                     ThumbnailImageUrl = e.ThumbnailImageUrl,
-                    EpisodeCrPremiumAirDate = e.EpisodeCrPremiumAirDate
+                    EpisodeCrPremiumAirDate = e.EpisodeCrPremiumAirDate,
+                    SonarrEpisodeId = e.SonarrEpisodeId,
+                    SonarrEpisodeNumber = e.SonarrEpisodeNumber,
+                    SonarrHasFile = e.SonarrHasFile,
+                    SonarrIsMonitored = e.SonarrIsMonitored,
+                    SonarrAbsolutNumber = e.SonarrAbsolutNumber,
+                    SonarrSeasonNumber = e.SonarrSeasonNumber,
+                    SonarrSeasonEpisodeText = e.SonarrSeasonEpisodeText
                 }).ToList()
             }).ToList()
         };
@@ -139,6 +168,11 @@ public class HistorySeriesResponse{
     public int DownloadedEpisodes { get; set; }
     public int TotalEpisodes { get; set; }
     public List<HistorySeasonResponse> Seasons { get; set; } = [];
+    // Sonarr fields
+    public string? SonarrSeriesId { get; set; }
+    public string? SonarrTvDbId { get; set; }
+    public string? SonarrSlugTitle { get; set; }
+    public string? SonarrNextAirDate { get; set; }
 }
 
 public class HistorySeasonResponse{
@@ -161,4 +195,12 @@ public class HistoryEpisodeResponse{
     public bool IsEpisodeAvailableOnStreamingService { get; set; }
     public string? ThumbnailImageUrl { get; set; }
     public DateTime? EpisodeCrPremiumAirDate { get; set; }
+    // Sonarr fields
+    public string? SonarrEpisodeId { get; set; }
+    public string? SonarrEpisodeNumber { get; set; }
+    public bool SonarrHasFile { get; set; }
+    public bool SonarrIsMonitored { get; set; }
+    public string? SonarrAbsolutNumber { get; set; }
+    public string? SonarrSeasonNumber { get; set; }
+    public string SonarrSeasonEpisodeText { get; set; } = "";
 }

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using Cruncharr.Core.Configuration;
@@ -13,7 +12,6 @@ using Cruncharr.Core.Utils.Muxing.Syncing;
 using Cruncharr.Core.Utils.Parser;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace Cruncharr.Core.Services;
 
@@ -1176,13 +1174,13 @@ public class DownloadService : IDownloadService{
     }
     
     // Ported from upstream Helpers.WidthBucket
+    // Normalizes widths that are approximately 16:9 to the expected 16:9 width,
+    // while keeping non-standard widths as-is. Used for video deduplication.
     private static int WidthBucket(int width, int height){
-        if (height == 0) return 0;
-        var ratio = width / (double)height;
-        if (ratio >= 2.3) return 3; // ~21:9
-        if (ratio >= 1.7) return 2; // ~16:9
-        if (ratio >= 1.3) return 1; // ~4:3
-        return 0; // Other
+        if (height == 0) return width;
+        int expected = (int)Math.Round(height * 16 / 9.0);
+        int tol = Math.Max(8, (int)(expected * 0.02)); // ~2% or >=8 px
+        return Math.Abs(width - expected) <= tol ? expected : width;
     }
     
     private Cruncharr.Core.Utils.Parser.VideoItem? SelectVideoTrackQma(List<Cruncharr.Core.Utils.Parser.VideoItem> videos, string qualityPreference){

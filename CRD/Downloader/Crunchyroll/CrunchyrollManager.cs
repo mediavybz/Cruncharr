@@ -1,0 +1,3090 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Xml;
+using CRD.Downloader.Crunchyroll.Utils;
+using CRD.Utils;
+using CRD.Utils.DRM;
+using CRD.Utils.Ffmpeg_Encoding;
+using CRD.Utils.Files;
+using CRD.Utils.HLS;
+using CRD.Utils.Http;
+using CRD.Utils.Muxing;
+using CRD.Utils.Muxing.Fonts;
+using CRD.Utils.Muxing.Structs;
+using CRD.Utils.Muxing.Syncing;
+using CRD.Utils.Notifications;
+using CRD.Utils.Parser;
+using CRD.Utils.Sonarr;
+using CRD.Utils.Sonarr.Models;
+using CRD.Utils.Structs;
+using CRD.Utils.Structs.Crunchyroll;
+using CRD.Utils.Structs.History;
+using CRD.Utils.Updater;
+using CRD.ViewModels;
+using CRD.ViewModels.Utils;
+using CRD.Views;
+using CRD.Views.Utils;
+using FluentAvalonia.UI.Controls;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using LanguageItem = CRD.Utils.Structs.LanguageItem;
+
+namespace CRD.Downloader.Crunchyroll;
+
+public class CrunchyrollManager{
+    private readonly Lazy<CrDownloadOptions> _optionsLazy;
+    public CrDownloadOptions CrunOptions => _optionsLazy.Value;
+
+    #region History Variables
+
+    public ObservableCollection<HistorySeries> HistoryList = new();
+
+    public HistorySeries SelectedSeries = new HistorySeries{
+        Seasons = []
+    };
+
+    #endregion
+
+    public CrBrowseSeriesBase? AllCRSeries;
+
+
+    public string DefaultLocale = "en-US";
+    public CrAuthSettings DefaultAndroidTvAuthSettings = new CrAuthSettings();
+    public CrAuthSettings DefaultAndroidAuthSettings = new CrAuthSettings();
+    public CrAuthSettings GuestAndroidAuthSettings = new CrAuthSettings();
+
+    public JsonSerializerSettings? SettingsJsonSerializerSettings = new(){
+        NullValueHandling = NullValueHandling.Ignore,
+    };
+
+    private Widevine _widevine = Widevine.Instance;
+    private readonly SemaphoreSlim dubDownloadDelaySemaphore = new(1, 1);
+    private readonly object dubDownloadDelayLock = new();
+    private DateTimeOffset? nextDubDownloadAllowedAtUtc;
+
+    public CrAuth CrAuthEndpoint1;
+    public CrAuth CrAuthEndpoint2;
+
+    public CrAuth CrAuthGuest;
+
+    public CrEpisode CrEpisode;
+    public CrSeries CrSeries;
+    public CrMovies CrMovies;
+    public CrMusic CrMusic;
+    public CrQueue CrQueue;
+
+    public History History;
+
+    #region Singelton
+
+    private static CrunchyrollManager? _instance;
+    private static readonly object Padlock = new();
+
+    public static CrunchyrollManager Instance{
+        get{
+            if (_instance == null){
+                lock (Padlock){
+                    if (_instance == null){
+                        _instance = new CrunchyrollManager();
+                    }
+                }
+            }
+
+            return _instance;
+        }
+    }
+
+    #endregion
+
+    public CrunchyrollManager(){
+        _optionsLazy = new Lazy<CrDownloadOptions>(InitDownloadOptions, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+
+    private CrDownloadOptions InitDownloadOptions(){
+        var options = new CrDownloadOptions();
+
+        options.UseCrBetaApi = true;
+        options.AutoDownload = false;
+        options.RemoveFinishedDownload = false;
+        options.PersistQueue = false;
+        options.Chapters = true;
+        options.Hslang = "none";
+        options.Force = "Y";
+        options.FileName = "${seriesTitle} - S${season}E${episode} [${height}p]";
+        options.Partsize = 10;
+        options.DubDownloadDelaySeconds = 0;
+        options.DlSubs = new List<string>{ "en-US" };
+        options.SkipMuxing = false;
+        options.MkvmergeOptions = [];
+        options.FfmpegOptions = [];
+        options.DefaultVideo = "ja-JP";
+        options.DefaultAudio = "ja-JP";
+        options.DefaultSub = "en-US";
+        options.QualityAudio = "best";
+        options.QualityVideo = "best";
+        options.CcTag = "CC";
+        options.CcSubsFont = "Trebuchet MS";
+        options.RetryDelay = 5;
+        options.RetryAttempts = 5;
+        options.PlaybackRateLimitRetryDelaySeconds = 30;
+        options.RetryMaxDelaySeconds = 3600;
+        options.Numbers = 2;
+        options.Timeout = 15000;
+        options.DubLang = new List<string>(){ "ja-JP" };
+        options.SimultaneousDownloads = 2;
+        options.SimultaneousProcessingJobs = 2;
+        // options.AccentColor = Colors.SlateBlue.ToString();
+        options.Theme = "System";
+        options.SelectedCalendarLanguage = "en-us";
+        options.CalendarDubFilter = "none";
+        options.CustomCalendar = true;
+        options.DlVideoOnce = true;
+        options.StreamEndpoint = new CrAuthSettings(){ Endpoint = "tv/android_tv", Audio = true, Video = true };
+        options.SubsAddScaledBorder = ScaledBorderAndShadowSelection.DontAdd;
+        options.HistoryLang = DefaultLocale;
+        options.FixCccSubtitles = true;
+        options.ConvertVtt2Ass = true;
+
+        options.BackgroundImageOpacity = 0.5;
+        options.BackgroundImageBlurRadius = 10;
+
+        options.HistoryPageProperties = new HistoryPageProperties{
+            SelectedView = HistoryViewType.Posters,
+            SelectedSorting = SortingType.SeriesTitle,
+            SelectedFilter = FilterType.All,
+            ScaleValue = 0.73,
+            Ascending = false,
+            ShowSeries = true,
+            ShowArtists = true
+        };
+
+        options.History = true;
+        options.HistoryRemoveMissingEpisodes = true;
+
+        options.HistoryAutoRefreshMode = HistoryRefreshMode.FastNewReleases;
+        options.HistoryAutoRefreshIntervalMinutes = 0;
+
+        CfgManager.UpdateSettingsFromFile(options, CfgManager.PathCrDownloadOptions);
+        options.NormalizeNotificationSettings();
+
+        return options;
+    }
+
+    public void InitOptions(){
+        _widevine = Widevine.Instance;
+
+        CrAuthEndpoint1 = new CrAuth(this, new CrAuthSettings());
+        CrAuthEndpoint1.Init();
+        CrAuthEndpoint2 = new CrAuth(this, new CrAuthSettings());
+        CrAuthEndpoint2.Init();
+
+        CrAuthGuest = new CrAuth(this, new CrAuthSettings());
+        CrAuthGuest.Init();
+
+        CrEpisode = new CrEpisode();
+        CrSeries = new CrSeries();
+        CrMovies = new CrMovies();
+        CrMusic = new CrMusic();
+        CrQueue = new CrQueue();
+        History = new History();
+    }
+
+    public static async Task<string> GetBase64EncodedTokenAsync(){
+        string url = "https://static.crunchyroll.com/vilos-v2/web/vilos/js/bundle.js";
+
+        try{
+            string jsContent = await HttpClientReq.Instance.GetHttpClient().GetStringAsync(url);
+
+            Match match = Regex.Match(jsContent, @"prod=""([\w-]+:[\w-]+)""");
+
+            if (!match.Success)
+                throw new Exception("Token not found in JS file.");
+
+            string token = match.Groups[1].Value;
+
+            byte[] tokenBytes = Encoding.UTF8.GetBytes(token);
+            string base64Token = Convert.ToBase64String(tokenBytes);
+
+            return base64Token;
+        } catch (Exception ex){
+            Console.Error.WriteLine($"Auth Token Fetch Error: {ex.Message}");
+            return "";
+        }
+    }
+
+    public async Task Init(){
+        if (CrunOptions.LogMode){
+            CfgManager.EnableLogMode();
+        } else{
+            CfgManager.DisableLogMode();
+        }
+
+        DefaultAndroidTvAuthSettings = new CrAuthSettings(){
+            Endpoint = "tv/android_tv",
+            Authorization = "Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=",
+            UserAgent = "ANDROIDTV/3.59.0 Android/16",
+            Device_name = "Android TV",
+            Device_type = "Android TV",
+            Audio = true,
+            Video = true,
+        };
+        
+        DefaultAndroidAuthSettings = new CrAuthSettings(){
+            Endpoint = "android/phone",
+            Authorization = "Basic bzJhNndsamdub3FtdjloMWJ5bHI6Ujk3S3ExZm5faExZVFk0bDJxTjJIT2lDQnpfYnpBSUU=",
+            UserAgent = "Crunchyroll/3.97.0 Android/16 okhttp/4.12.0",
+            Device_name = "CPH2449",
+            Device_type = "OnePlus CPH2449",
+            Audio = true,
+            Video = true,
+        };
+
+        
+        var ghAuth = Updater.Instance.GhAuthJson;
+        var ghAuthTv = ghAuth.FirstOrDefault(e => e.Type.Equals("tv"));
+        var ghAuthMobile = ghAuth.FirstOrDefault(e => e.Type.Equals("mobile"));
+
+        //---------- TV ----------
+        CrunOptions.StreamEndpoint ??= new CrAuthSettings{
+            Authorization = DefaultAndroidTvAuthSettings.Authorization,
+            UserAgent = DefaultAndroidTvAuthSettings.UserAgent,
+            Device_name = DefaultAndroidTvAuthSettings.Device_name,
+            Device_type = DefaultAndroidTvAuthSettings.Device_type,
+            UseDefault = true
+        };
+
+
+        if (CrunOptions.StreamEndpoint.UseDefault){
+            var streamEndpointAuthorization = DefaultAndroidTvAuthSettings.Authorization;
+            var streamEndpointUserAgent = DefaultAndroidTvAuthSettings.UserAgent;
+
+            if (!string.IsNullOrEmpty(CrunOptions.StreamEndpoint.Authorization) &&
+                !string.IsNullOrEmpty(CrunOptions.StreamEndpoint.UserAgent) &&
+                Helpers.CompareClientVersions(
+                    Helpers.ExtractClientVersion(CrunOptions.StreamEndpoint.UserAgent),
+                    Helpers.ExtractClientVersion(streamEndpointUserAgent)) > 0){
+                streamEndpointAuthorization = CrunOptions.StreamEndpoint.Authorization;
+                streamEndpointUserAgent = CrunOptions.StreamEndpoint.UserAgent;
+            }
+
+            if (ghAuthTv != null &&
+                !string.IsNullOrEmpty(ghAuthTv.Authorization) &&
+                !string.IsNullOrEmpty(ghAuthTv.VersionName) &&
+                Helpers.CompareClientVersions(ghAuthTv.VersionName, Helpers.ExtractClientVersion(streamEndpointUserAgent)) > 0){
+                streamEndpointAuthorization = ghAuthTv.Authorization;
+                streamEndpointUserAgent = $"ANDROIDTV/{ghAuthTv.VersionName} Android/16";
+            }
+
+            CrunOptions.StreamEndpoint.Authorization = streamEndpointAuthorization;
+            CrunOptions.StreamEndpoint.UserAgent = streamEndpointUserAgent;
+            CrunOptions.StreamEndpoint.Device_name = DefaultAndroidTvAuthSettings.Device_name;
+            CrunOptions.StreamEndpoint.Device_type = DefaultAndroidTvAuthSettings.Device_type;
+        }
+
+
+        CrunOptions.StreamEndpoint.Endpoint = "tv/android_tv";
+        CrAuthEndpoint1.AuthSettings = CrunOptions.StreamEndpoint;
+
+        //---------- TV ----------
+
+
+        //---------- Mobile ----------
+        CrunOptions.StreamEndpointSecondSettings ??= new CrAuthSettings{
+            Authorization = DefaultAndroidAuthSettings.Authorization,
+            UserAgent = DefaultAndroidAuthSettings.UserAgent,
+            Device_name = DefaultAndroidAuthSettings.Device_name,
+            Device_type = DefaultAndroidAuthSettings.Device_type,
+            UseDefault = true
+        };
+
+        if (CrunOptions.StreamEndpointSecondSettings.UseDefault){
+            var streamEndpointSecondAuthorization = DefaultAndroidAuthSettings.Authorization;
+            var streamEndpointSecondUserAgent = DefaultAndroidAuthSettings.UserAgent;
+
+            if (!string.IsNullOrEmpty(CrunOptions.StreamEndpointSecondSettings.Authorization) &&
+                !string.IsNullOrEmpty(CrunOptions.StreamEndpointSecondSettings.UserAgent) &&
+                Helpers.CompareClientVersions(
+                    Helpers.ExtractClientVersion(CrunOptions.StreamEndpointSecondSettings.UserAgent),
+                    Helpers.ExtractClientVersion(streamEndpointSecondUserAgent)) > 0){
+                streamEndpointSecondAuthorization = CrunOptions.StreamEndpointSecondSettings.Authorization;
+                streamEndpointSecondUserAgent = CrunOptions.StreamEndpointSecondSettings.UserAgent;
+            }
+
+            if (ghAuthMobile != null &&
+                !string.IsNullOrEmpty(ghAuthMobile.Authorization) &&
+                !string.IsNullOrEmpty(ghAuthMobile.VersionName) &&
+                Helpers.CompareClientVersions(ghAuthMobile.VersionName, Helpers.ExtractClientVersion(streamEndpointSecondUserAgent)) > 0){
+                streamEndpointSecondAuthorization = ghAuthMobile.Authorization;
+                streamEndpointSecondUserAgent = $"Crunchyroll/{ghAuthMobile.VersionName} Android/16 okhttp/4.12.0";
+            }
+
+            CrunOptions.StreamEndpointSecondSettings.Authorization = streamEndpointSecondAuthorization;
+            CrunOptions.StreamEndpointSecondSettings.UserAgent = streamEndpointSecondUserAgent;
+            CrunOptions.StreamEndpointSecondSettings.Device_name = DefaultAndroidAuthSettings.Device_name;
+            CrunOptions.StreamEndpointSecondSettings.Device_type = DefaultAndroidAuthSettings.Device_type;
+        }
+
+        CrAuthEndpoint2.AuthSettings = CrunOptions.StreamEndpointSecondSettings;
+
+        //---------- Mobile ----------
+
+        await CrAuthEndpoint1.Auth();
+        if (!string.IsNullOrEmpty(CrAuthEndpoint2.AuthSettings.Endpoint)){
+            await CrAuthEndpoint2.Auth();
+        }
+
+        CrAuthGuest.AuthSettings = GuestAndroidAuthSettings;
+        CrAuthGuest.EndpointEnum = CrunchyrollEndpoints.Guest;
+        await CrAuthGuest.AuthAnonymousFoxy();
+
+        CfgManager.WriteCrSettings();
+
+        var jsonFiles = Directory.Exists(CfgManager.PathENCODING_PRESETS_DIR) ? Directory.GetFiles(CfgManager.PathENCODING_PRESETS_DIR, "*.json") : [];
+
+        foreach (var file in jsonFiles){
+            try{
+                var jsonContent = File.ReadAllText(file);
+
+                var obj = Helpers.Deserialize<VideoPreset>(jsonContent, null);
+
+                if (obj != null){
+                    FfmpegEncoding.AddPreset(obj);
+                } else{
+                    Console.Error.WriteLine("Failed to add Preset to Available Presets List");
+                }
+            } catch (Exception ex){
+                Console.Error.WriteLine($"Failed to deserialize file {file}: {ex.Message}");
+            }
+        }
+
+
+        if (CrunOptions.History){
+            if (File.Exists(CfgManager.PathCrHistory)){
+                var decompressedJson = CfgManager.DecompressJsonFile(CfgManager.PathCrHistory);
+
+                if (!string.IsNullOrEmpty(decompressedJson)){
+                    var historyList = Helpers.Deserialize<ObservableCollection<HistorySeries>>(
+                        decompressedJson,
+                        SettingsJsonSerializerSettings
+                    );
+
+                    if (historyList != null){
+                        HistoryList = historyList;
+
+                        Parallel.ForEach(historyList, historySeries => {
+                            historySeries.Init();
+                        });
+                    } else{
+                        HistoryList = [];
+                    }
+                } else{
+                    HistoryList = [];
+                }
+            } else{
+                HistoryList = [];
+            }
+
+
+            await SonarrClient.Instance.RefreshSonarr();
+        }
+    }
+
+
+    public async Task<bool> DownloadEpisode(CrunchyEpMeta data, CrDownloadOptions options){
+        bool downloadSlotHeld = true;
+        bool processingSlotHeld = false;
+
+        void ReleaseDownloadSlotIfHeld(){
+            if (!downloadSlotHeld)
+                return;
+
+            downloadSlotHeld = false;
+            QueueManager.Instance.ReleaseDownloadSlot(data);
+        }
+
+        int retryAttemptCount = data.DownloadProgress.RetryAttemptCount;
+        data.DownloadProgress = new DownloadProgress(){
+            State = DownloadState.Downloading,
+            Percent = 0,
+            Time = 0,
+            DownloadSpeedBytes = 0,
+            Doing = "Starting",
+            RetryAttemptCount = retryAttemptCount
+        };
+        QueueManager.Instance.RefreshQueue();
+        var res = new DownloadResponse();
+        try{
+            res = await DownloadMediaList(data, options);
+        } catch (Exception e){
+            Console.WriteLine(e);
+            res.Error = true;
+        }
+
+        if (res.RetrySuggested){
+            ReleaseDownloadSlotIfHeld();
+            var retryDelay = TimeSpan.FromSeconds(Math.Max(1, res.RetryDelaySeconds));
+            QueueManager.Instance.BlockAutoDownloadUntil(retryDelay, data.Cts.Token);
+            QueueManager.Instance.ScheduleRetry(
+                data,
+                retryDelay,
+                $"Rate limited by playback API. Retrying in {(int)retryDelay.TotalSeconds}s",
+                data.Cts.Token);
+            return false;
+        }
+
+        data.DownloadProgress.ClearRetryState();
+
+        if (res.Error){
+            ReleaseDownloadSlotIfHeld();
+            data.DownloadProgress = new DownloadProgress(){
+                State = DownloadState.Error,
+                Percent = 100,
+                Time = 0,
+                DownloadSpeedBytes = 0,
+                Doing = "Download Error" + (!string.IsNullOrEmpty(res.ErrorText) ? " - " + res.ErrorText : ""),
+            };
+            QueueManager.Instance.RefreshQueue();
+            await NotificationPublisher.Instance.PublishDownloadFailedAsync(CrunOptions.NotificationSettings, data, res.ErrorText);
+            return false;
+        }
+
+        try{
+            if (options.DownloadAllowEarlyStart){
+                ReleaseDownloadSlotIfHeld();
+                data.DownloadProgress = new DownloadProgress(){
+                    State = DownloadState.Processing,
+                    Percent = 100,
+                    Time = 0,
+                    DownloadSpeedBytes = 0,
+                    Doing = "Waiting for Muxing/Encoding"
+                };
+                QueueManager.Instance.RefreshQueue();
+                await QueueManager.Instance.WaitForProcessingSlotAsync(data.Cts.Token);
+                processingSlotHeld = true;
+            }
+
+
+            if (options.SkipMuxing == false){
+                bool syncError = false;
+                bool muxError = false;
+                var notSyncedDubs = "";
+                var fallbackUsed = false;
+
+                data.DownloadProgress = new DownloadProgress(){
+                    State = DownloadState.Processing,
+                    Percent = 100,
+                    Time = 0,
+                    DownloadSpeedBytes = 0,
+                    Doing = "Muxing"
+                };
+
+                QueueManager.Instance.RefreshQueue();
+
+                if (options.MuxFonts){
+                    await FontsManager.Instance.GetFontsAsync();
+                }
+
+                var fileNameAndPath = options.DownloadToTempFolder
+                    ? Path.Combine(res.TempFolderPath ?? string.Empty, res.FileName ?? string.Empty)
+                    : Path.Combine(res.FolderPath ?? string.Empty, res.FileName ?? string.Empty);
+                if (options is{ DlVideoOnce: false, KeepDubsSeperate: true } && (!options.Noaudio || !options.Novids)){
+                    var groupByDub = Helpers.GroupByLanguageWithSubtitles(res.Data);
+                    var mergers = new List<Merger>();
+                    foreach (var keyValue in groupByDub){
+                        var result = await MuxStreams(keyValue.Value,
+                            new CrunchyMuxOptions{
+                                DubLangList = options.DubLang,
+                                SubLangList = options.DlSubs,
+                                FfmpegOptions = options.FfmpegOptions,
+                                SkipSubMux = options.SkipSubsMux,
+                                Output = fileNameAndPath + $".{keyValue.Value.First().Lang.Locale}",
+                                Mp4 = options.Mp4,
+                                Mp3 = options.AudioOnlyToMp3,
+                                MuxFonts = options.MuxFonts,
+                                MuxCover = options.MuxCover,
+                                VideoTitle = res.VideoTitle,
+                                Novids = options.Novids,
+                                NoCleanup = options.Nocleanup,
+                                DefaultVideo = !string.IsNullOrWhiteSpace(options.DefaultVideo) && options.DefaultVideo != "none" ? Languages.FindLang(options.DefaultVideo) : null,
+                                DefaultAudio = options.DefaultAudio != "none" ? Languages.FindLang(options.DefaultAudio) : null,
+                                DefaultSub = options.DefaultSub != "none" ? Languages.FindLang(options.DefaultSub) : null,
+                                MkvmergeOptions = options.MkvmergeOptions,
+                                ForceMuxer = options.Force,
+                                SyncTiming = options.SyncTiming,
+                                CcTag = options.CcTag,
+                                KeepAllVideos = true,
+                                MuxDescription = options.IncludeVideoDescription,
+                                ReplaceExistingFiles = options.ReplaceExistingFiles,
+                                DlVideoOnce = options.DlVideoOnce,
+                                DefaultSubSigns = options.DefaultSubSigns,
+                                DefaultSubForcedDisplay = options.DefaultSubForcedDisplay,
+                                CcSubsMuxingFlag = options.CcSubsMuxingFlag,
+                                SignsSubsAsForced = options.SignsSubsAsForced,
+                            },
+                            fileNameAndPath + $".{keyValue.Value.First().Lang.Locale}", data);
+
+                        if (result is{ merger: not null, isMuxed: true }){
+                            mergers.Add(result.merger);
+                        }
+
+                        if (!result.isMuxed && !data.OnlySubs){
+                            muxError = true;
+                        }
+
+                        if (result.syncError){
+                            syncError = true;
+                        }
+                    }
+
+                    foreach (var merger in mergers){
+                        merger.CleanUp();
+
+                        if (options.IsEncodeEnabled){
+                            data.DownloadProgress = new DownloadProgress(){
+                                State = DownloadState.Processing,
+                                Percent = 100,
+                                Time = 0,
+                                DownloadSpeedBytes = 0,
+                                Doing = "Encoding"
+                            };
+
+                            QueueManager.Instance.RefreshQueue();
+
+                            var preset = FfmpegEncoding.GetPreset(options.EncodingPresetName ?? string.Empty);
+
+                            if (preset != null) await Helpers.RunFFmpegWithPresetAsync(merger.Options.Output, preset, data);
+                        }
+
+                        if (options.DownloadToTempFolder){
+                            await MoveFromTempFolder(merger, data, options, res.TempFolderPath ?? CfgManager.PathTEMP_DIR, merger.Options.Subtitles, options.ReplaceExistingFiles);
+                        }
+                    }
+                } else{
+                    var result = await MuxStreams(res.Data,
+                        new CrunchyMuxOptions{
+                            DubLangList = options.DubLang,
+                            SubLangList = options.DlSubs,
+                            FfmpegOptions = options.FfmpegOptions,
+                            SkipSubMux = options.SkipSubsMux,
+                            Output = fileNameAndPath,
+                            Mp4 = options.Mp4,
+                            Mp3 = options.AudioOnlyToMp3,
+                            MuxFonts = options.MuxFonts,
+                            MuxCover = options.MuxCover,
+                            VideoTitle = res.VideoTitle,
+                            Novids = options.Novids,
+                            NoCleanup = options.Nocleanup,
+                            DefaultVideo = !string.IsNullOrWhiteSpace(options.DefaultVideo) && options.DefaultVideo != "none" ? Languages.FindLang(options.DefaultVideo) : null,
+                            DefaultAudio = options.DefaultAudio != "none" ? Languages.FindLang(options.DefaultAudio) : null,
+                            DefaultSub = options.DefaultSub != "none" ? Languages.FindLang(options.DefaultSub) : null,
+                            MkvmergeOptions = options.MkvmergeOptions,
+                            ForceMuxer = options.Force,
+                            SyncTiming = options.SyncTiming,
+                            CcTag = options.CcTag,
+                            KeepAllVideos = true,
+                            MuxDescription = options.IncludeVideoDescription,
+                            ReplaceExistingFiles = options.ReplaceExistingFiles,
+                            DlVideoOnce = options.DlVideoOnce,
+                            DefaultSubSigns = options.DefaultSubSigns,
+                            DefaultSubForcedDisplay = options.DefaultSubForcedDisplay,
+                            CcSubsMuxingFlag = options.CcSubsMuxingFlag,
+                            SignsSubsAsForced = options.SignsSubsAsForced,
+                        },
+                        fileNameAndPath, data);
+
+                    if (result.syncError && options.SyncTimingFullQualityFallback && result.failedSyncLocales.Count > 0){
+                        var fallbackResult = await TrySyncTimingFallbackAsync(res, data, options, result.failedSyncLocales);
+                        if (fallbackResult.FallbackReady){
+                            fallbackUsed = true;
+
+                            if (result.isMuxed && result.merger != null){
+                                Helpers.DeleteFile(result.merger.Options.Output);
+                            }
+
+                            result = await MuxStreams(res.Data,
+                                new CrunchyMuxOptions{
+                                    DubLangList = options.DubLang,
+                                    SubLangList = options.DlSubs,
+                                    FfmpegOptions = options.FfmpegOptions,
+                                    SkipSubMux = options.SkipSubsMux,
+                                    Output = fileNameAndPath,
+                                    Mp4 = options.Mp4,
+                                    Mp3 = options.AudioOnlyToMp3,
+                                    MuxFonts = options.MuxFonts,
+                                    MuxCover = options.MuxCover,
+                                    VideoTitle = res.VideoTitle,
+                                    Novids = options.Novids,
+                                    NoCleanup = options.Nocleanup,
+                                    DefaultVideo = !string.IsNullOrWhiteSpace(options.DefaultVideo) && options.DefaultVideo != "none" ? Languages.FindLang(options.DefaultVideo) : null,
+                                    DefaultAudio = options.DefaultAudio != "none" ? Languages.FindLang(options.DefaultAudio) : null,
+                                    DefaultSub = options.DefaultSub != "none" ? Languages.FindLang(options.DefaultSub) : null,
+                                    MkvmergeOptions = options.MkvmergeOptions,
+                                    ForceMuxer = options.Force,
+                                    SyncTiming = false,
+                                    CcTag = options.CcTag,
+                                    KeepAllVideos = true,
+                                    MuxDescription = options.IncludeVideoDescription,
+                                    ReplaceExistingFiles = options.ReplaceExistingFiles,
+                                    DlVideoOnce = false,
+                                    DefaultSubSigns = options.DefaultSubSigns,
+                                    DefaultSubForcedDisplay = options.DefaultSubForcedDisplay,
+                                    CcSubsMuxingFlag = options.CcSubsMuxingFlag,
+                                    SignsSubsAsForced = options.SignsSubsAsForced,
+                                },
+                                fileNameAndPath, data);
+
+                            syncError = false;
+                            notSyncedDubs = "";
+                        } else{
+                            result.notSyncedDubs = string.Join(", ", fallbackResult.FailedLocales);
+                        }
+                    }
+
+                    syncError = result.syncError;
+                    notSyncedDubs = result.notSyncedDubs;
+                    muxError = !result.isMuxed && !data.OnlySubs;
+
+                    if (result is{ merger: not null, isMuxed: true }){
+                        result.merger.CleanUp();
+                    }
+
+                    DeleteSyncVideoFiles(res.Data);
+
+                    if (options.IsEncodeEnabled && !muxError){
+                        data.DownloadProgress = new DownloadProgress(){
+                            State = DownloadState.Processing,
+                            Percent = 100,
+                            Time = 0,
+                            DownloadSpeedBytes = 0,
+                            Doing = "Encoding"
+                        };
+
+                        QueueManager.Instance.RefreshQueue();
+
+                        var preset = FfmpegEncoding.GetPreset(options.EncodingPresetName ?? string.Empty);
+                        if (preset != null && result.merger != null) await Helpers.RunFFmpegWithPresetAsync(result.merger.Options.Output, preset, data);
+                    }
+
+                    if (options.DownloadToTempFolder){
+                        var tempFolder = res.TempFolderPath ?? CfgManager.PathTEMP_DIR;
+
+                        List<SubtitleInput> subtitles =
+                            result.merger?.Options.Subtitles
+                            ?? res.Data
+                                .Where(d => d.Type == DownloadMediaType.Subtitle)
+                                .Select(d => new SubtitleInput{
+                                    File = d.Path ?? string.Empty,
+                                    Language = d.Language,
+                                    ClosedCaption = d.Cc ?? false,
+                                    Signs = d.Signs ?? false,
+                                    Delay = d.Delay,
+                                    RelatedVideoDownloadMedia = d.RelatedVideoDownloadMedia
+                                })
+                                .ToList();
+
+                        await MoveFromTempFolder(result.merger, data, options, tempFolder, subtitles, fallbackUsed || options.ReplaceExistingFiles);
+                    }
+                }
+
+
+                data.DownloadProgress = new DownloadProgress(){
+                    State = DownloadState.Done,
+                    Percent = 100,
+                    Time = 0,
+                    DownloadSpeedBytes = 0,
+                    Doing = (muxError ? "Muxing Failed" : "Done") + (syncError ? $" - Couldn't sync dubs ({notSyncedDubs})" : "") + (fallbackUsed ? " - Used full-quality fallback" : "")
+                };
+
+                QueueManager.Instance.MarkDownloadFinished(data, CrunOptions.RemoveFinishedDownload && !syncError);
+            } else{
+                Console.WriteLine("Skipping mux");
+                res.Data.ForEach(file => Helpers.DeleteFile(file.Path + ".resume"));
+                if (options.DownloadToTempFolder){
+                    if (string.IsNullOrEmpty(res.TempFolderPath) || !Directory.Exists(res.TempFolderPath)){
+                        Console.WriteLine("Invalid or non-existent temp folder path.");
+                    } else{
+                        // Move files
+                        foreach (var downloadedMedia in res.Data){
+                            await MoveFile(downloadedMedia.Path ?? string.Empty, res.TempFolderPath, data.DownloadPath ?? CfgManager.PathVIDEOS_DIR, options, options.ReplaceExistingFiles);
+                        }
+                    }
+                }
+
+                data.DownloadProgress = new DownloadProgress(){
+                    State = DownloadState.Done,
+                    Percent = 100,
+                    Time = 0,
+                    DownloadSpeedBytes = 0,
+                    Doing = "Done - Skipped muxing"
+                };
+
+                QueueManager.Instance.MarkDownloadFinished(data, CrunOptions.RemoveFinishedDownload);
+            }
+        } catch (OperationCanceledException){
+            // expected when removed/canceled
+        } finally{
+            ReleaseDownloadSlotIfHeld();
+
+            if (processingSlotHeld){
+                QueueManager.Instance.ReleaseProcessingSlot();
+            }
+        }
+
+
+        QueueManager.Instance.RefreshQueue();
+
+        if (options.History && data.Data is{ Count: > 0 } && (options.HistoryIncludeCrArtists && data.Music || !data.Music)){
+            var ids = data.Data.First().GetOriginalIds();
+            History.SetAsDownloaded(
+                data.SeriesId,
+                ids.seasonID ?? data.SeasonId,
+                ids.guid ?? data.Data.First().MediaId,
+                GetDownloadedDubs(data, res, options),
+                GetDownloadedSoftSubs(res));
+        }
+
+        if (options.MarkAsWatched && data.Data is{ Count: > 0 }){
+            _ = CrEpisode.MarkAsWatched(data.Data.First().MediaId);
+        }
+
+        await NotificationPublisher.Instance.PublishDownloadFinishedAsync(CrunOptions.NotificationSettings, data);
+
+        if (!QueueManager.Instance.Queue.Any(e => !e.DownloadProgress.IsFinished)){
+            await NotificationPublisher.Instance.PublishQueueFinishedAsync(CrunOptions.NotificationSettings, data);
+
+            if (CrunOptions.ShutdownWhenQueueEmpty){
+                CrunOptions.ShutdownWhenQueueEmpty = false;
+                CfgManager.WriteCrSettings();
+                Helpers.ShutdownComputer();
+            }
+        }
+
+
+        return true;
+    }
+
+    private static List<string> GetDownloadedDubs(CrunchyEpMeta data, DownloadResponse? response, CrDownloadOptions? options){
+        if (options?.Noaudio == true){
+            return [];
+        }
+
+        var downloadedFromFiles = NormalizeLocales(response?.Data?
+            .Where(item => item.Type is DownloadMediaType.Video or DownloadMediaType.SyncVideo or DownloadMediaType.Audio)
+            .Select(item => item.Lang.CrLocale));
+
+        if (downloadedFromFiles.Count > 0){
+            return downloadedFromFiles;
+        }
+
+        return NormalizeLocales(data.Data
+            .Where(item => !item.IsAudioRoleDescription)
+            .Select(item => item.Lang?.CrLocale));
+    }
+
+    private static List<string> GetDownloadedSoftSubs(DownloadResponse? response){
+        if (response?.Data == null){
+            return [];
+        }
+
+        return NormalizeLocales(response.Data
+            .Where(item => item.Type == DownloadMediaType.Subtitle && item.Signs != true)
+            .Select(item => item.Language.CrLocale));
+    }
+
+    private static List<string> NormalizeLocales(IEnumerable<string?>? locales){
+        return (locales ?? [])
+            .Where(locale => !string.IsNullOrWhiteSpace(locale))
+            .Select(locale => locale!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    #region Temp Files Move
+
+    private async Task MoveFromTempFolder(Merger? merger, CrunchyEpMeta data, CrDownloadOptions options, string tempFolderPath, List<SubtitleInput> subtitles, bool replaceExisting = false){
+        if (!options.DownloadToTempFolder) return;
+
+        data.DownloadProgress = new DownloadProgress{
+            State = DownloadState.Processing,
+            Percent = 100,
+            Time = 0,
+            DownloadSpeedBytes = 0,
+            Doing = "Moving Files"
+        };
+
+        QueueManager.Instance.RefreshQueue();
+
+        if (string.IsNullOrEmpty(tempFolderPath) || !Directory.Exists(tempFolderPath)){
+            Console.WriteLine("Invalid or non-existent temp folder path.");
+            return;
+        }
+
+        // Move the main output file
+        await MoveFile(merger?.Options.Output ?? string.Empty, tempFolderPath, data.DownloadPath ?? CfgManager.PathVIDEOS_DIR, options, replaceExisting);
+
+        // Move the subtitle files
+        foreach (var downloadedMedia in subtitles){
+            await MoveFile(downloadedMedia.File ?? string.Empty, tempFolderPath, data.DownloadPath ?? CfgManager.PathVIDEOS_DIR, options, replaceExisting);
+        }
+    }
+
+    private async Task MoveFile(string sourcePath, string tempFolderPath, string downloadPath, CrDownloadOptions options, bool replaceExisting = false){
+        if (string.IsNullOrEmpty(sourcePath) || !File.Exists(sourcePath)){
+            // Console.Error.WriteLine("Source file does not exist or path is invalid.");
+            return;
+        }
+
+        if (!sourcePath.StartsWith(tempFolderPath)){
+            Console.Error.WriteLine("Source file is not located in the temp folder.");
+            return;
+        }
+
+        try{
+            var fileName = sourcePath[tempFolderPath.Length..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var destinationFolder = !string.IsNullOrEmpty(downloadPath)
+                ? downloadPath
+                : !string.IsNullOrEmpty(options.DownloadDirPath)
+                    ? options.DownloadDirPath
+                    : CfgManager.PathVIDEOS_DIR;
+
+            var destinationPath = Path.Combine(destinationFolder ?? string.Empty, fileName);
+            destinationPath = replaceExisting ? destinationPath : Helpers.GetAvailableDestinationPath(destinationPath);
+
+            string? destinationDirectory = Path.GetDirectoryName(destinationPath);
+            if (string.IsNullOrEmpty(destinationDirectory)){
+                Console.WriteLine("Invalid destination directory path.");
+                return;
+            }
+
+            await Task.Run(() => {
+                if (!Directory.Exists(destinationDirectory)){
+                    Directory.CreateDirectory(destinationDirectory);
+                }
+            });
+
+            await Task.Run(() => File.Move(sourcePath, destinationPath, replaceExisting));
+            Console.WriteLine($"File moved to {destinationPath}");
+        } catch (IOException ex){
+            Console.Error.WriteLine($"An error occurred while moving the file: {ex.Message}");
+        } catch (UnauthorizedAccessException ex){
+            Console.Error.WriteLine($"Access denied while moving the file: {ex.Message}");
+        } catch (Exception ex){
+            Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    private async Task<(Merger? merger, bool isMuxed, bool syncError, string notSyncedDubs, List<string> failedSyncLocales)> MuxStreams(List<DownloadedMedia> data, CrunchyMuxOptions options, string filename,
+        CrunchyEpMeta crunchyEpMeta){
+        var muxToMp3 = false;
+
+        if (options.Novids == true || data.FindAll(a => a.Type == DownloadMediaType.Video).Count == 0){
+            if (data.FindAll(a => a.Type == DownloadMediaType.Audio).Count > 0){
+                if (options.Mp3){
+                    Console.WriteLine("Mux to MP3");
+                    muxToMp3 = true;
+                }
+            } else{
+                Console.WriteLine("Skip muxing since no videos are downloaded");
+                return (null, false, false, "", []);
+            }
+        }
+
+        var subs = data.Where(a => a.Type == DownloadMediaType.Subtitle).ToList();
+        var subsList = new List<SubtitleFonts>();
+
+        foreach (var downloadedMedia in subs){
+            var subt = new SubtitleFonts();
+            subt.Language = downloadedMedia.Language;
+            subt.Fonts = downloadedMedia.Fonts ?? [];
+            subsList.Add(subt);
+        }
+
+        var outputPath = $"{filename}.{(muxToMp3 ? "mp3" : options.Mp4 ? "mp4" : "mkv")}";
+        if (File.Exists(outputPath) && !string.IsNullOrEmpty(filename)){
+            if (options.ReplaceExistingFiles){
+                Helpers.DeleteFile(outputPath);
+            } else{
+            string newFilePath = filename;
+            int counter = 1;
+
+            while (File.Exists($"{newFilePath}.{(muxToMp3 ? "mp3" : options.Mp4 ? "mp4" : "mkv")}")){
+                newFilePath = filename + $"({counter})";
+                counter++;
+            }
+
+            filename = newFilePath;
+            }
+        }
+
+        bool muxDesc = false;
+        if (options.MuxDescription){
+            var descriptionPath = data.First(a => a.Type == DownloadMediaType.Description).Path;
+            if (File.Exists(descriptionPath)){
+                muxDesc = true;
+            } else{
+                Console.Error.WriteLine("No xml description file found to mux description");
+            }
+        }
+
+
+        var merger = new Merger(new MergerOptions{
+            DubLangList = options.DubLangList,
+            SubLangList = options.SubLangList,
+            OnlyVid = data.Where(a => a.Type == DownloadMediaType.Video).Select(a => new MergerInput{ Language = a.Lang, Path = a.Path ?? string.Empty, Bitrate = a.bitrate }).ToList(),
+            SkipSubMux = options.SkipSubMux,
+            OnlyAudio = data.Where(a => a.Type is DownloadMediaType.Audio or DownloadMediaType.AudioRoleDescription).Select(a => new MergerInput
+                { Language = a.Lang, Path = a.Path ?? string.Empty, Bitrate = a.bitrate, Delay = a.Delay, IsAudioRoleDescription = (a.Type is DownloadMediaType.AudioRoleDescription) }).ToList(),
+            Output = $"{filename}.{(muxToMp3 ? "mp3" : options.Mp4 ? "mp4" : "mkv")}",
+            Subtitles = data.Where(a => a.Type == DownloadMediaType.Subtitle).Select(a => new SubtitleInput
+                { File = a.Path ?? string.Empty, Language = a.Language, ClosedCaption = a.Cc ?? false, Signs = a.Signs ?? false, Delay = a.Delay, RelatedVideoDownloadMedia = a.RelatedVideoDownloadMedia }).ToList(),
+            KeepAllVideos = options.KeepAllVideos,
+            Fonts = options.MuxFonts ? FontsManager.Instance.MakeFontsList(CfgManager.PathFONTS_DIR, subsList) : [],
+            Chapters = data.Where(a => a.Type == DownloadMediaType.Chapters).Select(a => new MergerInput{ Language = a.Lang, Path = a.Path ?? string.Empty }).ToList(),
+            VideoTitle = options.VideoTitle,
+            Options = new MuxOptions(){
+                Ffmpeg = options.FfmpegOptions,
+                Mkvmerge = options.MkvmergeOptions
+            },
+            Defaults = new Defaults(){
+                Video = options.DefaultVideo,
+                Audio = options.DefaultAudio,
+                Sub = options.DefaultSub
+            },
+            CcTag = options.CcTag,
+            mp3 = muxToMp3,
+            DefaultSubSigns = options.DefaultSubSigns,
+            DefaultSubForcedDisplay = options.DefaultSubForcedDisplay,
+            CcSubsMuxingFlag = options.CcSubsMuxingFlag,
+            SignsSubsAsForced = options.SignsSubsAsForced,
+            Description = muxDesc ? data.Where(a => a.Type == DownloadMediaType.Description).Select(a => new MergerInput{ Path = a.Path ?? string.Empty }).ToList() : [],
+            Cover = options.MuxCover ? data.Where(a => a.Type == DownloadMediaType.Cover).Select(a => new MergerInput{ Path = a.Path ?? string.Empty }).ToList() : [],
+        });
+
+        bool ffmpegAvailable = Helpers.IsInstalled(CfgManager.PathFFMPEG, "-version");
+        bool mkvmergeAvailable = Helpers.IsInstalled(CfgManager.PathMKVMERGE, "--version");
+
+        if (!ffmpegAvailable){
+            Console.Error.WriteLine("FFmpeg not found");
+        }
+
+        if (!mkvmergeAvailable){
+            Console.Error.WriteLine("MKVmerge not found");
+        }
+
+        bool isMuxed, syncError = false;
+        List<string> notSyncedDubs = [];
+
+
+        if (options is{ SyncTiming: true, DlVideoOnce: true } && merger.Options.OnlyVid.Count > 0 && merger.Options.OnlyAudio.Count > 0){
+            crunchyEpMeta.DownloadProgress = new DownloadProgress(){
+                State = DownloadState.Processing,
+                Percent = 100,
+                Time = 0,
+                DownloadSpeedBytes = 0,
+                Doing = "Muxing – Syncing Dub Timings"
+            };
+
+            QueueManager.Instance.RefreshQueue();
+
+            var basePath = merger.Options.OnlyVid.First().Path;
+            var syncVideosList = data.Where(a => a.Type == DownloadMediaType.SyncVideo).ToList();
+
+            if (!string.IsNullOrEmpty(basePath) && syncVideosList.Count > 0){
+                foreach (var syncVideo in syncVideosList){
+                    if (!string.IsNullOrEmpty(syncVideo.Path)){
+                        var delay = await VideoSyncer.ProcessVideo(basePath, syncVideo.Path);
+
+                        if (delay.offSet <= -100){
+                            syncError = true;
+                            notSyncedDubs.Add(syncVideo.Lang.CrLocale);
+                            continue;
+                        }
+
+                        if (delay.lengthDiff > 0.1){
+                            Console.Error.WriteLine($"Dub difference > 0.1:");
+                            Console.Error.WriteLine($"\tFor episode: {filename}");
+                            Console.Error.WriteLine($"\tFor dub: {syncVideo.Lang.CrLocale}");
+                            Console.Error.WriteLine($"\tStart offset: {delay.startOffset} seconds");
+                            Console.Error.WriteLine($"\tEnd offset: {delay.endOffset} seconds");
+                            Console.Error.WriteLine($"\tVideo length difference: {delay.lengthDiff} seconds");
+                        }
+
+
+                        var audio = merger.Options.OnlyAudio.FirstOrDefault(audio => audio.Language.CrLocale == syncVideo.Lang.CrLocale);
+                        var delayMs = (int)(delay.offSet * 1000);
+                        if (audio != null){
+                            audio.Delay = delayMs;
+                        }
+
+                        var sourceAudio = data.FirstOrDefault(downloadedMedia =>
+                            downloadedMedia.Type is DownloadMediaType.Audio or DownloadMediaType.AudioRoleDescription &&
+                            downloadedMedia.Lang.CrLocale == syncVideo.Lang.CrLocale);
+                        if (sourceAudio != null){
+                            sourceAudio.Delay = delayMs;
+                        }
+
+
+                        var subtitles = merger.Options.Subtitles.Where(a => a.RelatedVideoDownloadMedia == syncVideo).ToList();
+                        var sourceSubtitles = data.Where(a => a.Type == DownloadMediaType.Subtitle && a.RelatedVideoDownloadMedia == syncVideo).ToList();
+
+                        if (subtitles.Count <= 0) continue;
+
+                        foreach (var subMergerInput in subtitles){
+                            subMergerInput.Delay = delayMs;
+                        }
+
+                        foreach (var sourceSubtitle in sourceSubtitles){
+                            sourceSubtitle.Delay = delayMs;
+                        }
+                    }
+                }
+            }
+
+            crunchyEpMeta.DownloadProgress = new DownloadProgress(){
+                State = DownloadState.Processing,
+                Percent = 100,
+                Time = 0,
+                DownloadSpeedBytes = 0,
+                Doing = "Muxing"
+            };
+
+            QueueManager.Instance.RefreshQueue();
+        }
+
+        if (!options.Mp4 && !muxToMp3){
+            isMuxed = await merger.Merge("mkvmerge", CfgManager.PathMKVMERGE, crunchyEpMeta.Cts.Token);
+        } else{
+            isMuxed = await merger.Merge("ffmpeg", CfgManager.PathFFMPEG, crunchyEpMeta.Cts.Token);
+        }
+
+        return (merger, isMuxed, syncError, string.Join(", ", notSyncedDubs), notSyncedDubs);
+    }
+
+    private async Task<(bool FallbackReady, List<string> FailedLocales)> TrySyncTimingFallbackAsync(DownloadResponse res, CrunchyEpMeta data, CrDownloadOptions options, List<string> failedSyncLocales){
+        var uniqueFailedLocales = failedSyncLocales
+            .Where(locale => !string.IsNullOrWhiteSpace(locale))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (uniqueFailedLocales.Count == 0){
+            return (false, []);
+        }
+
+        data.DownloadProgress = new DownloadProgress{
+            State = DownloadState.Downloading,
+            Percent = 0,
+            Time = 0,
+            DownloadSpeedBytes = 0,
+            Doing = $"Downloading full-quality fallback video ({string.Join(", ", uniqueFailedLocales)})"
+        };
+        QueueManager.Instance.RefreshQueue();
+
+        foreach (var syncVideo in res.Data.Where(media => media.Type == DownloadMediaType.SyncVideo && uniqueFailedLocales.Contains(media.Lang.CrLocale, StringComparer.OrdinalIgnoreCase)).ToList()){
+            if (!string.IsNullOrEmpty(syncVideo.Path)){
+                Helpers.DeleteFile(syncVideo.Path);
+                Helpers.DeleteFile(syncVideo.Path + ".resume");
+                Helpers.DeleteFile(syncVideo.Path + ".new.resume");
+            }
+        }
+
+        res.Data.RemoveAll(media => media.Type == DownloadMediaType.SyncVideo && uniqueFailedLocales.Contains(media.Lang.CrLocale, StringComparer.OrdinalIgnoreCase));
+
+        var fallbackOptions = Helpers.DeepCopy(options) ?? new CrDownloadOptions();
+
+        fallbackOptions.DubLang = uniqueFailedLocales;
+        fallbackOptions.Noaudio = true;
+        fallbackOptions.Novids = false;
+        fallbackOptions.DlSubs = [];
+        fallbackOptions.SkipSubs = true;
+        fallbackOptions.SkipSubsMux = true;
+        fallbackOptions.Chapters = false;
+        fallbackOptions.IncludeVideoDescription = false;
+        fallbackOptions.MuxCover = false;
+        fallbackOptions.DownloadDescriptionAudio = false;
+        fallbackOptions.DlVideoOnce = false;
+        fallbackOptions.SyncTiming = false;
+        fallbackOptions.DownloadFirstAvailableDub = false;
+        fallbackOptions.SkipMuxing = true;
+
+        var originalDataEntries = data.Data;
+        var originalSelectedDubs = data.SelectedDubs != null ? new List<string>(data.SelectedDubs) : null;
+        var originalDownloadSubs = new List<string>(data.DownloadSubs);
+        var originalTempFileSuffix = data.TempFileSuffix;
+
+        data.Data = data.Data
+            .Where(epMeta => epMeta.Lang != null && uniqueFailedLocales.Contains(epMeta.Lang.CrLocale, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        data.SelectedDubs = uniqueFailedLocales;
+        data.DownloadSubs = [];
+        data.TempFileSuffix = $"-fallback-{Guid.NewGuid():N}"[..19];
+
+        if (data.Data.Count == 0){
+            data.Data = originalDataEntries;
+            data.SelectedDubs = originalSelectedDubs;
+            data.DownloadSubs = originalDownloadSubs;
+            data.TempFileSuffix = originalTempFileSuffix;
+            return (false, uniqueFailedLocales);
+        }
+
+        DownloadResponse fallbackResponse;
+        try{
+            fallbackResponse = await DownloadMediaList(data, fallbackOptions);
+        } finally{
+            data.Data = originalDataEntries;
+            data.SelectedDubs = originalSelectedDubs;
+            data.DownloadSubs = originalDownloadSubs;
+            data.TempFileSuffix = originalTempFileSuffix;
+        }
+
+        if (fallbackResponse.Error){
+            return (false, uniqueFailedLocales);
+        }
+
+        var fallbackVideos = fallbackResponse.Data
+            .Where(media => media.Type == DownloadMediaType.Video && uniqueFailedLocales.Contains(media.Lang.CrLocale, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        var fallbackVideoLocales = fallbackVideos
+            .Select(media => media.Lang.CrLocale)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (fallbackVideoLocales.Count != uniqueFailedLocales.Count){
+            return (false, uniqueFailedLocales);
+        }
+
+        res.Data.RemoveAll(media => media.Type == DownloadMediaType.Video && uniqueFailedLocales.Contains(media.Lang.CrLocale, StringComparer.OrdinalIgnoreCase));
+        res.Data.AddRange(fallbackVideos);
+
+        return (true, uniqueFailedLocales);
+    }
+
+    private static void DeleteSyncVideoFiles(List<DownloadedMedia> data){
+        foreach (var syncVideo in data.Where(media => media.Type == DownloadMediaType.SyncVideo).ToList()){
+            if (!string.IsNullOrEmpty(syncVideo.Path)){
+                Helpers.DeleteFile(syncVideo.Path);
+                Helpers.DeleteFile(syncVideo.Path + ".resume");
+                Helpers.DeleteFile(syncVideo.Path + ".new.resume");
+            }
+        }
+    }
+
+    private async Task<DownloadResponse> DownloadMediaList(CrunchyEpMeta data, CrDownloadOptions options){
+        if (CrAuthEndpoint1.Profile.Username == "???"){
+            MainWindow.Instance.ShowError($"User Account not recognized - are you signed in?");
+            return new DownloadResponse{
+                Data = new List<DownloadedMedia>(),
+                Error = true,
+                FileName = "./unknown",
+                ErrorText = "User Account not recognized - are you signed in?"
+            };
+        }
+
+        bool ffmpegAvailable = Helpers.IsInstalled(CfgManager.PathFFMPEG, "-version");
+        bool mkvmergeAvailable = Helpers.IsInstalled(CfgManager.PathMKVMERGE, "--version");
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)){
+            if (!ffmpegAvailable){
+                Console.Error.WriteLine("Missing ffmpeg");
+                MainWindow.Instance.ShowError($"FFmpeg not found at: {CfgManager.PathFFMPEG}", "FFmpeg",
+                    "https://github.com/GyanD/codexffmpeg/releases/latest");
+                return new DownloadResponse{
+                    Data = new List<DownloadedMedia>(),
+                    Error = true,
+                    FileName = "./unknown",
+                    ErrorText = "Missing ffmpeg"
+                };
+            }
+
+            if (!mkvmergeAvailable){
+                Console.Error.WriteLine("Missing Mkvmerge");
+                MainWindow.Instance.ShowError($"Mkvmerge not found at: {CfgManager.PathMKVMERGE}", "Mkvmerge",
+                    "https://mkvtoolnix.download/downloads.html#windows");
+                return new DownloadResponse{
+                    Data = new List<DownloadedMedia>(),
+                    Error = true,
+                    FileName = "./unknown",
+                    ErrorText = "Missing Mkvmerge"
+                };
+            }
+        } else{
+            if (!ffmpegAvailable){
+                Console.Error.WriteLine("Ffmpeg is not installed or not in the system PATH.");
+                MainWindow.Instance.ShowError("Ffmpeg is not installed on the system or not found in the PATH.");
+                return new DownloadResponse{
+                    Data = new List<DownloadedMedia>(),
+                    Error = true,
+                    FileName = "./unknown",
+                    ErrorText = "Ffmpeg is not installed"
+                };
+            }
+
+            if (!mkvmergeAvailable){
+                Console.Error.WriteLine("Mkvmerge is not installed or not in the system PATH.");
+                MainWindow.Instance.ShowError("Mkvmerge is not installed on the system or not found in the PATH.");
+                return new DownloadResponse{
+                    Data = new List<DownloadedMedia>(),
+                    Error = true,
+                    FileName = "./unknown",
+                    ErrorText = "Mkvmerge is not installed"
+                };
+            }
+        }
+
+        if (!_widevine.canDecrypt){
+            Console.Error.WriteLine("CDM files missing");
+            MainWindow.Instance.ShowError("Can't find CDM files in the Widevine folder.\nFor more information, please check the FAQ section in the Wiki on the GitHub page.", "GitHub Wiki",
+                "https://github.com/Crunchy-DL/Crunchy-Downloader/wiki");
+            return new DownloadResponse{
+                Data = new List<DownloadedMedia>(),
+                Error = true,
+                FileName = "./unknown",
+                ErrorText = "Missing CDM files"
+            };
+        }
+
+        if (!File.Exists(CfgManager.PathMP4Decrypt) && !File.Exists(CfgManager.PathShakaPackager)){
+            Console.Error.WriteLine("mp4decrypt or shaka-packager not found");
+            MainWindow.Instance.ShowError($"Either mp4decrypt (expected in lib folder at: {CfgManager.PathMP4Decrypt}) " +
+                                          $"or shaka-packager (expected in lib folder at: {CfgManager.PathShakaPackager}) must be available.");
+            return new DownloadResponse{
+                Data = new List<DownloadedMedia>(),
+                Error = true,
+                FileName = "./unknown",
+                ErrorText = "Requires either mp4decrypt or shaka-packager"
+            };
+        }
+
+        string mediaName = $"{data.SeasonTitle} - {data.EpisodeNumber} - {data.EpisodeTitle}";
+        string fileName = "";
+        var variables = new List<Variable>();
+
+        List<DownloadedMedia> files = new List<DownloadedMedia>();
+
+        // if (data.Data != null && data.Data.All(a => a.Playback == null)){
+        //     Console.WriteLine("No Video Data found - Are you trying to download a premium episode without havíng a premium account?");
+        //     MainWindow.Instance.ShowError("No Video Data found - Are you trying to download a premium episode without havíng a premium account?");
+        //     return new DownloadResponse{
+        //         Data = files,
+        //         Error = true,
+        //         FileName = "./unknown",
+        //         ErrorText = "Video Data not found"
+        //     };
+        // }
+
+
+        bool dlFailed = false;
+        bool dlVideoOnce = false;
+        string fileDir = CfgManager.PathVIDEOS_DIR;
+
+        if (data.Data is{ Count: > 0 }){
+            options.Partsize = options.Partsize > 0 ? options.Partsize : 1;
+
+            var historyEpisode = History.GetHistoryEpisode(data.SeriesId ?? string.Empty, data.SeasonId ?? string.Empty, data.EpisodeId ?? string.Empty);
+            SonarrEpisode? sonarrEpisode;
+            if (historyEpisode != null && CrunOptions.SonarrProperties?.SonarrEnabled == true){
+                sonarrEpisode = await SonarrClient.Instance.GetEpisode(Convert.ToInt32(historyEpisode.SonarrEpisodeId));
+                if (sonarrEpisode is{ Series: null }) sonarrEpisode.Series = await SonarrClient.Instance.GetSeries(sonarrEpisode.SeriesId);
+                variables.Add(new Variable("sonarrSeriesTitle", sonarrEpisode?.Series?.Title ?? string.Empty, true));
+                variables.Add(new Variable("sonarrSeriesReleaseYear", sonarrEpisode?.Series?.Year ?? 0, true));
+                variables.Add(new Variable("sonarrEpisodeTitle", sonarrEpisode?.Title ?? string.Empty, true));
+            }
+
+            if (options.DownloadDescriptionAudio){
+                var alreadyAdr = new HashSet<string>(
+                    data.Data.Where(x => x.IsAudioRoleDescription).Select(x => x.Lang?.CrLocale ?? "err")
+                );
+
+                bool HasDescriptionRole(IEnumerable<string>? roles) =>
+                    roles?.Any(r => string.Equals(r, "description", StringComparison.OrdinalIgnoreCase)) == true;
+
+                var toDuplicate = data.Data
+                    .Where(m => !m.IsAudioRoleDescription)
+                    .Where(m => !alreadyAdr.Contains(m.Lang?.CrLocale ?? "err"))
+                    .Where(m => m.Versions?.Any(v => (v.AudioLocale == (m.Lang?.CrLocale ?? "err"))
+                                                     && HasDescriptionRole(v.roles)) == true)
+                    .ToList();
+
+                var additions = toDuplicate.Select(m => new CrunchyEpMetaData{
+                    MediaId = m.MediaId,
+                    Lang = m.Lang,
+                    Playback = m.Playback,
+                    Versions = m.Versions,
+                    IsSubbed = m.IsSubbed,
+                    IsDubbed = m.IsDubbed,
+                    IsAudioRoleDescription = true
+                }).ToList();
+
+                data.Data.AddRange(additions);
+            }
+
+
+            var rank = options.DubLang
+                .Select((val, i) => new{ val, i })
+                .ToDictionary(x => x.val, x => x.i, StringComparer.OrdinalIgnoreCase);
+
+            var sortedMetaData = data.Data
+                .OrderBy(m => {
+                    var key = m.Lang?.CrLocale ?? string.Empty;
+                    return rank.TryGetValue(key, out var r) ? r : int.MaxValue; // unknown locales last
+                })
+                .ThenBy(m => m.IsAudioRoleDescription) // false first, then true
+                .ToList();
+
+            data.Data = sortedMetaData;
+
+            foreach (CrunchyEpMetaData epMeta in data.Data){
+                await WaitForDubDownloadDelayAsync(data, options);
+                Console.WriteLine($"Requesting: [{epMeta.MediaId}] {mediaName}");
+
+                string currentMediaId = (epMeta.MediaId.Contains(':') ? epMeta.MediaId.Split(':')[1] : epMeta.MediaId);
+
+                fileDir = options.DownloadToTempFolder ? !string.IsNullOrEmpty(options.DownloadTempDirPath)
+                        ? Path.Combine(options.DownloadTempDirPath, Helpers.GetValidFolderName(currentMediaId))
+                        : Path.Combine(CfgManager.PathTEMP_DIR, Helpers.GetValidFolderName(currentMediaId)) :
+                    !string.IsNullOrEmpty(data.DownloadPath) ? data.DownloadPath :
+                    !string.IsNullOrEmpty(options.DownloadDirPath) ? options.DownloadDirPath : CfgManager.PathVIDEOS_DIR;
+
+                if (!Helpers.IsValidPath(fileDir)){
+                    fileDir = CfgManager.PathVIDEOS_DIR;
+                }
+
+
+                await CrAuthEndpoint1.RefreshToken(true);
+
+                EpisodeVersion currentVersion = new EpisodeVersion();
+                EpisodeVersion primaryVersion = new EpisodeVersion();
+                bool isPrimary = epMeta.IsSubbed;
+
+                //Get Media GUID
+                string mediaId = epMeta.MediaId;
+                string mediaGuid = currentMediaId;
+                if (epMeta.Versions != null){
+                    if (epMeta.Lang != null){
+                        currentVersion = epMeta.Versions.Find(a => a.AudioLocale == epMeta.Lang?.CrLocale) ?? currentVersion;
+                    } else if (data.SelectedDubs is{ Count: 1 }){
+                        LanguageItem? lang = Array.Find(Languages.languages, a => a.CrLocale == data.SelectedDubs[0]);
+                        currentVersion = epMeta.Versions.Find(a => a.AudioLocale == lang?.CrLocale) ?? currentVersion;
+                    } else if (epMeta.Versions.Count == 1){
+                        currentVersion = epMeta.Versions[0];
+                    }
+
+                    if (currentVersion.MediaGuid == null){
+                        Console.WriteLine("Selected language not found in versions.");
+                        MainWindow.Instance.ShowError("Selected language not found");
+                        continue;
+                    }
+
+                    isPrimary = currentVersion.Original;
+                    mediaId = currentVersion.MediaGuid;
+                    mediaGuid = currentVersion.Guid;
+
+                    if (!isPrimary){
+                        primaryVersion = epMeta.Versions.Find(a => a.Original) ?? currentVersion;
+                    } else{
+                        primaryVersion = currentVersion;
+                    }
+                }
+
+                if (mediaId.Contains(':')){
+                    mediaId = mediaId.Split(':')[1];
+                }
+
+                if (mediaGuid.Contains(':')){
+                    mediaGuid = mediaGuid.Split(':')[1];
+                }
+
+                Console.WriteLine("MediaGuid: " + mediaId);
+
+                #region Chapters
+
+                List<string> compiledChapters = new List<string>();
+
+                if (options.Chapters && !data.OnlySubs){
+                    await ParseChapters(mediaGuid, compiledChapters);
+
+                    if (compiledChapters.Count == 0 && !string.IsNullOrEmpty(primaryVersion.Guid) && mediaGuid != primaryVersion.Guid){
+                        Console.Error.WriteLine("Chapters empty trying to get original version chapters - might not match with video");
+                        await ParseChapters(primaryVersion.Guid, compiledChapters);
+                    }
+                }
+
+                #endregion
+
+                (bool IsOk, PlaybackData pbData, string error, Dictionary<string, string> Headers) fetchPlaybackData = default;
+                (bool IsOk, PlaybackData pbData, string error, Dictionary<string, string> Headers) fetchPlaybackData2 = default;
+
+                if (CrAuthEndpoint1.Profile.Username != "???" && options.StreamEndpoint != null && (options.StreamEndpoint.Video || options.StreamEndpoint.Audio)){
+                    fetchPlaybackData = await FetchPlaybackData(CrAuthEndpoint1, mediaId, mediaGuid, data.Music, epMeta.IsAudioRoleDescription, options.StreamEndpoint);
+                }
+
+                if (CrAuthEndpoint2.Profile.Username != "???" && options.StreamEndpointSecondSettings != null && (options.StreamEndpointSecondSettings.Video || options.StreamEndpointSecondSettings.Audio)){
+                    fetchPlaybackData2 = await FetchPlaybackData(CrAuthEndpoint2, mediaId, mediaGuid, data.Music, epMeta.IsAudioRoleDescription, options.StreamEndpointSecondSettings);
+                }
+
+                if (!fetchPlaybackData.IsOk && !fetchPlaybackData2.IsOk){
+                    var errorJson = !string.IsNullOrEmpty(fetchPlaybackData.error)
+                        ? fetchPlaybackData.error
+                        : fetchPlaybackData2.error;
+                    if (!string.IsNullOrEmpty(errorJson)){
+                        var error = StreamError.FromJson(errorJson);
+
+                        if (error?.IsTooManyActiveStreamsError() == true){
+                            MainWindow.Instance.ShowError("Too many active streams that couldn't be stopped");
+                            return new DownloadResponse{
+                                Data = new List<DownloadedMedia>(),
+                                Error = true,
+                                FileName = "./unknown",
+                                ErrorText = "Too many active streams that couldn't be stopped\nClose open Crunchyroll tabs in your browser"
+                            };
+                        }
+
+                        if (error?.Error?.Contains("Account maturity rating is lower than video rating") == true ||
+                            errorJson.Contains("Account maturity rating is lower than video rating")){
+                            MainWindow.Instance.ShowError("Account maturity rating is lower than video rating\nChange it in the Crunchyroll account settings");
+                            return new DownloadResponse{
+                                Data = new List<DownloadedMedia>(),
+                                Error = true,
+                                FileName = "./unknown",
+                                ErrorText = "Account maturity rating is lower than video rating"
+                            };
+                        }
+
+                        if (error?.IsPlaybackRateLimitError() == true){
+                            int retryDelaySeconds = Helpers.GetRetryDelaySeconds(options, data.DownloadProgress.RetryAttemptCount);
+
+                            if (fetchPlaybackData.Headers != null &&
+                                fetchPlaybackData.Headers.TryGetValue("retry-after", out var retryAfter) &&
+                                int.TryParse(retryAfter, out var parsedRetryAfter)){
+                                Console.WriteLine($"Retry after: {parsedRetryAfter} seconds");
+                                retryDelaySeconds = parsedRetryAfter;
+                            }
+
+                            Console.Error.WriteLine($"Playback API rate limited with 4294. Requeueing download in {retryDelaySeconds}s.");
+                            return new DownloadResponse{
+                                Data = new List<DownloadedMedia>(),
+                                RetrySuggested = true,
+                                RetryDelaySeconds = retryDelaySeconds,
+                                FileName = "./unknown",
+                                ErrorText = "Rate limit error"
+                            };
+                        }
+
+                        if (!string.IsNullOrEmpty(error?.Error)){
+                            MainWindow.Instance.ShowError($"Couldn't get Playback Data\n{error.Error}");
+                            return new DownloadResponse{
+                                Data = new List<DownloadedMedia>(),
+                                Error = true,
+                                FileName = "./unknown",
+                                ErrorText = "Playback data not found"
+                            };
+                        }
+                    }
+
+                    MainWindow.Instance.ShowError("Couldn't get Playback Data\nTry again later or else check logs and Crunchyroll");
+                    return new DownloadResponse{
+                        Data = new List<DownloadedMedia>(),
+                        Error = true,
+                        FileName = "./unknown",
+                        ErrorText = "Playback data not found"
+                    };
+                }
+
+                if (fetchPlaybackData2.IsOk){
+                    if (fetchPlaybackData.pbData?.Data != null && fetchPlaybackData2.pbData?.Data != null){
+                        foreach (var keyValuePair in fetchPlaybackData2.pbData.Data){
+                            var pbDataFirstEndpoint = fetchPlaybackData.pbData?.Data;
+                            if (pbDataFirstEndpoint != null && pbDataFirstEndpoint.TryGetValue(keyValuePair.Key, out var value)){
+                                var secondEndpoint = keyValuePair.Value.Url.First();
+
+                                var match = Regex.Match(secondEndpoint.Url ?? "", @"(https?:\/\/.*?\/(?:dash\/|\.urlset\/))");
+                                var shortendUrl = match.Success ? match.Value : secondEndpoint.Url;
+
+                                if (!string.IsNullOrEmpty(shortendUrl) && !value.Url.Any(arrayUrl => arrayUrl.Url != null && arrayUrl.Url.Contains(shortendUrl))){
+                                    value.Url.Add(secondEndpoint);
+                                }
+                            } else{
+                                if (pbDataFirstEndpoint != null){
+                                    pbDataFirstEndpoint[keyValuePair.Key] = keyValuePair.Value;
+                                } else{
+                                    if (fetchPlaybackData.pbData != null){
+                                        fetchPlaybackData.pbData.Data = new Dictionary<string, StreamDetails>{
+                                            [keyValuePair.Key] = keyValuePair.Value
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    } else{
+                        fetchPlaybackData = fetchPlaybackData2;
+                    }
+                }
+
+
+                var pbData = fetchPlaybackData.pbData;
+
+                List<string> hsLangs = new List<string>();
+                var pbStreams = pbData?.Data;
+                var streams = new List<StreamDetailsPop>();
+
+                variables.Add(new Variable("title", data.EpisodeTitle ?? string.Empty, true));
+                variables.Add(new Variable("episode",
+                    (double.TryParse(data.EpisodeNumber, NumberStyles.Any, CultureInfo.InvariantCulture, out double episodeNum) ? (object)Math.Round(episodeNum, 1) : data.AbsolutEpisodeNumberE) ?? string.Empty, false));
+                variables.Add(new Variable("seriesTitle", data.SeriesTitle ?? string.Empty, true));
+                variables.Add(new Variable("seasonTitle", data.SeasonTitle ?? string.Empty, true));
+                variables.Add(new Variable("season", !string.IsNullOrEmpty(data.Season) ? Math.Round(double.Parse(data.Season, CultureInfo.InvariantCulture), 1) : 0, false));
+                variables.Add(new Variable("dubs", string.Join(", ", data.SelectedDubs ?? []), true));
+
+
+                if (pbStreams?.Keys != null){
+                    var pb = pbStreams.Select(v => {
+                        if (v.Key != "none" && v.Value is{ IsHardsubbed: true, HardsubLocale: not null } && v.Value.HardsubLocale != Locale.DefaulT && !hsLangs.Contains(v.Value.HardsubLang.CrLocale)){
+                            hsLangs.Add(v.Value.HardsubLang.CrLocale);
+                        }
+
+                        return new StreamDetailsPop{
+                            Url = v.Value.Url,
+                            IsHardsubbed = v.Value.IsHardsubbed,
+                            HardsubLocale = v.Value.HardsubLocale,
+                            HardsubLang = v.Value.HardsubLang,
+                            AudioLang = pbData.Meta?.AudioLocale ?? Languages.DEFAULT_lang,
+                            Type = v.Value.Type,
+                            Format = "drm_adaptive_dash",
+                        };
+                    }).ToList();
+
+                    streams.AddRange(pb);
+
+
+                    if (streams.Count < 1){
+                        Console.WriteLine("No full streams found!");
+                        MainWindow.Instance.ShowError("No streams found");
+                        return new DownloadResponse{
+                            Data = new List<DownloadedMedia>(),
+                            Error = true,
+                            FileName = "./unknown",
+                            ErrorText = "Streams not found"
+                        };
+                    }
+
+                    var audDub = Languages.DEFAULT_lang;
+                    if (pbData.Meta != null){
+                        audDub = pbData.Meta.AudioLocale;
+                    }
+
+                    hsLangs = Languages.SortTags(hsLangs);
+
+                    streams = streams.Select(s => {
+                        s.AudioLang = audDub;
+                        s.HardsubLang = s.HardsubLang;
+                        s.Type = $"{s.Format}/{s.AudioLang.CrLocale}/{s.HardsubLang.CrLocale}";
+                        return s;
+                    }).ToList();
+
+                    streams.Sort((a, b) => String.CompareOrdinal(a.Type, b.Type));
+
+                    if (options.Hslang != "none"){
+                        if (hsLangs.IndexOf(options.Hslang) > -1){
+                            Console.WriteLine($"Selecting stream with {Languages.Locale2language(options.Hslang).Language} hardsubs");
+                            streams = streams.Where((s) => s.IsHardsubbed && s.HardsubLang.CrLocale == options.Hslang).ToList();
+                        } else{
+                            Console.Error.WriteLine($"Selected stream with {options.Hslang} hardsubs not available");
+                            if (hsLangs.Count > 0){
+                                Console.Error.WriteLine("Try hardsubs stream: " + string.Join(", ", hsLangs));
+                            }
+
+                            if (dlVideoOnce && options.DlVideoOnce){
+                                streams = streams.Where((s) => !s.IsHardsubbed).ToList();
+                            } else{
+                                if (hsLangs.Count > 0){
+                                    var dialog = new ContentDialog(){
+                                        Title = "Hardsub Select",
+                                        PrimaryButtonText = "Select",
+                                        CloseButtonText = "Close"
+                                    };
+
+                                    var viewModel = new ContentDialogDropdownSelectViewModel(dialog,
+                                        data.SeriesTitle + (!string.IsNullOrEmpty(data.Season)
+                                            ? " - S" + data.Season + "E" + (data.EpisodeNumber != string.Empty ? data.EpisodeNumber : data.AbsolutEpisodeNumberE)
+                                            : "") + " - " +
+                                        data.EpisodeTitle, hsLangs);
+                                    dialog.Content = new ContentDialogDropdownSelectView(){
+                                        DataContext = viewModel
+                                    };
+
+                                    var result = await dialog.ShowAsync();
+
+                                    if (result == ContentDialogResult.Primary){
+                                        string selectedValue = viewModel.SelectedDropdownItem.stringValue;
+
+                                        if (hsLangs.IndexOf(selectedValue) > -1){
+                                            Console.WriteLine($"Selecting stream with {Languages.Locale2language(selectedValue).Language} hardsubs");
+                                            streams = streams.Where((s) => s.IsHardsubbed && s.HardsubLang?.CrLocale == selectedValue).ToList();
+                                            data.Hslang = selectedValue;
+                                        }
+                                    } else{
+                                        dlFailed = true;
+
+                                        return new DownloadResponse{
+                                            Data = new List<DownloadedMedia>(),
+                                            Error = dlFailed,
+                                            FileName = "./unknown",
+                                            ErrorText = "Hardsub not available"
+                                        };
+                                    }
+                                } else{
+                                    if (options.HsRawFallback){
+                                        streams = streams.Where((s) => !s.IsHardsubbed).ToList();
+                                        if (streams.Count < 1){
+                                            Console.Error.WriteLine("Raw streams not available!");
+                                            dlFailed = true;
+                                        }
+                                    } else{
+                                        dlFailed = true;
+
+                                        return new DownloadResponse{
+                                            Data = new List<DownloadedMedia>(),
+                                            Error = dlFailed,
+                                            FileName = "./unknown",
+                                            ErrorText = "No Hardsubs available"
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    } else{
+                        streams = streams.Where((s) => !s.IsHardsubbed).ToList();
+
+                        if (streams.Count < 1){
+                            Console.Error.WriteLine("Raw streams not available!");
+                            if (hsLangs.Count > 0){
+                                Console.Error.WriteLine("Try hardsubs stream: " + string.Join(", ", hsLangs));
+                            }
+
+                            dlFailed = true;
+                        }
+
+                        Console.WriteLine("Selecting stream");
+                    }
+
+                    StreamDetailsPop? curStream = null;
+                    if (!dlFailed){
+                        options.Kstream = options.Kstream >= 1 && options.Kstream <= streams.Count
+                            ? options.Kstream
+                            : 1;
+
+                        for (int i = 0; i < streams.Count; i++){
+                            string isSelected = options.Kstream == i + 1 ? "+" : " ";
+                            Console.WriteLine($"Full stream: ({isSelected}{i + 1}: {streams[i].Type})");
+                        }
+
+                        Console.WriteLine("Downloading video...");
+                        curStream = streams[options.Kstream - 1];
+
+                        Console.WriteLine($"Playlists URL: {string.Join(", ", curStream.Url.Select(u => u.Url))} ({curStream.Type})");
+                    }
+
+                    string tsFile = "";
+                    var videoDownloadMedia = new DownloadedMedia(){ Lang = Languages.DEFAULT_lang };
+
+                    if (!dlFailed && curStream != null && options is not{ Novids: true, Noaudio: true }){
+                        Dictionary<string, StreamInfo> streamPlaylistsReqResponseList = [];
+
+                        foreach (var streamUrl in curStream.Url){
+                            var streamPlaylistsReq = HttpClientReq.CreateRequestMessage(streamUrl.Url ?? string.Empty, HttpMethod.Get, true, streamUrl.CrAuth?.Token?.access_token);
+                            var streamPlaylistsReqResponse = await HttpClientReq.Instance.SendHttpRequest(streamPlaylistsReq);
+
+                            if (!streamPlaylistsReqResponse.IsOk){
+                                dlFailed = true;
+                                return new DownloadResponse{
+                                    Data = new List<DownloadedMedia>(),
+                                    Error = dlFailed,
+                                    FileName = "./unknown",
+                                    ErrorText = "Playlist fetch problem"
+                                };
+                            }
+
+                            if (streamPlaylistsReqResponse.ResponseContent.Contains("MPD")){
+                                streamPlaylistsReqResponseList[streamUrl.Url ?? ""] = new StreamInfo(){
+                                    Playlist = streamPlaylistsReqResponse.ResponseContent,
+                                    Audio = streamUrl.Audio,
+                                    Video = streamUrl.Video
+                                };
+                            }
+                        }
+
+                        //Use again when cr has all endpoints with new encoding
+                        // var streamPlaylistsReq = HttpClientReq.CreateRequestMessage(curStream.Url ?? string.Empty, HttpMethod.Get, true, true, null);
+                        //
+                        // var streamPlaylistsReqResponse = await HttpClientReq.Instance.SendHttpRequest(streamPlaylistsReq);
+                        //
+                        // if (!streamPlaylistsReqResponse.IsOk){
+                        //     dlFailed = true;
+                        //     return new DownloadResponse{
+                        //         Data = new List<DownloadedMedia>(),
+                        //         Error = dlFailed,
+                        //         FileName = "./unknown",
+                        //         ErrorText = "Playlist fetch problem"
+                        //     };
+                        // }
+
+                        if (dlFailed){
+                            Console.WriteLine($"CAN\'T FETCH VIDEO PLAYLISTS!");
+                        } else{
+                            // if (streamPlaylistsReqResponse.ResponseContent.Contains("MPD")){
+                            //     var match = Regex.Match(curStream.Url ?? string.Empty, @"(.*\.urlset\/)");
+                            //     var matchedUrl = match.Success ? match.Value : null;
+                            //     //Parse MPD Playlists
+                            //     var crLocal = "";
+                            //     if (pbData.Meta != null){
+                            //         crLocal = pbData.Meta.AudioLocale.CrLocale;
+                            //     }
+                            //
+                            //     MPDParsed streamPlaylists = MPDParser.Parse(streamPlaylistsReqResponse.ResponseContent, Languages.FindLang(crLocal), matchedUrl);
+                            //
+                            //     List<string> streamServers = new List<string>(streamPlaylists.Data.Keys);
+                            if (streamPlaylistsReqResponseList.Count > 0){
+                                HashSet<string> streamServers = [];
+                                ServerData playListData = new ServerData();
+
+                                foreach (var curStreams in streamPlaylistsReqResponseList){
+                                    var match = Regex.Match(curStreams.Key ?? string.Empty, @"(https?:\/\/.*?\/(?:dash\/|\.urlset\/))");
+                                    var matchedUrl = match.Success ? match.Value : null;
+                                    //Parse MPD Playlists
+                                    var crLocal = "";
+                                    if (pbData.Meta != null){
+                                        crLocal = pbData.Meta.AudioLocale.CrLocale;
+                                    }
+
+                                    try{
+                                        var entry = curStreams.Value;
+                                        MPDParsed streamPlaylists = await MpdParser.Parse(entry.Playlist, Languages.FindLang(crLocal), matchedUrl);
+                                        streamServers.UnionWith(streamPlaylists.Data.Keys);
+                                        Helpers.MergePlaylistData(playListData, streamPlaylists.Data, entry.Audio, entry.Video);
+                                    } catch (Exception e){
+                                        Console.Error.WriteLine(e);
+                                    }
+                                }
+
+                                // options.StreamServer = options.StreamServer > streamServers.Count ? 1 : options.StreamServer;
+
+                                if (streamServers.Count == 0){
+                                    return new DownloadResponse{
+                                        Data = new List<DownloadedMedia>(),
+                                        Error = true,
+                                        FileName = "./unknown",
+                                        ErrorText = "No stream servers found"
+                                    };
+                                }
+
+                                playListData.video ??= [];
+                                playListData.audio ??= [];
+
+                                // if (options.StreamServer == 0){
+                                //     options.StreamServer = 1;
+                                // }
+
+                                // string selectedServer = streamServers[options.StreamServer - 1];
+                                // ServerData selectedList = streamPlaylists.Data[selectedServer];
+
+                                // string selectedServer = streamServers.ToList()[options.StreamServer - 1];
+                                // ServerData selectedList = playListData[selectedServer];
+
+                                var videos = playListData.video.Select(item => new VideoItem{
+                                    segments = item.segments,
+                                    pssh = item.pssh,
+                                    quality = item.quality,
+                                    bandwidth = item.bandwidth,
+                                    resolutionText = $"{item.quality.width}x{item.quality.height} ({Math.Round(item.bandwidth / 1024.0)}KiB/s)"
+                                }).ToList();
+
+                                var audios = playListData.audio.Select(item => new AudioItem{
+                                    @default = item.@default,
+                                    segments = item.segments,
+                                    pssh = item.pssh,
+                                    language = item.language,
+                                    bandwidth = item.bandwidth,
+                                    audioSamplingRate = item.audioSamplingRate,
+                                    resolutionText = $"{Math.Round(item.bandwidth / 1000.0)}kB/s",
+                                    resolutionTextSnap = $"{Helpers.SnapToAudioBucket(Helpers.ToKbps(item.bandwidth))}kB/s",
+                                }).ToList();
+
+                                // ---------- VIDEO: dedupe & sort ----------
+                                videos = videos
+                                    .GroupBy(v => new{ v.quality.height, WB = Helpers.WidthBucket(v.quality.width, v.quality.height) })
+                                    .Select(g => g.OrderByDescending(v => v.bandwidth).First())
+                                    .OrderBy(v => v.quality.height)
+                                    .ThenBy(v => v.bandwidth)
+                                    .ToList();
+
+                                // ---------- AUDIO: dedupe & sort ----------
+                                audios = audios
+                                    .Select(a => new{ Item = a, Lang = string.IsNullOrWhiteSpace(a.language?.CrLocale) ? "und" : a.language.CrLocale, Bucket = Helpers.SnapToAudioBucket(Helpers.ToKbps(a.bandwidth)) })
+                                    .GroupBy(x => new{ x.Lang, x.Bucket })
+                                    .Select(g => g.OrderByDescending(x => x.Item.@default)
+                                        .ThenByDescending(x => x.Item.audioSamplingRate)
+                                        .ThenByDescending(x => x.Item.bandwidth)
+                                        .First().Item)
+                                    .OrderBy(a => Helpers.ToKbps(a.bandwidth))
+                                    .ThenBy(a => a.audioSamplingRate)
+                                    .ToList();
+
+                                if (string.IsNullOrEmpty(data.VideoQuality)){
+                                    Console.Error.WriteLine("Warning: VideoQuality is null or empty. Defaulting to 'best' quality.");
+                                    data.VideoQuality = "best";
+                                }
+
+                                int chosenVideoQuality;
+                                if (options.DlVideoOnce && dlVideoOnce && options.SyncTiming){
+                                    chosenVideoQuality = 1;
+                                } else if (data.VideoQuality == "best"){
+                                    chosenVideoQuality = videos.Count;
+                                } else if (data.VideoQuality == "worst"){
+                                    chosenVideoQuality = 1;
+                                } else{
+                                    var tempIndex = videos.FindIndex(a => a.quality.height + "" == data.VideoQuality?.Replace("p", ""));
+                                    if (tempIndex < 0){
+                                        chosenVideoQuality = videos.Count;
+                                    } else{
+                                        tempIndex++;
+                                        chosenVideoQuality = tempIndex;
+                                    }
+                                }
+
+                                if (chosenVideoQuality > videos.Count){
+                                    Console.Error.WriteLine($"The requested quality of {chosenVideoQuality} is greater than the maximum {videos.Count}.\n[WARN] Therefore, the maximum will be capped at {videos.Count}.");
+                                    chosenVideoQuality = videos.Count;
+                                }
+
+                                chosenVideoQuality--;
+
+                                int chosenAudioQuality;
+                                if (options.QualityAudio == "best"){
+                                    chosenAudioQuality = audios.Count;
+                                } else if (options.QualityAudio == "worst"){
+                                    chosenAudioQuality = 1;
+                                } else{
+                                    var tempIndex = audios.FindIndex(a => a.resolutionTextSnap == options.QualityAudio);
+                                    if (tempIndex < 0){
+                                        chosenAudioQuality = audios.Count;
+                                    } else{
+                                        tempIndex++;
+                                        chosenAudioQuality = tempIndex;
+                                    }
+                                }
+
+
+                                if (chosenAudioQuality > audios.Count){
+                                    chosenAudioQuality = audios.Count;
+                                }
+
+                                chosenAudioQuality--;
+
+                                VideoItem chosenVideoSegments = videos[chosenVideoQuality];
+                                AudioItem chosenAudioSegments = audios[chosenAudioQuality];
+
+                                Console.WriteLine("Servers available:");
+                                foreach (var server in streamServers){
+                                    Console.WriteLine($"\t{server}");
+                                }
+
+                                var sb = new StringBuilder();
+                                sb.AppendLine("Available Video Qualities:");
+                                for (int i = 0; i < videos.Count; i++){
+                                    sb.AppendLine($"\t- {videos[i].resolutionText}");
+                                }
+
+                                sb.AppendLine("Available Audio Qualities:");
+                                for (int i = 0; i < audios.Count; i++){
+                                    sb.AppendLine($"\t- {audios[i].resolutionText} / {audios[i].audioSamplingRate}");
+                                }
+
+                                variables.Add(new Variable("height", chosenVideoSegments.quality.height, false));
+                                variables.Add(new Variable("width", chosenVideoSegments.quality.width, false));
+                                if (string.IsNullOrEmpty(data.Resolution)) data.Resolution = chosenVideoSegments.quality.height + "p";
+
+
+                                LanguageItem? lang = Languages.languages.FirstOrDefault(a => a.CrLocale == curStream.AudioLang.CrLocale);
+                                if (lang == null){
+                                    Console.Error.WriteLine($"Unable to find language for code {curStream.AudioLang.CrLocale}");
+                                    MainWindow.Instance.ShowError($"Unable to find language for code {curStream.AudioLang.CrLocale}");
+                                    return new DownloadResponse{
+                                        Data = new List<DownloadedMedia>(),
+                                        Error = true,
+                                        FileName = "./unknown",
+                                        ErrorText = "Language not found"
+                                    };
+                                }
+
+                                sb.AppendLine($"Selected quality:");
+                                sb.AppendLine($"\tVideo: {chosenVideoSegments.resolutionText}");
+                                sb.AppendLine($"\tAudio: {chosenAudioSegments.resolutionText} / {chosenAudioSegments.audioSamplingRate}");
+                                sb.AppendLine($"\tServer: {string.Join(", ", playListData.servers)}");
+
+                                string qualityConsoleLog = sb.ToString();
+                                Console.WriteLine(qualityConsoleLog);
+                                if (!options.DlVideoOnce || string.IsNullOrEmpty(data.AvailableQualities)){
+                                    data.AvailableQualities = qualityConsoleLog;
+                                }
+
+                                Console.WriteLine("Stream URL:" + chosenVideoSegments.segments[0].uri.Split(new[]{ ",.urlset" }, StringSplitOptions.None)[0]);
+
+
+                                fileName = Path.Combine(FileNameManager.ParseFileName(options.FileName, variables, options.Numbers, options.FileNameWhitespaceSubstitute, options.Override).ToArray());
+
+                                string onlyFileName = Path.GetFileName(fileName);
+                                int maxLength = 220;
+
+                                if (onlyFileName.Length > maxLength){
+                                    Console.Error.WriteLine($"Filename too long {onlyFileName}");
+                                    if (options.FileName.Split("\\").Last().Contains("${title}") && onlyFileName.Length - (data.EpisodeTitle ?? string.Empty).Length < maxLength){
+                                        var titleVariable = variables.Find(e => e.Name == "title");
+
+                                        if (titleVariable != null){
+                                            int excessLength = (onlyFileName.Length - maxLength);
+
+                                            if (excessLength > 0 && ((string)titleVariable.ReplaceWith).Length > excessLength){
+                                                titleVariable.ReplaceWith = ((string)titleVariable.ReplaceWith).Substring(0, ((string)titleVariable.ReplaceWith).Length - excessLength);
+                                                fileName = Path.Combine(FileNameManager.ParseFileName(options.FileName, variables, options.Numbers, options.FileNameWhitespaceSubstitute, options.Override).ToArray());
+                                                onlyFileName = Path.GetFileName(fileName);
+
+                                                if (onlyFileName.Length > maxLength){
+                                                    fileName = Helpers.LimitFileNameLength(fileName, maxLength);
+                                                }
+                                            }
+                                        }
+                                    } else{
+                                        fileName = Helpers.LimitFileNameLength(fileName, maxLength);
+                                    }
+
+                                    Console.Error.WriteLine($"Filename changed to {Path.GetFileName(fileName)}");
+                                }
+
+                                //string outFile = Path.Combine(FileNameManager.ParseFileName(options.FileName + "." + (epMeta.Lang?.CrLocale ?? lang.Value.Name), variables, options.Numbers, options.Override).ToArray());
+                                string outFile = fileName + "." + (epMeta.Lang?.CrLocale ?? lang.CrLocale) + (epMeta.IsAudioRoleDescription ? ".AD" : "");
+
+                                string tempFile = Path.Combine(FileNameManager
+                                    .ParseFileName($"temp-{(!string.IsNullOrEmpty(currentVersion.Guid) ? currentVersion.Guid : currentMediaId)}{data.TempFileSuffix ?? string.Empty}", variables, options.Numbers,
+                                        options.FileNameWhitespaceSubstitute,
+                                        options.Override)
+                                    .ToArray());
+                                string tempTsFile = Path.IsPathRooted(tempFile) ? tempFile : Path.Combine(fileDir, tempFile);
+
+                                bool audioDownloaded = false, videoDownloaded = false, syncTimingDownload = false;
+
+
+                                if (options.DlVideoOnce && dlVideoOnce && !options.SyncTiming){
+                                    Console.WriteLine("Already downloaded video, skipping video download...");
+                                } else if (options.Novids){
+                                    Console.WriteLine("Skipping video download...");
+                                } else{
+                                    await CrAuthEndpoint1.RefreshToken(true);
+                                    await CrAuthEndpoint2.RefreshToken(true);
+
+                                    Dictionary<string, string> authDataDict = new Dictionary<string, string>{
+                                        { "authorization", "Bearer " + ((options.StreamEndpoint is { Audio: true } or{ Video: true }) ? CrAuthEndpoint1.Token?.access_token : CrAuthEndpoint2.Token?.access_token) },
+                                        { "x-cr-content-id", mediaGuid },{ "x-cr-video-token", pbData.Meta?.Token ?? string.Empty }
+                                    };
+
+                                    chosenVideoSegments.encryptionKeys = await _widevine.getKeys(chosenVideoSegments.pssh, ApiUrls.WidevineLicenceUrl, authDataDict);
+
+                                    if (!string.IsNullOrEmpty(chosenVideoSegments.pssh) && !chosenVideoSegments.pssh.Equals(chosenAudioSegments.pssh)){
+                                        if (chosenAudioSegments.segments.Count > 0 && !options.Noaudio && !dlFailed){
+                                            Console.WriteLine("Video and Audio PSSH different requesting Audio encryption keys");
+                                            chosenAudioSegments.encryptionKeys = await _widevine.getKeys(chosenAudioSegments.pssh, ApiUrls.WidevineLicenceUrl, authDataDict);
+                                        }
+                                    }
+
+                                    var videoDownloadResult = await DownloadVideo(chosenVideoSegments, options, outFile, tempTsFile, data, fileDir);
+
+                                    tsFile = videoDownloadResult.tsFile;
+
+                                    if (!videoDownloadResult.Ok){
+                                        Console.Error.WriteLine($"Faild to download video - DL Stats: {JsonConvert.SerializeObject(videoDownloadResult.Parts)}");
+                                        dlFailed = true;
+                                    }
+
+                                    if (options.DlVideoOnce && dlVideoOnce && options.SyncTiming){
+                                        syncTimingDownload = true;
+                                    }
+
+                                    dlVideoOnce = true;
+                                    videoDownloaded = true;
+                                }
+
+
+                                if (chosenAudioSegments.segments.Count > 0 && !options.Noaudio && !dlFailed){
+                                    await CrAuthEndpoint1.RefreshToken(true);
+                                    await CrAuthEndpoint2.RefreshToken(true);
+
+                                    if (chosenVideoSegments.encryptionKeys.Count == 0){
+                                        Dictionary<string, string> authDataDict = new Dictionary<string, string>{
+                                            { "authorization", "Bearer " + ((options.StreamEndpoint is { Audio: true } or{ Video: true }) ? CrAuthEndpoint1.Token?.access_token : CrAuthEndpoint2.Token?.access_token) },
+                                            { "x-cr-content-id", mediaGuid },{ "x-cr-video-token", pbData.Meta?.Token ?? string.Empty }
+                                        };
+
+                                        chosenVideoSegments.encryptionKeys = await _widevine.getKeys(chosenVideoSegments.pssh, ApiUrls.WidevineLicenceUrl, authDataDict);
+
+                                        if (!string.IsNullOrEmpty(chosenVideoSegments.pssh) && !chosenVideoSegments.pssh.Equals(chosenAudioSegments.pssh)){
+                                            Console.WriteLine("Video and Audio PSSH different requesting Audio encryption keys");
+                                            chosenAudioSegments.encryptionKeys = await _widevine.getKeys(chosenAudioSegments.pssh, ApiUrls.WidevineLicenceUrl, authDataDict);
+                                        }
+                                    }
+
+                                    var audioDownloadResult = await DownloadAudio(chosenAudioSegments, options, outFile, tempTsFile, data, fileDir);
+
+                                    tsFile = audioDownloadResult.tsFile;
+
+                                    if (!audioDownloadResult.Ok){
+                                        Console.Error.WriteLine($"Faild to download audio - DL Stats: {JsonConvert.SerializeObject(audioDownloadResult.Parts)}");
+                                        dlFailed = true;
+                                    }
+
+                                    audioDownloaded = true;
+                                } else if (options.Noaudio){
+                                    Console.WriteLine("Skipping audio download...");
+                                }
+
+                                if (dlFailed){
+                                    return new DownloadResponse{
+                                        Data = files,
+                                        Error = dlFailed,
+                                        FileName = fileName.Length > 0 ? (Path.IsPathRooted(fileName) ? fileName : Path.Combine(fileDir, fileName)) : "./unknown",
+                                        ErrorText = "Audio or Video download failed",
+                                    };
+                                }
+
+                                if ((chosenVideoSegments.pssh != null || chosenAudioSegments.pssh != null) && (videoDownloaded || audioDownloaded)){
+                                    data.DownloadProgress = new DownloadProgress(){
+                                        State = DownloadState.Downloading,
+                                        Percent = 100,
+                                        Time = 0,
+                                        DownloadSpeedBytes = 0,
+                                        Doing = "Decrypting"
+                                    };
+                                    QueueManager.Instance.RefreshQueue();
+
+                                    Console.WriteLine("Decryption Needed, attempting to decrypt");
+
+                                    if (!_widevine.canDecrypt){
+                                        dlFailed = true;
+                                        return new DownloadResponse{
+                                            Data = files,
+                                            Error = dlFailed,
+                                            FileName = fileName.Length > 0 ? (Path.IsPathRooted(fileName) ? fileName : Path.Combine(fileDir, fileName)) : "./unknown",
+                                            ErrorText = "Decryption Needed but couldn't find CDM files"
+                                        };
+                                    }
+
+                                    await CrAuthEndpoint1.RefreshToken(true);
+                                    await CrAuthEndpoint2.RefreshToken(true);
+
+                                    Dictionary<string, string> authDataDict = new Dictionary<string, string>{
+                                        { "authorization", "Bearer " + ((options.StreamEndpoint is { Audio: true } or{ Video: true }) ? CrAuthEndpoint1.Token?.access_token : CrAuthEndpoint2.Token?.access_token) },
+                                        { "x-cr-content-id", mediaGuid },{ "x-cr-video-token", pbData.Meta?.Token ?? string.Empty }
+                                    };
+
+                                    var encryptionKeys = chosenVideoSegments.encryptionKeys;
+
+                                    if (encryptionKeys.Count == 0){
+                                        encryptionKeys = await _widevine.getKeys(chosenVideoSegments.pssh, ApiUrls.WidevineLicenceUrl, authDataDict);
+
+                                        if (encryptionKeys.Count == 0){
+                                            Console.Error.WriteLine("Failed to get encryption keys");
+                                            dlFailed = true;
+                                            return new DownloadResponse{
+                                                Data = files,
+                                                Error = dlFailed,
+                                                FileName = fileName.Length > 0 ? (Path.IsPathRooted(fileName) ? fileName : Path.Combine(fileDir, fileName)) : "./unknown",
+                                                ErrorText = "Couldn't get DRM encryption keys"
+                                            };
+                                        }
+                                    }
+
+
+                                    List<ContentKey> encryptionKeysAudio = chosenAudioSegments.encryptionKeys;
+                                    if (!string.IsNullOrEmpty(chosenVideoSegments.pssh) && !chosenVideoSegments.pssh.Equals(chosenAudioSegments.pssh)){
+                                        Console.WriteLine("Video and Audio PSSH different requesting Audio encryption keys");
+                                        encryptionKeysAudio = await _widevine.getKeys(chosenAudioSegments.pssh, ApiUrls.WidevineLicenceUrl, authDataDict);
+                                        if (encryptionKeysAudio.Count == 0){
+                                            Console.Error.WriteLine("Failed to get audio encryption keys");
+                                            dlFailed = true;
+                                            return new DownloadResponse{
+                                                Data = files,
+                                                Error = dlFailed,
+                                                FileName = fileName.Length > 0 ? (Path.IsPathRooted(fileName) ? fileName : Path.Combine(fileDir, fileName)) : "./unknown",
+                                                ErrorText = "Couldn't get DRM audio encryption keys"
+                                            };
+                                        }
+                                    }
+
+                                    if (Path.Exists(CfgManager.PathMP4Decrypt) || Path.Exists(CfgManager.PathShakaPackager)){
+                                        var tempTsFileName = Path.GetFileName(tempTsFile);
+                                        var tempTsFileWorkDir = Path.GetDirectoryName(tempTsFile) ?? CfgManager.PathVIDEOS_DIR;
+
+                                        // Use audio keys if available, otherwise fallback to video keys
+                                        var audioKeysToUse = encryptionKeysAudio.Count > 0 ? encryptionKeysAudio : encryptionKeys;
+
+                                        // === mp4decrypt command ===
+                                        var videoKey = encryptionKeys[0];
+                                        var videoKeyParam = BuildMp4DecryptKeyParam(videoKey.KeyID, videoKey.Bytes);
+                                        var commandVideo = $"--show-progress {videoKeyParam} \"{tempTsFileName}.video.enc.m4s\" \"{tempTsFileName}.video.m4s\"";
+
+                                        var audioKey = audioKeysToUse[0];
+                                        var audioKeyParam = BuildMp4DecryptKeyParam(audioKey.KeyID, audioKey.Bytes);
+                                        var commandAudio = $"--show-progress {audioKeyParam} \"{tempTsFileName}.audio.enc.m4s\" \"{tempTsFileName}.audio.m4s\"";
+
+                                        bool shaka = Path.Exists(CfgManager.PathShakaPackager);
+                                        if (shaka){
+                                            // === shaka-packager command ===
+                                            var shakaVideoKeys = BuildShakaKeysParam(encryptionKeys);
+                                            commandVideo = $"input=\"{tempTsFileName}.video.enc.m4s\",stream=video,output=\"{tempTsFileName}.video.m4s\" {shakaVideoKeys}";
+
+                                            var shakaAudioKeys = BuildShakaKeysParam(audioKeysToUse);
+                                            commandAudio = $"input=\"{tempTsFileName}.audio.enc.m4s\",stream=audio,output=\"{tempTsFileName}.audio.m4s\" {shakaAudioKeys}";
+                                        }
+
+                                        if (videoDownloaded){
+                                            Console.WriteLine("Started decrypting video");
+                                            data.DownloadProgress = new DownloadProgress(){
+                                                State = DownloadState.Downloading,
+                                                Percent = 100,
+                                                Time = 0,
+                                                DownloadSpeedBytes = 0,
+                                                Doing = "Decrypting video"
+                                            };
+                                            QueueManager.Instance.RefreshQueue();
+                                            var decryptVideo = await Helpers.ExecuteCommandAsyncWorkDir(shaka ? "shaka-packager" : "mp4decrypt", shaka ? CfgManager.PathShakaPackager : CfgManager.PathMP4Decrypt,
+                                                commandVideo, tempTsFileWorkDir);
+
+                                            if (!decryptVideo.IsOk){
+                                                Console.Error.WriteLine($"Decryption failed with exit code {decryptVideo.ErrorCode}\n" + (shaka ? "Downgrade to Shaka-Packager v2.6.1 or use mp4decrypt" : ""));
+                                                MainWindow.Instance.ShowError($"Decryption failed with exit code {decryptVideo.ErrorCode}\n" + (shaka ? "Downgrade to Shaka-Packager v2.6.1 or use mp4decrypt" : ""));
+                                                try{
+                                                    File.Move($"{tempTsFile}.video.enc.m4s", $"{tsFile}.video.enc.m4s");
+                                                } catch (IOException ex){
+                                                    Console.WriteLine($"An error occurred: {ex.Message}");
+                                                }
+
+                                                dlFailed = true;
+                                                return new DownloadResponse{
+                                                    Data = files,
+                                                    Error = dlFailed,
+                                                    FileName = fileName.Length > 0 ? (Path.IsPathRooted(fileName) ? fileName : Path.Combine(fileDir, fileName)) : "./unknown",
+                                                    ErrorText = (shaka ? "[SHAKA]" : "[MP4Decrypt]") + " Decryption failed"
+                                                };
+                                            }
+
+                                            Console.WriteLine("Decryption done for video");
+                                            if (!options.Nocleanup){
+                                                Helpers.DeleteFile($"{tempTsFile}.video.enc.m4s");
+                                                Helpers.DeleteFile($"{tempTsFile}.video.enc.m4s.resume");
+                                            }
+
+                                            try{
+                                                if (File.Exists($"{tsFile}.video.m4s")){
+                                                    File.Delete($"{tsFile}.video.m4s");
+                                                }
+
+                                                File.Move($"{tempTsFile}.video.m4s", $"{tsFile}.video.m4s");
+                                            } catch (IOException ex){
+                                                Console.WriteLine($"An error occurred: {ex.Message}");
+                                            }
+
+                                            videoDownloadMedia = new DownloadedMedia{
+                                                Type = syncTimingDownload ? DownloadMediaType.SyncVideo : DownloadMediaType.Video,
+                                                Path = $"{tsFile}.video.m4s",
+                                                Lang = lang,
+                                                Language = lang,
+                                                IsPrimary = isPrimary,
+                                                bitrate = chosenVideoSegments.bandwidth / 1024
+                                            };
+                                            files.Add(videoDownloadMedia);
+                                            data.downloadedFiles.Add($"{tsFile}.video.m4s");
+                                        } else{
+                                            Console.WriteLine("No Video downloaded");
+                                        }
+
+                                        if (audioDownloaded){
+                                            Console.WriteLine("Started decrypting audio");
+                                            data.DownloadProgress = new DownloadProgress(){
+                                                State = DownloadState.Downloading,
+                                                Percent = 100,
+                                                Time = 0,
+                                                DownloadSpeedBytes = 0,
+                                                Doing = "Decrypting audio"
+                                            };
+                                            QueueManager.Instance.RefreshQueue();
+                                            var decryptAudio = await Helpers.ExecuteCommandAsyncWorkDir(shaka ? "shaka-packager" : "mp4decrypt", shaka ? CfgManager.PathShakaPackager : CfgManager.PathMP4Decrypt,
+                                                commandAudio, tempTsFileWorkDir);
+
+                                            if (!decryptAudio.IsOk){
+                                                Console.Error.WriteLine($"Decryption failed with exit code {decryptAudio.ErrorCode}\n" + (shaka ? "Downgrade to Shaka-Packager v2.6.1 or use mp4decrypt" : ""));
+                                                MainWindow.Instance.ShowError($"Decryption failed with exit code {decryptAudio.ErrorCode}\n" + (shaka ? "Downgrade to Shaka-Packager v2.6.1 or use mp4decrypt" : ""));
+                                                try{
+                                                    File.Move($"{tempTsFile}.audio.enc.m4s", $"{tsFile}.audio.enc.m4s");
+                                                } catch (IOException ex){
+                                                    Console.WriteLine($"An error occurred: {ex.Message}");
+                                                }
+
+                                                dlFailed = true;
+                                                return new DownloadResponse{
+                                                    Data = files,
+                                                    Error = dlFailed,
+                                                    FileName = fileName.Length > 0 ? (Path.IsPathRooted(fileName) ? fileName : Path.Combine(fileDir, fileName)) : "./unknown",
+                                                    ErrorText = (shaka ? "[SHAKA]" : "[MP4Decrypt]") + " Decryption failed"
+                                                };
+                                            }
+
+                                            Console.WriteLine("Decryption done for audio");
+                                            if (!options.Nocleanup){
+                                                Helpers.DeleteFile($"{tempTsFile}.audio.enc.m4s");
+                                                Helpers.DeleteFile($"{tempTsFile}.audio.enc.m4s.resume");
+                                            }
+
+                                            try{
+                                                if (File.Exists($"{tsFile}.audio.m4s")){
+                                                    File.Delete($"{tsFile}.audio.m4s");
+                                                }
+
+                                                File.Move($"{tempTsFile}.audio.m4s", $"{tsFile}.audio.m4s");
+                                            } catch (IOException ex){
+                                                Console.WriteLine($"An error occurred: {ex.Message}");
+                                            }
+
+                                            files.Add(new DownloadedMedia{
+                                                Type = epMeta.IsAudioRoleDescription ? DownloadMediaType.AudioRoleDescription : DownloadMediaType.Audio,
+                                                Path = $"{tsFile}.audio.m4s",
+                                                Lang = lang,
+                                                IsPrimary = isPrimary,
+                                                bitrate = chosenAudioSegments.bandwidth / 1000
+                                            });
+                                            data.downloadedFiles.Add($"{tsFile}.audio.m4s");
+                                        } else{
+                                            Console.WriteLine("No Audio downloaded");
+                                        }
+                                    } else{
+                                        Console.Error.WriteLine("mp4decrypt not found, files need decryption. Decryption Keys: ");
+                                        MainWindow.Instance.ShowError($"mp4decrypt not found, files need decryption");
+                                    }
+                                } else{
+                                    if (videoDownloaded){
+                                        videoDownloadMedia = new DownloadedMedia{
+                                            Type = syncTimingDownload ? DownloadMediaType.SyncVideo : DownloadMediaType.Video,
+                                            Path = $"{tsFile}.video.m4s",
+                                            Lang = lang,
+                                            Language = lang,
+                                            IsPrimary = isPrimary,
+                                            bitrate = chosenVideoSegments.bandwidth / 1024
+                                        };
+                                        files.Add(videoDownloadMedia);
+                                        data.downloadedFiles.Add($"{tsFile}.video.m4s");
+                                    }
+
+                                    if (audioDownloaded){
+                                        files.Add(new DownloadedMedia{
+                                            Type = epMeta.IsAudioRoleDescription ? DownloadMediaType.AudioRoleDescription : DownloadMediaType.Audio,
+                                            Path = $"{tsFile}.audio.m4s",
+                                            Lang = lang,
+                                            IsPrimary = isPrimary,
+                                            bitrate = chosenAudioSegments.bandwidth / 1000
+                                        });
+                                        data.downloadedFiles.Add($"{tsFile}.audio.m4s");
+                                    }
+                                }
+                            } else if (options.Novids){
+                                fileName = Path.Combine(FileNameManager.ParseFileName(options.FileName, variables, options.Numbers, options.FileNameWhitespaceSubstitute, options.Override).ToArray());
+                                Console.WriteLine("Downloading skipped!");
+                            }
+                        }
+                    } else if (options is{ Novids: true, Noaudio: true }){
+                        variables.Add(new Variable("height", 360, false));
+                        variables.Add(new Variable("width", 640, false));
+
+                        fileName = Path.Combine(FileNameManager.ParseFileName(options.FileName, variables, options.Numbers, options.FileNameWhitespaceSubstitute, options.Override).ToArray());
+                    }
+
+                    if (compiledChapters.Count > 0 && options is not{ Novids: true, Noaudio: true }){
+                        try{
+                            // Parsing and constructing the file names
+                            fileName = Path.Combine(FileNameManager.ParseFileName(options.FileName, variables, options.Numbers, options.FileNameWhitespaceSubstitute, options.Override).ToArray());
+                            var outFile = Path.Combine(FileNameManager.ParseFileName(options.FileName + "." + (epMeta.Lang?.CrLocale), variables, options.Numbers, options.FileNameWhitespaceSubstitute, options.Override)
+                                .ToArray());
+                            if (Path.IsPathRooted(outFile)){
+                                tsFile = outFile;
+                            } else{
+                                tsFile = Path.Combine(fileDir, outFile);
+                            }
+
+                            // Check if the path is absolute
+                            var isAbsolute = Path.IsPathRooted(outFile);
+
+                            // Get all directory parts of the path except the last segment (assuming it's a file)
+                            var directories = Path.GetDirectoryName(outFile)?.Split(Path.DirectorySeparatorChar) ?? [];
+
+                            // Initialize the cumulative path based on whether the original path is absolute or not
+                            var cumulativePath = isAbsolute ? "" : fileDir;
+                            for (var i = 0; i < directories.Length; i++){
+                                // Build the path incrementally
+                                cumulativePath = Path.Combine(cumulativePath, directories[i]);
+
+                                // Check if the directory exists and create it if it does not
+                                if (!Directory.Exists(cumulativePath)){
+                                    Directory.CreateDirectory(cumulativePath);
+                                    Console.WriteLine($"Created directory: {cumulativePath}");
+                                }
+                            }
+
+                            // Finding language by code
+                            var lang = Languages.languages.FirstOrDefault(l => l == curStream?.AudioLang) ?? Languages.DEFAULT_lang;
+                            if (lang.Code == "und"){
+                                Console.Error.WriteLine($"Unable to find language for code {curStream?.AudioLang}");
+                            }
+
+                            File.WriteAllText($"{tsFile}.txt", string.Join("\r\n", compiledChapters));
+
+                            files.Add(new DownloadedMedia{ Path = $"{tsFile}.txt", Lang = lang, Type = DownloadMediaType.Chapters });
+                            data.downloadedFiles.Add($"{tsFile}.txt");
+                        } catch{
+                            Console.Error.WriteLine("Failed to write chapter file");
+                        }
+                    }
+
+                    if (data.DownloadSubs.IndexOf("all") > -1){
+                        data.DownloadSubs = new List<string>{ "all" };
+                    }
+
+                    if (options.Hslang != "none"){
+                        Console.WriteLine("Subtitles downloading disabled for hardsubed streams.");
+                        options.SkipSubs = true;
+                    }
+
+                    if (!options.SkipSubs && data.DownloadSubs.IndexOf("none") == -1){
+                        await DownloadSubtitles(options, pbData, audDub, fileName, files, fileDir, data, videoDownloadMedia);
+                    } else{
+                        Console.WriteLine("Subtitles downloading skipped!");
+                    }
+                }
+
+                // await Task.Delay(options.Waittime);
+                ScheduleNextDubDownloadDelay(options);
+            }
+        }
+
+        if (options.IncludeVideoDescription && !data.OnlySubs){
+            string fullPath = (Path.IsPathRooted(fileName) ? fileName : Path.Combine(fileDir, fileName)) + ".xml";
+
+            if (!File.Exists(fullPath)){
+                using (XmlWriter writer = XmlWriter.Create(fullPath)){
+                    writer.WriteStartDocument();
+                    writer.WriteStartElement("Tags");
+
+                    writer.WriteStartElement("Tag");
+
+                    writer.WriteStartElement("Targets");
+                    writer.WriteElementString("TargetTypeValue", "50");
+                    writer.WriteEndElement(); // End Targets
+
+                    writer.WriteStartElement("Simple");
+                    writer.WriteElementString("Name", "DESCRIPTION");
+                    writer.WriteElementString("String", data.Description);
+                    writer.WriteEndElement(); // End Simple
+
+                    writer.WriteEndElement(); // End Tag
+
+                    writer.WriteEndElement(); // End Tags
+                    writer.WriteEndDocument();
+                }
+
+                files.Add(new DownloadedMedia{
+                    Type = DownloadMediaType.Description,
+                    Path = fullPath,
+                    Lang = Languages.DEFAULT_lang
+                });
+                data.downloadedFiles.Add(fullPath);
+            } else{
+                if (files.All(e => e.Type != DownloadMediaType.Description)){
+                    files.Add(new DownloadedMedia{
+                        Type = DownloadMediaType.Description,
+                        Path = fullPath,
+                        Lang = Languages.DEFAULT_lang
+                    });
+                    data.downloadedFiles.Add(fullPath);
+                }
+            }
+
+            Console.WriteLine($"{fileName}.xml has been created with the description.");
+        }
+
+        if (options is{ MuxCover: true, Noaudio: false, Novids: false }){
+            var coverPath = Path.Combine(fileDir, $"{fileName}.cover.png");
+            if (!string.IsNullOrEmpty(data.ImageBig) && !File.Exists(coverPath)){
+                var bitmap = await Helpers.LoadImage(data.ImageBig);
+                if (bitmap != null){
+                    Helpers.EnsureDirectoriesExist(coverPath);
+                    await using (var fs = File.OpenWrite(coverPath)){
+                        bitmap.Save(fs); // always saves PNG
+                    }
+
+                    bitmap.Dispose();
+
+                    files.Add(new DownloadedMedia{
+                        Type = DownloadMediaType.Cover,
+                        Lang = Languages.DEFAULT_lang,
+                        Path = coverPath
+                    });
+                    data.downloadedFiles.Add(coverPath);
+                }
+            }
+        }
+
+        var tempFolderPath = "";
+        if (options.DownloadToTempFolder){
+            tempFolderPath = fileDir;
+            fileDir = !string.IsNullOrEmpty(data.DownloadPath) ? data.DownloadPath :
+                !string.IsNullOrEmpty(options.DownloadDirPath) ? options.DownloadDirPath : CfgManager.PathVIDEOS_DIR;
+        }
+
+        if (string.IsNullOrEmpty(data.DownloadPath)){
+            data.DownloadPath = fileDir;
+        }
+
+        return new DownloadResponse{
+            Data = files,
+            Error = dlFailed,
+            FileName = fileName.Length > 0 ? fileName : "unknown - " + Guid.NewGuid(),
+            ErrorText = "",
+            VideoTitle = FileNameManager.ParseFileName(options.VideoTitle ?? "", variables, options.Numbers, options.FileNameWhitespaceSubstitute, options.Override).Last(),
+            FolderPath = fileDir,
+            TempFolderPath = tempFolderPath
+        };
+    }
+
+    private async Task WaitForDubDownloadDelayAsync(CrunchyEpMeta data, CrDownloadOptions options){
+        if (options.DubDownloadDelaySeconds <= 0){
+            return;
+        }
+
+        await dubDownloadDelaySemaphore.WaitAsync(data.Cts.Token);
+        try{
+            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset? nextAllowedAt;
+            lock (dubDownloadDelayLock){
+                nextAllowedAt = nextDubDownloadAllowedAtUtc;
+            }
+
+            if (nextAllowedAt.HasValue && nextAllowedAt.Value > now){
+                var delay = nextAllowedAt.Value - now;
+                data.DownloadProgress.Doing = $"Waiting {Math.Ceiling(delay.TotalSeconds)}s before next dub";
+                QueueManager.Instance.RefreshQueue();
+                await Task.Delay(delay, data.Cts.Token);
+            }
+
+            lock (dubDownloadDelayLock){
+                nextDubDownloadAllowedAtUtc = DateTimeOffset.UtcNow.AddSeconds(options.DubDownloadDelaySeconds);
+            }
+        } finally{
+            dubDownloadDelaySemaphore.Release();
+        }
+    }
+
+    private void ScheduleNextDubDownloadDelay(CrDownloadOptions options){
+        if (options.DubDownloadDelaySeconds <= 0){
+            return;
+        }
+
+        var nextAllowedAt = DateTimeOffset.UtcNow.AddSeconds(options.DubDownloadDelaySeconds);
+        lock (dubDownloadDelayLock){
+            if (!nextDubDownloadAllowedAtUtc.HasValue || nextAllowedAt > nextDubDownloadAllowedAtUtc.Value){
+                nextDubDownloadAllowedAtUtc = nextAllowedAt;
+            }
+        }
+    }
+
+    private static async Task DownloadSubtitles(CrDownloadOptions options, PlaybackData pbData, LanguageItem audDub, string fileName, List<DownloadedMedia> files, string fileDir, CrunchyEpMeta data,
+        DownloadedMedia videoDownloadMedia){
+        if (pbData.Meta != null && (pbData.Meta.Subtitles is{ Count: > 0 } || pbData.Meta.Captions is{ Count: > 0 })){
+            if (videoDownloadMedia.Lang == Languages.DEFAULT_lang){
+                videoDownloadMedia.Lang = pbData.Meta.AudioLocale;
+            }
+
+            List<SubtitleInfo> subsData = pbData.Meta.Subtitles?.Values.ToList() ?? [];
+            List<Caption> capsData = pbData.Meta.Captions?.Values.ToList() ?? [];
+            var subsDataMapped = subsData.Select(s => {
+                var subLang = Languages.FixAndFindCrLc((s.Locale ?? Locale.DefaulT).GetEnumMemberValue());
+                return new{
+                    format = s.Format,
+                    url = s.Url,
+                    locale = subLang,
+                    language = subLang.Locale,
+                    isCC = false
+                };
+            }).ToList();
+
+            var capsDataMapped = capsData.Select(s => {
+                var subLang = Languages.FixAndFindCrLc((s.Language ?? Locale.DefaulT).GetEnumMemberValue());
+                return new{
+                    format = s.Format,
+                    url = s.Url,
+                    locale = subLang,
+                    language = subLang.Locale,
+                    isCC = true
+                };
+            }).ToList();
+
+            subsDataMapped.AddRange(capsDataMapped);
+
+            var subsArr = Languages.SortSubtitles(subsDataMapped, "language");
+
+            foreach (var subsItem in subsArr){
+                var index = subsArr.IndexOf(subsItem);
+                var langItem = subsItem.locale;
+                var sxData = new SxItem();
+                sxData.Language = langItem;
+                var isSigns = langItem.CrLocale == audDub.CrLocale && !subsItem.isCC;
+                var isCc = subsItem.isCC;
+                var isDuplicate = false;
+
+
+                if ((!options.IncludeSignsSubs && isSigns) || (!options.IncludeCcSubs && isCc)){
+                    continue;
+                }
+
+                var matchingSubs = files.Where(a => a.Type == DownloadMediaType.Subtitle &&
+                                                    (a.Language.CrLocale == langItem.CrLocale || a.Language.Locale == langItem.Locale) &&
+                                                    a.Cc == isCc &&
+                                                    a.Signs == isSigns).ToList();
+
+                if (matchingSubs.Count > 0){
+                    isDuplicate = true;
+                    if (options is not{ KeepDubsSeperate: true, DlVideoOnce: false } || !options.SubsDownloadDuplicate || matchingSubs.Any(a => a.RelatedVideoDownloadMedia?.Lang == videoDownloadMedia.Lang)){
+                        continue;
+                    }
+                }
+
+                sxData.File = Languages.SubsFile(fileName, index + "", langItem, (isDuplicate || options is{ KeepDubsSeperate: true, DlVideoOnce: false }) ? videoDownloadMedia.Lang.CrLocale : "", isCc, options.CcTag,
+                    isSigns, subsItem.format,
+                    !(data.DownloadSubs.Count == 1 && !data.DownloadSubs.Contains("all")));
+                sxData.Path = Path.Combine(fileDir, sxData.File);
+
+                Helpers.EnsureDirectoriesExist(sxData.Path);
+
+                if (data.DownloadSubs.Contains("all") || data.DownloadSubs.Contains(langItem.CrLocale)){
+                    if (string.IsNullOrEmpty(subsItem.url)){
+                        continue;
+                    }
+
+                    var subsAssReq = HttpClientReq.CreateRequestMessage(subsItem.url, HttpMethod.Get, false, Instance.CrAuthEndpoint1.Token?.access_token, null);
+
+                    var subsAssReqResponse = await HttpClientReq.Instance.SendHttpRequest(subsAssReq);
+
+                    if (subsAssReqResponse.IsOk){
+                        if (subsItem.format == "ass"){
+                            subsAssReqResponse.ResponseContent =
+                                SubtitleUtils.CleanAssAndEnsureScriptInfo(subsAssReqResponse.ResponseContent, options, langItem);
+
+                            sxData.Title = $"{langItem.Name}";
+                            var keysList = FontsManager.ExtractFontsFromAss(subsAssReqResponse.ResponseContent, options.MuxTypesettingFonts);
+                            sxData.Fonts = FontsManager.Instance.GetDictFromKeyList(keysList);
+                        } else if (subsItem.format == "vtt" && options.ConvertVtt2Ass){
+                            var assBuilder = new StringBuilder();
+
+                            assBuilder.AppendLine("[Script Info]");
+                            assBuilder.AppendLine("Title: CC Subtitle");
+                            assBuilder.AppendLine("ScriptType: v4.00+");
+                            assBuilder.AppendLine("WrapStyle: 0");
+                            assBuilder.AppendLine("PlayResX: 640");
+                            assBuilder.AppendLine("PlayResY: 360");
+                            assBuilder.AppendLine("Timer: 0.0");
+                            if (options.SubsAddScaledBorder == ScaledBorderAndShadowSelection.ScaledBorderAndShadowYes){
+                                assBuilder.AppendLine("ScaledBorderAndShadow: yes");
+                            } else if (options.SubsAddScaledBorder == ScaledBorderAndShadowSelection.ScaledBorderAndShadowNo){
+                                assBuilder.AppendLine("ScaledBorderAndShadow: no");
+                            }
+
+                            assBuilder.AppendLine();
+                            assBuilder.AppendLine("[V4+ Styles]");
+                            assBuilder.AppendLine("Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,"
+                                                  + "Underline,Strikeout,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding");
+                            assBuilder.AppendLine($"Style: Default,{options.CcSubsFont ?? "Trebuchet MS"},24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,1");
+                            assBuilder.AppendLine();
+                            assBuilder.AppendLine("[Events]");
+                            assBuilder.AppendLine("Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text");
+
+                            // Parse the VTT content
+                            string normalizedContent = subsAssReqResponse.ResponseContent.Replace("\r\n", "\n").Replace("\r", "\n");
+                            var timePattern = new Regex(
+                                @"^(?<start>(?:\d{2}:)?\d{2}:\d{2}\.\d{3})\s*-->\s*(?<end>(?:\d{2}:)?\d{2}:\d{2}\.\d{3})(?:\s+.+)?$",
+                                RegexOptions.Compiled);
+
+                            var lines = normalizedContent.Split('\n');
+                            int i = 0;
+
+                            while (i < lines.Length){
+                                var line = lines[i].TrimEnd();
+                                if (string.IsNullOrWhiteSpace(line) || line.Equals("WEBVTT", StringComparison.OrdinalIgnoreCase) || line.Equals("STYLE", StringComparison.OrdinalIgnoreCase)){
+                                    i++;
+                                    continue;
+                                }
+
+                                int timeLineIndex = -1;
+
+                                if (timePattern.IsMatch(line)){
+                                    timeLineIndex = i;
+                                } else if (i + 1 < lines.Length && timePattern.IsMatch(lines[i + 1].TrimEnd())){
+                                    timeLineIndex = i + 1;
+                                } else{
+                                    i++;
+                                    continue;
+                                }
+
+                                var match = timePattern.Match(lines[timeLineIndex].TrimEnd());
+                                string startAss = Helpers.ConvertTimeFormat(match.Groups["start"].Value);
+                                string endAss = Helpers.ConvertTimeFormat(match.Groups["end"].Value);
+
+                                int textStart = timeLineIndex + 1;
+                                var textLines = new List<string>();
+                                while (textStart < lines.Length && !string.IsNullOrWhiteSpace(lines[textStart])){
+                                    textLines.Add(lines[textStart].TrimEnd());
+                                    textStart++;
+                                }
+
+                                if (textLines.Count > 0){
+                                    string dialogue = string.Join("\\N", textLines);
+                                    dialogue = Helpers.ConvertVTTStylesToASS(dialogue);
+
+                                    assBuilder.AppendLine($"Dialogue: 0,{startAss},{endAss},Default,,0000,0000,0000,,{dialogue}");
+                                }
+
+                                i = textStart + 1;
+                            }
+
+                            subsAssReqResponse.ResponseContent = assBuilder.ToString();
+
+                            sxData.Title = $"{langItem.Name} / CC Subtitle";
+                            var keysList = FontsManager.ExtractFontsFromAss(subsAssReqResponse.ResponseContent, options.MuxTypesettingFonts);
+                            sxData.Fonts = FontsManager.Instance.GetDictFromKeyList(keysList);
+                            sxData.Path = sxData.Path.Replace("vtt", "ass");
+                        }
+
+                        File.WriteAllText(sxData.Path, subsAssReqResponse.ResponseContent);
+                        Console.WriteLine($"Subtitle downloaded: {sxData.File}");
+                        files.Add(new DownloadedMedia{
+                            Type = DownloadMediaType.Subtitle,
+                            Cc = isCc,
+                            Signs = isSigns,
+                            Path = sxData.Path,
+                            File = sxData.File,
+                            Title = sxData.Title,
+                            Fonts = sxData.Fonts,
+                            Language = sxData.Language,
+                            Lang = sxData.Language,
+                            RelatedVideoDownloadMedia = videoDownloadMedia
+                        });
+                        data.downloadedFiles.Add(sxData.Path);
+                    } else{
+                        Console.WriteLine($"Failed to download subtitle: ${sxData.File}");
+                    }
+                }
+            }
+        } else{
+            Console.WriteLine("Can\'t find urls for subtitles!");
+        }
+    }
+
+    private async Task<(bool Ok, PartsData Parts, string tsFile)> DownloadVideo(VideoItem chosenVideoSegments, CrDownloadOptions options, string outFile, string tempTsFile, CrunchyEpMeta data,
+        string fileDir){
+        // Prepare for video download
+        int totalParts = chosenVideoSegments.segments.Count;
+        int mathParts = (int)Math.Ceiling((double)totalParts / options.Partsize);
+        string mathMsg = $"({mathParts}*{options.Partsize})";
+        string tsFile;
+        Console.WriteLine($"Total parts in video stream: {totalParts} {mathMsg}");
+
+        if (Path.IsPathRooted(outFile)){
+            tsFile = outFile;
+        } else{
+            tsFile = Path.Combine(fileDir, outFile);
+        }
+
+        Helpers.EnsureDirectoriesExist(tsFile);
+
+        M3U8Json videoJson = new M3U8Json{
+            Segments = chosenVideoSegments.segments.Cast<dynamic>().ToList()
+        };
+
+        data.downloadedFiles.Add(chosenVideoSegments.pssh != null ? $"{tempTsFile}.video.enc.m4s" : $"{tsFile}.video.m4s");
+        data.downloadedFiles.Add(chosenVideoSegments.pssh != null ? $"{tempTsFile}.video.enc.m4s.resume" : $"{tsFile}.video.m4s.resume");
+
+        var videoDownloader = new HlsDownloader(new HlsOptions{
+            Output = chosenVideoSegments.pssh != null ? $"{tempTsFile}.video.enc.m4s" : $"{tsFile}.video.m4s",
+            Timeout = options.Timeout,
+            M3U8Json = videoJson,
+            // BaseUrl = chunkPlaylist.BaseUrl, 
+            Threads = options.Partsize,
+            FsRetryTime = options.RetryDelay * 1000,
+            Retries = options.RetryAttempts,
+            Override = options.Force,
+        }, data, true, false, options.DownloadMethodeNew);
+
+        var defParts = new PartsData{
+            First = 0,
+            Total = 0,
+            Completed = 0,
+        };
+
+        var videoDownloadResult = (Ok: false, Parts: defParts);
+
+        try{
+            videoDownloadResult = await videoDownloader.Download();
+        } catch (Exception e){
+            Console.WriteLine(e);
+        }
+
+
+        return (videoDownloadResult.Ok, videoDownloadResult.Parts, tsFile);
+    }
+
+    private async Task<(bool Ok, PartsData Parts, string tsFile)> DownloadAudio(AudioItem chosenAudioSegments, CrDownloadOptions options, string outFile, string tempTsFile, CrunchyEpMeta data,
+        string fileDir){
+        // Prepare for audio download
+        string tsFile;
+        int totalParts = chosenAudioSegments.segments.Count;
+        int mathParts = (int)Math.Ceiling((double)totalParts / options.Partsize);
+        string mathMsg = $"({mathParts}*{options.Partsize})";
+        Console.WriteLine($"Total parts in audio stream: {totalParts} {mathMsg}");
+
+        if (Path.IsPathRooted(outFile)){
+            tsFile = outFile;
+        } else{
+            tsFile = Path.Combine(fileDir, outFile);
+        }
+
+        // Check if the path is absolute
+        bool isAbsolute = Path.IsPathRooted(outFile);
+
+        // Get all directory parts of the path except the last segment (assuming it's a file)
+        string[] directories = Path.GetDirectoryName(outFile)?.Split(Path.DirectorySeparatorChar) ?? Array.Empty<string>();
+
+        // Initialize the cumulative path based on whether the original path is absolute or not
+        string cumulativePath = isAbsolute ? "" : fileDir;
+        for (int i = 0; i < directories.Length; i++){
+            // Build the path incrementally
+            cumulativePath = Path.Combine(cumulativePath, directories[i]);
+
+            // Check if the directory exists and create it if it does not
+            if (!Directory.Exists(cumulativePath)){
+                Directory.CreateDirectory(cumulativePath);
+                Console.WriteLine($"Created directory: {cumulativePath}");
+            }
+        }
+
+        M3U8Json audioJson = new M3U8Json{
+            Segments = chosenAudioSegments.segments.Cast<dynamic>().ToList()
+        };
+
+        data.downloadedFiles.Add(chosenAudioSegments.pssh != null ? $"{tempTsFile}.audio.enc.m4s" : $"{tsFile}.audio.m4s");
+        data.downloadedFiles.Add(chosenAudioSegments.pssh != null ? $"{tempTsFile}.audio.enc.m4s.resume" : $"{tsFile}.audio.m4s.resume");
+
+        var audioDownloader = new HlsDownloader(new HlsOptions{
+            Output = chosenAudioSegments.pssh != null ? $"{tempTsFile}.audio.enc.m4s" : $"{tsFile}.audio.m4s",
+            Timeout = options.Timeout,
+            M3U8Json = audioJson,
+            // BaseUrl = chunkPlaylist.BaseUrl, 
+            Threads = options.Partsize,
+            FsRetryTime = options.RetryDelay * 1000,
+            Retries = options.RetryAttempts,
+            Override = options.Force,
+        }, data, false, true, options.DownloadMethodeNew);
+
+        var defParts = new PartsData{
+            First = 0,
+            Total = 0,
+            Completed = 0,
+        };
+
+        var audioDownloadResult = (Ok: false, Parts: defParts);
+
+        try{
+            audioDownloadResult = await audioDownloader.Download();
+        } catch (Exception e){
+            Console.WriteLine(e);
+        }
+
+        return (audioDownloadResult.Ok, audioDownloadResult.Parts, tsFile);
+    }
+
+    #region Fetch Playback Data
+
+    private async Task<(bool IsOk, PlaybackData pbData, string error, Dictionary<string, string> Headers)> FetchPlaybackData(CrAuth authEndpoint, string mediaId, string mediaGuidId, bool music, bool auioRoleDesc,
+        CrAuthSettings optionsStreamEndpointSettings){
+        var temppbData = new PlaybackData{
+            Total = 0,
+            Data = new Dictionary<string, StreamDetails>()
+        };
+
+        await authEndpoint.RefreshToken(true);
+
+        var playbackEndpoint = $"{ApiUrls.Playback}/{(music ? "music/" : "")}{mediaGuidId}/{authEndpoint.AuthSettings.Endpoint}/play{(auioRoleDesc ? "?audioRole=description" : "")}";
+        var playbackRequestResponse = await SendPlaybackRequestAsync(playbackEndpoint, authEndpoint);
+
+        if (!playbackRequestResponse.IsOk){
+            playbackRequestResponse = await HandleStreamErrorsAsync(playbackRequestResponse, playbackEndpoint, authEndpoint);
+        }
+
+        if (playbackRequestResponse.IsOk){
+            temppbData = await ProcessPlaybackResponseAsync(playbackRequestResponse.ResponseContent, mediaId, mediaGuidId, authEndpoint, optionsStreamEndpointSettings);
+        } else{
+            Console.WriteLine("Request Stream URLs FAILED! Attempting fallback");
+            playbackEndpoint = $"{ApiUrls.Playback}/{(music ? "music/" : "")}{mediaGuidId}/web/firefox/play{(auioRoleDesc ? "?audioRole=description" : "")}";
+            playbackRequestResponse = await SendPlaybackRequestAsync(playbackEndpoint, authEndpoint);
+
+            if (!playbackRequestResponse.IsOk){
+                playbackRequestResponse = await HandleStreamErrorsAsync(playbackRequestResponse, playbackEndpoint, authEndpoint);
+            }
+
+            if (playbackRequestResponse.IsOk){
+                temppbData = await ProcessPlaybackResponseAsync(playbackRequestResponse.ResponseContent, mediaId, mediaGuidId, authEndpoint, optionsStreamEndpointSettings);
+            } else{
+                Console.Error.WriteLine("Fallback Request Stream URLs FAILED!");
+            }
+        }
+
+        return (playbackRequestResponse.IsOk, pbData: temppbData, error: playbackRequestResponse.IsOk ? "" : playbackRequestResponse.ResponseContent, playbackRequestResponse.Headers);
+    }
+
+    private async Task<(bool IsOk, string ResponseContent, string error, Dictionary<string, string> Headers)> SendPlaybackRequestAsync(string endpoint, CrAuth authEndpoint){
+        var request = HttpClientReq.CreateRequestMessage(endpoint, HttpMethod.Get, true, authEndpoint.Token?.access_token, null);
+        request.Headers.UserAgent.ParseAdd(authEndpoint.AuthSettings.UserAgent);
+        return await HttpClientReq.Instance.SendHttpRequest(request, false, authEndpoint.cookieStore);
+    }
+
+    private async Task<(bool IsOk, string ResponseContent, string error, Dictionary<string, string> Headers)> HandleStreamErrorsAsync(
+        (bool IsOk, string ResponseContent, string error, Dictionary<string, string> Headers) response, string endpoint, CrAuth authEndpoint){
+        if (response.IsOk || string.IsNullOrEmpty(response.ResponseContent)) return response;
+
+        var error = StreamError.FromJson(response.ResponseContent);
+        if (error?.IsTooManyActiveStreamsError() == true){
+            foreach (var errorActiveStream in error.ActiveStreams){
+                await Instance.DeAuthVideo(errorActiveStream.ContentId, errorActiveStream.Token, authEndpoint);
+            }
+
+            return await SendPlaybackRequestAsync(endpoint, authEndpoint);
+        }
+
+        return response;
+    }
+
+    private async Task<PlaybackData> ProcessPlaybackResponseAsync(string responseContent, string mediaId, string mediaGuidId, CrAuth authEndpoint, CrAuthSettings optionsStreamEndpointSettings){
+        var temppbData = new PlaybackData{
+            Total = 0,
+            Data = new Dictionary<string, StreamDetails>()
+        };
+
+        var playStream = Helpers.Deserialize<CrunchyStreamData>(responseContent, SettingsJsonSerializerSettings);
+        if (playStream == null) return temppbData;
+
+        if (!string.IsNullOrEmpty(playStream.Token)){
+            await Instance.DeAuthVideo(mediaGuidId, playStream.Token, authEndpoint);
+        }
+
+        var derivedPlayCrunchyStreams = new CrunchyStreams();
+        if (playStream.HardSubs != null){
+            //hlang "none" is no hardsube same url as the default url
+            foreach (var hardsub in playStream.HardSubs){
+                var stream = hardsub.Value;
+                derivedPlayCrunchyStreams[hardsub.Key] = new StreamDetails{
+                    Url = [new UrlWithAuth(){ Url = stream.Url, CrAuth = authEndpoint, Audio = optionsStreamEndpointSettings.Audio, Video = optionsStreamEndpointSettings.Video }],
+                    IsHardsubbed = true,
+                    HardsubLocale = stream.Hlang,
+                    HardsubLang = Languages.FixAndFindCrLc((stream.Hlang ?? Locale.DefaulT).GetEnumMemberValue())
+                };
+            }
+        }
+
+        derivedPlayCrunchyStreams[""] = new StreamDetails{
+            Url = [new UrlWithAuth(){ Url = playStream.Url, CrAuth = authEndpoint, Audio = optionsStreamEndpointSettings.Audio, Video = optionsStreamEndpointSettings.Video }],
+            IsHardsubbed = false,
+            HardsubLocale = Locale.DefaulT,
+            HardsubLang = Languages.DEFAULT_lang
+        };
+
+        temppbData.Data = derivedPlayCrunchyStreams;
+        temppbData.Total = 1;
+
+        temppbData.Meta = new PlaybackMeta{
+            AudioLocale = Languages.FindLang(playStream.AudioLocale != null ? playStream.AudioLocale.GetEnumMemberValue() : ""),
+            Versions = playStream.Versions,
+            Bifs = new List<string>{ playStream.Bifs ?? "" },
+            MediaId = mediaId,
+            Captions = playStream.Captions,
+            Subtitles = new Subtitles(),
+            Token = playStream.Token,
+        };
+
+        if (playStream.Subtitles != null){
+            foreach (var subtitle in playStream.Subtitles){
+                temppbData.Meta.Subtitles.Add(subtitle.Key, new SubtitleInfo{
+                    Format = subtitle.Value.Format,
+                    Locale = subtitle.Value.Locale,
+                    Url = subtitle.Value.Url
+                });
+            }
+        }
+
+        return temppbData;
+    }
+
+    #endregion
+
+
+    private async Task ParseChapters(string currentMediaId, List<string> compiledChapters){
+        var showRequest = HttpClientReq.CreateRequestMessage($"https://static.crunchyroll.com/skip-events/production/{currentMediaId}.json", HttpMethod.Get, true, CrAuthEndpoint1.Token?.access_token, null);
+
+        var showRequestResponse = await HttpClientReq.Instance.SendHttpRequest(showRequest, true);
+
+        if (showRequestResponse.IsOk){
+            CrunchyChapters chapterData = new CrunchyChapters();
+            chapterData.Chapters = new List<CrunchyChapter>();
+
+            try{
+                JObject jObject = JObject.Parse(showRequestResponse.ResponseContent);
+
+                if (jObject.TryGetValue("lastUpdate", out JToken? lastUpdateToken)){
+                    chapterData.lastUpdate = lastUpdateToken.ToObject<DateTime>();
+                }
+
+                if (jObject.TryGetValue("mediaId", out JToken? mediaIdToken)){
+                    chapterData.mediaId = mediaIdToken.ToObject<string>();
+                }
+
+                chapterData.Chapters = new List<CrunchyChapter>();
+
+                foreach (var property in jObject.Properties()){
+                    if (property.Value.Type == JTokenType.Object && property.Name != "lastUpdate" && property.Name != "mediaId"){
+                        try{
+                            CrunchyChapter chapter = property.Value.ToObject<CrunchyChapter>() ?? new CrunchyChapter();
+                            chapterData.Chapters.Add(chapter);
+                        } catch (Exception ex){
+                            Console.Error.WriteLine($"Error parsing chapter: {ex.Message}");
+                        }
+                    }
+                }
+            } catch (Exception ex){
+                Console.Error.WriteLine($"Error parsing JSON response: {ex.Message}");
+                return;
+            }
+
+            if (chapterData.Chapters.Count > 0){
+                chapterData.Chapters.Sort((a, b) => {
+                    if (a.start.HasValue && b.start.HasValue){
+                        return a.start.Value.CompareTo(b.start.Value);
+                    }
+
+                    return 0; // Both values are null, they are considered equal
+                });
+
+                if (!((chapterData.Chapters.Any(c => c.type == "intro")) || chapterData.Chapters.Any(c => c.type == "recap"))){
+                    int chapterNumber = (compiledChapters.Count / 2) + 1;
+                    compiledChapters.Add($"CHAPTER{chapterNumber}=00:00:00.00");
+                    compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Episode");
+                }
+
+                foreach (CrunchyChapter chapter in chapterData.Chapters){
+                    if (chapter.start == null || chapter.end == null) continue;
+
+                    TimeSpan startTime = TimeSpan.FromSeconds(chapter.start.Value);
+                    TimeSpan endTime = TimeSpan.FromSeconds(chapter.end.Value);
+
+                    string startFormatted = startTime.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture);
+                    string endFormatted = endTime.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture);
+
+                    int chapterNumber = (compiledChapters.Count / 2) + 1;
+                    if (chapter.type == "intro"){
+                        if (chapter.start > 0){
+                            compiledChapters.Add($"CHAPTER{chapterNumber}=00:00:00.00");
+                            compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Prologue");
+                        }
+
+                        chapterNumber = (compiledChapters.Count / 2) + 1;
+                        compiledChapters.Add($"CHAPTER{chapterNumber}={startFormatted}");
+                        compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Opening");
+                        chapterNumber = (compiledChapters.Count / 2) + 1;
+                        compiledChapters.Add($"CHAPTER{chapterNumber}={endFormatted}");
+                        compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Episode");
+                    } else{
+                        string formattedChapterType = char.ToUpper(chapter.type[0]) + chapter.type.Substring(1);
+                        chapterNumber = (compiledChapters.Count / 2) + 1;
+                        compiledChapters.Add($"CHAPTER{chapterNumber}={startFormatted}");
+                        compiledChapters.Add($"CHAPTER{chapterNumber}NAME={formattedChapterType} Start");
+                        chapterNumber = (compiledChapters.Count / 2) + 1;
+                        compiledChapters.Add($"CHAPTER{chapterNumber}={endFormatted}");
+                        compiledChapters.Add($"CHAPTER{chapterNumber}NAME={formattedChapterType} End");
+                    }
+                }
+            }
+        } else{
+            Console.WriteLine("Chapter request failed, attempting old API ");
+
+            showRequest = HttpClientReq.CreateRequestMessage($"https://static.crunchyroll.com/datalab-intro-v2/{currentMediaId}.json", HttpMethod.Get, true, CrAuthEndpoint1.Token?.access_token, null);
+
+            showRequestResponse = await HttpClientReq.Instance.SendHttpRequest(showRequest, true);
+
+            if (showRequestResponse.IsOk){
+                CrunchyOldChapter chapterData = Helpers.Deserialize<CrunchyOldChapter>(showRequestResponse.ResponseContent, SettingsJsonSerializerSettings) ?? new CrunchyOldChapter();
+
+                TimeSpan startTime = TimeSpan.FromSeconds(chapterData.startTime);
+                TimeSpan endTime = TimeSpan.FromSeconds(chapterData.endTime);
+
+                string startFormatted = startTime.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture);
+                string endFormatted = endTime.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture);
+
+
+                int chapterNumber = (compiledChapters.Count / 2) + 1;
+                if (chapterData.startTime > 1){
+                    compiledChapters.Add($"CHAPTER{chapterNumber}=00:00:00.00");
+                    compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Prologue");
+                }
+
+                chapterNumber = (compiledChapters.Count / 2) + 1;
+                compiledChapters.Add($"CHAPTER{chapterNumber}={startFormatted}");
+                compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Opening");
+                chapterNumber = (compiledChapters.Count / 2) + 1;
+                compiledChapters.Add($"CHAPTER{chapterNumber}={endFormatted}");
+                compiledChapters.Add($"CHAPTER{chapterNumber}NAME=Episode");
+                return;
+            }
+
+            Console.Error.WriteLine("Chapter request failed");
+        }
+    }
+
+    public async Task DeAuthVideo(string currentMediaId, string videoToken, CrAuth authEndoint){
+        var deauthVideoToken = HttpClientReq.CreateRequestMessage($"https://cr-play-service.prd.crunchyrollsvc.com/v1/token/{currentMediaId}/{videoToken}/inactive", HttpMethod.Patch, true,
+            authEndoint.Token?.access_token, null);
+        var deauthVideoTokenResponse = await HttpClientReq.Instance.SendHttpRequest(deauthVideoToken);
+    }
+
+    private static string FormatKey(byte[] keyBytes) =>
+        BitConverter.ToString(keyBytes).Replace("-", "").ToLower();
+
+    private static string BuildMp4DecryptKeyParam(byte[] keyId, byte[] key) =>
+        $"--key {FormatKey(keyId)}:{FormatKey(key)}";
+
+    private static string BuildShakaKeysParam(List<ContentKey> keys) =>
+        "--enable_raw_key_decryption " + string.Join(" ",
+            keys.Select(k => $"--keys key_id={FormatKey(k.KeyID)}:key={FormatKey(k.Bytes)}"));
+}

@@ -1,0 +1,379 @@
+﻿using System;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using CRD.Downloader;
+using CRD.Downloader.Crunchyroll;
+using CRD.Utils;
+using CRD.Utils.Files;
+using CRD.Utils.Structs;
+using CRD.Utils.Structs.Crunchyroll;
+
+namespace CRD.ViewModels;
+
+public partial class DownloadsPageViewModel : ViewModelBase{
+    public ObservableCollection<DownloadItemModel> Items{ get; }
+
+    [ObservableProperty]
+    private bool shutdownWhenQueueEmpty;
+
+    [ObservableProperty]
+    private bool autoDownload;
+
+    [ObservableProperty]
+    private bool removeFinished;
+
+    [ObservableProperty]
+    private QueueManager queueManagerIns;
+
+    public DownloadsPageViewModel(){
+        QueueManagerIns = QueueManager.Instance;
+        QueueManagerIns.UpdateDownloadListItems();
+        Items = QueueManagerIns.DownloadItemModels;
+        AutoDownload = CrunchyrollManager.Instance.CrunOptions.AutoDownload;
+        RemoveFinished = CrunchyrollManager.Instance.CrunOptions.RemoveFinishedDownload;
+        ShutdownWhenQueueEmpty = CrunchyrollManager.Instance.CrunOptions.ShutdownWhenQueueEmpty;
+    }
+
+
+    partial void OnAutoDownloadChanged(bool value){
+        CrunchyrollManager.Instance.CrunOptions.AutoDownload = value;
+        if (value){
+            QueueManagerIns.UpdateDownloadListItems();
+        }
+
+        CfgManager.WriteCrSettings();
+    }
+
+    partial void OnRemoveFinishedChanged(bool value){
+        CrunchyrollManager.Instance.CrunOptions.RemoveFinishedDownload = value;
+        CfgManager.WriteCrSettings();
+    }
+
+    partial void OnShutdownWhenQueueEmptyChanged(bool value){
+        CrunchyrollManager.Instance.CrunOptions.ShutdownWhenQueueEmpty = value;
+        CfgManager.WriteCrSettings();
+    }
+
+    [RelayCommand]
+    public void ClearQueue(){
+        var items = QueueManagerIns.Queue;
+        QueueManagerIns.ClearQueue();
+
+        foreach (var crunchyEpMeta in items){
+            if (!crunchyEpMeta.DownloadProgress.IsDone){
+                foreach (var downloadItemDownloadedFile in crunchyEpMeta.downloadedFiles){
+                    try{
+                        if (File.Exists(downloadItemDownloadedFile)){
+                            File.Delete(downloadItemDownloadedFile);
+                        }
+                    } catch (Exception){
+                        // ignored
+                    }
+                }
+            }
+        }
+    }
+
+    [RelayCommand]
+    public void RetryQueue(){
+        var items = QueueManagerIns.Queue;
+
+        foreach (var crunchyEpMeta in items){
+            if (crunchyEpMeta.DownloadProgress.IsError){
+                crunchyEpMeta.DownloadProgress.ResetForRetry();
+            }
+        }
+
+        QueueManagerIns.UpdateDownloadListItems();
+    }
+    
+    [RelayCommand]
+    public void PauseQueue(){
+        AutoDownload = false;
+        foreach (var item in Items){
+            if (item.epMeta.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing){
+                item.ToggleIsDownloading();
+            }
+        }
+
+        QueueManagerIns.UpdateDownloadListItems();
+    }
+    
+}
+
+public partial class DownloadItemModel : INotifyPropertyChanged{
+    public string ImageUrl{ get; set; }
+    public Bitmap? ImageBitmap{ get; set; }
+    public string Title{ get; set; }
+
+    public bool isDownloading{ get; set; }
+    public bool Done{ get; set; }
+    public bool Paused{ get; set; }
+
+    public double Percent{ get; set; }
+    public string Time{ get; set; }
+    public string DoingWhat{ get; set; }
+    public string DownloadSpeed{ get; set; }
+    public string InfoText{ get; set; }
+    public string InfoTextHover{ get; set; }
+    public CrunchyEpMeta epMeta{ get; set; }
+
+
+    public bool Error{ get; set; }
+    public bool ShowPauseIcon{ get; set; }
+
+    public DownloadItemModel(CrunchyEpMeta epMetaF){
+        epMeta = epMetaF;
+
+        ImageUrl = epMeta.Image ?? string.Empty;
+        Title = epMeta.SeriesTitle + (!string.IsNullOrEmpty(epMeta.Season) ? " - S" + epMeta.Season + "E" + (epMeta.EpisodeNumber != string.Empty ? epMeta.EpisodeNumber : epMeta.AbsolutEpisodeNumberE) : "") + " - " +
+                epMeta.EpisodeTitle;
+
+        Done = epMeta.DownloadProgress.IsDone;
+        isDownloading = epMeta.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing;
+        ShowPauseIcon = isDownloading;
+        Percent = epMeta.DownloadProgress.Percent;
+        Time = GetTimeText();
+        DownloadSpeed = GetDownloadSpeedText();
+        Paused = epMeta.DownloadProgress.IsPaused;
+        DoingWhat = GetDoingWhatText();
+
+        InfoText = JoinWithSeparator(
+            GetDubString(),
+            GetSubtitleString(),
+            epMeta.Resolution
+        );
+        InfoTextHover = epMeta.AvailableQualities;
+
+        Error = epMeta.DownloadProgress.IsError;
+    }
+
+    string JoinWithSeparator(params string[] parts){
+        return string.Join(" - ", parts.Where(part => !string.IsNullOrEmpty(part)));
+    }
+
+    private string GetDubString(){
+        if (epMeta.SelectedDubs == null || epMeta.SelectedDubs.Count < 1){
+            return "";
+        }
+
+        return epMeta.SelectedDubs.Aggregate("Dub: ", (current, crunOptionsDlDub) => current + (crunOptionsDlDub + " "));
+    }
+
+    private string GetSubtitleString(){
+        var hardSubs = epMeta.Hslang != "none" ? "Hardsub: " : "";
+        if (hardSubs != string.Empty){
+            var locale = Languages.Locale2language(epMeta.Hslang).CrLocale;
+            if (epMeta.AvailableSubs != null && epMeta.AvailableSubs.Contains(locale)){
+                hardSubs += locale + " ";
+            }
+
+            return hardSubs;
+        }
+
+        if (epMeta.DownloadSubs.Count < 1){
+            return "";
+        }
+
+        var softSubs = "Softsub: ";
+
+        if (epMeta.DownloadSubs.Contains("all")){
+            if (epMeta.AvailableSubs != null){
+                return epMeta.AvailableSubs.Aggregate(softSubs, (current, epMetaAvailableSub) => current + (epMetaAvailableSub + " "));
+            }
+        }
+
+        foreach (var crunOptionsDlSub in epMeta.DownloadSubs){
+            if (epMeta.AvailableSubs != null && epMeta.AvailableSubs.Contains(crunOptionsDlSub)){
+                softSubs += crunOptionsDlSub + " ";
+            }
+        }
+
+        return softSubs;
+    }
+
+    public void Refresh(){
+        Done = epMeta.DownloadProgress.IsDone;
+        isDownloading = epMeta.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing;
+        ShowPauseIcon = isDownloading;
+        Percent = epMeta.DownloadProgress.Percent;
+        Time = GetTimeText();
+        DownloadSpeed = GetDownloadSpeedText();
+
+        Paused = epMeta.DownloadProgress.IsPaused;
+        DoingWhat = GetDoingWhatText();
+
+        InfoText = JoinWithSeparator(
+            GetDubString(),
+            GetSubtitleString(),
+            epMeta.Resolution
+        );
+        InfoTextHover = epMeta.AvailableQualities;
+        Error = epMeta.DownloadProgress.IsError;
+
+
+        if (PropertyChanged != null){
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(isDownloading)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPauseIcon)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Percent)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Time)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DownloadSpeed)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DoingWhat)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Error)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(InfoText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(InfoTextHover)));
+        }
+    }
+
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private string GetDoingWhatText(){
+        if (epMeta.DownloadProgress.IsWaitingForRetry && epMeta.DownloadProgress.RetryAtUtc.HasValue){
+            return "Rate limited, retrying at " + epMeta.DownloadProgress.RetryAtUtc.Value
+                .ToLocalTime()
+                .ToString("T", CultureInfo.CurrentCulture);
+        }
+
+        return Paused ? "Paused" :
+            Done ? (epMeta.DownloadProgress.Doing != string.Empty ? epMeta.DownloadProgress.Doing : "Done") :
+            epMeta.DownloadProgress.Doing != string.Empty ? epMeta.DownloadProgress.Doing : "Waiting";
+    }
+
+    private string GetTimeText(){
+        if (epMeta.DownloadProgress.IsWaitingForRetry && epMeta.DownloadProgress.RetryAtUtc.HasValue){
+            return string.Empty;
+        }
+
+        return "Estimated Time: " + TimeSpan.FromSeconds(epMeta.DownloadProgress.Time).ToString(@"hh\:mm\:ss");
+    }
+
+    private string GetDownloadSpeedText(){
+        if (epMeta.DownloadProgress.IsWaitingForRetry){
+            return string.Empty;
+        }
+
+        return CrunchyrollManager.Instance.CrunOptions.DownloadSpeedInBits
+            ? $"{epMeta.DownloadProgress.DownloadSpeedBytes * 8 / 1000000.0:F2} Mb/s"
+            : $"{epMeta.DownloadProgress.DownloadSpeedBytes / 1000000.0:F2} MB/s";
+    }
+
+    [RelayCommand]
+    public void ToggleIsDownloading(){
+        if (epMeta.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing){
+            epMeta.DownloadProgress.ResumeState = epMeta.DownloadProgress.State;
+            epMeta.DownloadProgress.State = DownloadState.Paused;
+            isDownloading = false;
+            Paused = true;
+            ShowPauseIcon = false;
+
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(isDownloading)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Paused)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPauseIcon)));
+
+            QueueManager.Instance.ReleaseDownloadSlot(epMeta);
+            QueueManager.Instance.RefreshQueue();
+            return;
+        }
+
+        if (epMeta.DownloadProgress.IsPaused){
+            if (!QueueManager.Instance.TryResumeDownload(epMeta))
+                return;
+
+            epMeta.DownloadProgress.State = epMeta.DownloadProgress.ResumeState;
+            isDownloading = epMeta.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing;
+            Paused = false;
+            ShowPauseIcon = isDownloading;
+
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(isDownloading)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Paused)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPauseIcon)));
+            return;
+        }
+
+        StartDownload();
+    }
+    
+    [RelayCommand]
+    public void RetryDownload(){
+        epMeta.DownloadProgress.ResetForRetry();
+        isDownloading = false;
+        Paused = false;
+        ShowPauseIcon = false;
+
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Paused)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(isDownloading)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPauseIcon)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Error)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Percent)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Time)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DownloadSpeed)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DoingWhat)));
+
+        QueueManager.Instance.RefreshQueue();
+        StartDownload();
+    }
+
+    public Task StartDownload(){
+        QueueManager.Instance.TryStartDownload(this);
+        return Task.CompletedTask;
+    }
+
+    internal async Task StartDownloadCore(){
+        if (isDownloading)
+            return;
+
+        epMeta.RenewCancellationToken();
+        isDownloading = true;
+        epMeta.DownloadProgress.State = DownloadState.Downloading;
+        Paused = false;
+        ShowPauseIcon = true;
+
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(isDownloading)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Paused)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPauseIcon)));
+
+        CrDownloadOptions? newOptions = Helpers.DeepCopy(CrunchyrollManager.Instance.CrunOptions);
+
+        if (epMeta.OnlySubs){
+            newOptions?.Novids = true;
+            newOptions?.Noaudio = true;
+        }
+
+        await CrunchyrollManager.Instance.DownloadEpisode(
+            epMeta,
+            epMeta.DownloadSettings ?? newOptions ?? CrunchyrollManager.Instance.CrunOptions);
+    }
+
+    [RelayCommand]
+    public void RemoveFromQueue(){
+        CrunchyEpMeta? downloadItem = QueueManager.Instance.Queue.FirstOrDefault(e => e.Equals(epMeta)) ?? null;
+        if (downloadItem != null){
+            QueueManager.Instance.RemoveFromQueue(downloadItem);
+            epMeta.CancelDownload();
+            if (!Done){
+                foreach (var downloadItemDownloadedFile in downloadItem.downloadedFiles){
+                    try{
+                        if (File.Exists(downloadItemDownloadedFile)){
+                            File.Delete(downloadItemDownloadedFile);
+                        }
+                    } catch (Exception){
+                        // ignored
+                    }
+                }
+            }
+        }
+    }
+
+    public async Task LoadImage(){
+        ImageBitmap = await Helpers.LoadImage(ImageUrl, 208, 117);
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ImageBitmap)));
+    }
+}

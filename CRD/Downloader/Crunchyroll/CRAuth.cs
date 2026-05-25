@@ -1,0 +1,480 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Web;
+using CRD.Utils;
+using CRD.Utils.Files;
+using CRD.Utils.Http;
+using CRD.Utils.Notifications;
+using CRD.Utils.Structs;
+using CRD.Utils.Structs.Crunchyroll;
+using CRD.Views;
+using Newtonsoft.Json;
+using ReactiveUI;
+
+namespace CRD.Downloader.Crunchyroll;
+
+public class CrAuth(CrunchyrollManager crunInstance, CrAuthSettings authSettings){
+    private static readonly TimeSpan TokenRefreshBuffer = TimeSpan.FromSeconds(60);
+
+    public CrToken? Token;
+    public CrProfile Profile = new();
+    public Subscription? Subscription{ get; set; }
+    public CrMultiProfile MultiProfile = new();
+
+    public CrunchyrollEndpoints EndpointEnum = CrunchyrollEndpoints.Unknown;
+
+    public CrAuthSettings AuthSettings = authSettings;
+
+    public Dictionary<string, CookieCollection> cookieStore = new();
+
+    private bool IsTokenExpiredOrNearExpiry(){
+        return Token == null || DateTime.Now >= Token.expires - TokenRefreshBuffer;
+    }
+
+    public void Init(){
+        Profile = new CrProfile{
+            Username = "???",
+            Avatar = "crbrand_avatars_logo_marks_mangagirl_taupe.png",
+            PreferredContentAudioLanguage = "ja-JP",
+            PreferredContentSubtitleLanguage = crunInstance.DefaultLocale,
+            HasPremium = false,
+        };
+    }
+
+    private string GetTokenFilePath(){
+        switch (AuthSettings.Endpoint){
+            case "tv/samsung":
+            case "tv/vidaa":
+            case "tv/android_tv":
+                return CfgManager.PathCrToken.Replace(".json", "_tv.json");
+            case "android/phone":
+            case "android/tablet":
+                return CfgManager.PathCrToken.Replace(".json", "_android.json");
+            case "console/switch":
+            case "console/ps4":
+            case "console/ps5":
+            case "console/xbox_one":
+                return CfgManager.PathCrToken.Replace(".json", "_console.json");
+            case "---":
+                return CfgManager.PathCrToken.Replace(".json", "_guest.json");
+            default:
+                return CfgManager.PathCrToken;
+        }
+    }
+
+    public async Task Auth(){
+        if (CfgManager.CheckIfFileExists(GetTokenFilePath())){
+            Token = CfgManager.ReadJsonFromFile<CrToken>(GetTokenFilePath());
+            await LoginWithToken();
+        } else{
+            await AuthAnonymous();
+        }
+    }
+    
+    public void SetETPCookie(string refreshToken){
+        HttpClientReq.Instance.AddCookie(".crunchyroll.com", new Cookie("etp_rt", refreshToken), cookieStore);
+        HttpClientReq.Instance.AddCookie(".crunchyroll.com", new Cookie("c_locale", "en-US"), cookieStore);
+    }
+
+    public async Task AuthAnonymous(){
+        string uuid = string.IsNullOrEmpty(Token?.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
+
+        Subscription = new Subscription();
+
+        var formData = new Dictionary<string, string>{
+            { "grant_type", "client_id" },
+            { "scope", "offline_access" },
+            { "device_id", uuid },
+            { "device_type", AuthSettings.Device_type },
+        };
+
+        if (!string.IsNullOrEmpty(AuthSettings.Device_name)){
+            formData.Add("device_name", AuthSettings.Device_name);
+        }
+
+        var requestContent = new FormUrlEncodedContent(formData);
+
+        var crunchyAuthHeaders = new Dictionary<string, string>{
+            { "Authorization", AuthSettings.Authorization },
+            { "User-Agent", AuthSettings.UserAgent }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
+            Content = requestContent
+        };
+
+        foreach (var header in crunchyAuthHeaders){
+            request.Headers.Add(header.Key, header.Value);
+        }
+
+        var response = await HttpClientReq.Instance.SendHttpRequest(request);
+
+        if (response.IsOk){
+            JsonTokenToFileAndVariable(response.ResponseContent, uuid);
+        } else{
+            Console.Error.WriteLine("Anonymous login failed");
+        }
+
+        Profile = new CrProfile{
+            Username = "???",
+            Avatar = "crbrand_avatars_logo_marks_mangagirl_taupe.png",
+            PreferredContentAudioLanguage = "ja-JP",
+            PreferredContentSubtitleLanguage = "de-DE"
+        };
+    }
+
+    private void JsonTokenToFileAndVariable(string content, string deviceId){
+        Token = Helpers.Deserialize<CrToken>(content, crunInstance.SettingsJsonSerializerSettings);
+
+        if (Token is{ expires_in: not null }){
+            Token.device_id = deviceId;
+            Token.expires = DateTime.Now.AddSeconds((double)Token.expires_in);
+
+            if (EndpointEnum == CrunchyrollEndpoints.Guest){
+                return;
+            }
+
+            CfgManager.WriteJsonToFile(GetTokenFilePath(), Token);
+        }
+    }
+
+    private async Task AuthOld(AuthData data){
+        string uuid = Guid.NewGuid().ToString();
+
+        var formData = new Dictionary<string, string>{
+            { "username", data.Username },
+            { "password", data.Password },
+            { "grant_type", "password" },
+            { "scope", "offline_access" },
+            { "device_id", uuid },
+            { "device_type", AuthSettings.Device_type },
+        };
+
+        if (!string.IsNullOrEmpty(AuthSettings.Device_name)){
+            formData.Add("device_name", AuthSettings.Device_name);
+        }
+
+        var requestContent = new FormUrlEncodedContent(formData);
+
+        var crunchyAuthHeaders = new Dictionary<string, string>{
+            { "Authorization", AuthSettings.Authorization },
+            { "User-Agent", AuthSettings.UserAgent }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
+            Content = requestContent
+        };
+
+        foreach (var header in crunchyAuthHeaders){
+            request.Headers.Add(header.Key, header.Value);
+        }
+
+        var response = await HttpClientReq.Instance.SendHttpRequest(request);
+
+        if (response.IsOk){
+            JsonTokenToFileAndVariable(response.ResponseContent, uuid);
+        } else{
+            if (response.ResponseContent.Contains("invalid_credentials")){
+                MessageBus.Current.SendMessage(new ToastMessage("Login failed. Please check your username and password.", ToastType.Error, 5));
+            } else if (response.ResponseContent.Contains("<title>Just a moment...</title>") ||
+                       response.ResponseContent.Contains("<title>Access denied</title>") ||
+                       response.ResponseContent.Contains("<title>Attention Required! | Cloudflare</title>") ||
+                       response.ResponseContent.Trim().Equals("error code: 1020") ||
+                       response.ResponseContent.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1){
+                MessageBus.Current.SendMessage(new ToastMessage($"Failed to login - Cloudflare error {(crunInstance.CrunOptions.UseCrBetaApi ? "" : "try to change to BetaAPI in settings")}", ToastType.Error, 5));
+            } else{
+                MessageBus.Current.SendMessage(new ToastMessage($"Failed to login - {response.ResponseContent.Substring(0, response.ResponseContent.Length < 200 ? response.ResponseContent.Length : 200)}",
+                    ToastType.Error, 5));
+                await Console.Error.WriteLineAsync("Full Response: " + response.ResponseContent);
+            }
+        }
+
+        if (Token?.refresh_token != null){
+            SetETPCookie(Token.refresh_token);
+
+            await GetMultiProfile();
+        }
+    }
+    
+    public async Task ChangeProfile(string profileId){
+        if (Token?.access_token == null && Token?.refresh_token == null ||
+            Token.access_token != null && Token.refresh_token == null){
+            await AuthAnonymous();
+        }
+
+        if (Profile.Username == "???"){
+            return;
+        }
+
+        if (string.IsNullOrEmpty(profileId) || Token?.refresh_token == null){
+            return;
+        }
+
+        string uuid = string.IsNullOrEmpty(Token.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
+
+        SetETPCookie(Token.refresh_token);
+
+        var formData = new Dictionary<string, string>{
+            { "grant_type", "refresh_token_profile_id" },
+            { "profile_id", profileId },
+            { "device_id", uuid },
+            { "device_type", AuthSettings.Device_type },
+        };
+
+        var requestContent = new FormUrlEncodedContent(formData);
+
+        var crunchyAuthHeaders = new Dictionary<string, string>{
+            { "Authorization", AuthSettings.Authorization },
+            { "User-Agent", AuthSettings.UserAgent }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
+            Content = requestContent
+        };
+
+        foreach (var header in crunchyAuthHeaders){
+            request.Headers.Add(header.Key, header.Value);
+        }
+
+        if (Token?.refresh_token != null) SetETPCookie(Token.refresh_token);
+
+        var response = await HttpClientReq.Instance.SendHttpRequest(request, false, cookieStore);
+
+        if (response.IsOk){
+            JsonTokenToFileAndVariable(response.ResponseContent, uuid);
+            if (Token?.refresh_token != null){
+                SetETPCookie(Token.refresh_token);
+            }
+
+            await GetMultiProfile();
+            
+        } else{
+            Console.Error.WriteLine("Refresh Token Auth Failed");
+        }
+    }
+
+    public async Task GetProfile(){
+        if (Token?.access_token == null){
+            Console.Error.WriteLine("Missing Access Token");
+            return;
+        }
+
+        var request = HttpClientReq.CreateRequestMessage(ApiUrls.Profile, HttpMethod.Get, true, Token.access_token, null);
+
+        var response = await HttpClientReq.Instance.SendHttpRequest(request);
+
+        if (response.IsOk){
+            var profileTemp = Helpers.Deserialize<CrProfile>(response.ResponseContent, crunInstance.SettingsJsonSerializerSettings);
+
+            if (profileTemp != null){
+                Profile = profileTemp;
+
+                await GetSubscription();
+            }
+        }
+    }
+
+    private async Task GetSubscription(){
+        var requestSubs = HttpClientReq.CreateRequestMessage(ApiUrls.Subscription + Token.account_id, HttpMethod.Get, true, Token.access_token, null);
+
+        var responseSubs = await HttpClientReq.Instance.SendHttpRequest(requestSubs);
+
+        if (responseSubs.IsOk){
+            var subsc = Helpers.Deserialize<Subscription>(responseSubs.ResponseContent, crunInstance.SettingsJsonSerializerSettings);
+            Subscription = subsc;
+            if (subsc is{ SubscriptionProducts:{ Count: 0 }, ThirdPartySubscriptionProducts.Count: > 0 }){
+                var thirdPartySub = subsc.ThirdPartySubscriptionProducts.First();
+                var expiration = thirdPartySub.InGrace ? thirdPartySub.InGraceExpirationDate : thirdPartySub.ExpirationDate;
+                var remaining = expiration - DateTime.Now;
+                Profile.HasPremium = true;
+                if (Subscription != null){
+                    Subscription.IsActive = remaining > TimeSpan.Zero;
+                    Subscription.NextRenewalDate = expiration;
+                }
+            } else if (subsc is{ SubscriptionProducts:{ Count: 0 }, NonrecurringSubscriptionProducts.Count: > 0 }){
+                var nonRecurringSub = subsc.NonrecurringSubscriptionProducts.First();
+                var remaining = nonRecurringSub.EndDate - DateTime.Now;
+                Profile.HasPremium = true;
+                if (Subscription != null){
+                    Subscription.IsActive = remaining > TimeSpan.Zero;
+                    Subscription.NextRenewalDate = nonRecurringSub.EndDate;
+                }
+            } else if (subsc is{ SubscriptionProducts:{ Count: 0 }, FunimationSubscriptions.Count: > 0 }){
+                Profile.HasPremium = true;
+            } else if (subsc is{ SubscriptionProducts.Count: > 0 }){
+                Profile.HasPremium = true;
+            } else{
+                Profile.HasPremium = false;
+                Console.Error.WriteLine($"No subscription available:\n {JsonConvert.SerializeObject(subsc, Formatting.Indented)} ");
+            }
+        } else{
+            Profile.HasPremium = false;
+            Console.Error.WriteLine("Failed to check premium subscription status");
+        }
+    }
+
+    private async Task GetMultiProfile(){
+        if (Token?.access_token == null){
+            Console.Error.WriteLine("Missing Access Token");
+            return;
+        }
+
+        var request = HttpClientReq.CreateRequestMessage(ApiUrls.MultiProfile, HttpMethod.Get, true, Token?.access_token);
+
+        var response = await HttpClientReq.Instance.SendHttpRequest(request, false, cookieStore);
+
+        if (response.IsOk){
+            MultiProfile = Helpers.Deserialize<CrMultiProfile>(response.ResponseContent, crunInstance.SettingsJsonSerializerSettings) ?? new CrMultiProfile();
+
+            var selectedProfile = MultiProfile.Profiles.FirstOrDefault( e => e.IsSelected);
+            if (selectedProfile != null) Profile = selectedProfile;
+             
+            await GetSubscription();
+        }
+    }
+            }
+        }
+    }
+
+    public async Task LoginWithToken(){
+        if (Token?.refresh_token == null){
+            Console.Error.WriteLine("Missing Refresh Token");
+            await AuthAnonymous();
+            return;
+        }
+
+        string uuid = string.IsNullOrEmpty(Token.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
+
+        var formData = new Dictionary<string, string>{
+            { "refresh_token", Token.refresh_token },
+            { "scope", "offline_access" },
+            { "device_id", uuid },
+            { "grant_type", "refresh_token" },
+            { "device_type", AuthSettings.Device_type },
+        };
+
+        if (!string.IsNullOrEmpty(AuthSettings.Device_name)){
+            formData.Add("device_name", AuthSettings.Device_name);
+        }
+
+        var requestContent = new FormUrlEncodedContent(formData);
+
+        var crunchyAuthHeaders = new Dictionary<string, string>{
+            { "Authorization", AuthSettings.Authorization },
+            { "User-Agent", AuthSettings.UserAgent }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
+            Content = requestContent
+        };
+
+        foreach (var header in crunchyAuthHeaders){
+            request.Headers.Add(header.Key, header.Value);
+        }
+
+        SetETPCookie(Token.refresh_token);
+
+        var response = await HttpClientReq.Instance.SendHttpRequest(request);
+
+        if (response.ResponseContent.Contains("<title>Just a moment...</title>") ||
+            response.ResponseContent.Contains("<title>Access denied</title>") ||
+            response.ResponseContent.Contains("<title>Attention Required! | Cloudflare</title>") ||
+            response.ResponseContent.Trim().Equals("error code: 1020") ||
+            response.ResponseContent.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1){
+            MessageBus.Current.SendMessage(new ToastMessage($"Failed to login - Cloudflare error {(crunInstance.CrunOptions.UseCrBetaApi ? "" : "try to change to BetaAPI in settings")}", ToastType.Error, 5));
+            Console.Error.WriteLine($"Failed to login - Cloudflare error {(crunInstance.CrunOptions.UseCrBetaApi ? "" : "try to change to BetaAPI in settings")}");
+        }
+
+        if (response.IsOk){
+            JsonTokenToFileAndVariable(response.ResponseContent, uuid);
+
+            if (Token?.refresh_token != null){
+                SetETPCookie(Token.refresh_token);
+
+                await GetMultiProfile();
+            }
+        } else{
+            Console.Error.WriteLine("Token Auth Failed");
+            await AuthAnonymous();
+
+            MainWindow.Instance.ShowError("Login failed. Please check the log for more details.");
+        }
+    }
+
+    public async Task RefreshToken(bool needsToken){
+        if (EndpointEnum == CrunchyrollEndpoints.Guest){
+            if (!IsTokenExpiredOrNearExpiry()){
+                return;
+            }
+
+            await AuthAnonymousFoxy();
+            return;
+        }
+
+        if (Token?.access_token == null && Token?.refresh_token == null ||
+            Token.access_token != null && Token.refresh_token == null){
+            await AuthAnonymous();
+        } else{
+            if (!IsTokenExpiredOrNearExpiry() && needsToken){
+                return;
+            }
+        }
+
+        if (Profile.Username == "???"){
+            return;
+        }
+
+        var hadUserSession = !string.IsNullOrWhiteSpace(Token?.refresh_token) && !string.IsNullOrWhiteSpace(Profile.Username) && Profile.Username != "???";
+
+        string uuid = string.IsNullOrEmpty(Token?.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
+
+        var formData = new Dictionary<string, string>{
+            { "refresh_token", Token?.refresh_token ?? "" },
+            { "grant_type", "refresh_token" },
+            { "scope", "offline_access" },
+            { "device_id", uuid },
+            { "device_type", AuthSettings.Device_type },
+        };
+
+        if (!string.IsNullOrEmpty(AuthSettings.Device_name)){
+            formData.Add("device_name", AuthSettings.Device_name);
+        }
+
+        var requestContent = new FormUrlEncodedContent(formData);
+
+        var crunchyAuthHeaders = new Dictionary<string, string>{
+            { "Authorization", AuthSettings.Authorization },
+            { "User-Agent", AuthSettings.UserAgent }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
+            Content = requestContent
+        };
+
+        foreach (var header in crunchyAuthHeaders){
+            request.Headers.Add(header.Key, header.Value);
+        }
+
+        SetETPCookie(Token?.refresh_token ?? string.Empty);
+
+        var response = await HttpClientReq.Instance.SendHttpRequest(request);
+
+        if (response.IsOk){
+            JsonTokenToFileAndVariable(response.ResponseContent, uuid);
+        } else{
+            Console.Error.WriteLine("Refresh Token Auth Failed");
+            if (hadUserSession){
+                await NotificationPublisher.Instance.PublishLoginExpiredAsync(crunInstance.CrunOptions.NotificationSettings, Profile.Username, AuthSettings.Endpoint);
+            }
+        }
+    }
+}

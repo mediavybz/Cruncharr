@@ -1,0 +1,175 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             xmlns:vm="clr-namespace:CRD.ViewModels"
+             xmlns:controls="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia"
+             x:DataType="vm:DownloadsPageViewModel"
+             x:Class="CRD.Views.DownloadsPageView"
+             xmlns:ui="clr-namespace:CRD.Utils.UI">
+
+    <UserControl.Resources>
+        <ui:UiValueConverter x:Key="UiValueConverter" />
+    </UserControl.Resources>
+
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <ToggleSwitch HorizontalAlignment="Right" Margin="0 0 10 0 " IsChecked="{Binding RemoveFinished}" OffContent="Remove Finished" OnContent="Remove Finished"></ToggleSwitch>
+            <ToggleSwitch HorizontalAlignment="Right" Margin="0 0 10 0 " IsChecked="{Binding AutoDownload}" OffContent="Auto Download" OnContent="Auto Download"></ToggleSwitch>
+            <ToggleSwitch HorizontalAlignment="Right" Margin="0 0 10 0 " IsChecked="{Binding ShutdownWhenQueueEmpty}" OffContent="Shutdown PC" OnContent="Shutdown PC">
+                <ToolTip.Tip>
+                    <TextBlock Text="Automatically shut down the PC when the queue is empty" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"></TextBlock>
+                </ToolTip.Tip>
+            </ToggleSwitch>
+
+            <Button BorderThickness="0"
+                    HorizontalAlignment="Right"
+                    Margin="0 0 10 0 "
+                    VerticalAlignment="Center"
+                    IsEnabled="{Binding QueueManagerIns.HasFailedItem}"
+                    Command="{Binding RetryQueue}">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <controls:SymbolIcon Symbol="Refresh" FontSize="22" />
+                </StackPanel>
+                <ToolTip.Tip>
+                    <TextBlock Text="Retry failed" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"></TextBlock>
+                </ToolTip.Tip>
+            </Button>
+            
+            <Button BorderThickness="0"
+                    HorizontalAlignment="Right"
+                    Margin="0 0 10 0 "
+                    VerticalAlignment="Center"
+                    IsEnabled="{Binding QueueManagerIns.HasActiveDownloads}"
+                    Command="{Binding PauseQueue}">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <controls:SymbolIcon Symbol="Pause" FontSize="22" />
+                </StackPanel>
+                <ToolTip.Tip>
+                    <TextBlock Text="Pause running" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"></TextBlock>
+                </ToolTip.Tip>
+            </Button>
+
+            <Button BorderThickness="0"
+                    HorizontalAlignment="Right"
+                    Margin="0 0 10 0 "
+                    VerticalAlignment="Center"
+                    Command="{Binding ClearQueue}">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <controls:SymbolIcon Symbol="Delete" FontSize="22" />
+                </StackPanel>
+                <ToolTip.Tip>
+                    <TextBlock Text="Clear Queue" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"></TextBlock>
+                </ToolTip.Tip>
+            </Button>
+
+        </StackPanel>
+
+
+        <ListBox Grid.Row="1" Focusable="False" Margin="10" VerticalAlignment="Stretch" ItemsSource="{Binding Items}">
+            <ListBox.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:DownloadItemModel}">
+                    <StackPanel>
+                        <Border Padding="10" Margin="5" BorderThickness="1">
+                            <Grid Margin="10" VerticalAlignment="Top">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Grid>
+                                    <Image HorizontalAlignment="Center" Width="208" Height="117" Source="../Assets/coming_soon_ep.jpg" />
+                                    <Image Grid.Column="0" Width="208" Height="117" Source="{Binding ImageBitmap}"
+                                           Stretch="Fill" />
+                                </Grid>
+
+
+                                <!-- Text Content -->
+                                <Grid Grid.Column="1" Margin="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" /> <!-- Takes up most space for the title -->
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" IsVisible="{Binding !epMeta.HighlightAllAvailable}" MaxHeight="117" Text="{Binding Title}" FontWeight="Bold" FontSize="16"
+                                               TextWrapping="Wrap" VerticalAlignment="Top" />
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Foreground="Orange" IsVisible="{Binding epMeta.HighlightAllAvailable}" MaxHeight="117" Text="{Binding Title}" FontWeight="Bold" FontSize="16"
+                                               TextWrapping="Wrap" VerticalAlignment="Top" />
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" MaxHeight="117" Text="{Binding InfoText}" Opacity="0.8"
+                                               TextWrapping="Wrap" VerticalAlignment="Center"> 
+                                        <ToolTip.Tip>
+                                            <TextBlock Text="{Binding InfoTextHover}" FontSize="14"></TextBlock>
+                                        </ToolTip.Tip>
+                                    </TextBlock>
+
+                                    <Button Grid.Row="0" Grid.Column="1" Margin="0 0 5 0" IsVisible="{Binding !Error}" Command="{Binding ToggleIsDownloading}" FontStyle="Italic"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top">
+                                        <StackPanel Orientation="Horizontal">
+                                            <controls:SymbolIcon Symbol="{Binding 
+                                            ShowPauseIcon, Converter={StaticResource UiValueConverter}}" FontSize="18" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Grid.Row="0" Grid.Column="1" Margin="0 0 5 0" IsVisible="{Binding Error}" Command="{Binding RetryDownload}" FontStyle="Italic"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top">
+                                        <StackPanel Orientation="Horizontal">
+                                            <controls:SymbolIcon Symbol="Refresh" FontSize="18" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Grid.Row="0" Grid.Column="2" Command="{Binding RemoveFromQueue}" FontStyle="Italic"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top">
+                                        <StackPanel Orientation="Horizontal">
+                                            <controls:SymbolIcon Symbol="Delete" FontSize="18" />
+                                        </StackPanel>
+                                    </Button>
+
+
+                                    <ProgressBar Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" VerticalAlignment="Bottom" Margin="0 0 0 10" Height="5" Value="{Binding Percent}"></ProgressBar>
+
+
+                                    <Grid Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" VerticalAlignment="Bottom">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Bottom" Text="{Binding  DoingWhat}"
+                                                   Opacity="1" TextWrapping="NoWrap" />
+
+                                        <TextBlock Grid.Row="0" Grid.Column="1" VerticalAlignment="Bottom" Margin="0 0 10 0" Text="{Binding  Time}"
+                                                   Opacity="0.8" TextWrapping="Wrap" />
+
+                                        <TextBlock Grid.Row="0" Grid.Column="2" VerticalAlignment="Bottom" Text="{Binding  DownloadSpeed}"
+                                                   Opacity="0.8" TextWrapping="Wrap" />
+                                    </Grid>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <Border Background="LightGray" Height="1" Margin="0,5" HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Grid>
+</UserControl>

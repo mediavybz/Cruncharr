@@ -1,0 +1,1287 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:CRD.ViewModels"
+             xmlns:ui="clr-namespace:CRD.Utils.UI"
+             xmlns:controls="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia"
+             xmlns:history="clr-namespace:CRD.Utils.Structs.History"
+             xmlns:structs="clr-namespace:CRD.Utils.Structs"
+             x:DataType="vm:HistoryPageViewModel"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="CRD.Views.HistoryPageView"
+             Unloaded="OnUnloaded"
+             Loaded="Control_OnLoaded">
+
+    <UserControl.Resources>
+        <ui:UiIntToVisibilityConverter x:Key="UiIntToVisibilityConverter" />
+        <ui:UiSonarrIdToVisibilityConverter x:Key="UiSonarrIdToVisibilityConverter" />
+        <ui:UiListToStringConverter x:Key="UiListToStringConverter" />
+        <ui:UiListHasElementsConverter x:Key="UiListHasElementsConverter" />
+        <ui:UiSeriesSeasonConverter x:Key="UiSeriesSeasonConverter" />
+        <ui:UiEnumToBoolConverter x:Key="EnumToBoolConverter" />
+        <ui:UiHistoryDownloadStatusConverter x:Key="UiHistoryDownloadStatusConverter" />
+    </UserControl.Resources>
+
+
+    <Grid>
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Background="{DynamicResource ControlAltFillColorQuarternary}"></StackPanel>
+
+        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal">
+
+            <Button Width="70" Height="70" Background="Transparent" BorderThickness="0" Margin="5 0"
+                    VerticalAlignment="Center"
+                    Command="{Binding RefreshAll}"
+                    IsEnabled="{Binding !ProgramManager.FetchingData}">
+                <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
+                    <controls:SymbolIcon Symbol="Sync" FontSize="32" />
+                    <TextBlock Text="Refresh Filtered" HorizontalAlignment="Center" TextWrapping="Wrap" FontSize="12"></TextBlock>
+                </StackPanel>
+            </Button>
+
+            <Button Width="70" Height="70" Background="Transparent" BorderThickness="0" Margin="5 0"
+                    VerticalAlignment="Center"
+                    Command="{Binding AddMissingToQueue}"
+                    IsEnabled="{Binding !ProgramManager.FetchingData}">
+                <StackPanel Orientation="Vertical">
+                    <controls:SymbolIcon Symbol="Import" FontSize="32" />
+                    <TextBlock Text="Add To Queue" TextWrapping="Wrap" HorizontalAlignment="Center" FontSize="12"></TextBlock>
+                </StackPanel>
+            </Button>
+
+            <ToggleButton Width="70" Height="70" Background="Transparent" BorderThickness="0" Margin="5 0"
+                          VerticalAlignment="Center"
+                          IsChecked="{Binding EditMode}"
+                          IsEnabled="{Binding !ProgramManager.FetchingData}">
+                <StackPanel Orientation="Vertical">
+                    <controls:SymbolIcon Symbol="Edit" FontSize="32" />
+                    <TextBlock Text="Edit" TextWrapping="Wrap" HorizontalAlignment="Center" FontSize="12"></TextBlock>
+                </StackPanel>
+            </ToggleButton>
+
+
+            <StackPanel>
+                <ToggleButton x:Name="DropdownButtonSearch" Width="70" Height="70" Background="Transparent" BorderThickness="0" Margin="5 0"
+                              VerticalAlignment="Center"
+                              IsChecked="{Binding IsSearchOpen, Mode=TwoWay}"
+                              IsEnabled="{Binding !ProgramManager.FetchingData}">
+                    <Grid>
+                        <StackPanel Orientation="Vertical">
+                            <controls:SymbolIcon Symbol="Zoom" FontSize="32" />
+                            <TextBlock Text="Search" HorizontalAlignment="Center" FontSize="12"></TextBlock>
+                        </StackPanel>
+
+                        <Ellipse Width="10" Height="10"
+                                 HorizontalAlignment="Right"
+                                 VerticalAlignment="Top"
+                                 Margin="0,0,0,0"
+                                 Fill="Orange"
+                                 IsHitTestVisible="False"
+                                 IsVisible="{Binding IsSearchActiveClosed}" />
+                    </Grid>
+                </ToggleButton>
+                <Popup IsLightDismissEnabled="True"
+                       IsOpen="{Binding IsSearchOpen, Mode=TwoWay}"
+                       Placement="BottomEdgeAlignedRight"
+                       PlacementTarget="{Binding ElementName=DropdownButtonSearch}"
+                       Opened="SearchPopup_OnOpened">
+                    
+                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                        <StackPanel Orientation="Horizontal" Margin="10">
+
+                            <TextBox x:Name="SearchBar" Width="160"
+                                     Watermark="Search"
+                                     Text="{Binding SearchInput, UpdateSourceTrigger=PropertyChanged}" />
+                            <Button Content="✕" Margin="6,0,0,0"
+                                    Command="{Binding ClearSearchCommand}" />
+                        </StackPanel>
+
+                    </Border>
+
+
+                </Popup>
+            </StackPanel>
+
+            <Rectangle Width="1" Height="50" Fill="Gray" Margin="10,0" />
+
+            <StackPanel Margin="10,0">
+                <ToggleButton x:Name="DropdownButtonSonarr" Width="70" Height="70" Background="Transparent"
+                              BorderThickness="0" CornerRadius="5"
+                              IsVisible="{Binding SonarrAvailable}"
+                              IsChecked="{Binding SonarrOptionsOpen}"
+                              IsEnabled="{Binding !ProgramManager.FetchingData}">
+                    <StackPanel Orientation="Vertical">
+                        <controls:ImageIcon VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0 1 0 0" Source="../Assets/sonarr.png" Width="30" Height="30" />
+                        <TextBlock Text="Sonarr" TextWrapping="Wrap" HorizontalAlignment="Center" FontSize="12"></TextBlock>
+                    </StackPanel>
+                </ToggleButton>
+                <Popup IsLightDismissEnabled="True"
+                       IsOpen="{Binding IsChecked, ElementName=DropdownButtonSonarr, Mode=TwoWay}"
+                       Placement="BottomEdgeAlignedRight"
+                       PlacementTarget="{Binding ElementName=DropdownButtonSonarr}">
+                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                        <StackPanel>
+                            <Button Margin="10 5"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Stretch"
+                                    IsEnabled="{Binding !AddingMissingSonarrSeries}"
+                                    Content="Add Sonarr Series"
+                                    Command="{Binding AddMissingSonarrSeriesToHistory}">
+                            </Button>
+                            <Button Margin="10 5"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Stretch"
+                                    Content="Download Missing from Sonarr"
+                                    Command="{Binding DownloadMissingSonarr}">
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+            </StackPanel>
+
+            <TextBlock VerticalAlignment="Center" Text="{Binding ProgressText}"></TextBlock>
+
+
+            <!-- <Button Command="{Binding RefreshAll}" Margin="10" IsEnabled="{Binding !FetchingData}">Refresh All</Button> -->
+            <!-- <Button Command="{Binding AddMissingToQueue}" Margin="10 0"  IsEnabled="{Binding !FetchingData}">Add To Queue</Button> -->
+            <!-- <ToggleButton IsChecked="{Binding EditMode}" Margin="10 0"  IsEnabled="{Binding !FetchingData}">Edit</ToggleButton> -->
+        </StackPanel>
+
+
+        <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal">
+
+            <Slider VerticalAlignment="Center" Minimum="0.5" Maximum="1" Width="100"
+                    Value="{Binding ScaleValue}"
+                    IsVisible="{Binding IsPosterViewSelected}">
+            </Slider>
+
+            <StackPanel>
+                <ToggleButton x:Name="DropdownButtonViews" Width="70" Height="70" Background="Transparent"
+                              BorderThickness="0" Margin="5 0" VerticalAlignment="Center"
+                              IsEnabled="{Binding !ProgramManager.FetchingData}"
+                              IsChecked="{Binding ViewSelectionOpen}">
+                    <StackPanel Orientation="Vertical">
+                        <controls:SymbolIcon Symbol="View" FontSize="32" />
+                        <TextBlock Text="View" HorizontalAlignment="Center" FontSize="12"></TextBlock>
+                    </StackPanel>
+                </ToggleButton>
+                <Popup IsLightDismissEnabled="True"
+                       IsOpen="{Binding IsChecked, ElementName=DropdownButtonViews, Mode=TwoWay}"
+                       Placement="BottomEdgeAlignedRight"
+                       PlacementTarget="{Binding ElementName=DropdownButtonViews}">
+                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                        <ListBox SelectionMode="Single" Width="210"
+                                 MaxHeight="400"
+                                 ItemsSource="{Binding ViewsList}" SelectedItem="{Binding SelectedView}">
+                        </ListBox>
+                    </Border>
+                </Popup>
+            </StackPanel>
+
+
+            <StackPanel>
+                <ToggleButton x:Name="DropdownButtonSorting" Width="70" Height="70" Background="Transparent"
+                              BorderThickness="0" Margin="5 0" VerticalAlignment="Center"
+                              IsEnabled="{Binding !ProgramManager.FetchingData}"
+                              IsChecked="{Binding SortingSelectionOpen}">
+                    <StackPanel Orientation="Vertical">
+                        <controls:SymbolIcon Symbol="Sort" FontSize="32" />
+                        <TextBlock Text="Sort" HorizontalAlignment="Center" FontSize="12"></TextBlock>
+                    </StackPanel>
+                </ToggleButton>
+                <Popup IsLightDismissEnabled="True"
+                       IsOpen="{Binding IsChecked, ElementName=DropdownButtonSorting, Mode=TwoWay}"
+                       Placement="BottomEdgeAlignedRight"
+                       PlacementTarget="{Binding ElementName=DropdownButtonSorting}">
+                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                        <ListBox SelectionMode="Single,Toggle" Width="210"
+                                 MaxHeight="400"
+                                 ItemsSource="{Binding SortingList}" SelectedItem="{Binding SelectedSorting}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                                        <controls:SymbolIcon IsVisible="{Binding !$parent[UserControl].((vm:HistoryPageViewModel)DataContext).SortDir}" Symbol="ChevronUp" FontSize="12" Margin="0 0 10 0" />
+                                        <controls:SymbolIcon IsVisible="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).SortDir}" Symbol="ChevronDown" FontSize="12" Margin="0 0 10 0" />
+                                        <TextBlock Text="{Binding SortingTitle}"></TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+                </Popup>
+            </StackPanel>
+
+            <StackPanel>
+                <ToggleButton x:Name="DropdownButtonFilter" Width="70" Height="70" Background="Transparent" BorderThickness="0" Margin="5 0"
+                              VerticalAlignment="Center"
+                              IsEnabled="{Binding !ProgramManager.FetchingData}">
+                    <StackPanel Orientation="Vertical">
+                        <controls:SymbolIcon Symbol="Filter" FontSize="32" />
+                        <TextBlock Text="Filter" HorizontalAlignment="Center" FontSize="12"></TextBlock>
+                    </StackPanel>
+                </ToggleButton>
+                <Popup IsLightDismissEnabled="True"
+                       IsOpen="{Binding IsChecked, ElementName=DropdownButtonFilter, Mode=TwoWay}"
+                       Placement="BottomEdgeAlignedRight"
+                       PlacementTarget="{Binding ElementName=DropdownButtonFilter}">
+                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                        <StackPanel Orientation="Vertical">
+
+                            <Grid Margin="8 0 5 0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" /> <!-- TextBlock takes remaining space -->
+                                    <ColumnDefinition Width="Auto" /> <!-- ToggleSwitch takes only needed space -->
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Text="Series" Grid.Column="0" VerticalAlignment="Center" />
+                                <ToggleSwitch OffContent="" OnContent="" Grid.Column="1" IsChecked="{Binding ShowSeries}" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Grid Margin="8 0 5 0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Text="Artists" Grid.Column="0" VerticalAlignment="Center" />
+                                <ToggleSwitch OffContent="" OnContent="" Grid.Column="1" IsChecked="{Binding ShowArtists}" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Grid Margin="8 0 5 0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Text="Movies" Grid.Column="0" VerticalAlignment="Center" />
+                                <ToggleSwitch OffContent="" OnContent="" Grid.Column="1" IsChecked="{Binding ShowMovies}" VerticalAlignment="Center" />
+                            </Grid>
+
+
+                            <Rectangle Height="1" Fill="Gray" Margin="0,8,0,8" />
+
+                            <ListBox SelectionMode="Single" Width="210"
+                                     MaxHeight="400"
+                                     ItemsSource="{Binding FilterList}" SelectedItem="{Binding SelectedFilter}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding FilterTitle}"></TextBlock>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+
+                        </StackPanel>
+
+                    </Border>
+                </Popup>
+            </StackPanel>
+
+
+        </StackPanel>
+
+
+        <ListBox x:Name="SeriesListBox" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" ItemsSource="{Binding FilteredItems}"
+                 SelectedItem="{Binding SelectedSeries}"
+                 Margin="5" IsVisible="{Binding IsPosterViewSelected}">
+
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal"></WrapPanel>
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Border>
+                        <Grid>
+                            <StackPanel Orientation="Vertical" HorizontalAlignment="Center"
+                                        Width="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).PosterWidth}"
+                                        Height="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).PosterHeight}"
+                                        Margin="5">
+                                <Grid>
+                                    <Image Source="{Binding ThumbnailImage}"
+                                           Width="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).PosterImageWidth}"
+                                           Height="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).PosterImageHeight}">
+                                    </Image>
+
+                                    <Border VerticalAlignment="Top" HorizontalAlignment="Right" CornerRadius="0 0 0 10"
+                                            Background="#f78c25" Opacity="1"
+                                            Margin="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).CornerMargin} "
+                                            IsVisible="{Binding NewEpisodes, Converter={StaticResource UiIntToVisibilityConverter}}">
+                                        <TextBlock VerticalAlignment="Center" TextAlignment="Center" Width="30"
+                                                   Height="30"
+                                                   Text="{Binding NewEpisodes}"
+                                                   Padding="0,5,0,0" />
+                                    </Border>
+
+                                </Grid>
+
+                                <TextBlock HorizontalAlignment="Center" TextAlignment="Center"
+                                           Text="{Binding SeriesTitle}"
+                                           TextWrapping="Wrap"
+                                           Width="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).PosterImageWidth}"
+                                           FontSize="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).PosterTextSize}"
+                                           Height="35"
+                                           Margin="4,0,4,0">
+                                    <ToolTip.Tip>
+                                        <TextBlock Text="{Binding SeriesTitle}" FontSize="15" />
+                                    </ToolTip.Tip>
+                                </TextBlock>
+
+                                <TextBlock HorizontalAlignment="Center" TextAlignment="Center"
+                                           Text="{Binding SonarrNextAirDate}"
+                                           TextWrapping="Wrap"
+                                           Width="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).PosterImageWidth}"
+                                           FontSize="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).PosterTextSize}"
+                                           MaxHeight="20"
+                                           Margin="4,0,4,0">
+                                    <ToolTip.Tip>
+                                        <TextBlock Text="{Binding SonarrNextAirDate}" FontSize="15" />
+                                    </ToolTip.Tip>
+                                </TextBlock>
+                            </StackPanel>
+
+
+                            <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#90000000" IsVisible="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).EditMode}">
+
+                                <Button
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                    FontStyle="Italic"
+                                    Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).RemoveSeries}"
+                                    CommandParameter="{Binding SeriesId}"
+                                    IsEnabled="{Binding !$parent[UserControl].((vm:HistoryPageViewModel)DataContext).ProgramManager.FetchingData}">
+                                    <ToolTip.Tip>
+                                        <TextBlock Text="Remove Series" FontSize="15" />
+                                    </ToolTip.Tip>
+                                    <StackPanel Orientation="Horizontal">
+                                        <controls:SymbolIcon Symbol="Delete" FontSize="32" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#90000000" IsVisible="{Binding FetchingData}">
+                                <controls:ProgressRing Width="100" Height="100"></controls:ProgressRing>
+                            </Grid>
+
+                        </Grid>
+                    </Border>
+
+
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" IsVisible="{Binding IsTableViewSelected}">
+
+            <ScrollViewer>
+
+                <controls:ItemsRepeater ItemsSource="{Binding FilteredItems}">
+                    <controls:ItemsRepeater.Layout>
+                        <controls:StackLayout Orientation="Vertical" Spacing="5" />
+                    </controls:ItemsRepeater.Layout>
+                    <controls:ItemsRepeater.ItemTemplate>
+                        <DataTemplate DataType="{x:Type history:HistorySeries}">
+                            <Grid>
+                                <controls:SettingsExpander
+                                    x:Name="SettingsExpanderSeries"
+                                    Header="{Binding .}"
+                                    ItemsSource="{Binding .}"
+                                    IsExpanded="{Binding IsExpanded}">
+                                    <controls:SettingsExpander.HeaderTemplate>
+                                        <DataTemplate DataType="{x:Type history:HistorySeries}">
+
+                                            <Grid Margin="10">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="*" />
+                                                </Grid.RowDefinitions>
+
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <Grid Grid.Row="1" Grid.Column="0">
+                                                    <!-- Define a row with auto height to match the image height -->
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <!-- Define columns if needed -->
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <!-- Image element -->
+                                                    <Image Margin="10"
+                                                           Source="{Binding ThumbnailImage}"
+                                                           Width="120"
+                                                           Height="180" />
+
+                                                    <!-- Border element aligned within the same grid cell, overlaying the image -->
+                                                    <Border VerticalAlignment="Top" HorizontalAlignment="Right"
+                                                            CornerRadius="0 0 0 10"
+                                                            Background="#f78c25" Opacity="1"
+                                                            Margin="10"
+                                                            IsVisible="{Binding NewEpisodes, Converter={StaticResource UiIntToVisibilityConverter}}"
+                                                            Grid.Row="0" Grid.Column="0">
+                                                        <TextBlock VerticalAlignment="Center" TextAlignment="Center"
+                                                                   Width="30" Height="30"
+                                                                   Text="{Binding NewEpisodes}"
+                                                                   Padding="0,5,0,0" />
+                                                    </Border>
+                                                </Grid>
+
+
+                                                <Grid Grid.Row="1" Grid.Column="1">
+
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="*" />
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+
+                                                    <TextBlock Grid.Row="0" FontSize="25" Text="{Binding SeriesTitle}" TextTrimming="CharacterEllipsis"></TextBlock>
+                                                    <TextBlock Grid.Row="1" FontSize="15" Margin="0 0 0 5" TextWrapping="Wrap"
+                                                               Text="{Binding SeriesDescription}" MinWidth="200">
+                                                    </TextBlock>
+
+                                                    <StackPanel Grid.Row="3" Orientation="Horizontal" VerticalAlignment="Center"
+                                                                IsVisible="{Binding HistorySeriesAvailableDubLang, Converter={StaticResource UiListHasElementsConverter}}">
+                                                        <TextBlock FontSize="15" Opacity="0.8" TextWrapping="Wrap" Text="Available Dubs: "></TextBlock>
+
+                                                        <ui:HighlightingTextBlock
+                                                            Items="{Binding HistorySeriesAvailableDubLang}"
+                                                            Series="{Binding .}"
+                                                            Season=""
+                                                            StreamingService="Crunchyroll"
+                                                            CheckDubs="True"
+                                                            FontSize="15"
+                                                            Opacity="0.8"
+                                                            TextWrapping="Wrap" />
+
+
+                                                    </StackPanel>
+
+                                                    <StackPanel Grid.Row="4" Orientation="Horizontal" VerticalAlignment="Center"
+                                                                IsVisible="{Binding HistorySeriesAvailableSoftSubs, Converter={StaticResource UiListHasElementsConverter}}">
+                                                        <TextBlock FontSize="15" Opacity="0.8" TextWrapping="Wrap" Text="Available Subs: "></TextBlock>
+
+                                                        <ui:HighlightingTextBlock
+                                                            Items="{Binding HistorySeriesAvailableSoftSubs}"
+                                                            Series="{Binding .}"
+                                                            Season=""
+                                                            StreamingService="Crunchyroll"
+                                                            CheckDubs="False"
+                                                            FontSize="15"
+                                                            Opacity="0.8"
+                                                            TextWrapping="Wrap" />
+
+
+                                                    </StackPanel>
+
+
+                                                    <StackPanel Grid.Row="5" Orientation="Vertical">
+
+                                                        <StackPanel Orientation="Horizontal" Margin="0 10 10 10">
+
+                                                            <Button Width="34" Height="34" Margin="0 0 10 0"
+                                                                    Background="Transparent"
+                                                                    BorderThickness="0" CornerRadius="50"
+                                                                    Command="{Binding OpenCrPage}">
+                                                                <Grid>
+                                                                    <controls:ImageIcon
+                                                                        Source="../Assets/crunchy_icon_round.png"
+                                                                        Width="30"
+                                                                        Height="30" />
+                                                                </Grid>
+                                                            </Button>
+
+                                                            <Button Width="34" Height="34" Margin="0 0 10 0"
+                                                                    Background="Transparent"
+                                                                    BorderThickness="0" CornerRadius="50"
+                                                                    IsVisible="{Binding SonarrSeriesId, Converter={StaticResource UiSonarrIdToVisibilityConverter}}"
+                                                                    Command="{Binding OpenSonarrPage}">
+                                                                <Grid>
+                                                                    <controls:ImageIcon
+                                                                        Source="../Assets/sonarr.png"
+                                                                        Width="30"
+                                                                        Height="30" />
+                                                                </Grid>
+                                                            </Button>
+
+                                                            <Button Width="34" Height="34" Margin="0 0 10 0" Background="Transparent"
+                                                                    BorderThickness="0" CornerRadius="50"
+                                                                    IsVisible="{Binding SeriesFolderPathExists}"
+                                                                    Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).OpenFolderPath}"
+                                                                    CommandParameter="{Binding .}">
+                                                                <ToolTip.Tip>
+                                                                    <TextBlock Text="Open Series Folder" FontSize="15" />
+                                                                </ToolTip.Tip>
+                                                                <Grid>
+                                                                    <!-- <controls:ImageIcon Source="../Assets/sonarr.png" Width="30" Height="30" /> -->
+                                                                    <controls:SymbolIcon Symbol="Folder" FontSize="20" Width="30" Height="30" />
+                                                                </Grid>
+                                                            </Button>
+
+
+                                                        </StackPanel>
+
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Button Content="Refresh Series"
+                                                                    Margin="0 0 5  10"
+                                                                    Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).UpdateData}">
+                                                                <Button.CommandParameter>
+                                                                    <MultiBinding Converter="{StaticResource UiSeriesSeasonConverter}">
+                                                                        <Binding />
+                                                                    </MultiBinding>
+                                                                </Button.CommandParameter>
+                                                            </Button>
+                                                            <ToggleButton x:Name="SeriesEditModeToggle" IsChecked="{Binding EditModeEnabled}" Margin="0 0 5  10">Edit</ToggleButton>
+
+                                                            <Button Margin="0 0 5 10" FontStyle="Italic"
+                                                                    VerticalAlignment="Center"
+                                                                    Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).OpenFolderDialogAsync}">
+                                                                <Button.CommandParameter>
+                                                                    <MultiBinding Converter="{StaticResource UiSeriesSeasonConverter}">
+                                                                        <Binding />
+                                                                    </MultiBinding>
+                                                                </Button.CommandParameter>
+                                                                <ToolTip.Tip>
+                                                                    <TextBlock Text="{Binding SeriesDownloadPath}"
+                                                                               FontSize="15" />
+                                                                </ToolTip.Tip>
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <controls:SymbolIcon Symbol="Folder" FontSize="18" />
+                                                                </StackPanel>
+                                                            </Button>
+
+                                                            <ToggleButton Margin="0 0 5 10" FontStyle="Italic"
+                                                                          VerticalAlignment="Center"
+                                                                          IsChecked="{Binding IsInactive}"
+                                                                          Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).ToggleInactive}">
+                                                                <ToolTip.Tip>
+                                                                    <StackPanel Orientation="Vertical">
+                                                                        <TextBlock Text="Set Active"
+                                                                                   IsVisible="{Binding IsInactive}"
+                                                                                   FontSize="15" />
+                                                                        <TextBlock Text="Set Inactive"
+                                                                                   IsVisible="{Binding !IsInactive}"
+                                                                                   FontSize="15" />
+                                                                    </StackPanel>
+                                                                </ToolTip.Tip>
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <controls:SymbolIcon Symbol="CloudOffline" FontSize="18" />
+                                                                </StackPanel>
+                                                            </ToggleButton>
+
+                                                            <StackPanel>
+                                                                <ToggleButton x:Name="SeriesOverride" Margin="0 0 5 10" FontStyle="Italic"
+                                                                              VerticalAlignment="Center"
+                                                                              IsVisible="{Binding EditModeEnabled}">
+                                                                    <StackPanel Orientation="Horizontal">
+                                                                        <controls:SymbolIcon Symbol="Settings" FontSize="18" />
+                                                                    </StackPanel>
+                                                                </ToggleButton>
+
+                                                                <Popup IsLightDismissEnabled="True"
+                                                                       MaxWidth="400"
+                                                                       MaxHeight="600"
+                                                                       IsOpen="{Binding IsChecked, ElementName=SeriesOverride, Mode=TwoWay}"
+                                                                       Placement="Bottom"
+                                                                       PlacementTarget="{Binding ElementName=SeriesOverride}">
+                                                                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+
+                                                                        <StackPanel>
+                                                                            <controls:SettingsExpander Header="Settings Override">
+
+                                                                                <controls:SettingsExpander.Footer>
+                                                                                    <StackPanel>
+                                                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0 0 0 10">
+                                                                                            <TextBlock Text="Video Quality" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0 0 10 0"></TextBlock>
+
+                                                                                            <StackPanel>
+                                                                                                <ToggleButton x:Name="OverrideDropdownButtonQuality" Width="210" HorizontalContentAlignment="Stretch">
+                                                                                                    <ToggleButton.Content>
+                                                                                                        <Grid>
+                                                                                                            <Grid.ColumnDefinitions>
+                                                                                                                <ColumnDefinition Width="*" />
+                                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                                            </Grid.ColumnDefinitions>
+                                                                                                            <TextBlock HorizontalAlignment="Center" Text="{Binding SelectedVideoQualityItem, FallbackValue=''}"
+                                                                                                                       VerticalAlignment="Center" />
+                                                                                                            <Path Grid.Column="1" Data="M 0,1 L 4,4 L 8,1" Stroke="White" StrokeThickness="1"
+                                                                                                                  VerticalAlignment="Center" Margin="5,0,5,0" Stretch="Uniform" Width="8" />
+                                                                                                        </Grid>
+                                                                                                    </ToggleButton.Content>
+                                                                                                </ToggleButton>
+                                                                                                <Popup IsLightDismissEnabled="True"
+                                                                                                       IsOpen="{Binding IsChecked, ElementName=OverrideDropdownButtonQuality, Mode=TwoWay}"
+                                                                                                       Placement="Bottom"
+                                                                                                       PlacementTarget="{Binding ElementName=OverrideDropdownButtonQuality}">
+                                                                                                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                                                                                                        <ListBox x:Name="ListBoxQulitiesSelection" SelectionMode="Single,Toggle" Width="210"
+                                                                                                                 MaxHeight="400"
+                                                                                                                 ItemsSource="{Binding VideoQualityList , Mode=OneWay}"
+                                                                                                                 SelectedItem="{Binding SelectedVideoQualityItem}" />
+                                                                                                    </Border>
+                                                                                                </Popup>
+                                                                                            </StackPanel>
+
+
+                                                                                        </StackPanel>
+
+                                                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0 0 0 10">
+                                                                                            <TextBlock Text="Dub" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0 0 10 0"></TextBlock>
+                                                                                            <StackPanel>
+                                                                                                <ToggleButton x:Name="DropdownButtonDub" Width="210" HorizontalContentAlignment="Stretch">
+                                                                                                    <ToggleButton.Content>
+                                                                                                        <Grid>
+                                                                                                            <Grid.ColumnDefinitions>
+                                                                                                                <ColumnDefinition Width="*" />
+                                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                                            </Grid.ColumnDefinitions>
+                                                                                                            <TextBlock HorizontalAlignment="Center" Text="{Binding SelectedDubs}"
+                                                                                                                       VerticalAlignment="Center" />
+                                                                                                            <Path Grid.Column="1" Data="M 0,1 L 4,4 L 8,1" Stroke="White" StrokeThickness="1"
+                                                                                                                  VerticalAlignment="Center" Margin="5,0,5,0" Stretch="Uniform" Width="8" />
+                                                                                                        </Grid>
+                                                                                                    </ToggleButton.Content>
+                                                                                                </ToggleButton>
+                                                                                                <Popup IsLightDismissEnabled="True"
+                                                                                                       IsOpen="{Binding IsChecked, ElementName=DropdownButtonDub, Mode=TwoWay}"
+                                                                                                       Placement="Bottom"
+                                                                                                       PlacementTarget="{Binding ElementName=DropdownButtonDub}">
+                                                                                                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                                                                                                        <ListBox x:Name="ListBoxDubsSelection" SelectionMode="Multiple,Toggle" Width="210"
+                                                                                                                 MaxHeight="400"
+                                                                                                                 ItemsSource="{Binding DubLangList, Mode=OneWay}"
+                                                                                                                 SelectedItems="{Binding SelectedDubLang}" />
+                                                                                                    </Border>
+                                                                                                </Popup>
+                                                                                            </StackPanel>
+                                                                                        </StackPanel>
+
+                                                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                                                            <TextBlock Text="Sub" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0 0 10 0"></TextBlock>
+                                                                                            <StackPanel>
+                                                                                                <ToggleButton x:Name="DropdownButtonSub" Width="210" HorizontalContentAlignment="Stretch">
+                                                                                                    <ToggleButton.Content>
+                                                                                                        <Grid>
+                                                                                                            <Grid.ColumnDefinitions>
+                                                                                                                <ColumnDefinition Width="*" />
+                                                                                                                <ColumnDefinition Width="Auto" />
+                                                                                                            </Grid.ColumnDefinitions>
+                                                                                                            <TextBlock HorizontalAlignment="Center" Text="{Binding SelectedSubs}"
+                                                                                                                       VerticalAlignment="Center" />
+                                                                                                            <Path Grid.Column="1" Data="M 0,1 L 4,4 L 8,1" Stroke="White" StrokeThickness="1"
+                                                                                                                  VerticalAlignment="Center" Margin="5,0,5,0" Stretch="Uniform" Width="8" />
+                                                                                                        </Grid>
+                                                                                                    </ToggleButton.Content>
+                                                                                                </ToggleButton>
+                                                                                                <Popup IsLightDismissEnabled="True"
+                                                                                                       IsOpen="{Binding IsChecked, ElementName=DropdownButtonSub, Mode=TwoWay}" Placement="Bottom"
+                                                                                                       PlacementTarget="{Binding ElementName=DropdownButtonSub}">
+                                                                                                    <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                                                                                                        <ListBox SelectionMode="Multiple,Toggle" Width="210"
+                                                                                                                 MaxHeight="400"
+                                                                                                                 ItemsSource="{Binding SubLangList, Mode=OneWay}"
+                                                                                                                 SelectedItems="{Binding SelectedSubLang}" />
+                                                                                                    </Border>
+                                                                                                </Popup>
+                                                                                            </StackPanel>
+                                                                                        </StackPanel>
+
+
+                                                                                    </StackPanel>
+
+
+                                                                                </controls:SettingsExpander.Footer>
+
+                                                                            </controls:SettingsExpander>
+
+                                                                        </StackPanel>
+
+                                                                    </Border>
+                                                                </Popup>
+                                                            </StackPanel>
+
+                                                        </StackPanel>
+
+
+                                                    </StackPanel>
+
+                                                </Grid>
+
+
+                                            </Grid>
+
+
+                                        </DataTemplate>
+                                    </controls:SettingsExpander.HeaderTemplate>
+
+
+                                    <controls:SettingsExpanderItem>
+                                        <ScrollViewer x:Name="TableViewScrollViewer">
+                                            <ItemsControl ItemsSource="{Binding Seasons}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="{x:Type history:HistorySeason}">
+
+                                                        <controls:SettingsExpander
+                                                            Header="{Binding CombinedProperty}"
+                                                            ItemsSource="{Binding EpisodesList}"
+
+                                                            Description="{Binding SeasonTitle}"
+                                                            IsExpanded="{Binding IsExpanded}">
+
+
+                                                            <controls:SettingsExpander.ItemTemplate>
+                                                                <DataTemplate DataType="{x:Type history:HistoryEpisode}">
+
+                                                                    <Grid VerticalAlignment="Center">
+
+                                                                        <Grid.ColumnDefinitions>
+                                                                            <ColumnDefinition Width="Auto" />
+                                                                            <ColumnDefinition Width="*" />
+                                                                            <ColumnDefinition Width="Auto" />
+                                                                        </Grid.ColumnDefinitions>
+
+                                                                        <controls:SymbolIcon Grid.Column="0" IsVisible="{Binding !IsEpisodeAvailableOnStreamingService}"
+                                                                                             Margin="0 0 5 0 "
+                                                                                             Symbol="AlertOn"
+                                                                                             FontSize="18"
+                                                                                             HorizontalAlignment="Center"
+                                                                                             VerticalAlignment="Center">
+                                                                            <ToolTip.Tip>
+                                                                                <TextBlock Text="Episode unavailable — it might not be available on the streaming service or got moved to a different season" FontSize="15" />
+                                                                            </ToolTip.Tip>
+
+                                                                        </controls:SymbolIcon>
+
+                                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+
+                                                                            <ui:EpisodeHighlightTextBlock
+                                                                                Series="{Binding $parent[ScrollViewer].((history:HistorySeries)DataContext)}"
+                                                                                Season="{Binding $parent[controls:SettingsExpander].((history:HistorySeason)DataContext)}"
+                                                                                Episode="{Binding .}"
+                                                                                StreamingService="Crunchyroll"
+                                                                                MinWidth="50"
+                                                                                TextWrapping="NoWrap"
+                                                                                TextTrimming="CharacterEllipsis" />
+
+                                                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                                                                        IsVisible="{Binding HistoryEpisodeAvailableDubLang, Converter={StaticResource UiListHasElementsConverter}}">
+                                                                                <TextBlock FontStyle="Italic"
+                                                                                           FontSize="12"
+                                                                                           Opacity="0.8" Text="Dubs: ">
+                                                                                </TextBlock>
+
+                                                                                <ui:HighlightingTextBlock
+                                                                                    Items="{Binding HistoryEpisodeAvailableDubLang}"
+                                                                                    Series="{Binding $parent[ScrollViewer].((history:HistorySeries)DataContext)}"
+                                                                                    Season="{Binding $parent[controls:SettingsExpander].((history:HistorySeason)DataContext)}"
+                                                                                    StreamingService="Crunchyroll"
+                                                                                    CheckDubs="True"
+                                                                                    FontSize="12"
+                                                                                    Opacity="0.8"
+                                                                                    FontStyle="Italic" />
+
+                                                                            </StackPanel>
+                                                                        </StackPanel>
+
+                                                                        <StackPanel Grid.Column="2"
+                                                                                    Orientation="Horizontal"
+                                                                                    VerticalAlignment="Center">
+
+                                                                            <TextBlock Text="{Binding ReleaseDateFormated}" VerticalAlignment="Center" FontSize="15" Opacity="0.8" Margin="0 0 20  0"></TextBlock>
+
+                                                                            <StackPanel VerticalAlignment="Center"
+                                                                                        Margin="0 0 5 0"
+                                                                                        IsVisible="{Binding $parent[ScrollViewer].((history:HistorySeries)DataContext).SonarrSeriesId, Converter={StaticResource UiSonarrIdToVisibilityConverter}}">
+
+                                                                                <controls:ImageIcon
+                                                                                    IsVisible="{Binding SonarrHasFile}"
+                                                                                    Source="../Assets/sonarr.png"
+                                                                                    Width="25"
+                                                                                    Height="25" />
+
+                                                                                <controls:ImageIcon
+                                                                                    IsVisible="{Binding !SonarrHasFile}"
+                                                                                    Source="../Assets/sonarr_inactive.png"
+                                                                                    Width="25"
+                                                                                    Height="25" />
+
+                                                                            </StackPanel>
+
+
+                                                                            <Button Width="34" Height="34"
+                                                                                    Margin="0 0 10 0" Background="Transparent"
+                                                                                    BorderThickness="0" CornerRadius="50"
+                                                                                    IsVisible="{Binding !WasDownloaded}"
+                                                                                    Command="{Binding ToggleWasDownloadedSeries}"
+                                                                                    CommandParameter="{Binding $parent[ScrollViewer].((history:HistorySeries)DataContext)}">
+                                                                                <Grid>
+                                                                                    <Ellipse Width="25" Height="25"
+                                                                                             Fill="Gray" />
+                                                                                    <controls:SymbolIcon Symbol="Checkmark"
+                                                                                                         FontSize="18" />
+                                                                                </Grid>
+                                                                            </Button>
+
+                                                                            <Button Width="34" Height="34"
+                                                                                    Margin="0 0 10 0" Background="Transparent"
+                                                                                    BorderThickness="0" CornerRadius="50"
+                                                                                    IsVisible="{Binding WasDownloaded}"
+                                                                                    Command="{Binding ToggleWasDownloadedSeries}"
+                                                                                    CommandParameter="{Binding $parent[ScrollViewer].((history:HistorySeries)DataContext)}">
+                                                                                <Grid>
+                                                                                    <Ellipse Width="25" Height="25">
+                                                                                        <Ellipse.Fill>
+                                                                                            <MultiBinding Converter="{StaticResource UiHistoryDownloadStatusConverter}">
+                                                                                                <Binding Path="." />
+                                                                                                <Binding Path="$parent[ScrollViewer].((history:HistorySeries)DataContext)" />
+                                                                                                <Binding Path="$parent[controls:SettingsExpander].((history:HistorySeason)DataContext)" />
+                                                                                                <Binding Path="WasDownloaded" />
+                                                                                                <Binding Path="DownloadedDubLang" />
+                                                                                                <Binding Path="DownloadedSoftSubs" />
+                                                                                                <Binding Path="HistoryEpisodeAvailableDubLang" />
+                                                                                                <Binding Path="HistoryEpisodeAvailableSoftSubs" />
+                                                                                                <Binding Path="$parent[ScrollViewer].((history:HistorySeries)DataContext).SelectedDubs" />
+                                                                                                <Binding Path="$parent[ScrollViewer].((history:HistorySeries)DataContext).SelectedSubs" />
+                                                                                                <Binding Path="$parent[controls:SettingsExpander].((history:HistorySeason)DataContext).SelectedDubs" />
+                                                                                                <Binding Path="$parent[controls:SettingsExpander].((history:HistorySeason)DataContext).SelectedSubs" />
+                                                                                            </MultiBinding>
+                                                                                        </Ellipse.Fill>
+                                                                                    </Ellipse>
+                                                                                    <controls:SymbolIcon Symbol="Checkmark"
+                                                                                                         FontSize="18" />
+                                                                                </Grid>
+                                                                                <ToolTip.Tip>
+                                                                                    <TextBlock FontSize="15">
+                                                                                        <TextBlock.Text>
+                                                                                            <MultiBinding Converter="{StaticResource UiHistoryDownloadStatusConverter}" ConverterParameter="Tooltip">
+                                                                                                <Binding Path="." />
+                                                                                                <Binding Path="$parent[ScrollViewer].((history:HistorySeries)DataContext)" />
+                                                                                                <Binding Path="$parent[controls:SettingsExpander].((history:HistorySeason)DataContext)" />
+                                                                                                <Binding Path="WasDownloaded" />
+                                                                                                <Binding Path="DownloadedDubLang" />
+                                                                                                <Binding Path="DownloadedSoftSubs" />
+                                                                                                <Binding Path="HistoryEpisodeAvailableDubLang" />
+                                                                                                <Binding Path="HistoryEpisodeAvailableSoftSubs" />
+                                                                                                <Binding Path="$parent[ScrollViewer].((history:HistorySeries)DataContext).SelectedDubs" />
+                                                                                                <Binding Path="$parent[ScrollViewer].((history:HistorySeries)DataContext).SelectedSubs" />
+                                                                                                <Binding Path="$parent[controls:SettingsExpander].((history:HistorySeason)DataContext).SelectedDubs" />
+                                                                                                <Binding Path="$parent[controls:SettingsExpander].((history:HistorySeason)DataContext).SelectedSubs" />
+                                                                                            </MultiBinding>
+                                                                                        </TextBlock.Text>
+                                                                                    </TextBlock>
+                                                                                </ToolTip.Tip>
+                                                                            </Button>
+
+                                                                            <Button Margin="0 0 5 0" FontStyle="Italic"
+                                                                                    HorizontalAlignment="Right"
+                                                                                    VerticalAlignment="Center"
+                                                                                    Command="{Binding DownloadEpisodeDefault}">
+                                                                                <StackPanel Orientation="Horizontal">
+                                                                                    <controls:SymbolIcon Symbol="Download"
+                                                                                                         FontSize="18" />
+                                                                                </StackPanel>
+                                                                            </Button>
+
+                                                                            <Button Margin="0 0 5 0" FontStyle="Italic" HorizontalAlignment="Right"
+                                                                                    VerticalAlignment="Center"
+                                                                                    IsEnabled="{Binding HistoryEpisodeAvailableSoftSubs, Converter={StaticResource UiListHasElementsConverter}}"
+                                                                                    Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).DownloadEpisodeOnlyOptions}"
+                                                                                    CommandParameter="{Binding .}">
+                                                                                <StackPanel Orientation="Horizontal">
+                                                                                    <controls:SymbolIcon Symbol="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).SelectedDownloadIcon}" FontSize="18" />
+
+                                                                                </StackPanel>
+                                                                                <ToolTip.Tip>
+                                                                                    <TextBlock Text="Download Only" FontSize="15" />
+                                                                                </ToolTip.Tip>
+                                                                            </Button>
+
+                                                                        </StackPanel>
+                                                                    </Grid>
+                                                                </DataTemplate>
+                                                            </controls:SettingsExpander.ItemTemplate>
+
+                                                            <controls:SettingsExpander.Footer>
+                                                                <StackPanel Orientation="Horizontal"
+                                                                            VerticalAlignment="Center">
+                                                                    <TextBlock Text="{Binding DownloadedEpisodes}" VerticalAlignment="Center"></TextBlock>
+                                                                    <TextBlock Text="/" VerticalAlignment="Center"></TextBlock>
+                                                                    <TextBlock Text="{Binding EpisodesList.Count}" VerticalAlignment="Center"></TextBlock>
+
+                                                                    <Button Margin="10 0 0 0" FontStyle="Italic"
+                                                                            VerticalAlignment="Center"
+                                                                            Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).UpdateData}">
+                                                                        <Button.CommandParameter>
+                                                                            <MultiBinding Converter="{StaticResource UiSeriesSeasonConverter}">
+                                                                                <Binding Path="DataContext" RelativeSource="{RelativeSource AncestorType=ScrollViewer}" />
+                                                                                <Binding Path="SeasonId" />
+                                                                            </MultiBinding>
+                                                                        </Button.CommandParameter>
+                                                                        <ToolTip.Tip>
+                                                                            <TextBlock Text="Refresh Season" FontSize="15" />
+                                                                        </ToolTip.Tip>
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <controls:SymbolIcon Symbol="Refresh"
+                                                                                                 FontSize="18" />
+                                                                        </StackPanel>
+                                                                    </Button>
+
+                                                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                                        <ToggleButton x:Name="ToggleDownloadAdd" Margin="10 0 0 0" FontStyle="Italic"
+                                                                                      VerticalAlignment="Center">
+                                                                            <StackPanel Orientation="Horizontal">
+                                                                                <controls:SymbolIcon Symbol="Download" FontSize="18" />
+                                                                            </StackPanel>
+                                                                        </ToggleButton>
+
+                                                                        <Popup IsLightDismissEnabled="True"
+                                                                               MaxWidth="400"
+                                                                               MaxHeight="600"
+                                                                               IsOpen="{Binding IsChecked, ElementName=ToggleDownloadAdd, Mode=TwoWay}"
+                                                                               Placement="Bottom"
+                                                                               PlacementTarget="{Binding ElementName=ToggleDownloadAdd}">
+                                                                            <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+
+                                                                                <StackPanel>
+                                                                                    <Button Margin="10 5"
+                                                                                            VerticalAlignment="Center"
+                                                                                            HorizontalAlignment="Stretch"
+                                                                                            Content="Download All"
+                                                                                            Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).DownloadSeasonAll}"
+                                                                                            CommandParameter="{Binding }">
+                                                                                    </Button>
+                                                                                    <Button Margin="10 5"
+                                                                                            VerticalAlignment="Center"
+                                                                                            HorizontalAlignment="Stretch"
+                                                                                            Content="Download Missing"
+                                                                                            Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).DownloadSeasonMissing}"
+                                                                                            CommandParameter="{Binding }">
+                                                                                    </Button>
+                                                                                    <Button Margin="10 5"
+                                                                                            VerticalAlignment="Center"
+                                                                                            HorizontalAlignment="Stretch"
+                                                                                            Content="Download Missing from Sonarr"
+                                                                                            IsEnabled="{Binding  $parent[ScrollViewer].((history:HistorySeries)DataContext).SonarrSeriesId, Converter={StaticResource UiSonarrIdToVisibilityConverter}}"
+                                                                                            Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).DownloadSeasonMissingSonarr}"
+                                                                                            CommandParameter="{Binding }">
+                                                                                    </Button>
+                                                                                    <Button Margin="10 5"
+                                                                                            VerticalAlignment="Center"
+                                                                                            HorizontalAlignment="Stretch"
+                                                                                            Content="Toggle Downloaded"
+                                                                                            Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).ToggleDownloadedMark}">
+                                                                                        <Button.CommandParameter>
+                                                                                            <MultiBinding Converter="{StaticResource UiSeriesSeasonConverter}">
+                                                                                                <Binding Path="DataContext" RelativeSource="{RelativeSource AncestorType=ScrollViewer}" />
+                                                                                                <Binding />
+                                                                                            </MultiBinding>
+                                                                                        </Button.CommandParameter>
+                                                                                    </Button>
+                                                                                </StackPanel>
+
+                                                                            </Border>
+                                                                        </Popup>
+                                                                    </StackPanel>
+
+                                                                    <Button Margin="10 0 0 0" FontStyle="Italic"
+                                                                            VerticalAlignment="Center"
+                                                                            Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).OpenFolderDialogAsync}">
+                                                                        <Button.CommandParameter>
+                                                                            <MultiBinding Converter="{StaticResource UiSeriesSeasonConverter}">
+                                                                                <Binding Path="DataContext" RelativeSource="{RelativeSource AncestorType=ScrollViewer}" />
+                                                                                <Binding />
+                                                                            </MultiBinding>
+                                                                        </Button.CommandParameter>
+                                                                        <ToolTip.Tip>
+                                                                            <TextBlock Text="{Binding SeasonDownloadPath}"
+                                                                                       FontSize="15" />
+                                                                        </ToolTip.Tip>
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <controls:SymbolIcon Symbol="Folder"
+                                                                                                 FontSize="18" />
+                                                                        </StackPanel>
+                                                                    </Button>
+
+                                                                    <StackPanel>
+                                                                        <ToggleButton x:Name="DropdownButtonOnlyDownload"
+                                                                                      Margin="10 0 0 0" FontStyle="Italic" HorizontalAlignment="Right"
+                                                                                      VerticalAlignment="Center">
+                                                                            <StackPanel Orientation="Vertical">
+                                                                                <controls:SymbolIcon Symbol="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).SelectedDownloadIcon}" FontSize="18" />
+                                                                            </StackPanel>
+                                                                        </ToggleButton>
+                                                                        <Popup IsLightDismissEnabled="True"
+                                                                               IsOpen="{Binding IsChecked, ElementName=DropdownButtonOnlyDownload, Mode=TwoWay}"
+                                                                               Placement="BottomEdgeAlignedRight"
+                                                                               PlacementTarget="{Binding ElementName=DropdownButtonOnlyDownload}">
+                                                                            <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                                                                                <StackPanel Orientation="Vertical">
+
+                                                                                    <Button Margin="10 5"
+                                                                                            VerticalAlignment="Center"
+                                                                                            HorizontalAlignment="Stretch"
+                                                                                            Content="Download All"
+                                                                                            Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).DownloadSeasonAllOnlyOptions}"
+                                                                                            CommandParameter="{Binding }">
+                                                                                    </Button>
+
+
+                                                                                    <Rectangle Height="1" Fill="Gray" Margin="0,8,0,8" />
+
+                                                                                    <Grid Margin="8 0 5 0">
+                                                                                        <Grid.ColumnDefinitions>
+                                                                                            <ColumnDefinition Width="*" />
+                                                                                            <ColumnDefinition Width="Auto" />
+                                                                                        </Grid.ColumnDefinitions>
+
+                                                                                        <TextBlock Text="Video" Grid.Column="0" VerticalAlignment="Center" />
+                                                                                        <ToggleSwitch OffContent="" OnContent="" Grid.Column="1" IsChecked="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).SelectedDownloadMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=OnlyVideo}" VerticalAlignment="Center" />
+                                                                                    </Grid>
+
+                                                                                    <Grid Margin="8 0 5 0">
+                                                                                        <Grid.ColumnDefinitions>
+                                                                                            <ColumnDefinition Width="*" />
+                                                                                            <ColumnDefinition Width="Auto" />
+                                                                                        </Grid.ColumnDefinitions>
+
+                                                                                        <TextBlock Text="Audio" Grid.Column="0" VerticalAlignment="Center" />
+                                                                                        <ToggleSwitch OffContent="" OnContent="" Grid.Column="1" IsChecked="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).SelectedDownloadMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=OnlyAudio}" VerticalAlignment="Center" />
+                                                                                    </Grid>
+
+                                                                                    <Grid Margin="8 0 5 0">
+                                                                                        <Grid.ColumnDefinitions>
+                                                                                            <ColumnDefinition Width="*" />
+                                                                                            <ColumnDefinition Width="Auto" />
+                                                                                        </Grid.ColumnDefinitions>
+
+                                                                                        <TextBlock Text="Sub" Grid.Column="0" VerticalAlignment="Center" />
+                                                                                        <ToggleSwitch OffContent="" OnContent="" Grid.Column="1" IsChecked="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).SelectedDownloadMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=OnlySubs}" VerticalAlignment="Center" />
+                                                                                    </Grid>
+
+
+                                                                                </StackPanel>
+
+                                                                            </Border>
+                                                                        </Popup>
+                                                                    </StackPanel>
+
+
+                                                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                                        <ToggleButton x:Name="SeasonOverride" Margin="10 0 0 0" FontStyle="Italic"
+                                                                                      VerticalAlignment="Center"
+                                                                                      IsVisible="{Binding $parent[ScrollViewer].((history:HistorySeries)DataContext).EditModeEnabled}">
+                                                                            <StackPanel Orientation="Horizontal">
+                                                                                <controls:SymbolIcon Symbol="Settings" FontSize="18" />
+                                                                            </StackPanel>
+                                                                        </ToggleButton>
+
+                                                                        <Popup IsLightDismissEnabled="True"
+                                                                               MaxWidth="400"
+                                                                               MaxHeight="600"
+                                                                               IsOpen="{Binding IsChecked, ElementName=SeasonOverride, Mode=TwoWay}"
+                                                                               Placement="Bottom"
+                                                                               PlacementTarget="{Binding ElementName=SeasonOverride}">
+                                                                            <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+
+                                                                                <StackPanel>
+                                                                                    <controls:SettingsExpander Header="Settings Override">
+
+                                                                                        <controls:SettingsExpander.Footer>
+                                                                                            <StackPanel>
+
+                                                                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0 0 0 10">
+                                                                                                    <TextBlock Text="Video Quality" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0 0 10 0"></TextBlock>
+
+                                                                                                    <StackPanel>
+                                                                                                        <ToggleButton x:Name="SeasonOverrideDropdownButtonQuality" Width="210" HorizontalContentAlignment="Stretch">
+                                                                                                            <ToggleButton.Content>
+                                                                                                                <Grid>
+                                                                                                                    <Grid.ColumnDefinitions>
+                                                                                                                        <ColumnDefinition Width="*" />
+                                                                                                                        <ColumnDefinition Width="Auto" />
+                                                                                                                    </Grid.ColumnDefinitions>
+                                                                                                                    <TextBlock HorizontalAlignment="Center" Text="{Binding SelectedVideoQualityItem, FallbackValue=''}"
+                                                                                                                               VerticalAlignment="Center" />
+                                                                                                                    <Path Grid.Column="1" Data="M 0,1 L 4,4 L 8,1" Stroke="White" StrokeThickness="1"
+                                                                                                                          VerticalAlignment="Center" Margin="5,0,5,0" Stretch="Uniform" Width="8" />
+                                                                                                                </Grid>
+                                                                                                            </ToggleButton.Content>
+                                                                                                        </ToggleButton>
+                                                                                                        <Popup IsLightDismissEnabled="True"
+                                                                                                               IsOpen="{Binding IsChecked, ElementName=SeasonOverrideDropdownButtonQuality, Mode=TwoWay}"
+                                                                                                               Placement="Bottom"
+                                                                                                               PlacementTarget="{Binding ElementName=SeasonOverrideDropdownButtonQuality}">
+                                                                                                            <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                                                                                                                <ListBox x:Name="ListBoxQulitiesSelection" SelectionMode="Single,Toggle" Width="210"
+                                                                                                                         MaxHeight="400"
+                                                                                                                         ItemsSource="{Binding VideoQualityList , Mode=OneWay}"
+                                                                                                                         SelectedItem="{Binding SelectedVideoQualityItem}" />
+                                                                                                            </Border>
+                                                                                                        </Popup>
+                                                                                                    </StackPanel>
+
+
+                                                                                                </StackPanel>
+
+                                                                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0 0 0 10">
+                                                                                                    <TextBlock Text="Dub" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0 0 10 0"></TextBlock>
+                                                                                                    <StackPanel>
+                                                                                                        <ToggleButton x:Name="SeasonOverrideDropdownButtonDub" Width="210" HorizontalContentAlignment="Stretch">
+                                                                                                            <ToggleButton.Content>
+                                                                                                                <Grid>
+                                                                                                                    <Grid.ColumnDefinitions>
+                                                                                                                        <ColumnDefinition Width="*" />
+                                                                                                                        <ColumnDefinition Width="Auto" />
+                                                                                                                    </Grid.ColumnDefinitions>
+                                                                                                                    <TextBlock HorizontalAlignment="Center" Text="{Binding SelectedDubs}"
+                                                                                                                               VerticalAlignment="Center" />
+                                                                                                                    <Path Grid.Column="1" Data="M 0,1 L 4,4 L 8,1" Stroke="White" StrokeThickness="1"
+                                                                                                                          VerticalAlignment="Center" Margin="5,0,5,0" Stretch="Uniform" Width="8" />
+                                                                                                                </Grid>
+                                                                                                            </ToggleButton.Content>
+                                                                                                        </ToggleButton>
+                                                                                                        <Popup IsLightDismissEnabled="True"
+                                                                                                               IsOpen="{Binding IsChecked, ElementName=SeasonOverrideDropdownButtonDub, Mode=TwoWay}"
+                                                                                                               Placement="Bottom"
+                                                                                                               PlacementTarget="{Binding ElementName=SeasonOverrideDropdownButtonDub}">
+                                                                                                            <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                                                                                                                <ListBox x:Name="ListBoxDubsSelection" SelectionMode="Multiple,Toggle" Width="210"
+                                                                                                                         MaxHeight="400"
+                                                                                                                         ItemsSource="{Binding DubLangList}"
+                                                                                                                         SelectedItems="{Binding SelectedDubLang}" />
+                                                                                                            </Border>
+                                                                                                        </Popup>
+                                                                                                    </StackPanel>
+                                                                                                </StackPanel>
+
+                                                                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                                                                    <TextBlock Text="Sub" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0 0 10 0"></TextBlock>
+                                                                                                    <StackPanel>
+                                                                                                        <ToggleButton x:Name="SeasonOverrideDropdownButtonSub" Width="210" HorizontalContentAlignment="Stretch">
+                                                                                                            <ToggleButton.Content>
+                                                                                                                <Grid>
+                                                                                                                    <Grid.ColumnDefinitions>
+                                                                                                                        <ColumnDefinition Width="*" />
+                                                                                                                        <ColumnDefinition Width="Auto" />
+                                                                                                                    </Grid.ColumnDefinitions>
+                                                                                                                    <TextBlock HorizontalAlignment="Center" Text="{Binding SelectedSubs}"
+                                                                                                                               VerticalAlignment="Center" />
+                                                                                                                    <Path Grid.Column="1" Data="M 0,1 L 4,4 L 8,1" Stroke="White" StrokeThickness="1"
+                                                                                                                          VerticalAlignment="Center" Margin="5,0,5,0" Stretch="Uniform" Width="8" />
+                                                                                                                </Grid>
+                                                                                                            </ToggleButton.Content>
+                                                                                                        </ToggleButton>
+                                                                                                        <Popup IsLightDismissEnabled="True"
+                                                                                                               IsOpen="{Binding IsChecked, ElementName=SeasonOverrideDropdownButtonSub, Mode=TwoWay}" Placement="Bottom"
+                                                                                                               PlacementTarget="{Binding ElementName=SeasonOverrideDropdownButtonSub}">
+                                                                                                            <Border BorderThickness="1" Background="{DynamicResource ComboBoxDropDownBackground}">
+                                                                                                                <ListBox SelectionMode="Multiple,Toggle" Width="210"
+                                                                                                                         MaxHeight="400"
+                                                                                                                         ItemsSource="{Binding SubLangList}"
+                                                                                                                         SelectedItems="{Binding SelectedSubLang}" />
+                                                                                                            </Border>
+                                                                                                        </Popup>
+                                                                                                    </StackPanel>
+                                                                                                </StackPanel>
+
+
+                                                                                            </StackPanel>
+
+
+                                                                                        </controls:SettingsExpander.Footer>
+
+                                                                                    </controls:SettingsExpander>
+
+                                                                                </StackPanel>
+
+                                                                            </Border>
+                                                                        </Popup>
+                                                                    </StackPanel>
+
+
+                                                                    <Button Margin="10 0 0 0" FontStyle="Italic"
+                                                                            IsVisible="{Binding $parent[ScrollViewer].((history:HistorySeries)DataContext).EditModeEnabled}"
+                                                                            Command="{Binding $parent[ScrollViewer].((history:HistorySeries)DataContext).RemoveSeason}"
+                                                                            CommandParameter="{Binding SeasonId}"
+                                                                            VerticalAlignment="Center">
+                                                                        <ToolTip.Tip>
+                                                                            <TextBlock Text="Remove Season" FontSize="15" />
+                                                                        </ToolTip.Tip>
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <controls:SymbolIcon Symbol="Delete"
+                                                                                                 FontSize="18" />
+                                                                        </StackPanel>
+                                                                    </Button>
+                                                                </StackPanel>
+                                                            </controls:SettingsExpander.Footer>
+
+                                                        </controls:SettingsExpander>
+
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+
+                                    </controls:SettingsExpanderItem>
+
+                                </controls:SettingsExpander>
+
+                                <Grid IsVisible="{Binding FetchingData}"
+                                      Background="#90000000"
+                                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                    <controls:ProgressRing Width="100" Height="100" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <Grid IsVisible="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).EditMode}"
+                                      Background="#90000000"
+                                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                    <Button
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        FontStyle="Italic"
+                                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                        Command="{Binding $parent[UserControl].((vm:HistoryPageViewModel)DataContext).RemoveSeries}"
+                                        CommandParameter="{Binding SeriesId}"
+                                        IsEnabled="{Binding !$parent[UserControl].((vm:HistoryPageViewModel)DataContext).ProgramManager.FetchingData}">
+                                        <ToolTip.Tip>
+                                            <TextBlock Text="Remove Series" FontSize="15" />
+                                        </ToolTip.Tip>
+                                        <StackPanel Orientation="Horizontal">
+                                            <controls:SymbolIcon Symbol="Delete" FontSize="32" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </controls:ItemsRepeater.ItemTemplate>
+                </controls:ItemsRepeater>
+            </ScrollViewer>
+        </Grid>
+
+    </Grid>
+
+
+</UserControl>

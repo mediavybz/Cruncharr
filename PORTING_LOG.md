@@ -564,9 +564,34 @@ Web UI currently implements #1-8 plus toast notifications. Missing: #9-11.
 - `src/Cruncharr.API/wwwroot/index.html` - Added SSE client, Upcoming Seasons page, Featured Music dialog
 - `PORTING_LOG.md` - Updated all status, API contract, completed files
 
-### ALL TASKS COMPLETE
+## Session Notes - 2026-05-26 Frontend Fix
+
+### Critical Bug Fix: Orphaned Catch Block
+**Issue:** All frontend tabs stopped working with `Uncaught SyntaxError: Unexpected token 'catch'` at index.html:1225
+**Root Cause:** When refactoring `fetchDownloads()` to use SSE, a `catch` block was left orphaned (no matching `try`) inside `updateQueueData()` function
+**Fix:** Removed the orphaned `catch (e) { console.error('Failed to load downloads:', e); }` block at line 1225
+**Also Fixed:** Added explicit `event` parameter to `openSonarrMenu(event)` to prevent strict mode error with implicit global `event`
+
+### Files Modified
+- `src/Cruncharr.API/wwwroot/index.html` - Removed orphaned catch block, fixed event parameter
+- Docker image rebuilt and pushed: `ghcr.io/mediavybz/cruncharr:latest`
+
+### Verification Needed
+- [ ] Pull new image and test all tabs work correctly
+- [ ] Confirm no console errors on page load
+
+---
+
+### Remaining Tasks (from summary)
+1. **Verify frontend fix works** - Awaiting user testing
+2. **Test multi-dub download** with `download_multiple_dubs: true`
+3. **Verify temp file cleanup** removes all leftover files
+4. **Update README** with credits to original upstream developers
+5. **GHCR package visibility** - Still private (requires GitHub web UI)
+
+### ALL MAJOR TASKS COMPLETE
 - Backend: 84/85 files ported (1 skipped: Auto-updater - not applicable to Docker)
 - Frontend: 12/12 screens built
 - Infrastructure: SSE implemented
-- Critical bugs: 0
+- Critical bugs: 0 (orphaned catch block just fixed)
 - Build: PASS (0 errors, 0 warnings)

@@ -1,8 +1,8 @@
-using System.Text.Json;
 using System.Threading.Channels;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json;
 
 namespace Cruncharr.API.Controllers;
 
@@ -27,7 +27,7 @@ public class QueueController : ControllerBase{
                 ActiveDownloads = _queueService.ActiveDownloads,
                 HasActiveDownloads = _queueService.HasActiveDownloads
             };
-            var json = JsonSerializer.Serialize(response);
+            var json = JsonConvert.SerializeObject(response);
             _queueUpdatesChannel.Writer.TryWrite(json);
         } catch (Exception ex){
             _logger.LogError(ex, "Failed to broadcast queue update");
@@ -177,7 +177,7 @@ public class QueueController : ControllerBase{
             ActiveDownloads = _queueService.ActiveDownloads,
             HasActiveDownloads = _queueService.HasActiveDownloads
         };
-        await WriteSseEventAsync(JsonSerializer.Serialize(initialResponse), cancellationToken);
+        await WriteSseEventAsync(JsonConvert.SerializeObject(initialResponse), cancellationToken);
 
         // Listen for updates
         await foreach (var update in _queueUpdatesChannel.Reader.ReadAllAsync(cancellationToken)){

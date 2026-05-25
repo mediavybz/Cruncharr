@@ -96,6 +96,8 @@ public class SonarrSeries{
     public List<SonarrSeason>? Seasons { get; set; }
     public int Year { get; set; }
     public string? Path { get; set; }
+    public int TvdbId { get; set; }
+    public string? TitleSlug { get; set; }
 }
 
 public class SonarrSeason{
@@ -113,4 +115,7 @@ public class SonarrEpisode{
     public string? Title { get; set; }
     public bool HasFile { get; set; }
     public bool Monitored { get; set; }
+    public int AbsoluteEpisodeNumber { get; set; }
+    public string? Overview { get; set; }
+    public DateTimeOffset AirDateUtc { get; set; }
 }

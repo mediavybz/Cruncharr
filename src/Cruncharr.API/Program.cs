@@ -44,7 +44,12 @@ public class Program{
             new CrunchyrollAuthService(config, sp.GetService<ILogger<CrunchyrollAuthService>>()));
         builder.Services.AddSingleton<ICrunchyrollApiService, CrunchyrollApiService>();
         builder.Services.AddSingleton<IDownloadService, DownloadService>();
-        builder.Services.AddSingleton<IHistoryService, HistoryService>();
+        builder.Services.AddSingleton<IHistoryService>(sp =>
+            new HistoryService(
+                null,
+                sp.GetService<ILogger<HistoryService>>(),
+                sp.GetService<ISonarrService>(),
+                config));
         builder.Services.AddSingleton<IQueuePersistenceService>(
             _ => new QueuePersistenceService(config.Queue.QueueFilePath));
         builder.Services.AddSingleton<ICalendarService, CalendarService>();

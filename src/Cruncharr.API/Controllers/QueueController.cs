@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Threading.Channels;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -9,10 +11,27 @@ namespace Cruncharr.API.Controllers;
 public class QueueController : ControllerBase{
     private readonly IQueueService _queueService;
     private readonly ILogger<QueueController> _logger;
+    private static readonly Channel<string> _queueUpdatesChannel = Channel.CreateUnbounded<string>();
 
     public QueueController(IQueueService queueService, ILogger<QueueController> logger){
         _queueService = queueService;
         _logger = logger;
+        _queueService.QueueStateChanged += OnQueueStateChanged;
+    }
+
+    private void OnQueueStateChanged(object? sender, EventArgs e){
+        try{
+            var queue = _queueService.GetQueue();
+            var response = new QueueResponse{
+                Items = queue,
+                ActiveDownloads = _queueService.ActiveDownloads,
+                HasActiveDownloads = _queueService.HasActiveDownloads
+            };
+            var json = JsonSerializer.Serialize(response);
+            _queueUpdatesChannel.Writer.TryWrite(json);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to broadcast queue update");
+        }
     }
 
     /// <summary>
@@ -140,6 +159,37 @@ public class QueueController : ControllerBase{
             Failed = items.Count(i => i.DownloadProgress.IsError),
             WaitingForRetry = items.Count(i => i.DownloadProgress.IsWaitingForRetry)
         });
+    }
+
+    /// <summary>
+    /// Server-Sent Events endpoint for real-time queue updates
+    /// </summary>
+    [HttpGet("sse")]
+    public async Task GetQueueUpdates(CancellationToken cancellationToken){
+        Response.Headers.Append("Content-Type", "text/event-stream");
+        Response.Headers.Append("Cache-Control", "no-cache");
+        Response.Headers.Append("Connection", "keep-alive");
+
+        // Send initial state
+        var initialQueue = _queueService.GetQueue();
+        var initialResponse = new QueueResponse{
+            Items = initialQueue,
+            ActiveDownloads = _queueService.ActiveDownloads,
+            HasActiveDownloads = _queueService.HasActiveDownloads
+        };
+        await WriteSseEventAsync(JsonSerializer.Serialize(initialResponse), cancellationToken);
+
+        // Listen for updates
+        await foreach (var update in _queueUpdatesChannel.Reader.ReadAllAsync(cancellationToken)){
+            if (cancellationToken.IsCancellationRequested) break;
+            await WriteSseEventAsync(update, cancellationToken);
+            await Response.Body.FlushAsync(cancellationToken);
+        }
+    }
+
+    private async Task WriteSseEventAsync(string data, CancellationToken cancellationToken){
+        await Response.WriteAsync($"data: {data}\n\n", cancellationToken);
+        await Response.Body.FlushAsync(cancellationToken);
     }
 }
 

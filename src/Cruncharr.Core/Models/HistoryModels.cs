@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using Cruncharr.Core.Services;
 
 namespace Cruncharr.Core.Models;
 
@@ -22,6 +23,12 @@ public class HistorySeries{
     
     [JsonIgnore]
     public List<string> HistorySeriesAvailableSoftSubs { get; set; } = [];
+    
+    // Sonarr integration fields
+    public string? SonarrSeriesId { get; set; }
+    public string? SonarrTvDbId { get; set; }
+    public string? SonarrSlugTitle { get; set; }
+    public string? SonarrNextAirDate { get; set; }
     
     public void UpdateNewEpisodes(List<string>? selectedDubs = null, List<string>? selectedSubs = null){
         TotalEpisodes = Seasons.Sum(s => s.EpisodesList.Count);
@@ -82,6 +89,43 @@ public class HistoryEpisode{
     public bool IsEpisodeAvailableOnStreamingService { get; set; }
     public string? ThumbnailImageUrl { get; set; }
     public bool WasDownloaded { get; set; }
+    
+    // Sonarr integration fields
+    public string? SonarrEpisodeId { get; set; }
+    public string? SonarrEpisodeNumber { get; set; }
+    public bool SonarrHasFile { get; set; }
+    public bool SonarrIsMonitored { get; set; }
+    public string? SonarrAbsolutNumber { get; set; }
+    public string? SonarrSeasonNumber { get; set; }
+    
+    [JsonIgnore]
+    public string SonarrSeasonEpisodeText {
+        get {
+            if (int.TryParse(SonarrSeasonNumber, out int season) &&
+                int.TryParse(SonarrEpisodeNumber, out int episode)) {
+                return $"S{season:D2}E{episode:D2}";
+            }
+            return $"S{SonarrSeasonNumber}E{SonarrEpisodeNumber}";
+        }
+    }
+    
+    public void AssignSonarrEpisodeData(SonarrEpisode episode) {
+        SonarrEpisodeId = episode.Id.ToString();
+        SonarrEpisodeNumber = episode.EpisodeNumber.ToString();
+        SonarrHasFile = episode.HasFile;
+        SonarrIsMonitored = episode.Monitored;
+        SonarrAbsolutNumber = episode.AbsoluteEpisodeNumber.ToString();
+        SonarrSeasonNumber = episode.SeasonNumber.ToString();
+    }
+    
+    public void ClearSonarrEpisodeData() {
+        SonarrEpisodeId = null;
+        SonarrEpisodeNumber = null;
+        SonarrHasFile = false;
+        SonarrIsMonitored = false;
+        SonarrAbsolutNumber = null;
+        SonarrSeasonNumber = null;
+    }
 }
 
 public class SeriesDataCache{

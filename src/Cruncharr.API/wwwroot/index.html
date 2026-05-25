@@ -935,6 +935,18 @@ MAINTENANCE NOTES:
         /* Sonarr icon placeholder */
         .sonarr-icon { width: 24px; height: 24px; background: var(--accent-green); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7em; color: #fff; }
 
+        /* Dropdown menu */
+        .dropdown-menu { position: absolute; background: var(--surface); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100; min-width: 200px; display: none; }
+        .dropdown-menu.active { display: block; }
+        .dropdown-item { padding: 10px 15px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.9em; }
+        .dropdown-item:hover { background: var(--hover); }
+        .dropdown-divider { height: 1px; background: var(--border-color); margin: 5px 0; }
+
+        /* Sonarr match status indicators */
+        .sonarr-matched { border-left: 3px solid var(--accent-green); }
+        .sonarr-unmatched { border-left: 3px solid var(--text-secondary); }
+        .sonarr-match-badge { font-size: 0.7em; padding: 2px 6px; border-radius: 3px; background: var(--accent-green); color: #fff; margin-left: 5px; }
+
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar { width: 60px; }
@@ -1119,8 +1131,16 @@ MAINTENANCE NOTES:
             try {
                 const res = await fetch('/api/v1/queue');
                 const data = await res.json();
-                queueData = data.items || [];
-                const list = document.getElementById('downloads-list');
+                updateQueueData(data.items || []);
+            } catch (e) {
+                console.error('Failed to fetch downloads:', e);
+            }
+        }
+        
+        function updateQueueData(items) {
+            queueData = items;
+            const list = document.getElementById('downloads-list');
+            if (!list) return;
 
                 // Check for auth/subscription errors and show notifications
                 const authErrors = queueData.filter(i => {
@@ -1225,6 +1245,9 @@ MAINTENANCE NOTES:
                         <input type="checkbox" id="add-all-checkbox" onchange="toggleAddAll(this.checked)">
                         All
                     </label>
+                    <button class="header-btn" id="music-btn" onclick="showFeaturedMusic()" style="display:none;">
+                        <span>&#127925;</span> Music
+                    </button>
                     <div style="margin-left:auto;">
                         <select class="form-select" id="season-dropdown" style="min-width:200px;" onchange="onSeasonChange(this.value)">
                             <option>Select Season</option>
@@ -1284,6 +1307,7 @@ MAINTENANCE NOTES:
             addDownloadSelectedSeries = series;
             if (!series) return;
             document.getElementById('add-search-input').value = series.title;
+            document.getElementById('music-btn').style.display = 'inline-flex';
             try {
                 // Use existing endpoint: get all episodes then extract seasons
                 const res = await fetch(`/api/v1/series/${seriesId}/episodes`);
@@ -1397,6 +1421,64 @@ MAINTENANCE NOTES:
                 showToast(`Added ${ids.length} episode(s) to queue`, 'success');
                 selectedEpisodes.clear();
                 renderAddEpisodes();
+            } catch (e) {
+                showToast('Failed to add to queue', 'error');
+            }
+        }
+
+        async function showFeaturedMusic() {
+            if (!addDownloadSelectedSeries) return;
+            try {
+                const res = await fetch(`/api/v1/music/featured/${addDownloadSelectedSeries.id}`);
+                if (!res.ok) throw new Error('Failed to fetch');
+                const videos = await res.json();
+                
+                if (!videos || videos.length === 0) {
+                    showToast('No featured music videos found for this series', 'info');
+                    return;
+                }
+                
+                document.getElementById('modal-title').textContent = 'Featured Music Videos';
+                document.getElementById('modal-body').innerHTML = `
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        ${videos.map(video => `
+                            <div style="padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px;">
+                                <div style="width: 80px; height: 45px; background: var(--surface-light); border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                                    ${video.thumbnailUrl ? `<img src="${video.thumbnailUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="">` : '🎵'}
+                                </div>
+                                <div style="flex: 1;">
+                                    <div style="font-weight: 500;">${video.title || 'Unknown'}</div>
+                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${video.artist || ''}</div>
+                                </div>
+                                <button class="header-btn" onclick="addMusicVideoToQueue('${video.id}', '${escapeHtml(video.title || '')}', '${escapeHtml(video.artist || '')}')">Add</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                document.getElementById('modal-footer').innerHTML = `
+                    <button class="header-btn" onclick="closeModal()">Close</button>
+                `;
+                document.getElementById('modal').classList.add('active');
+            } catch (e) {
+                showToast('Failed to load featured music videos', 'error');
+            }
+        }
+        
+        async function addMusicVideoToQueue(videoId, title, artist) {
+            try {
+                await fetch('/api/v1/queue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        episodeId: videoId,
+                        title: title || 'Music Video',
+                        seriesTitle: artist || 'Unknown Artist',
+                        episodeNumber: 1,
+                        seasonNumber: 1,
+                        locale: 'ja-JP'
+                    })
+                });
+                showToast('Added music video to queue', 'success');
             } catch (e) {
                 showToast('Failed to add to queue', 'error');
             }
@@ -1518,20 +1600,166 @@ MAINTENANCE NOTES:
         // ================== SEASONS ==================
         function renderSeasons(container) {
             container.innerHTML = `
-                <div class="page-title">Seasons</div>
-                <div class="page-subtitle">Browse anime series</div>
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">Browse Series</div>
-                    </div>
-                    <div id="seasons-grid" class="history-poster-grid">
-                        <div class="empty-state" style="grid-column:1/-1;">
-                            <div class="empty-state-icon">&#128270;</div>
-                            <div class="empty-state-title">Use the search bar to find series</div>
-                        </div>
-                    </div>
+                <div class="page-title">Upcoming Seasons</div>
+                <div class="page-subtitle">Upcoming anime episodes and premieres</div>
+                <div id="seasons-content">
+                    <div class="loading"><div class="spinner"></div>Loading upcoming episodes...</div>
                 </div>
             `;
+            fetchUpcomingSeasons();
+        }
+
+        async function fetchUpcomingSeasons() {
+            try {
+                const res = await fetch('/api/v1/calendar/upcoming');
+                const episodes = await res.json();
+                renderUpcomingSeasonsContent(episodes || []);
+            } catch (e) {
+                document.getElementById('seasons-content').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#10060;</div>
+                        <div class="empty-state-title">Failed to load upcoming episodes</div>
+                    </div>`;
+            }
+        }
+
+        function renderUpcomingSeasonsContent(episodes) {
+            const content = document.getElementById('seasons-content');
+            if (episodes.length === 0) {
+                content.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#128270;</div>
+                        <div class="empty-state-title">No upcoming episodes found</div>
+                    </div>`;
+                return;
+            }
+
+            // Group by series
+            const seriesMap = new Map();
+            for (const ep of episodes) {
+                const seriesId = ep.seriesId || ep.id;
+                if (!seriesMap.has(seriesId)) {
+                    seriesMap.set(seriesId, {
+                        seriesId: seriesId,
+                        seriesTitle: ep.seriesTitle || 'Unknown',
+                        thumbnailUrl: ep.thumbnailUrl,
+                        episodes: []
+                    });
+                }
+                seriesMap.get(seriesId).episodes.push(ep);
+            }
+
+            const seriesList = Array.from(seriesMap.values());
+
+            content.innerHTML = `
+                <div class="history-poster-grid">
+                    ${seriesList.map(series => `
+                        <div class="history-poster" onclick="showSeriesEpisodesModal('${series.seriesId}', '${escapeHtml(series.seriesTitle)}')" style="cursor: pointer;">
+                            <div class="history-poster-img">
+                                ${series.thumbnailUrl ? `<img src="${series.thumbnailUrl}" alt="">` : '📺'}
+                                ${series.episodes.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
+                            </div>
+                            <div class="history-poster-info">
+                                <div class="history-poster-title" title="${escapeHtml(series.seriesTitle)}">${escapeHtml(series.seriesTitle)}</div>
+                                <div class="history-poster-meta">${series.episodes.length} upcoming episode(s)</div>
+                                <div class="history-poster-meta" style="color: var(--accent-green);">
+                                    Next: ${formatDate(series.episodes[0].airDate)}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>`;
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'Unknown';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diff = date - now;
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            
+            if (days === 0) return 'Today';
+            if (days === 1) return 'Tomorrow';
+            if (days < 7) return `In ${days} days`;
+            return date.toLocaleDateString();
+        }
+
+        function showSeriesEpisodesModal(seriesId, seriesTitle) {
+            document.getElementById('modal-title').textContent = decodeURIComponent(seriesTitle);
+            
+            // Find episodes for this series from the last fetched data
+            const allEpisodes = [];
+            document.querySelectorAll('.history-poster').forEach(poster => {
+                // This is a simplified approach - in production you'd store the data
+            });
+            
+            document.getElementById('modal-body').innerHTML = `
+                <div class="loading"><div class="spinner"></div>Loading episodes...</div>
+            `;
+            document.getElementById('modal-footer').innerHTML = `
+                <button class="header-btn" onclick="closeModal()">Close</button>
+                <button class="header-btn primary" onclick="searchSeriesById('${seriesId}')">Search Series</button>
+            `;
+            document.getElementById('modal').classList.add('active');
+            
+            // Fetch and show episodes
+            fetch(`/api/v1/series/${seriesId}/episodes`).then(res => res.json()).then(episodes => {
+                document.getElementById('modal-body').innerHTML = `
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        ${(episodes || []).slice(0, 10).map(ep => `
+                            <div style="padding: 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <div style="font-weight: 500;">Episode ${ep.episodeNumber || '?'}</div>
+                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${ep.title || 'Unknown'}</div>
+                                </div>
+                                <button class="header-btn" onclick="addEpisodeToQueue('${ep.id}', '${escapeHtml(ep.title || '')}', '${escapeHtml(seriesTitle)}')">Add</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }).catch(() => {
+                document.getElementById('modal-body').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-title">Failed to load episodes</div>
+                    </div>
+                `;
+            });
+        }
+
+        function searchSeriesById(seriesId) {
+            closeModal();
+            navigateTo('add-download');
+            // Trigger search after a short delay to let the page render
+            setTimeout(() => {
+                const searchInput = document.getElementById('search-input');
+                if (searchInput) {
+                    searchInput.value = seriesId;
+                    performSearch();
+                }
+            }, 100);
+        }
+
+        function addEpisodeToQueue(episodeId, title, seriesTitle) {
+            fetch('/api/v1/queue', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    episodeId: episodeId,
+                    title: title || 'Unknown',
+                    seriesTitle: seriesTitle || 'Unknown'
+                })
+            }).then(() => {
+                showToast('Added to queue', 'success');
+            }).catch(() => {
+                showToast('Failed to add to queue', 'error');
+            });
         }
 
         // ================== HISTORY ==================
@@ -1615,13 +1843,13 @@ MAINTENANCE NOTES:
 
             if (historyViewMode === 'poster') {
                 content.innerHTML = '<div class="history-poster-grid">' + historyData.map(item => `
-                    <div class="history-poster">
+                    <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}">
                         <div class="history-poster-img">
                             ${item.thumbnailUrl ? `<img src="${item.thumbnailUrl}" alt="">` : '📺'}
                             ${item.newEpisodes ? `<div class="history-poster-badge">${item.newEpisodes}</div>` : ''}
                         </div>
                         <div class="history-poster-info">
-                            <div class="history-poster-title" title="${item.seriesTitle || ''}">${item.seriesTitle || 'Unknown'}</div>
+                            <div class="history-poster-title" title="${item.seriesTitle || ''}">${item.seriesTitle || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
                             <div class="history-poster-meta">${item.sonarrNextAirDate || ''}</div>
                         </div>
                     </div>
@@ -1634,6 +1862,7 @@ MAINTENANCE NOTES:
                                 <tr>
                                     <th>Series</th>
                                     <th>Status</th>
+                                    <th>Sonarr</th>
                                     <th>Dubs</th>
                                     <th>Subs</th>
                                     <th>Actions</th>
@@ -1641,17 +1870,20 @@ MAINTENANCE NOTES:
                             </thead>
                             <tbody>
                                 ${historyData.map(item => `
-                                    <tr>
+                                    <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}">
                                         <td>
                                             <strong>${item.seriesTitle || 'Unknown'}</strong>
+                                            ${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}
                                             <br><small style="color:var(--text-secondary);">${item.seriesDescription ? item.seriesDescription.substring(0, 80) + '...' : ''}</small>
                                         </td>
                                         <td>${getStatusBadge(item.downloadStatus || 'done')}</td>
+                                        <td>${item.sonarrSeriesId ? `✓ ${item.sonarrSlugTitle || 'Matched'}` : '—'}</td>
                                         <td>${item.availableDubs ? item.availableDubs.join(', ') : '-'}</td>
                                         <td>${item.availableSubs ? item.availableSubs.join(', ') : '-'}</td>
                                         <td>
                                             <button class="btn-icon" onclick="refreshSeries('${item.seriesId}')">&#128260;</button>
                                             <button class="btn-icon" onclick="downloadSeries('${item.seriesId}')">&#9660;</button>
+                                            ${item.sonarrSeriesId ? `<button class="btn-icon" onclick="matchEpisodesForSeries('${item.seriesId}')" title="Rematch episodes">&#128260;</button>` : ''}
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -2614,7 +2846,102 @@ MAINTENANCE NOTES:
         
         function toggleEditMode() { /* UI toggle - no backend call needed */ }
         function toggleSearchDropdown() { /* UI dropdown - no backend call needed */ }
-        function openSonarrMenu() { /* Sonarr menu - no backend call needed */ }
+        function openSonarrMenu() {
+            // Remove existing dropdown if any
+            const existing = document.getElementById('sonarr-dropdown');
+            if (existing) { existing.remove(); return; }
+
+            const btn = event.target.closest('.toolbar-btn');
+            const dropdown = document.createElement('div');
+            dropdown.id = 'sonarr-dropdown';
+            dropdown.className = 'dropdown-menu active';
+            dropdown.style.top = (btn.offsetTop + btn.offsetHeight + 5) + 'px';
+            dropdown.style.left = btn.offsetLeft + 'px';
+            dropdown.innerHTML = `
+                <div class="dropdown-item" onclick="matchAllSeriesWithSonarr(); document.getElementById('sonarr-dropdown').remove();">
+                    <span>&#127758;</span> Match All Series
+                </div>
+                <div class="dropdown-item" onclick="showSeriesSelectorForMatching(); document.getElementById('sonarr-dropdown').remove();">
+                    <span>&#128260;</span> Match Episodes for Series...
+                </div>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-item" onclick="fetchHistoryData(); document.getElementById('sonarr-dropdown').remove();">
+                    <span>&#128194;</span> Refresh History
+                </div>
+            `;
+            document.body.appendChild(dropdown);
+
+            // Close dropdown when clicking outside
+            setTimeout(() => {
+                document.addEventListener('click', function closeDropdown(e) {
+                    if (!dropdown.contains(e.target)) {
+                        dropdown.remove();
+                        document.removeEventListener('click', closeDropdown);
+                    }
+                });
+            }, 0);
+        }
+
+        async function matchAllSeriesWithSonarr() {
+            try {
+                showToast('Matching all series with Sonarr...', 'success');
+                const res = await fetch('/api/v1/history/sonarr/match-series', { method: 'POST' });
+                if (res.ok) {
+                    showToast('Series matching completed', 'success');
+                    fetchHistoryData();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.message || 'Failed to match series', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to match series with Sonarr', 'error');
+            }
+        }
+
+        async function matchEpisodesForSeries(seriesId) {
+            if (!seriesId) return;
+            try {
+                showToast('Matching episodes with Sonarr...', 'success');
+                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${seriesId}`, { method: 'POST' });
+                if (res.ok) {
+                    showToast('Episode matching completed', 'success');
+                    fetchHistoryData();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.message || 'Failed to match episodes', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to match episodes with Sonarr', 'error');
+            }
+        }
+
+        function showSeriesSelectorForMatching() {
+            if (!historyData || historyData.length === 0) {
+                showToast('No history data available', 'warning');
+                return;
+            }
+
+            document.getElementById('modal-title').textContent = 'Select Series to Match';
+            document.getElementById('modal-body').innerHTML = `
+                <div style="max-height: 400px; overflow-y: auto;">
+                    ${historyData.map(item => `
+                        <div class="dropdown-item" onclick="matchEpisodesForSeries('${item.seriesId}'); closeModal();" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
+                            <div style="flex: 1;">
+                                <div style="font-weight: 500;">${item.seriesTitle || 'Unknown'}</div>
+                                <div style="font-size: 0.8em; color: var(--text-secondary);">
+                                    ${item.sonarrSeriesId ? '✓ Matched' : 'Not matched'}
+                                    ${item.sonarrNextAirDate ? '· Next: ' + item.sonarrNextAirDate : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            document.getElementById('modal-footer').innerHTML = `
+                <button class="header-btn" onclick="closeModal()">Cancel</button>
+            `;
+            document.getElementById('modal').classList.add('active');
+        }
         function toggleSortMenu() { /* UI sort - no backend call needed */ }
         function toggleFilterMenu() { /* UI filter - no backend call needed */ }
         
@@ -2734,15 +3061,51 @@ MAINTENANCE NOTES:
             return 'Queued';
         }
 
+        let eventSource = null;
+        
         function startPolling() {
             // Check auth status periodically
             checkAuthStatus();
             setInterval(checkAuthStatus, 30000);
             
+            // Use SSE for real-time queue updates instead of polling
+            startQueueSSE();
+            
+            // Keep polling history (no SSE for history yet)
             setInterval(() => {
-                if (currentPage === 'downloads') fetchDownloads();
                 if (currentPage === 'history') fetchHistoryData();
             }, 5000);
+        }
+        
+        function startQueueSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            eventSource = new EventSource('/api/v1/queue/sse');
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateQueueData(data.items || []);
+                } catch (e) {
+                    console.error('Failed to parse SSE data:', e);
+                }
+            };
+            
+            eventSource.onerror = (error) => {
+                console.error('SSE connection error:', error);
+                // Reconnect after 3 seconds
+                setTimeout(() => {
+                    if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                        startQueueSSE();
+                    }
+                }, 3000);
+            };
+            
+            eventSource.onopen = () => {
+                console.log('SSE connection established');
+            };
         }
         
         let lastAuthWarning = 0;

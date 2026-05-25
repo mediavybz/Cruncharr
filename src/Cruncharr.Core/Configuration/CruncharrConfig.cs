@@ -208,6 +208,9 @@ public class DownloadConfig{
     
     [YamlMember(Alias = "download_first_available_dub", ApplyNamingConventions = false)]
     public bool DownloadFirstAvailableDub { get; set; } = false;
+
+    [YamlMember(Alias = "download_multiple_dubs", ApplyNamingConventions = false)]
+    public bool DownloadMultipleDubs { get; set; } = false;
     
     [YamlMember(Alias = "dl_video_once", ApplyNamingConventions = false)]
     public bool DlVideoOnce { get; set; } = true;

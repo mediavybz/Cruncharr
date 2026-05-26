@@ -27,25 +27,30 @@ public interface IQueueService{
 
 public class QueueService : IQueueService, IDisposable{
     private readonly ConcurrentDictionary<string, QueueItem> _queue = new();
-    private readonly ConcurrentDictionary<string, QueueItem> _activeDownloads = new();
     private readonly IDownloadService _downloadService;
     private readonly IQueuePersistenceService? _persistenceService;
     private readonly ILogger<QueueService>? _logger;
-    private SemaphoreSlim _downloadSemaphore;
     private ProcessingSlotManager? _processingSlots;
     private CruncharrConfig? _config;
-    private IProgress<DownloadProgress>? _progress;
     private CancellationToken _cancellationToken;
     
+    // Ported from upstream: HashSet with lock for active download tracking
+    private readonly object _downloadStartLock = new();
+    private readonly HashSet<string> _activeOrStarting = new();
+    
+    // Ported from upstream: pump scheduling
     private int _pumpScheduled;
     private int _pumpDirty;
+    
+    // Ported from upstream: auto-download blocking
     private DateTimeOffset? _autoDownloadBlockedUntilUtc;
     private readonly object _autoDownloadBlockLock = new();
-    private readonly Timer? _autoUnblockTimer;
 
     public int ActiveDownloads{
         get{
-            return _activeDownloads.Count;
+            lock (_downloadStartLock){
+                return _activeOrStarting.Count;
+            }
         }
     }
 
@@ -57,8 +62,8 @@ public class QueueService : IQueueService, IDisposable{
         _downloadService = downloadService;
         _logger = logger;
         _persistenceService = persistenceService;
-        _downloadSemaphore = new SemaphoreSlim(2, int.MaxValue);
         
+        // Restore persisted queue
         if (_persistenceService != null){
             var savedQueue = _persistenceService.LoadQueue();
             if (savedQueue != null){
@@ -150,128 +155,255 @@ public class QueueService : IQueueService, IDisposable{
         }
     }
 
+    // Ported from upstream QueueManager.TryStartDownload
     public void StartItem(string queueItemId){
         if (_queue.TryGetValue(queueItemId, out var item)){
-            // Check if item can be started
-            if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing){
-                _logger?.LogWarning("Item {QueueItemId} is already downloading", queueItemId);
+            if (!TryStartDownload(item)){
+                _logger?.LogWarning("Cannot start {QueueItemId} - already active or no slots", queueItemId);
                 return;
             }
-            if (item.DownloadProgress.IsDone){
-                _logger?.LogWarning("Item {QueueItemId} is already complete", queueItemId);
-                return;
-            }
-            if (_activeDownloads.ContainsKey(item.Id)){
-                _logger?.LogWarning("Item {QueueItemId} is already active", queueItemId);
-                return;
-            }
-            if (_activeDownloads.Count >= (_config?.Download.SimultaneousDownloads ?? 2)){
-                _logger?.LogWarning("Cannot start {QueueItemId} - max concurrent downloads reached", queueItemId);
-                item.DownloadProgress.State = DownloadState.Queued;
-                item.DownloadProgress.Doing = "Waiting for download slot...";
-                OnQueueStateChanged();
-                ScheduleSave();
-                return;
-            }
-
-            // Start the download immediately (bypass AutoDownload check)
+            
             _ = Task.Run(async () =>{
-                bool semaphoreAcquired = false;
                 try{
-                    await _downloadSemaphore.WaitAsync(_cancellationToken);
-                    semaphoreAcquired = true;
-                    
-                    _activeDownloads[item.Id] = item;
-                    item.DownloadProgress.State = DownloadState.Downloading;
-                    item.DownloadProgress.Doing = "Starting download...";
-                    OnQueueStateChanged();
-                    ScheduleSave();
-
-                    _logger?.LogInformation("Manually starting download: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
-
-                    try{
-                        var queueProgress = new Progress<DownloadProgress>(p =>{
-                            item.DownloadProgress.State = p.State;
-                            item.DownloadProgress.Percent = p.Percent;
-                            item.DownloadProgress.Doing = p.Doing;
-                            item.DownloadProgress.DownloadSpeedBytes = p.DownloadSpeedBytes;
-                            item.DownloadProgress.Time = p.Time;
-                            OnQueueStateChanged();
-                        });
-                        
-                        var result = await _downloadService.DownloadEpisodeAsync(item.Episode, _config, queueProgress, _cancellationToken);
-                        
-                        if (!result.Success){
-                            string errorMessage = result.ErrorMessage ?? "Download failed";
-                            if (result.ErrorType == DownloadErrorType.NotAuthenticated){
-                                errorMessage = "Not logged in. Please go to Account tab and log in.";
-                            } else if (result.ErrorType == DownloadErrorType.SubscriptionExpired){
-                                errorMessage = "Subscription expired. Please renew your Crunchyroll subscription.";
-                            } else if (result.ErrorType == DownloadErrorType.PremiumContent){
-                                errorMessage = "Premium content. A Crunchyroll subscription is required.";
-                            } else if (result.ErrorType == DownloadErrorType.TooManyActiveStreams){
-                                errorMessage = "Too many active streams. Close Crunchyroll tabs and try again.";
-                            } else if (result.ErrorType == DownloadErrorType.MaturityRating){
-                                errorMessage = "Maturity rating too low. Update your account settings.";
-                            } else if (result.ErrorType == DownloadErrorType.RateLimited){
-                                errorMessage = "Rate limited. Please wait a few minutes.";
-                            }
-                            throw new Exception(errorMessage);
-                        }
-                        
-                        item.DownloadProgress.State = DownloadState.Done;
-                        item.DownloadProgress.Percent = 100;
-                        item.DownloadProgress.Doing = "Complete";
-                        _logger?.LogInformation("Download complete: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
-                        
-                        if (_config?.RemoveFinishedDownload == true){
-                            _queue.TryRemove(item.Id, out _);
-                            _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
-                        }
-                    } catch (DownloadException dex){
-                        _logger?.LogError("Download failed with specific error: {ErrorType} - {Message}", dex.ErrorType, dex.Message);
-                        bool isAuthError = dex.ErrorType == DownloadErrorType.NotAuthenticated ||
-                                          dex.ErrorType == DownloadErrorType.SubscriptionExpired ||
-                                          dex.ErrorType == DownloadErrorType.PremiumContent ||
-                                          dex.ErrorType == DownloadErrorType.MaturityRating;
-                        
-                        if (!isAuthError && item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 3)){
-                            var delay = TimeSpan.FromSeconds((_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
-                            ScheduleRetry(item.Id, delay, $"Error: {dex.Message}");
-                        } else{
-                            item.DownloadProgress.State = DownloadState.Error;
-                            item.DownloadProgress.Doing = $"Error: {dex.Message}";
-                        }
-                    } catch (OperationCanceledException){
-                        item.DownloadProgress.State = DownloadState.Cancelled;
-                        item.DownloadProgress.Doing = "Cancelled";
-                        _logger?.LogInformation("Download cancelled: {EpisodeId}", item.Episode.Id);
-                    } catch (Exception ex){
-                        _logger?.LogError(ex, "Download failed: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
-                        
-                        if (item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 3)){
-                            var delay = TimeSpan.FromSeconds((_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
-                            ScheduleRetry(item.Id, delay, $"Error: {ex.Message}");
-                        } else{
-                            item.DownloadProgress.State = DownloadState.Error;
-                            item.DownloadProgress.Doing = $"Error: {ex.Message}";
-                        }
-                    }
+                    await RunDownloadAsync(item, _cancellationToken);
                 } finally{
-                    _activeDownloads.TryRemove(item.Id, out _);
-                    if (semaphoreAcquired){
-                        _downloadSemaphore.Release();
-                    }
-                    OnQueueStateChanged();
-                    ScheduleSave();
-                    
-                    // Trigger pump to start next item if AutoDownload is on
-                    if (_config?.Queue.AutoDownload == true){
-                        RequestPump();
-                    }
+                    ReleaseDownloadSlot(item);
                 }
             }, _cancellationToken);
         }
+    }
+
+    // Ported from upstream QueueManager.TryStartDownload
+    private bool TryStartDownload(QueueItem item){
+        lock (_downloadStartLock){
+            if (_activeOrStarting.Contains(item.Id))
+                return false;
+
+            if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing)
+                return false;
+
+            if (item.DownloadProgress.IsDone)
+                return false;
+
+            if (item.DownloadProgress.IsError)
+                return false;
+
+            if (item.DownloadProgress.IsPaused)
+                return false;
+
+            if (_activeOrStarting.Count >= (_config?.Download.SimultaneousDownloads ?? 2))
+                return false;
+
+            _activeOrStarting.Add(item.Id);
+        }
+        
+        NotifyDownloadStateChanged();
+        OnQueueStateChanged();
+        return true;
+    }
+
+    // Ported from upstream QueueManager.ReleaseDownloadSlot
+    private void ReleaseDownloadSlot(QueueItem item){
+        bool removed;
+
+        lock (_downloadStartLock){
+            removed = _activeOrStarting.Remove(item.Id);
+        }
+
+        if (removed){
+            NotifyDownloadStateChanged();
+            OnQueueStateChanged();
+
+            if (_config?.Queue.AutoDownload == true){
+                RequestPump();
+            }
+        }
+    }
+
+    public async Task ProcessQueueAsync(CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default){
+        _config = config;
+        _cancellationToken = cancellationToken;
+        _processingSlots = new ProcessingSlotManager(config.Queue.SimultaneousProcessingJobs);
+
+        _logger?.LogInformation("Queue processor started with {Downloads} concurrent downloads, {Processing} processing jobs", 
+            config.Download.SimultaneousDownloads, config.Queue.SimultaneousProcessingJobs);
+
+        // Keep running until cancellation
+        try{
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+        } catch (OperationCanceledException){
+            _logger?.LogInformation("Queue processor stopped");
+        }
+    }
+
+    // Ported from upstream QueueManager.RunPump + PumpQueue
+    private void RequestPump(){
+        if (_config?.Queue.AutoDownload != true) return;
+        
+        Interlocked.Exchange(ref _pumpDirty, 1);
+
+        if (Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) != 0)
+            return;
+
+        _ = Task.Run(async () =>{
+            try{
+                while (Interlocked.Exchange(ref _pumpDirty, 0) == 1){
+                    await PumpQueueAsync();
+                    await Task.Delay(100, _cancellationToken);
+                }
+            } finally{
+                Interlocked.Exchange(ref _pumpScheduled, 0);
+
+                if (Volatile.Read(ref _pumpDirty) == 1 &&
+                    Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) == 0){
+                    _ = Task.Run(async () =>{
+                        await Task.Delay(100, _cancellationToken);
+                        RequestPump();
+                    });
+                }
+            }
+        });
+    }
+
+    // Ported from upstream QueueManager.PumpQueue
+    private async Task PumpQueueAsync(){
+        if (_config == null) return;
+        if (!_config.Queue.AutoDownload) return;
+
+        lock (_autoDownloadBlockLock){
+            if (_autoDownloadBlockedUntilUtc.HasValue && !HasPendingRetryItems()){
+                _autoDownloadBlockedUntilUtc = null;
+            }
+
+            if (_autoDownloadBlockedUntilUtc.HasValue && _autoDownloadBlockedUntilUtc.Value > DateTimeOffset.UtcNow){
+                return;
+            }
+
+            if (_autoDownloadBlockedUntilUtc.HasValue){
+                _autoDownloadBlockedUntilUtc = null;
+            }
+        }
+        
+        var toStart = new List<QueueItem>();
+        bool changed = false;
+        
+        lock (_downloadStartLock){
+            int limit = _config.Download.SimultaneousDownloads;
+            int freeSlots = Math.Max(0, limit - _activeOrStarting.Count);
+
+            if (freeSlots == 0)
+                return;
+
+            foreach (var item in _queue.Values.OrderBy(q => q.AddedAt)){
+                if (freeSlots == 0)
+                    break;
+
+                if (item.DownloadProgress.IsError)
+                    continue;
+
+                if (item.DownloadProgress.IsWaitingForRetry)
+                    continue;
+
+                if (item.DownloadProgress.IsDone)
+                    continue;
+
+                if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing)
+                    continue;
+
+                if (_activeOrStarting.Contains(item.Id))
+                    continue;
+
+                _activeOrStarting.Add(item.Id);
+                freeSlots--;
+                toStart.Add(item);
+                changed = true;
+            }
+        }
+        
+        if (changed){
+            NotifyDownloadStateChanged();
+        }
+
+        foreach (var item in toStart){
+            _ = Task.Run(async () =>{
+                try{
+                    await RunDownloadAsync(item, _cancellationToken);
+                } finally{
+                    ReleaseDownloadSlot(item);
+                }
+            }, _cancellationToken);
+        }
+
+        OnQueueStateChanged();
+    }
+
+    // Extracted download execution logic
+    private async Task RunDownloadAsync(QueueItem item, CancellationToken cancellationToken){
+        item.DownloadProgress.State = DownloadState.Downloading;
+        item.DownloadProgress.Doing = "Starting download...";
+        OnQueueStateChanged();
+        ScheduleSave();
+
+        _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+
+        try{
+            var queueProgress = new Progress<DownloadProgress>(p =>{
+                item.DownloadProgress.State = p.State;
+                item.DownloadProgress.Percent = p.Percent;
+                item.DownloadProgress.Doing = p.Doing;
+                item.DownloadProgress.DownloadSpeedBytes = p.DownloadSpeedBytes;
+                item.DownloadProgress.Time = p.Time;
+                OnQueueStateChanged();
+            });
+            
+            var result = await _downloadService.DownloadEpisodeAsync(item.Episode, _config!, queueProgress, cancellationToken);
+            
+            if (!result.Success){
+                throw new Exception(result.ErrorMessage ?? "Download failed");
+            }
+            
+            item.DownloadProgress.State = DownloadState.Done;
+            item.DownloadProgress.Percent = 100;
+            item.DownloadProgress.Doing = "Complete";
+            _logger?.LogInformation("Download complete: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+            
+            if (_config?.RemoveFinishedDownload == true){
+                _queue.TryRemove(item.Id, out _);
+                _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
+            }
+        } catch (DownloadException dex){
+            _logger?.LogError("Download failed: {ErrorType} - {Message}", dex.ErrorType, dex.Message);
+            
+            bool isAuthError = dex.ErrorType == DownloadErrorType.NotAuthenticated ||
+                              dex.ErrorType == DownloadErrorType.SubscriptionExpired ||
+                              dex.ErrorType == DownloadErrorType.PremiumContent ||
+                              dex.ErrorType == DownloadErrorType.MaturityRating;
+            
+            if (!isAuthError && item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 5)){
+                var delay = TimeSpan.FromSeconds(Math.Max(1, (_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount)));
+                ScheduleRetry(item.Id, delay, $"Error: {dex.Message}");
+            } else{
+                item.DownloadProgress.State = DownloadState.Error;
+                item.DownloadProgress.Doing = $"Error: {dex.Message}";
+            }
+        } catch (OperationCanceledException){
+            item.DownloadProgress.State = DownloadState.Cancelled;
+            item.DownloadProgress.Doing = "Cancelled";
+            _logger?.LogInformation("Download cancelled: {EpisodeId}", item.Episode.Id);
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Download failed: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+            
+            if (item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 5)){
+                var delay = TimeSpan.FromSeconds(Math.Max(1, (_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount)));
+                ScheduleRetry(item.Id, delay, $"Error: {ex.Message}");
+            } else{
+                item.DownloadProgress.State = DownloadState.Error;
+                item.DownloadProgress.Doing = $"Error: {ex.Message}";
+            }
+        }
+        
+        OnQueueStateChanged();
+        ScheduleSave();
     }
 
     public void ScheduleRetry(string queueItemId, TimeSpan delay, string statusText){
@@ -327,216 +459,13 @@ public class QueueService : IQueueService, IDisposable{
             }
         });
     }
-    
-    public async Task ProcessQueueAsync(CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default){
-        _config = config;
-        _progress = progress;
-        _cancellationToken = cancellationToken;
-        _downloadSemaphore = new SemaphoreSlim(config.Download.SimultaneousDownloads, int.MaxValue);
-        _processingSlots = new ProcessingSlotManager(config.Queue.SimultaneousProcessingJobs);
-
-        _logger?.LogInformation("Queue processor started with {Downloads} concurrent downloads, {Processing} processing jobs", 
-            config.Download.SimultaneousDownloads, config.Queue.SimultaneousProcessingJobs);
-
-        // Start the pump loop
-        _ = Task.Run(() => PumpLoopAsync(cancellationToken), cancellationToken);
-
-        // Keep running until cancellation
-        try{
-            await Task.Delay(Timeout.Infinite, cancellationToken);
-        } catch (OperationCanceledException){
-            _logger?.LogInformation("Queue processor stopped");
-        }
-    }
-
-    private async Task PumpLoopAsync(CancellationToken cancellationToken){
-        while (!cancellationToken.IsCancellationRequested){
-            if (_config?.Queue.AutoDownload == true){
-                await PumpQueueAsync(cancellationToken);
-            }
-            await Task.Delay(1000, cancellationToken);
-        }
-    }
-
-    private async Task PumpQueueAsync(CancellationToken cancellationToken){
-        if (_config == null) return;
-        
-        lock (_autoDownloadBlockLock){
-            if (_autoDownloadBlockedUntilUtc.HasValue && !HasPendingRetryItems()){
-                _autoDownloadBlockedUntilUtc = null;
-            }
-
-            if (_autoDownloadBlockedUntilUtc.HasValue && _autoDownloadBlockedUntilUtc.Value > DateTimeOffset.UtcNow){
-                return;
-            }
-
-            if (_autoDownloadBlockedUntilUtc.HasValue){
-                _autoDownloadBlockedUntilUtc = null;
-            }
-        }
-
-        var toStart = new List<QueueItem>();
-        
-        foreach (var item in _queue.Values.OrderBy(q => q.AddedAt)){
-            if (_activeDownloads.Count >= _config.Download.SimultaneousDownloads)
-                break;
-
-            if (item.DownloadProgress.IsError)
-                continue;
-
-            if (item.DownloadProgress.IsWaitingForRetry)
-                continue;
-
-            if (item.DownloadProgress.IsDone)
-                continue;
-
-            if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing)
-                continue;
-
-            if (_activeDownloads.ContainsKey(item.Id))
-                continue;
-
-            if (_downloadSemaphore.CurrentCount == 0)
-                break;
-
-            toStart.Add(item);
-        }
-
-        foreach (var item in toStart){
-            _ = Task.Run(async () =>{
-                bool semaphoreAcquired = false;
-                try{
-                    await _downloadSemaphore.WaitAsync(cancellationToken);
-                    semaphoreAcquired = true;
-                    
-                    _activeDownloads[item.Id] = item;
-                    item.DownloadProgress.State = DownloadState.Downloading;
-                    item.DownloadProgress.Doing = "Starting download...";
-                    OnQueueStateChanged();
-                    ScheduleSave();
-
-                    _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
-
-                    try{
-                        // Create progress reporter that updates queue item
-                        var queueProgress = new Progress<DownloadProgress>(p =>{
-                            item.DownloadProgress.State = p.State;
-                            item.DownloadProgress.Percent = p.Percent;
-                            item.DownloadProgress.Doing = p.Doing;
-                            item.DownloadProgress.DownloadSpeedBytes = p.DownloadSpeedBytes;
-                            item.DownloadProgress.Time = p.Time;
-                            OnQueueStateChanged();
-                        });
-                        
-                        var result = await _downloadService.DownloadEpisodeAsync(item.Episode, _config, queueProgress, cancellationToken);
-                        
-                        if (!result.Success){
-                            // Check for specific error types and provide better messages
-                            string errorMessage = result.ErrorMessage ?? "Download failed";
-                            if (result.ErrorType == DownloadErrorType.NotAuthenticated){
-                                errorMessage = "Not logged in. Please go to Account tab and log in.";
-                            } else if (result.ErrorType == DownloadErrorType.SubscriptionExpired){
-                                errorMessage = "Subscription expired. Please renew your Crunchyroll subscription.";
-                            } else if (result.ErrorType == DownloadErrorType.PremiumContent){
-                                errorMessage = "Premium content. A Crunchyroll subscription is required.";
-                            } else if (result.ErrorType == DownloadErrorType.TooManyActiveStreams){
-                                errorMessage = "Too many active streams. Close Crunchyroll tabs and try again.";
-                            } else if (result.ErrorType == DownloadErrorType.MaturityRating){
-                                errorMessage = "Maturity rating too low. Update your account settings.";
-                            } else if (result.ErrorType == DownloadErrorType.RateLimited){
-                                errorMessage = "Rate limited. Please wait a few minutes.";
-                            }
-                            
-                            throw new Exception(errorMessage);
-                        }
-                        
-                        item.DownloadProgress.State = DownloadState.Done;
-                        item.DownloadProgress.Percent = 100;
-                        item.DownloadProgress.Doing = "Complete";
-                        _logger?.LogInformation("Download complete: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
-                        
-                        // Remove finished download if configured
-                        if (_config.RemoveFinishedDownload){
-                            _queue.TryRemove(item.Id, out _);
-                            _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
-                        }
-                    } catch (DownloadException dex){
-                        _logger?.LogError("Download failed with specific error: {ErrorType} - {Message}", dex.ErrorType, dex.Message);
-                        
-                        // Don't retry auth/subscription errors - they're not transient
-                        bool isAuthError = dex.ErrorType == DownloadErrorType.NotAuthenticated ||
-                                          dex.ErrorType == DownloadErrorType.SubscriptionExpired ||
-                                          dex.ErrorType == DownloadErrorType.PremiumContent ||
-                                          dex.ErrorType == DownloadErrorType.MaturityRating;
-                        
-                        if (!isAuthError && item.DownloadProgress.RetryAttemptCount < _config.Download.RetryAttempts){
-                            var delay = TimeSpan.FromSeconds(_config.Download.RetryDelaySeconds * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
-                            ScheduleRetry(item.Id, delay, $"Error: {dex.Message}");
-                        } else{
-                            item.DownloadProgress.State = DownloadState.Error;
-                            item.DownloadProgress.Doing = $"Error: {dex.Message}";
-                        }
-                    } catch (OperationCanceledException){
-                        item.DownloadProgress.State = DownloadState.Cancelled;
-                        item.DownloadProgress.Doing = "Cancelled";
-                        _logger?.LogInformation("Download cancelled: {EpisodeId}", item.Episode.Id);
-                    } catch (Exception ex){
-                        _logger?.LogError(ex, "Download failed: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
-                        
-                        if (item.DownloadProgress.RetryAttemptCount < _config.Download.RetryAttempts){
-                            var delay = TimeSpan.FromSeconds(_config.Download.RetryDelaySeconds * Math.Pow(3, item.DownloadProgress.RetryAttemptCount));
-                            ScheduleRetry(item.Id, delay, $"Error: {ex.Message}");
-                        } else{
-                            item.DownloadProgress.State = DownloadState.Error;
-                            item.DownloadProgress.Doing = $"Error: {ex.Message}";
-                        }
-                    }
-                } finally{
-                    _activeDownloads.TryRemove(item.Id, out _);
-                    if (semaphoreAcquired){
-                        _downloadSemaphore.Release();
-                    }
-                    OnQueueStateChanged();
-                    ScheduleSave();
-                    
-                    if (_config?.Queue.AutoDownload == true){
-                        RequestPump();
-                    }
-                }
-            }, cancellationToken);
-        }
-    }
 
     private bool HasPendingRetryItems(){
         return _queue.Values.Any(item => item.DownloadProgress.IsWaitingForRetry);
     }
 
-    private void RequestPump(){
-        if (_config?.Queue.AutoDownload != true) return;
-        
-        Interlocked.Exchange(ref _pumpDirty, 1);
-
-        if (Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) != 0)
-            return;
-
-        _ = Task.Run(async () =>{
-            try{
-                while (Interlocked.Exchange(ref _pumpDirty, 0) == 1){
-                    await PumpQueueAsync(_cancellationToken);
-                    await Task.Delay(100);
-                }
-            } finally{
-                Interlocked.Exchange(ref _pumpScheduled, 0);
-
-                if (Volatile.Read(ref _pumpDirty) == 1 &&
-                    Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) == 0){
-                    _ = Task.Run(async () =>{
-                        await Task.Delay(100);
-                        RequestPump();
-                    });
-                }
-            }
-        });
+    private void NotifyDownloadStateChanged(){
+        OnQueueStateChanged();
     }
 
     private void ScheduleSave(){
@@ -551,9 +480,6 @@ public class QueueService : IQueueService, IDisposable{
     }
 
     public void Dispose(){
-        _downloadSemaphore?.Dispose();
         _processingSlots?.Dispose();
-        _autoUnblockTimer?.Dispose();
-        _persistenceService?.Dispose();
     }
 }

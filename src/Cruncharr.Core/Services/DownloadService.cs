@@ -229,7 +229,8 @@ public class DownloadService : IDownloadService{
             AudioLanguage = config.Download.DefaultAudio
         };
         var fileName = _filenameService.FormatFilename(config.Download.Filename, episode, filenameOptions);
-        var outputPath = Path.Combine(outputDir, fileName + ".mkv");
+        var outputExtension = config.Download.MuxMp4 ? ".mp4" : ".mkv";
+        var outputPath = Path.Combine(outputDir, fileName + outputExtension);
         
         // Replace existing file if configured
         if (config.Download.ReplaceExistingFiles && File.Exists(outputPath)){
@@ -440,9 +441,9 @@ public class DownloadService : IDownloadService{
                 }
             }
             
-            // Download cover art if available
+            // Download cover art if available and enabled
             string? coverPath = null;
-            if (!string.IsNullOrEmpty(episode.CoverArtUrl) && !config.Download.SkipMuxing){
+            if (!string.IsNullOrEmpty(episode.CoverArtUrl) && config.Download.MuxCover && !config.Download.SkipMuxing){
                 try{
                     progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 83, Doing = "Downloading cover art..." });
                     using var coverResponse = await _httpClient.Client.GetAsync(episode.CoverArtUrl, cancellationToken);

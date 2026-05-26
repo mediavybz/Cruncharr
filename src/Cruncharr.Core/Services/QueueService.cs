@@ -23,6 +23,11 @@ public interface IQueueService{
     int ActiveDownloads { get; }
     bool HasActiveDownloads { get; }
     event EventHandler? QueueStateChanged;
+    
+    // Processing slot management (ported from upstream QueueManager)
+    Task WaitForProcessingSlotAsync(CancellationToken cancellationToken = default);
+    void ReleaseProcessingSlot();
+    void SetProcessingLimit(int newLimit);
 }
 
 public class QueueService : IQueueService, IDisposable{
@@ -477,6 +482,20 @@ public class QueueService : IQueueService, IDisposable{
 
     private void OnQueueStateChanged(){
         QueueStateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task WaitForProcessingSlotAsync(CancellationToken cancellationToken = default){
+        if (_processingSlots != null){
+            await _processingSlots.WaitAsync(cancellationToken);
+        }
+    }
+
+    public void ReleaseProcessingSlot(){
+        _processingSlots?.Release();
+    }
+
+    public void SetProcessingLimit(int newLimit){
+        _processingSlots?.SetLimit(newLimit);
     }
 
     public void Dispose(){

@@ -33,14 +33,16 @@ public class DownloadService : IDownloadService{
     private readonly IEncodingService? _encodingService;
     
     private readonly IHistoryService? _history;
+    private readonly IQueueService? _queueService;
     
-    public DownloadService(ICrunchyrollAuthService auth, ICrunchyrollApiService api, ILogger<DownloadService>? logger = null, IHistoryService? history = null, IVideoSyncer? videoSyncer = null, IEncodingService? encodingService = null){
+    public DownloadService(ICrunchyrollAuthService auth, ICrunchyrollApiService api, ILogger<DownloadService>? logger = null, IHistoryService? history = null, IVideoSyncer? videoSyncer = null, IEncodingService? encodingService = null, IQueueService? queueService = null){
         _auth = auth;
         _api = api;
         _logger = logger;
         _history = history;
         _videoSyncer = videoSyncer;
         _encodingService = encodingService;
+        _queueService = queueService;
         _httpClient = auth.HttpClient;
         // Use /widevine for Docker, fallback to default path
         var widevineDir = "/widevine";
@@ -594,16 +596,30 @@ public class DownloadService : IDownloadService{
                 }
             }
             
-            // Mux
-            progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 90, Doing = "Muxing..." });
-            if (!config.Download.SkipMuxing){
-                await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays);
-            }
-            
-            // Post-process encoding if configured
-            if (!string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null){
-                progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
-                await EncodeOutputAsync(outputPath, config.Download.EncodingPreset, cancellationToken);
+            // Wait for processing slot (muxing/encoding limit)
+            bool processingSlotHeld = false;
+            try{
+                if (_queueService != null){
+                    progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 88, Doing = "Waiting for processing slot..." });
+                    await _queueService.WaitForProcessingSlotAsync(cancellationToken);
+                    processingSlotHeld = true;
+                }
+                
+                // Mux
+                progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 90, Doing = "Muxing..." });
+                if (!config.Download.SkipMuxing){
+                    await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays);
+                }
+                
+                // Post-process encoding if configured
+                if (!string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null){
+                    progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
+                    await EncodeOutputAsync(outputPath, config.Download.EncodingPreset, cancellationToken);
+                }
+            } finally{
+                if (processingSlotHeld && _queueService != null){
+                    _queueService.ReleaseProcessingSlot();
+                }
             }
             
             progress?.Report(new DownloadProgress{ State = DownloadState.Done, Percent = 100, Doing = "Complete" });

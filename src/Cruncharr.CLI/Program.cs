@@ -47,16 +47,21 @@ class Program{
         
         command.SetHandler(async (string email, string password) => {
             var auth = provider.GetRequiredService<IAuthenticationService>();
-            var result = await auth.LoginAsync(email, password);
-            if (result){
-                Console.WriteLine("Login successful");
-                // Save credentials to config
-                var config = LoadConfig();
-                config.Crunchyroll.Email = email;
-                config.Crunchyroll.Password = password;
-                SaveConfig(config);
-            } else{
-                Console.Error.WriteLine("Login failed");
+            try {
+                var result = await auth.LoginAsync(email, password);
+                if (result){
+                    Console.WriteLine("Login successful");
+                    // Save credentials to config
+                    var config = LoadConfig();
+                    config.Crunchyroll.Email = email;
+                    config.Crunchyroll.Password = password;
+                    SaveConfig(config);
+                } else{
+                    Console.Error.WriteLine("Login failed");
+                    Environment.ExitCode = 1;
+                }
+            } catch (Exception ex) {
+                Console.Error.WriteLine($"Login failed: {ex.Message}");
                 Environment.ExitCode = 1;
             }
         }, emailOption, passwordOption);

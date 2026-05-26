@@ -2784,6 +2784,7 @@ MAINTENANCE NOTES:
                                 ${renderMultiSelect('setting-dub-langs', dl.dubLanguages||LANG_OPTIONS.map(o=>o.value), LANG_OPTIONS)}
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Download AD for Selected Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-ad" ${dl.downloadDescriptionAudio?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download First Available Dub</div></div><label class="toggle-switch"><input type="checkbox" id="setting-first-dub" ${dl.downloadFirstAvailableDub?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Multiple Dubs</div><div class="setting-desc">Download all selected dubs per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-multi-dub" ${dl.downloadMultipleDubs?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                         <div class="settings-section">
@@ -2805,7 +2806,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Signs as forced in mkv</div></div><label class="toggle-switch"><input type="checkbox" id="setting-signs-forced" ${dl.signsSubsAsForced?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">CC Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-subs" ${dl.includeCcSubs?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">CC as hearing impaired in mkv</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-hi" ${dl.ccSubsMuxingFlag?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Convert CC VTT to ASS</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-convert" ${dl.convertVtt2Ass?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Convert CC VTT to ASS</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-convert" ${dl.convertVttToAss?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">CC Font</div></div><input type="text" class="form-input" id="setting-cc-font" value="${dl.ccSubsFont||'Trebuchet MS'}" style="width:200px;"></div>
                             </div>
                         </div>
@@ -3128,6 +3129,25 @@ MAINTENANCE NOTES:
                             useDefault: document.getElementById('setting-stream-use-default-2')?.checked ?? false
                         }
                     };
+                    // Language/subtitle settings are displayed on the crunchyroll tab
+                    newConfig.download = {
+                        dubLanguages: getMultiSelect('setting-dub-langs'),
+                        downloadDescriptionAudio: document.getElementById('setting-dl-ad')?.checked ?? false,
+                        downloadFirstAvailableDub: document.getElementById('setting-first-dub')?.checked || false,
+                        downloadMultipleDubs: document.getElementById('setting-download-multi-dub')?.checked || false,
+                        hardSubLang: document.getElementById('setting-hard-sub')?.value || 'none',
+                        hardSubRawFallback: document.getElementById('setting-hard-fallback')?.checked || false,
+                        softSubs: getMultiSelect('setting-soft-subs'),
+                        fixCccSubtitles: document.getElementById('setting-fix-ccc')?.checked ?? true,
+                        subsDownloadDuplicate: document.getElementById('setting-subs-dup')?.checked || false,
+                        subsAddScaledBorder: document.getElementById('setting-scaled-border')?.value || 'DontAdd',
+                        includeSignsSubs: document.getElementById('setting-signs-subs')?.checked || false,
+                        signsSubsAsForced: document.getElementById('setting-signs-forced')?.checked || false,
+                        includeCcSubs: document.getElementById('setting-cc-subs')?.checked || false,
+                        ccSubsMuxingFlag: document.getElementById('setting-cc-hi')?.checked || false,
+                        convertVttToAss: document.getElementById('setting-cc-convert')?.checked ?? true,
+                        ccSubsFont: document.getElementById('setting-cc-font')?.value || 'Trebuchet MS'
+                    };
                     break;
                     
                 case 'download':
@@ -3144,26 +3164,11 @@ MAINTENANCE NOTES:
                         leadingNumbers: parseInt(document.getElementById('setting-leading-zeros')?.value) || 2,
                         qualityVideo: document.getElementById('setting-quality-video')?.value || 'best',
                         qualityAudio: document.getElementById('setting-quality-audio')?.value || 'best',
-                        dubLanguages: getMultiSelect('setting-dub-langs'),
                         defaultAudio: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
-                        downloadDescriptionAudio: document.getElementById('setting-dl-ad')?.checked ?? false,
-                        downloadFirstAvailableDub: document.getElementById('setting-first-dub')?.checked || false,
                         dlVideoOnce: !(document.getElementById('setting-dl-video-every')?.checked ?? false),
                         keepDubsSeparate: document.getElementById('setting-keep-separate')?.checked || false,
                         dubDownloadDelaySeconds: parseInt(document.getElementById('setting-dub-delay')?.value) || 0,
-                        hardSubLang: document.getElementById('setting-hard-sub')?.value || 'none',
-                        hardSubRawFallback: document.getElementById('setting-hard-fallback')?.checked || false,
-                        softSubs: getMultiSelect('setting-soft-subs'),
                         defaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
-                        includeSignsSubs: document.getElementById('setting-signs-subs')?.checked || false,
-                        signsSubsAsForced: document.getElementById('setting-signs-forced')?.checked || false,
-                        includeCcSubs: document.getElementById('setting-cc-subs')?.checked || false,
-                        ccSubsMuxingFlag: document.getElementById('setting-cc-hi')?.checked || false,
-                        subsDownloadDuplicate: document.getElementById('setting-subs-dup')?.checked || false,
-                        fixCccSubtitles: document.getElementById('setting-fix-ccc')?.checked ?? true,
-                        convertVtt2Ass: document.getElementById('setting-cc-convert')?.checked ?? true,
-                        ccSubsFont: document.getElementById('setting-cc-font')?.value || 'Trebuchet MS',
-                        subsAddScaledBorder: document.getElementById('setting-scaled-border')?.value || 'DontAdd',
                         simultaneousDownloads: parseInt(document.getElementById('setting-concurrent')?.value) || 2,
                         simultaneousProcessingJobs: parseInt(document.getElementById('setting-proc-jobs')?.value) || 2,
                         downloadMethodeNew: document.getElementById('setting-new-method')?.checked || false,
@@ -3178,7 +3183,7 @@ MAINTENANCE NOTES:
                         partSize: parseInt(document.getElementById('setting-part-size')?.value) || 10,
                         noVideo: !(document.getElementById('setting-dl-video')?.checked ?? true),
                         noAudio: !(document.getElementById('setting-dl-audio')?.checked ?? true),
-                        chapters: document.getElementById('setting-chapters')?.checked ?? true,
+                        includeChapters: document.getElementById('setting-chapters')?.checked ?? true,
                         skipMuxing: document.getElementById('setting-skip-mux')?.checked || false,
                         muxMp4: document.getElementById('setting-mux-mp4')?.checked || false,
                         muxAudioOnlyToMp3: document.getElementById('setting-mux-mp3')?.checked || false,
@@ -3196,7 +3201,7 @@ MAINTENANCE NOTES:
                         mkvmergeOptions: getListInput('setting-mkvmerge'),
                         ffmpegOptions: getListInput('setting-ffmpeg'),
                         encodeEnabled: document.getElementById('setting-encode')?.checked || false,
-                        encodePreset: document.getElementById('setting-encode-preset')?.value || null
+                        encodingPreset: document.getElementById('setting-encode-preset')?.value || null
                     };
                     break;
                     

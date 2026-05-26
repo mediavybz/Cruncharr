@@ -353,17 +353,23 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             JsonTokenToFileAndVariable(content, uuid);
         } else{
             _logger?.LogError("Login failed: {Error}", error);
+            string errorMessage;
             if (content.Contains("invalid_credentials")){
+                errorMessage = "Invalid credentials - please check your email and password";
                 _logger?.LogError("Invalid credentials");
             } else if (content.Contains("<title>Just a moment...</title>") ||
                        content.Contains("<title>Access denied</title>") ||
                        content.Contains("<title>Attention Required! | Cloudflare</title>") ||
                        content.Trim().Equals("error code: 1020") ||
                        content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1){
+                errorMessage = "Cloudflare/DDOS protection detected - try enabling Beta API in settings";
                 _logger?.LogError("Cloudflare/DDOS protection detected during login");
             } else{
-                _logger?.LogError("Login error response: {Response}", content.Substring(0, content.Length < 200 ? content.Length : 200));
+                var responsePreview = content.Substring(0, content.Length < 200 ? content.Length : 200);
+                errorMessage = $"Login failed: {responsePreview}";
+                _logger?.LogError("Login error response: {Response}", responsePreview);
             }
+            throw new Exception(errorMessage);
         }
         
         if (Token?.refresh_token != null){
@@ -373,7 +379,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             return true;
         }
         
-        return false;
+        throw new Exception("Login failed - no refresh token received from Crunchyroll");
     }
     
     public async Task<bool> LoginWithTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default){

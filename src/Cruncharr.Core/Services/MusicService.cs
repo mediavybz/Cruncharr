@@ -158,6 +158,8 @@ public class MusicVideo{
 public class CrunchyMusicVideoImages{
     [JsonProperty("thumbnail")]
     public List<List<CrunchyImage>>? Thumbnail{ get; set; }
+    [JsonProperty("poster_tall")]
+    public List<List<CrunchyImage>>? PosterTall{ get; set; }
 }
 
 public class CrunchyMusicVideoList{
@@ -172,6 +174,8 @@ public class ArtistInfo{
     public string Id{ get; set; } = "";
     [JsonProperty("name")]
     public string? Name{ get; set; }
+    [JsonProperty("description")]
+    public string? Description{ get; set; }
     [JsonProperty("images")]
     public CrunchyMusicVideoImages? Images{ get; set; }
 }

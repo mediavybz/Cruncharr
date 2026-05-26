@@ -12,7 +12,7 @@ public class HistorySeries{
     public string? ThumbnailImageUrl { get; set; }
     public List<HistorySeason> Seasons { get; set; } = [];
     public DateTime? HistorySeriesAddDate { get; set; }
-    public string SeriesType { get; set; } = "Unknown";
+    public SeriesType SeriesType { get; set; } = SeriesType.Unknown;
     public string SeriesStreamingService { get; set; } = "Crunchyroll";
     public bool HasNewEpisodes { get; set; }
     public int DownloadedEpisodes { get; set; }
@@ -23,6 +23,12 @@ public class HistorySeries{
     
     [JsonIgnore]
     public List<string> HistorySeriesAvailableSoftSubs { get; set; } = [];
+    
+    // Override fields for per-series settings
+    public List<string> HistorySeriesDubLangOverride { get; set; } = [];
+    public List<string> HistorySeriesSoftSubsOverride { get; set; } = [];
+    public string HistorySeriesVideoQualityOverride { get; set; } = "";
+    public string SeriesDownloadPath { get; set; } = "";
     
     // Sonarr integration fields
     public string? SonarrSeriesId { get; set; }
@@ -64,6 +70,12 @@ public class HistorySeason{
     public bool SpecialSeason { get; set; }
     public int DownloadedEpisodes { get; set; }
     
+    // Override fields for per-season settings
+    public List<string> HistorySeasonDubLangOverride { get; set; } = [];
+    public List<string> HistorySeasonSoftSubsOverride { get; set; } = [];
+    public string HistorySeasonVideoQualityOverride { get; set; } = "";
+    public string SeasonDownloadPath { get; set; } = "";
+    
     public void UpdateDownloaded(){
         DownloadedEpisodes = EpisodesList.Count(e => e.WasDownloaded);
     }
@@ -84,8 +96,8 @@ public class HistoryEpisode{
     public List<string> DownloadedSoftSubs { get; set; } = [];
     
     public DateTime? EpisodeCrPremiumAirDate { get; set; }
-    public string EpisodeType { get; set; } = "Episode";
-    public string EpisodeSeriesType { get; set; } = "Unknown";
+    public EpisodeType EpisodeType { get; set; } = EpisodeType.Episode;
+    public SeriesType EpisodeSeriesType { get; set; } = SeriesType.Unknown;
     public bool IsEpisodeAvailableOnStreamingService { get; set; }
     public string? ThumbnailImageUrl { get; set; }
     public bool WasDownloaded { get; set; }
@@ -126,6 +138,40 @@ public class HistoryEpisode{
         SonarrAbsolutNumber = null;
         SonarrSeasonNumber = null;
     }
+    
+    public void UpdateAvailableMedia(List<string> availableDubs, List<string> availableSubs){
+        HistoryEpisodeAvailableDubLang = availableDubs.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        HistoryEpisodeAvailableSoftSubs = availableSubs.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+    
+    public void SetDownloadedMedia(List<string> downloadedDubs, List<string> downloadedSubs){
+        DownloadedDubLang = downloadedDubs;
+        DownloadedSoftSubs = downloadedSubs;
+    }
+}
+
+public enum EpisodeType{
+    Episode,
+    Concert,
+    MusicVideo
+}
+
+public enum SeriesType{
+    Unknown,
+    Series,
+    Movie,
+    Artist
+}
+
+public enum SortingType{
+    SeriesTitle,
+    NextAirDate,
+    HistorySeriesAddDate
+}
+
+public class HistoryPageProperties{
+    public SortingType SelectedSorting { get; set; } = SortingType.SeriesTitle;
+    public bool Ascending { get; set; } = false;
 }
 
 public class SeriesDataCache{

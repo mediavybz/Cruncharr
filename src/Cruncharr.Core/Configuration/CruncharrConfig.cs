@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Cruncharr.Core.Models;
 using YamlDotNet.Serialization;
 
 namespace Cruncharr.Core.Configuration;
@@ -15,6 +16,10 @@ public class CruncharrConfig{
     [JsonPropertyName("history")]
     [YamlMember(Alias = "history", ApplyNamingConventions = false)]
     public HistoryConfig History { get; set; } = new();
+    
+    [JsonPropertyName("history_page_properties")]
+    [YamlMember(Alias = "history_page_properties", ApplyNamingConventions = false)]
+    public HistoryPageProperties HistoryPageProperties { get; set; } = new();
     
     [JsonPropertyName("queue")]
     [YamlMember(Alias = "queue", ApplyNamingConventions = false)]

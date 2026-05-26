@@ -14,6 +14,11 @@ public interface ICrunchyrollApiService{
     Task<List<EpisodeInfo>> GetEpisodesAsync(string seriesId, bool useBetaApi, CancellationToken cancellationToken = default);
     Task<EpisodeInfo?> GetEpisodeAsync(string episodeId, bool useBetaApi, CancellationToken cancellationToken = default);
     Task<CrBrowseEpisodeBase?> GetNewEpisodesAsync(string? crLocale, int requestAmount, bool forcedLang = false, CancellationToken cancellationToken = default);
+    
+    // Methods ported from upstream CrSeries for HistoryService
+    Task<List<SeasonInfo>> ParseSeriesByIdAsync(string id, string? crLocale, bool forced = false, CancellationToken cancellationToken = default);
+    Task<List<EpisodeInfo>> GetSeasonDataByIdAsync(string seasonId, string? crLocale, bool forcedLang = false, CancellationToken cancellationToken = default);
+    Task<SeriesInfo?> SeriesByIdAsync(string id, string? crLocale, bool forced = false, CancellationToken cancellationToken = default);
 }
 
 public class CrunchyrollApiService : ICrunchyrollApiService{
@@ -314,6 +319,56 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
         } catch{
             return new List<EpisodeInfo>();
         }
+    }
+    
+    public async Task<List<SeasonInfo>> ParseSeriesByIdAsync(string id, string? crLocale, bool forced = false, CancellationToken cancellationToken = default){
+        if (!await EnsureAuthenticatedAsync(true, cancellationToken)){
+            return new List<SeasonInfo>();
+        }
+        
+        var queryParams = new NameValueCollection{
+            { "preferred_audio_language", "ja-JP" }
+        };
+        if (!string.IsNullOrEmpty(crLocale)){
+            queryParams["locale"] = crLocale;
+            if (forced){
+                queryParams["force_locale"] = crLocale;
+            }
+        }
+        
+        var uriBuilder = new UriBuilder($"{ApiUrls.Cms(true)}/series/{id}/seasons"){
+            Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
+        };
+        
+        var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        
+        if (!isOk){
+            _logger?.LogError("ParseSeriesById failed: {Error}", error);
+            return new List<SeasonInfo>();
+        }
+        
+        try{
+            var result = JsonConvert.DeserializeObject<CrCmsListResponse<CrSeasonDetail>>(content);
+            if (result?.Data == null) return new List<SeasonInfo>();
+            
+            return result.Data.Select(s => new SeasonInfo{
+                Id = s.Id,
+                Title = s.Title,
+                SeasonNumber = s.SeasonNumber
+            }).ToList();
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to parse series seasons");
+            return new List<SeasonInfo>();
+        }
+    }
+    
+    public async Task<List<EpisodeInfo>> GetSeasonDataByIdAsync(string seasonId, string? crLocale, bool forcedLang = false, CancellationToken cancellationToken = default){
+        return await GetSeasonEpisodesAsync(seasonId, true, cancellationToken);
+    }
+    
+    public async Task<SeriesInfo?> SeriesByIdAsync(string id, string? crLocale, bool forced = false, CancellationToken cancellationToken = default){
+        return await GetSeriesAsync(id, true, cancellationToken);
     }
     
     private async Task<bool> EnsureAuthenticatedAsync(bool useBetaApi, CancellationToken cancellationToken){

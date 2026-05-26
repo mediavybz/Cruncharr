@@ -14,16 +14,31 @@ public interface IHistoryService{
     Task RemoveAsync(string episodeId);
     Task<List<DownloadHistory>> GetSeriesHistoryAsync(string seriesId);
     
-    // New rich history methods
+    // Rich history methods
     Task<List<HistorySeries>> GetHistorySeriesAsync();
     Task UpdateWithSeasonDataAsync(List<EpisodeInfo> episodes);
+    Task UpdateWithEpisodeListAsync(List<EpisodeInfo> episodeList);
+    Task UpdateWithMusicEpisodeListAsync(List<MusicVideo> episodeList);
+    Task<bool> CrUpdateSeriesAsync(string? seriesId, string? seasonId);
     Task SetAsDownloadedAsync(string? seriesId, string? seasonId, string episodeId, List<string>? downloadedDubs = null, List<string>? downloadedSubs = null);
     Task<HistoryEpisode?> GetHistoryEpisodeAsync(string? seriesId, string? seasonId, string episodeId);
     Task RemoveUnavailableEpisodesAsync();
     
+    // History getters with overrides
+    Task<(HistoryEpisode? HistoryEpisode, string DownloadDirPath)> GetHistoryEpisodeWithDownloadDirAsync(string? seriesId, string? seasonId, string episodeId);
+    Task<(HistoryEpisode? HistoryEpisode, List<string> DubList, List<string> SubList, string DownloadDirPath, string VideoQuality)> GetHistoryEpisodeWithDubListAndDownloadDirAsync(string? seriesId, string? seasonId, string episodeId);
+    Task<List<string>> GetDubListAsync(string? seriesId, string? seasonId);
+    Task<(List<string> SubList, string VideoQuality)> GetSubListAsync(string? seriesId, string? seasonId);
+    
+    // Sorting
+    Task SortItemsAsync();
+    
     // Sonarr integration
     Task MatchHistorySeriesWithSonarrAsync(bool updateAll = false);
     Task MatchHistoryEpisodesWithSonarrAsync(string seriesId, bool rematchAll = false);
+    
+    // Utilities
+    double CalculateSimilarity(string source, string target);
 }
 
 public class HistoryService : IHistoryService{
@@ -31,11 +46,15 @@ public class HistoryService : IHistoryService{
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly ILogger<HistoryService>? _logger;
     private readonly ISonarrService? _sonarrService;
+    private readonly ICrunchyrollApiService? _apiService;
+    private readonly IMusicService? _musicService;
+    private readonly ICrunchyrollAuthService? _authService;
     private readonly CruncharrConfig _config;
     private List<HistorySeries> _historyList = [];
     private bool _loaded = false;
+    private SeriesDataCache? _cachedSeries;
     
-    public HistoryService(string? historyPath = null, ILogger<HistoryService>? logger = null, ISonarrService? sonarrService = null, CruncharrConfig? config = null){
+    public HistoryService(string? historyPath = null, ILogger<HistoryService>? logger = null, ISonarrService? sonarrService = null, ICrunchyrollApiService? apiService = null, IMusicService? musicService = null, ICrunchyrollAuthService? authService = null, CruncharrConfig? config = null){
         _historyPath = historyPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "cruncharr",
@@ -43,6 +62,9 @@ public class HistoryService : IHistoryService{
         );
         _logger = logger;
         _sonarrService = sonarrService;
+        _apiService = apiService;
+        _musicService = musicService;
+        _authService = authService;
         _config = config ?? new CruncharrConfig();
         Directory.CreateDirectory(Path.GetDirectoryName(_historyPath)!);
     }
@@ -139,7 +161,7 @@ public class HistoryService : IHistoryService{
                     SeriesId = seriesId,
                     Seasons = [],
                     HistorySeriesAddDate = DateTime.Now,
-                    SeriesType = "Series",
+                    SeriesType = SeriesType.Series,
                     SeriesStreamingService = "Crunchyroll"
                 };
                 _historyList.Add(historySeries);
@@ -260,6 +282,8 @@ public class HistoryService : IHistoryService{
             SpecialEpisode = false,
             IsEpisodeAvailableOnStreamingService = true,
             ThumbnailImageUrl = episode.ThumbnailUrl,
+            EpisodeType = EpisodeType.Episode,
+            EpisodeSeriesType = SeriesType.Series,
             HistoryEpisodeAvailableDubLang = episode.AudioLocale != null ? new List<string>{ episode.AudioLocale } : new List<string>(),
             HistoryEpisodeAvailableSoftSubs = episode.SubtitleLocales ?? new List<string>()
         };
@@ -273,6 +297,7 @@ public class HistoryService : IHistoryService{
         historyEpisode.EpisodeSeasonNum = episode.SeasonNumber.ToString();
         historyEpisode.IsEpisodeAvailableOnStreamingService = true;
         historyEpisode.ThumbnailImageUrl = episode.ThumbnailUrl;
+        historyEpisode.EpisodeSeriesType = SeriesType.Series;
         // Update available dub/sub metadata for existing episodes
         if (episode.AudioLocale != null && !historyEpisode.HistoryEpisodeAvailableDubLang.Contains(episode.AudioLocale)){
             historyEpisode.HistoryEpisodeAvailableDubLang.Add(episode.AudioLocale);
@@ -358,7 +383,7 @@ public class HistoryService : IHistoryService{
                 : [];
 
             foreach (var historySeries in _historyList){
-                if (historySeries.SeriesType == "Artist") continue;
+                if (historySeries.SeriesType == SeriesType.Artist) continue;
                 
                 if (string.IsNullOrEmpty(historySeries.SonarrSeriesId)){
                     var matchedSeries = FindClosestMatch(historySeries.SeriesTitle ?? string.Empty, sonarrSeries);
@@ -585,6 +610,467 @@ public class HistoryService : IHistoryService{
         }
 
         return string.Empty;
+    }
+    
+    // Methods ported from upstream History.cs
+    
+    public async Task<bool> CrUpdateSeriesAsync(string? seriesId, string? seasonId){
+        if (string.IsNullOrEmpty(seriesId) || _apiService == null){
+            return false;
+        }
+
+        if (_authService != null){
+            await _authService.AuthenticateAsync(true);
+        }
+
+        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+
+        if (historySeries != null){
+            if (string.IsNullOrEmpty(seasonId)){
+                foreach (var historySeriesSeason in historySeries.Seasons){
+                    foreach (var historyEpisode in historySeriesSeason.EpisodesList){
+                        historyEpisode.IsEpisodeAvailableOnStreamingService = false;
+                    }
+                }
+            } else{
+                var matchingSeason = historySeries.Seasons.FirstOrDefault(historySeason => historySeason.SeasonId == seasonId);
+
+                if (matchingSeason != null){
+                    foreach (var historyEpisode in matchingSeason.EpisodesList){
+                        historyEpisode.IsEpisodeAvailableOnStreamingService = false;
+                    }
+                }
+            }
+        }
+
+        var seasons = await _apiService.ParseSeriesByIdAsync(seriesId, "ja-JP", true);
+
+        if (seasons == null || seasons.Count == 0){
+            _logger?.LogError("Parse Data Invalid - series is maybe only available with VPN or got deleted");
+            return false;
+        }
+
+        var result = false;
+        foreach (var season in seasons){
+            var lang = string.IsNullOrEmpty(_config.History.Lang)
+                ? "en-US"
+                : _config.History.Lang;
+
+            var candidateIds = new List<string>();
+            candidateIds.Add(season.Id);
+
+            if (!string.IsNullOrEmpty(seasonId) &&
+                !candidateIds.Contains(seasonId, StringComparer.OrdinalIgnoreCase)){
+                continue;
+            }
+
+            foreach (var candidateId in candidateIds){
+                try{
+                    var seasonEpisodes = await _apiService.GetSeasonDataByIdAsync(candidateId, lang, true);
+
+                    if (seasonEpisodes != null && seasonEpisodes.Count > 0){
+                        result = true;
+                        await UpdateWithSeasonDataAsync(seasonEpisodes);
+                        break;
+                    }
+                } catch{
+                    // optional: log candidateId
+                }
+            }
+        }
+
+        historySeries ??= _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+
+        if (historySeries != null){
+            RemoveUnavailableEpisodesFromSeries(historySeries);
+            if (historySeries.Seasons.Count == 0){
+                _historyList.Remove(historySeries);
+                await SaveRichHistoryAsync();
+                return result;
+            }
+
+            await MatchHistorySeriesWithSonarrAsync(false);
+            await MatchHistoryEpisodesWithSonarrAsync(historySeries.SeriesId ?? "", false);
+            await SaveRichHistoryAsync();
+            return result;
+        }
+
+        return false;
+    }
+    
+    public async Task UpdateWithEpisodeListAsync(List<EpisodeInfo> episodeList){
+        if (episodeList is { Count: > 0 }){
+            var episodeVersions = episodeList.First().Versions;
+            if (episodeVersions != null){
+                var version = episodeVersions.Find(a => a.Original);
+                if (version?.AudioLocale != episodeList.First().AudioLocale){
+                    await CrUpdateSeriesAsync(episodeList.First().SeriesId, version?.SeasonGuid);
+                    return;
+                }
+            } else{
+                await CrUpdateSeriesAsync(episodeList.First().SeriesId, "");
+                return;
+            }
+
+            await UpdateWithSeasonDataAsync(episodeList);
+        }
+    }
+    
+    public async Task UpdateWithMusicEpisodeListAsync(List<MusicVideo> episodeList){
+        if (episodeList is { Count: > 0 } && _config.History.Enabled && _config.History.IncludeCrArtists){
+            // Group all music videos together since we don't have artist info in the model yet
+            await UpdateWithSeasonDataAsync(episodeList.Select(mv => new EpisodeInfo{
+                Id = mv.Id,
+                Title = mv.Title,
+                SeriesId = mv.Id,
+                SeasonId = mv.Id,
+                SeriesTitle = mv.Title,
+                SeasonTitle = mv.Title,
+                Description = mv.Description,
+                EpisodeNumber = 0,
+                SeasonNumber = 0
+            }).ToList());
+        }
+    }
+    
+    public async Task<(HistoryEpisode? HistoryEpisode, string DownloadDirPath)> GetHistoryEpisodeWithDownloadDirAsync(string? seriesId, string? seasonId, string episodeId){
+        await EnsureLoadedAsync();
+        
+        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+        var downloadDirPath = "";
+
+        if (historySeries != null){
+            var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
+            if (!string.IsNullOrEmpty(historySeries.SeriesDownloadPath)){
+                downloadDirPath = historySeries.SeriesDownloadPath;
+            }
+
+            if (historySeason != null){
+                var historyEpisode = historySeason.EpisodesList.Find(e => e.EpisodeId == episodeId);
+                if (!string.IsNullOrEmpty(historySeason.SeasonDownloadPath)){
+                    downloadDirPath = historySeason.SeasonDownloadPath;
+                }
+
+                if (historyEpisode != null){
+                    return (historyEpisode, downloadDirPath);
+                }
+            }
+        }
+
+        return (null, downloadDirPath);
+    }
+    
+    public async Task<(HistoryEpisode? HistoryEpisode, List<string> DubList, List<string> SubList, string DownloadDirPath, string VideoQuality)> GetHistoryEpisodeWithDubListAndDownloadDirAsync(string? seriesId, string? seasonId, string episodeId){
+        await EnsureLoadedAsync();
+        
+        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+
+        var downloadDirPath = "";
+        var videoQuality = "";
+        List<string> dublist = [];
+        List<string> sublist = [];
+
+        if (historySeries != null){
+            var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
+            if (historySeries.HistorySeriesDubLangOverride.Count > 0){
+                dublist = historySeries.HistorySeriesDubLangOverride.ToList();
+            }
+
+            if (historySeries.HistorySeriesSoftSubsOverride.Count > 0){
+                sublist = historySeries.HistorySeriesSoftSubsOverride.ToList();
+            }
+
+            if (!string.IsNullOrEmpty(historySeries.SeriesDownloadPath)){
+                downloadDirPath = historySeries.SeriesDownloadPath;
+            }
+
+            if (!string.IsNullOrEmpty(historySeries.HistorySeriesVideoQualityOverride)){
+                videoQuality = historySeries.HistorySeriesVideoQualityOverride;
+            }
+
+            if (historySeason != null){
+                var historyEpisode = historySeason.EpisodesList.Find(e => e.EpisodeId == episodeId);
+                if (historySeason.HistorySeasonDubLangOverride.Count > 0){
+                    dublist = historySeason.HistorySeasonDubLangOverride.ToList();
+                }
+
+                if (historySeason.HistorySeasonSoftSubsOverride.Count > 0){
+                    sublist = historySeason.HistorySeasonSoftSubsOverride.ToList();
+                }
+
+                if (!string.IsNullOrEmpty(historySeason.SeasonDownloadPath)){
+                    downloadDirPath = historySeason.SeasonDownloadPath;
+                }
+
+                if (!string.IsNullOrEmpty(historySeason.HistorySeasonVideoQualityOverride)){
+                    videoQuality = historySeason.HistorySeasonVideoQualityOverride;
+                }
+
+                if (historyEpisode != null){
+                    return (historyEpisode, dublist, sublist, downloadDirPath, videoQuality);
+                }
+            }
+        }
+
+        return (null, dublist, sublist, downloadDirPath, videoQuality);
+    }
+    
+    public async Task<List<string>> GetDubListAsync(string? seriesId, string? seasonId){
+        await EnsureLoadedAsync();
+        
+        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+
+        List<string> dublist = [];
+
+        if (historySeries != null){
+            var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
+            if (historySeries.HistorySeriesDubLangOverride.Count > 0){
+                dublist = historySeries.HistorySeriesDubLangOverride.ToList();
+            }
+
+            if (historySeason is { HistorySeasonDubLangOverride.Count: > 0 }){
+                dublist = historySeason.HistorySeasonDubLangOverride.ToList();
+            }
+        }
+
+        return dublist;
+    }
+    
+    public async Task<(List<string> SubList, string VideoQuality)> GetSubListAsync(string? seriesId, string? seasonId){
+        await EnsureLoadedAsync();
+        
+        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+
+        List<string> sublist = [];
+        var videoQuality = "";
+
+        if (historySeries != null){
+            var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
+            if (historySeries.HistorySeriesSoftSubsOverride.Count > 0){
+                sublist = historySeries.HistorySeriesSoftSubsOverride.ToList();
+            }
+
+            if (!string.IsNullOrEmpty(historySeries.HistorySeriesVideoQualityOverride)){
+                videoQuality = historySeries.HistorySeriesVideoQualityOverride;
+            }
+
+            if (historySeason is { HistorySeasonSoftSubsOverride.Count: > 0 }){
+                sublist = historySeason.HistorySeasonSoftSubsOverride.ToList();
+            }
+
+            if (historySeason != null && !string.IsNullOrEmpty(historySeason.HistorySeasonVideoQualityOverride)){
+                videoQuality = historySeason.HistorySeasonVideoQualityOverride;
+            }
+        }
+
+        return (sublist, videoQuality);
+    }
+    
+    public async Task SortItemsAsync(){
+        await EnsureLoadedAsync();
+        
+        var currentSortingType = _config.HistoryPageProperties?.SelectedSorting ?? SortingType.SeriesTitle;
+        var sortingDir = _config.HistoryPageProperties?.Ascending ?? false;
+        DateTime today = DateTime.Now.Date;
+        
+        switch (currentSortingType){
+            case SortingType.SeriesTitle:
+                var sortedList = sortingDir
+                    ? _historyList.OrderByDescending(s => s.SeriesTitle).ToList()
+                    : _historyList.OrderBy(s => s.SeriesTitle).ToList();
+
+                _historyList.Clear();
+                _historyList.AddRange(sortedList);
+                return;
+
+            case SortingType.NextAirDate:
+                var sortedSeriesDates = sortingDir
+                    ? _historyList
+                        .OrderByDescending(s => {
+                            var date = ParseDate(s.SonarrNextAirDate ?? string.Empty, today);
+                            return date ?? DateTime.MinValue;
+                        })
+                        .ThenByDescending(s => s.SonarrNextAirDate == "Today" ? 1 : 0)
+                        .ThenBy(s => string.IsNullOrEmpty(s.SonarrNextAirDate) ? 1 : 0)
+                        .ThenBy(s => s.SeriesTitle)
+                        .ToList()
+                    : _historyList
+                        .OrderByDescending(s => s.SonarrNextAirDate == "Today")
+                        .ThenBy(s => s.SonarrNextAirDate == "Today" ? s.SeriesTitle : null)
+                        .ThenBy(s => {
+                            var date = ParseDate(s.SonarrNextAirDate ?? string.Empty, today);
+                            return date ?? DateTime.MaxValue;
+                        })
+                        .ThenBy(s => s.SeriesTitle)
+                        .ToList();
+
+                _historyList.Clear();
+                _historyList.AddRange(sortedSeriesDates);
+                return;
+
+            case SortingType.HistorySeriesAddDate:
+                var sortedSeriesAddDates = _historyList
+                    .OrderBy(s => sortingDir
+                        ? -(s.HistorySeriesAddDate?.Date.Ticks ?? DateTime.MinValue.Ticks)
+                        : s.HistorySeriesAddDate?.Date.Ticks ?? DateTime.MaxValue.Ticks)
+                    .ThenBy(s => s.SeriesTitle)
+                    .ToList();
+
+                _historyList.Clear();
+                _historyList.AddRange(sortedSeriesAddDates);
+                return;
+        }
+    }
+    
+    private static void SortSeasons(HistorySeries series){
+        var sortedSeasons = series.Seasons
+            .OrderBy(s => {
+                double seasonNum;
+                return double.TryParse(s.SeasonNum, NumberStyles.Any, CultureInfo.InvariantCulture, out seasonNum)
+                    ? seasonNum
+                    : double.MaxValue;
+            })
+            .ToList();
+
+        series.Seasons.Clear();
+
+        foreach (var season in sortedSeasons){
+            series.Seasons.Add(season);
+        }
+    }
+    
+    private static SeriesType InferSeriesType(HistorySeries? historySeries){
+        var seriesTypes = new List<SeriesType>();
+
+        if (historySeries != null){
+            seriesTypes.AddRange(historySeries.Seasons
+                .SelectMany(season => season.EpisodesList)
+                .Select(episode => episode.EpisodeSeriesType)
+                .Where(type => type != SeriesType.Unknown));
+        }
+
+        if (seriesTypes.Count == 0){
+            return historySeries?.SeriesType ?? SeriesType.Unknown;
+        }
+
+        if (seriesTypes.All(type => type == SeriesType.Artist)){
+            return SeriesType.Artist;
+        }
+
+        if (seriesTypes.All(type => type == SeriesType.Movie)){
+            return SeriesType.Movie;
+        }
+
+        return SeriesType.Series;
+    }
+    
+    private async Task RefreshSeriesDataAsync(string seriesId, HistorySeries historySeries){
+        if (_cachedSeries == null || (!string.IsNullOrEmpty(_cachedSeries.SeriesId) && _cachedSeries.SeriesId != seriesId)){
+            if (historySeries.SeriesType is SeriesType.Series or SeriesType.Movie){
+                var seriesData = await _apiService?.SeriesByIdAsync(seriesId, 
+                    string.IsNullOrEmpty(_config.History.Lang) ? "en-US" : _config.History.Lang, true);
+                if (seriesData != null){
+                    _cachedSeries = new SeriesDataCache{
+                        SeriesDescription = seriesData.Description ?? "",
+                        SeriesId = seriesId,
+                        SeriesTitle = seriesData.Title ?? "",
+                        ThumbnailImageUrl = seriesData.CoverArtUrl ?? "",
+                        HistorySeriesAvailableDubLang = [],
+                        HistorySeriesAvailableSoftSubs = []
+                    };
+
+                    historySeries.SeriesDescription = _cachedSeries.SeriesDescription;
+                    historySeries.ThumbnailImageUrl = _cachedSeries.ThumbnailImageUrl;
+                    historySeries.SeriesTitle = _cachedSeries.SeriesTitle;
+                    historySeries.HistorySeriesAvailableDubLang = _cachedSeries.HistorySeriesAvailableDubLang;
+                    historySeries.HistorySeriesAvailableSoftSubs = _cachedSeries.HistorySeriesAvailableSoftSubs;
+                }
+            } else if (historySeries.SeriesType == SeriesType.Artist && _musicService != null){
+                var artisteData = await _musicService.GetArtistAsync(seriesId, 
+                    string.IsNullOrEmpty(_config.History.Lang) ? "en-US" : _config.History.Lang, true);
+                if (artisteData != null && !string.IsNullOrEmpty(artisteData.Id)){
+                    _cachedSeries = new SeriesDataCache{
+                        SeriesDescription = artisteData.Description ?? "",
+                        SeriesId = artisteData.Id,
+                        SeriesTitle = artisteData.Name ?? "",
+                        ThumbnailImageUrl = artisteData.Images?.PosterTall?.SelectMany(list => list).FirstOrDefault(e => e.Height == 360)?.Source ?? "",
+                        HistorySeriesAvailableDubLang = [],
+                        HistorySeriesAvailableSoftSubs = []
+                    };
+
+                    historySeries.SeriesDescription = _cachedSeries.SeriesDescription;
+                    historySeries.ThumbnailImageUrl = _cachedSeries.ThumbnailImageUrl;
+                    historySeries.SeriesTitle = _cachedSeries.SeriesTitle;
+                    historySeries.HistorySeriesAvailableDubLang = _cachedSeries.HistorySeriesAvailableDubLang;
+                    historySeries.HistorySeriesAvailableSoftSubs = _cachedSeries.HistorySeriesAvailableSoftSubs;
+                }
+            }
+        } else{
+            if (_cachedSeries != null){
+                historySeries.SeriesDescription = _cachedSeries.SeriesDescription;
+                historySeries.ThumbnailImageUrl = _cachedSeries.ThumbnailImageUrl;
+                historySeries.SeriesTitle = _cachedSeries.SeriesTitle;
+                historySeries.HistorySeriesAvailableDubLang = _cachedSeries.HistorySeriesAvailableDubLang;
+                historySeries.HistorySeriesAvailableSoftSubs = _cachedSeries.HistorySeriesAvailableSoftSubs;
+            }
+        }
+    }
+    
+    private void RemoveUnavailableEpisodesFromSeries(HistorySeries historySeries){
+        if (!_config.History.RemoveMissingEpisodes){
+            return;
+        }
+
+        var seasonsToRemove = new List<HistorySeason>();
+
+        foreach (var season in historySeries.Seasons){
+            var unavailableEpisodes = season.EpisodesList
+                .Where(episode => !episode.IsEpisodeAvailableOnStreamingService)
+                .ToList();
+
+            foreach (var episode in unavailableEpisodes){
+                season.EpisodesList.Remove(episode);
+            }
+
+            if (season.EpisodesList.Count == 0){
+                seasonsToRemove.Add(season);
+                continue;
+            }
+
+            season.EpisodesList.Sort(new NumericStringPropertyComparer());
+            season.UpdateDownloaded();
+        }
+
+        foreach (var season in seasonsToRemove){
+            historySeries.Seasons.Remove(season);
+        }
+
+        historySeries.UpdateNewEpisodes();
+        SortSeasons(historySeries);
+    }
+    
+    public double CalculateSimilarity(string source, string target){
+        return StringSimilarity.CalculateSimilarity(source, target);
+    }
+    
+    public DateTime? ParseDate(string dateStr, DateTime today){
+        if (dateStr == "Today"){
+            return today;
+        }
+
+        if (DateTime.TryParseExact(dateStr, "dd.MM.yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date)){
+            return date;
+        }
+
+        return null;
+    }
+    
+    private static List<string> NormalizeLocales(IEnumerable<string?>? locales){
+        return (locales ?? [])
+            .Where(locale => !string.IsNullOrWhiteSpace(locale))
+            .Select(locale => locale!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 }
 

@@ -49,6 +49,9 @@ public class Program{
                 null,
                 sp.GetService<ILogger<HistoryService>>(),
                 sp.GetService<ISonarrService>(),
+                sp.GetService<ICrunchyrollApiService>(),
+                sp.GetService<IMusicService>(),
+                sp.GetService<ICrunchyrollAuthService>(),
                 config));
         builder.Services.AddSingleton<IQueuePersistenceService>(
             _ => new QueuePersistenceService(config.Queue.QueueFilePath));

@@ -333,8 +333,7 @@ public class DownloadConfig{
     [YamlMember(Alias = "convert_vtt_to_ass", ApplyNamingConventions = false)]
     public bool ConvertVttToAss { get; set; } = true;
     
-    [YamlMember(Alias = "convert_cc_vtt_subs_to_ass", ApplyNamingConventions = false)]
-    public bool ConvertVtt2Ass { get; set; } = true;
+
     
     [YamlMember(Alias = "cc_subs_font", ApplyNamingConventions = false)]
     public string CcSubsFont { get; set; } = "Trebuchet MS";
@@ -387,8 +386,7 @@ public class DownloadConfig{
     [YamlMember(Alias = "include_chapters", ApplyNamingConventions = false)]
     public bool IncludeChapters { get; set; } = true;
     
-    [YamlMember(Alias = "chapters", ApplyNamingConventions = false)]
-    public bool Chapters { get; set; } = true;
+
     
     [YamlMember(Alias = "skip_muxing", ApplyNamingConventions = false)]
     public bool SkipMuxing { get; set; } = false;
@@ -443,9 +441,6 @@ public class DownloadConfig{
     
     [YamlMember(Alias = "encode_enabled", ApplyNamingConventions = false)]
     public bool EncodeEnabled { get; set; } = false;
-    
-    [YamlMember(Alias = "encode_preset", ApplyNamingConventions = false)]
-    public string? EncodePreset { get; set; }
     
     [YamlMember(Alias = "history_enabled", ApplyNamingConventions = false)]
     public bool HistoryEnabled { get; set; } = true;

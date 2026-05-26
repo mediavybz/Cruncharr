@@ -118,14 +118,14 @@ public class AuthController : ControllerBase{
             } else{
                 return Unauthorized(new LoginResponse{
                     Success = false,
-                    Message = "Invalid credentials or login failed"
+                    Message = "Login failed - unknown error"
                 });
             }
         } catch (Exception ex){
             _logger?.LogError(ex, "Login failed for {Email}", request.Email);
-            return StatusCode(500, new LoginResponse{
+            return Unauthorized(new LoginResponse{
                 Success = false,
-                Message = $"Login error: {ex.Message}"
+                Message = ex.Message
             });
         }
     }

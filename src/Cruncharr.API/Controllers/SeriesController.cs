@@ -195,7 +195,7 @@ public class ConfigController : ControllerBase{
                 CcSubsMuxingFlag = _config.Download.CcSubsMuxingFlag,
                 SubsDownloadDuplicate = _config.Download.SubsDownloadDuplicate,
                 FixCccSubtitles = _config.Download.FixCccSubtitles,
-                ConvertVtt2Ass = _config.Download.ConvertVtt2Ass,
+                ConvertVttToAss = _config.Download.ConvertVttToAss,
                 CcSubsFont = _config.Download.CcSubsFont,
                 SubsAddScaledBorder = _config.Download.SubsAddScaledBorder,
                 SimultaneousDownloads = _config.Download.SimultaneousDownloads,
@@ -215,7 +215,7 @@ public class ConfigController : ControllerBase{
                 PartSize = _config.Download.PartSize,
                 NoVideo = _config.Download.NoVideo,
                 NoAudio = _config.Download.NoAudio,
-                Chapters = _config.Download.Chapters,
+                IncludeChapters = _config.Download.IncludeChapters,
                 SkipMuxing = _config.Download.SkipMuxing,
                 MuxMp4 = _config.Download.MuxMp4,
                 MuxAudioOnlyToMp3 = _config.Download.MuxAudioOnlyToMp3,
@@ -233,7 +233,8 @@ public class ConfigController : ControllerBase{
                 MkvmergeOptions = _config.Download.MkvmergeOptions,
                 FfmpegOptions = _config.Download.FfmpegOptions,
                 EncodeEnabled = _config.Download.EncodeEnabled,
-                EncodePreset = _config.Download.EncodePreset
+                EncodingPreset = _config.Download.EncodingPreset,
+                DownloadMultipleDubs = _config.Download.DownloadMultipleDubs
             },
             Queue = new{
                 PersistQueue = _config.Queue.PersistQueue,
@@ -398,7 +399,7 @@ public class ConfigController : ControllerBase{
             if (dl.Timeout.HasValue) _config.Download.Timeout = dl.Timeout.Value;
             if (dl.SkipSubs.HasValue) _config.Download.SkipSubs = dl.SkipSubs.Value;
             if (!string.IsNullOrEmpty(dl.CcTag)) _config.Download.CcTag = dl.CcTag;
-            if (dl.ConvertVtt2Ass.HasValue) _config.Download.ConvertVtt2Ass = dl.ConvertVtt2Ass.Value;
+            if (dl.ConvertVttToAss.HasValue) _config.Download.ConvertVttToAss = dl.ConvertVttToAss.Value;
             if (!string.IsNullOrEmpty(dl.CcSubsFont)) _config.Download.CcSubsFont = dl.CcSubsFont;
             if (!string.IsNullOrEmpty(dl.SubsAddScaledBorder)) _config.Download.SubsAddScaledBorder = dl.SubsAddScaledBorder;
             if (dl.SimultaneousDownloads.HasValue) _config.Download.SimultaneousDownloads = dl.SimultaneousDownloads.Value;
@@ -415,7 +416,7 @@ public class ConfigController : ControllerBase{
             if (dl.PartSize.HasValue) _config.Download.PartSize = dl.PartSize.Value;
             if (dl.NoVideo.HasValue) _config.Download.NoVideo = dl.NoVideo.Value;
             if (dl.NoAudio.HasValue) _config.Download.NoAudio = dl.NoAudio.Value;
-            if (dl.Chapters.HasValue) _config.Download.Chapters = dl.Chapters.Value;
+            if (dl.IncludeChapters.HasValue) _config.Download.IncludeChapters = dl.IncludeChapters.Value;
             if (dl.SkipMuxing.HasValue) _config.Download.SkipMuxing = dl.SkipMuxing.Value;
             if (dl.MuxMp4.HasValue) _config.Download.MuxMp4 = dl.MuxMp4.Value;
             if (dl.MuxAudioOnlyToMp3.HasValue) _config.Download.MuxAudioOnlyToMp3 = dl.MuxAudioOnlyToMp3.Value;
@@ -433,12 +434,15 @@ public class ConfigController : ControllerBase{
             if (dl.MkvmergeOptions != null) _config.Download.MkvmergeOptions = dl.MkvmergeOptions;
             if (dl.FfmpegOptions != null) _config.Download.FfmpegOptions = dl.FfmpegOptions;
             if (dl.EncodeEnabled.HasValue) _config.Download.EncodeEnabled = dl.EncodeEnabled.Value;
-            if (dl.EncodePreset != null) _config.Download.EncodePreset = dl.EncodePreset;
+            if (dl.EncodingPreset != null) _config.Download.EncodingPreset = dl.EncodingPreset;
+            if (dl.DownloadMultipleDubs.HasValue) _config.Download.DownloadMultipleDubs = dl.DownloadMultipleDubs.Value;
         }
         
         if (request.Queue != null){
             if (request.Queue.PersistQueue.HasValue) _config.Queue.PersistQueue = request.Queue.PersistQueue.Value;
             if (request.Queue.AutoDownload.HasValue) _config.Queue.AutoDownload = request.Queue.AutoDownload.Value;
+            if (request.Queue.SimultaneousProcessingJobs.HasValue) _config.Queue.SimultaneousProcessingJobs = request.Queue.SimultaneousProcessingJobs.Value;
+            if (!string.IsNullOrEmpty(request.Queue.QueueFilePath)) _config.Queue.QueueFilePath = request.Queue.QueueFilePath;
             if (request.Queue.ShutdownWhenQueueEmpty.HasValue) _config.Queue.ShutdownWhenQueueEmpty = request.Queue.ShutdownWhenQueueEmpty.Value;
         }
         
@@ -602,7 +606,7 @@ public class DownloadUpdateConfig{
     public int? Timeout { get; set; }
     public bool? SkipSubs { get; set; }
     public string? CcTag { get; set; }
-    public bool? ConvertVtt2Ass { get; set; }
+    public bool? ConvertVttToAss { get; set; }
     public string? CcSubsFont { get; set; }
     public string? SubsAddScaledBorder { get; set; }
     public int? SimultaneousDownloads { get; set; }
@@ -619,7 +623,7 @@ public class DownloadUpdateConfig{
     public int? PartSize { get; set; }
     public bool? NoVideo { get; set; }
     public bool? NoAudio { get; set; }
-    public bool? Chapters { get; set; }
+    public bool? IncludeChapters { get; set; }
     public bool? SkipMuxing { get; set; }
     public bool? MuxMp4 { get; set; }
     public bool? MuxAudioOnlyToMp3 { get; set; }
@@ -637,12 +641,15 @@ public class DownloadUpdateConfig{
     public List<string>? MkvmergeOptions { get; set; }
     public List<string>? FfmpegOptions { get; set; }
     public bool? EncodeEnabled { get; set; }
-    public string? EncodePreset { get; set; }
+    public string? EncodingPreset { get; set; }
+    public bool? DownloadMultipleDubs { get; set; }
 }
 
 public class QueueUpdateConfig{
     public bool? PersistQueue { get; set; }
     public bool? AutoDownload { get; set; }
+    public int? SimultaneousProcessingJobs { get; set; }
+    public string? QueueFilePath { get; set; }
     public bool? ShutdownWhenQueueEmpty { get; set; }
 }
 

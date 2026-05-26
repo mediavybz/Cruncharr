@@ -1702,6 +1702,7 @@ MAINTENANCE NOTES:
                 
                 // Add each queue item to the queue
                 let added = 0;
+                const markAsWatched = config?.crunchyroll?.markAsWatched || false;
                 for (const [key, item] of Object.entries(queueItems)) {
                     if (item && item.episodeId) {
                         await fetch('/api/v1/queue', {
@@ -1722,6 +1723,14 @@ MAINTENANCE NOTES:
                                 videoQuality: item.videoQuality || 'best'
                             })
                         });
+                        // Mark as watched if enabled
+                        if (markAsWatched && item.data?.[0]?.mediaId) {
+                            try {
+                                await fetch(`/api/v1/series/episodes/${item.data[0].mediaId}/mark-watched`, { method: 'POST' });
+                            } catch (e) {
+                                console.warn('Failed to mark as watched:', e);
+                            }
+                        }
                         added++;
                     }
                 }
@@ -2035,36 +2044,75 @@ MAINTENANCE NOTES:
         }
 
         async function selectBrowseResult(seriesId) {
-            // Navigate to add-download and select this series
+            // Navigate to add-download and select this series using ListSeriesId for multi-dub support
             navigateTo('add-download');
-            // Wait for render then trigger search result selection
-            setTimeout(() => {
-                // Fetch series details and populate
-                fetch(`/api/v1/series/${seriesId}/episodes`)
-                    .then(r => r.json())
-                    .then(episodes => {
-                        addDownloadEpisodes = episodes || [];
-                        // Extract seasons
-                        const seasonMap = new Map();
-                        episodes.forEach(ep => {
-                            if (ep.seasonId && !seasonMap.has(ep.seasonId)) {
-                                seasonMap.set(ep.seasonId, {
-                                    id: ep.seasonId,
-                                    title: ep.seasonTitle || `Season ${ep.seasonNumber || ep.seasonId}`
-                                });
-                            }
-                        });
-                        const seasons = Array.from(seasonMap.values());
-                        const dropdown = document.getElementById('season-dropdown');
-                        if (dropdown) {
-                            dropdown.innerHTML = seasons.map(season => `<option value="${season.id}">${season.title}</option>`).join('');
-                            if (seasons.length > 0) {
-                                dropdown.value = seasons[0].id;
-                                onSeasonChange(seasons[0].id);
+            // Wait for render then load series with dub info
+            setTimeout(async () => {
+                try {
+                    const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
+                    const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
+                    const res = await fetch(`/api/v1/series/${seriesId}/list?${dubLangParam}`);
+                    const result = await res.json();
+                    
+                    if (!result || !result.list) {
+                        showToast('No episodes found for this series', 'error');
+                        return;
+                    }
+                    
+                    addDownloadEpisodeList = result.list || [];
+                    addDownloadSeriesData = result.data || {};
+                    
+                    // Set the search input to show something
+                    const searchInput = document.getElementById('add-search-input');
+                    if (searchInput) searchInput.value = 'Selected Series';
+                    
+                    // Show music button
+                    const musicBtn = document.getElementById('music-btn');
+                    if (musicBtn) musicBtn.style.display = 'inline-flex';
+                    
+                    // Extract unique seasons from episodes
+                    const seasonMap = new Map();
+                    addDownloadEpisodeList.forEach(ep => {
+                        const seasonId = ep.id;
+                        if (seasonId && !seasonMap.has(seasonId)) {
+                            seasonMap.set(seasonId, {
+                                id: seasonId,
+                                title: ep.seasonTitle || `Season ${ep.season}`
+                            });
+                        }
+                    });
+                    const seasons = Array.from(seasonMap.values());
+                    
+                    // Initialize default dub selections from config
+                    selectedEpisodeDubs.clear();
+                    const defaultDubs = new Set(dubLangs);
+                    addDownloadEpisodeList.forEach(ep => {
+                        const epKey = ep.e;
+                        const epData = addDownloadSeriesData[epKey];
+                        if (epData && epData.variants) {
+                            const availableDubs = new Set(epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale));
+                            const selected = new Set([...defaultDubs].filter(d => availableDubs.has(d)));
+                            if (selected.size > 0) {
+                                selectedEpisodeDubs.set(epKey, selected);
                             }
                         }
-                    })
-                    .catch(e => console.error('Failed to load series:', e));
+                    });
+                    
+                    const dropdown = document.getElementById('season-dropdown');
+                    if (dropdown) {
+                        dropdown.innerHTML = seasons.map(season => `<option value="${season.id}">${season.title}</option>`).join('');
+                        if (seasons.length > 0) {
+                            dropdown.value = seasons[0].id;
+                            onSeasonChange(seasons[0].id);
+                        } else {
+                            selectedEpisodes.clear();
+                            renderAddEpisodesMultiDub();
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to load series:', e);
+                    showToast('Failed to load series episodes', 'error');
+                }
             }, 100);
         }
 
@@ -2251,14 +2299,10 @@ MAINTENANCE NOTES:
                         <span class="icon">&#128229;</span>
                         <span>Add To Queue</span>
                     </button>
-                    <button class="toolbar-btn" id="btn-edit-mode" onclick="toggleEditMode()">
-                        <span class="icon">&#9998;</span>
-                        <span>Edit</span>
-                    </button>
-                    <button class="toolbar-btn" onclick="toggleSearchDropdown()">
-                        <span class="icon">&#128269;</span>
-                        <span>Search</span>
-                    </button>
+                    <div class="header-search" style="width:200px; margin-left:8px;">
+                        <span>&#128269;</span>
+                        <input type="text" id="history-search-input" placeholder="Filter history..." oninput="filterHistory(this.value)">
+                    </div>
                     <button class="toolbar-btn" id="btn-sonarr-menu" onclick="openSonarrMenu(event)">
                         <span class="icon">&#127758;</span>
                         <span>Sonarr</span>
@@ -2306,18 +2350,26 @@ MAINTENANCE NOTES:
 
         function renderHistoryContent() {
             const content = document.getElementById('history-content');
-            if (historyData.length === 0) {
+            const filteredData = historyFilterText 
+                ? historyData.filter(item => 
+                    (item.seriesTitle || '').toLowerCase().includes(historyFilterText) ||
+                    (item.seriesDescription || '').toLowerCase().includes(historyFilterText) ||
+                    (item.sonarrSlugTitle || '').toLowerCase().includes(historyFilterText)
+                  )
+                : historyData;
+            
+            if (filteredData.length === 0) {
                 content.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#128218;</div>
-                        <div class="empty-state-title">No history yet</div>
-                        <div>Completed downloads will appear here</div>
+                        <div class="empty-state-title">${historyData.length === 0 ? 'No history yet' : 'No matches found'}</div>
+                        <div>${historyData.length === 0 ? 'Completed downloads will appear here' : 'Try a different search term'}</div>
                     </div>`;
                 return;
             }
 
             if (historyViewMode === 'poster') {
-                content.innerHTML = '<div class="history-poster-grid">' + historyData.map(item => `
+                content.innerHTML = '<div class="history-poster-grid">' + filteredData.map(item => `
                     <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}">
                         <div class="history-poster-img">
                             ${item.thumbnailUrl ? `<img src="${item.thumbnailUrl}" alt="">` : '📺'}
@@ -2344,7 +2396,7 @@ MAINTENANCE NOTES:
                                 </tr>
                             </thead>
                             <tbody>
-                                ${historyData.map(item => `
+                                ${filteredData.map(item => `
                                     <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}">
                                         <td>
                                             <strong>${item.seriesTitle || 'Unknown'}</strong>
@@ -2667,6 +2719,21 @@ MAINTENANCE NOTES:
             fetchConfig().then(() => renderSettingsTab());
         }
 
+        async function loadEncodingPresets() {
+            const select = document.getElementById('setting-encode-preset');
+            if (!select || select.dataset.loaded) return;
+            try {
+                const res = await fetch('/api/v1/encoding/presets');
+                const presets = await res.json();
+                const currentValue = select.value;
+                select.innerHTML = '<option value="">None</option>' + 
+                    (presets || []).map(p => `<option value="${p}" ${p === currentValue ? 'selected' : ''}>${p}</option>`).join('');
+                select.dataset.loaded = 'true';
+            } catch (e) {
+                console.error('Failed to load encoding presets:', e);
+            }
+        }
+
         function setSettingsTab(tab) {
             settingsTab = tab;
             document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
@@ -2845,7 +2912,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
                                 ${renderListInput('setting-ffmpeg', dl.ffmpegOptions, '-option')}
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><input type="text" class="form-input" id="setting-encode-preset" value="${dl.encodePreset||''}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><select class="form-select" id="setting-encode-preset" style="min-width:200px;" onfocus="loadEncodingPresets()"><option value="">${dl.encodePreset || 'None'}</option></select></div>
                             </div>
                         </div>
                     `;
@@ -3406,104 +3473,13 @@ MAINTENANCE NOTES:
             }
         }
         
-        function toggleEditMode() { /* UI toggle - no backend call needed */ }
-        function toggleSearchDropdown() { /* UI dropdown - no backend call needed */ }
-        function openSonarrMenu(e) {
-            // Remove existing dropdown if any
-            const existing = document.getElementById('sonarr-dropdown');
-            if (existing) { existing.remove(); return; }
-
-            const btn = e?.target?.closest('.toolbar-btn') || document.getElementById('btn-sonarr-menu') || event?.target?.closest('.toolbar-btn');
-            const dropdown = document.createElement('div');
-            dropdown.id = 'sonarr-dropdown';
-            dropdown.className = 'dropdown-menu active';
-            dropdown.style.top = (btn.offsetTop + btn.offsetHeight + 5) + 'px';
-            dropdown.style.left = btn.offsetLeft + 'px';
-            dropdown.innerHTML = `
-                <div class="dropdown-item" onclick="matchAllSeriesWithSonarr(); document.getElementById('sonarr-dropdown').remove();">
-                    <span>&#127758;</span> Match All Series
-                </div>
-                <div class="dropdown-item" onclick="showSeriesSelectorForMatching(); document.getElementById('sonarr-dropdown').remove();">
-                    <span>&#128260;</span> Match Episodes for Series...
-                </div>
-                <div class="dropdown-divider"></div>
-                <div class="dropdown-item" onclick="fetchHistoryData(); document.getElementById('sonarr-dropdown').remove();">
-                    <span>&#128194;</span> Refresh History
-                </div>
-            `;
-            document.body.appendChild(dropdown);
-
-            // Close dropdown when clicking outside
-            setTimeout(() => {
-                document.addEventListener('click', function closeDropdown(e) {
-                    if (!dropdown.contains(e.target)) {
-                        dropdown.remove();
-                        document.removeEventListener('click', closeDropdown);
-                    }
-                });
-            }, 0);
+        let historyFilterText = '';
+        
+        function filterHistory(query) {
+            historyFilterText = query.toLowerCase();
+            renderHistoryContent();
         }
-
-        async function matchAllSeriesWithSonarr() {
-            try {
-                showToast('Matching all series with Sonarr...', 'success');
-                const res = await fetch('/api/v1/history/sonarr/match-series', { method: 'POST' });
-                if (res.ok) {
-                    showToast('Series matching completed', 'success');
-                    fetchHistoryData();
-                } else {
-                    const err = await res.json().catch(() => ({}));
-                    showToast(err.message || 'Failed to match series', 'error');
-                }
-            } catch (e) {
-                showToast('Failed to match series with Sonarr', 'error');
-            }
-        }
-
-        async function matchEpisodesForSeries(seriesId) {
-            if (!seriesId) return;
-            try {
-                showToast('Matching episodes with Sonarr...', 'success');
-                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${seriesId}`, { method: 'POST' });
-                if (res.ok) {
-                    showToast('Episode matching completed', 'success');
-                    fetchHistoryData();
-                } else {
-                    const err = await res.json().catch(() => ({}));
-                    showToast(err.message || 'Failed to match episodes', 'error');
-                }
-            } catch (e) {
-                showToast('Failed to match episodes with Sonarr', 'error');
-            }
-        }
-
-        function showSeriesSelectorForMatching() {
-            if (!historyData || historyData.length === 0) {
-                showToast('No history data available', 'warning');
-                return;
-            }
-
-            document.getElementById('modal-title').textContent = 'Select Series to Match';
-            document.getElementById('modal-body').innerHTML = `
-                <div style="max-height: 400px; overflow-y: auto;">
-                    ${historyData.map(item => `
-                        <div class="dropdown-item" onclick="matchEpisodesForSeries('${item.seriesId}'); closeModal();" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
-                            <div style="flex: 1;">
-                                <div style="font-weight: 500;">${item.seriesTitle || 'Unknown'}</div>
-                                <div style="font-size: 0.8em; color: var(--text-secondary);">
-                                    ${item.sonarrSeriesId ? '✓ Matched' : 'Not matched'}
-                                    ${item.sonarrNextAirDate ? '· Next: ' + item.sonarrNextAirDate : ''}
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-            document.getElementById('modal-footer').innerHTML = `
-                <button class="header-btn" onclick="closeModal()">Cancel</button>
-            `;
-            document.getElementById('modal').classList.add('active');
-        }
+        
         async function refreshSeries(id) {
             try {
                 const res = await fetch(`/api/v1/history/update-series/${id}`, { method: 'POST' });

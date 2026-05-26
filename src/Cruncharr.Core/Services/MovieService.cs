@@ -124,4 +124,10 @@ public class CrunchyMovieImages{
 public class CrunchyImage{
     [JsonProperty("source")]
     public string Source{ get; set; } = "";
+    [JsonProperty("height")]
+    public int Height{ get; set; }
+    [JsonProperty("width")]
+    public int Width{ get; set; }
+    [JsonProperty("type")]
+    public string Type{ get; set; } = "";
 }

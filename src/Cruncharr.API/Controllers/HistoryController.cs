@@ -93,6 +93,62 @@ public class HistoryController : ControllerBase{
     }
 
     /// <summary>
+    /// Update series data from Crunchyroll
+    /// </summary>
+    [HttpPost("update-series/{seriesId}")]
+    public async Task<IActionResult> UpdateSeries(string seriesId, [FromQuery] string? seasonId = null){
+        var result = await _historyService.CrUpdateSeriesAsync(seriesId, seasonId);
+        return Ok(new { Success = result });
+    }
+
+    /// <summary>
+    /// Sort history items
+    /// </summary>
+    [HttpPost("sort")]
+    public async Task<IActionResult> Sort(){
+        await _historyService.SortItemsAsync();
+        return Ok(new { Message = "History sorted" });
+    }
+
+    /// <summary>
+    /// Get episode with download directory
+    /// </summary>
+    [HttpGet("episode-with-dir/{seriesId}/{seasonId}/{episodeId}")]
+    public async Task<ActionResult> GetEpisodeWithDir(string seriesId, string seasonId, string episodeId){
+        var (episode, dir) = await _historyService.GetHistoryEpisodeWithDownloadDirAsync(seriesId, seasonId, episodeId);
+        if (episode == null) return NotFound();
+        return Ok(new { Episode = episode, DownloadDir = dir });
+    }
+
+    /// <summary>
+    /// Get episode with dub/sub lists and download directory
+    /// </summary>
+    [HttpGet("episode-with-dubs/{seriesId}/{seasonId}/{episodeId}")]
+    public async Task<ActionResult> GetEpisodeWithDubs(string seriesId, string seasonId, string episodeId){
+        var (episode, dubs, subs, dir, quality) = await _historyService.GetHistoryEpisodeWithDubListAndDownloadDirAsync(seriesId, seasonId, episodeId);
+        if (episode == null) return NotFound();
+        return Ok(new { Episode = episode, DubList = dubs, SubList = subs, DownloadDir = dir, VideoQuality = quality });
+    }
+
+    /// <summary>
+    /// Get dub list for series/season
+    /// </summary>
+    [HttpGet("dubs/{seriesId}/{seasonId}")]
+    public async Task<ActionResult<List<string>>> GetDubList(string seriesId, string seasonId){
+        var dubs = await _historyService.GetDubListAsync(seriesId, seasonId);
+        return Ok(dubs);
+    }
+
+    /// <summary>
+    /// Get sub list and video quality for series/season
+    /// </summary>
+    [HttpGet("subs/{seriesId}/{seasonId}")]
+    public async Task<ActionResult> GetSubList(string seriesId, string seasonId){
+        var (subs, quality) = await _historyService.GetSubListAsync(seriesId, seasonId);
+        return Ok(new { SubList = subs, VideoQuality = quality });
+    }
+
+    /// <summary>
     /// Match all history series with Sonarr
     /// </summary>
     [HttpPost("sonarr/match-series")]

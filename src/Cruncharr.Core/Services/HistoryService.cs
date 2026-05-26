@@ -18,6 +18,7 @@ public interface IHistoryService{
     Task<List<HistorySeries>> GetHistorySeriesAsync();
     Task UpdateWithSeasonDataAsync(List<EpisodeInfo> episodes);
     Task UpdateWithEpisodeListAsync(List<EpisodeInfo> episodeList);
+    Task UpdateWithEpisodeAsync(List<CrBrowseEpisode> episodes);
     Task UpdateWithMusicEpisodeListAsync(List<MusicVideo> episodeList);
     Task<bool> CrUpdateSeriesAsync(string? seriesId, string? seasonId);
     Task SetAsDownloadedAsync(string? seriesId, string? seasonId, string episodeId, List<string>? downloadedDubs = null, List<string>? downloadedSubs = null);
@@ -334,7 +335,11 @@ public class HistoryService : IHistoryService{
         }
         
         try{
-            var content = await File.ReadAllTextAsync(_historyPath);
+            var content = await DecompressJsonFileAsync(_historyPath);
+            if (string.IsNullOrEmpty(content)){
+                // Fallback to uncompressed
+                content = await File.ReadAllTextAsync(_historyPath);
+            }
             _historyList = JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListHistorySeries) ?? [];
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to load rich history");
@@ -344,8 +349,7 @@ public class HistoryService : IHistoryService{
 
     private async Task SaveRichHistoryAsync(){
         try{
-            var content = JsonSerializer.Serialize(_historyList, HistoryJsonContext.Default.ListHistorySeries);
-            await File.WriteAllTextAsync(_historyPath, content);
+            await WriteJsonToFileCompressedAsync(_historyPath, _historyList, keepBackups: 5);
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to save rich history");
         }
@@ -355,7 +359,11 @@ public class HistoryService : IHistoryService{
         if (!File.Exists(_historyPath)) return new List<DownloadHistory>();
         
         try{
-            var content = await File.ReadAllTextAsync(_historyPath);
+            var content = await DecompressJsonFileAsync(_historyPath);
+            if (string.IsNullOrEmpty(content)){
+                // Fallback to uncompressed
+                content = await File.ReadAllTextAsync(_historyPath);
+            }
             return JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListDownloadHistory) ?? new List<DownloadHistory>();
         } catch{
             return new List<DownloadHistory>();
@@ -363,8 +371,102 @@ public class HistoryService : IHistoryService{
     }
 
     private async Task SaveHistoryAsync(List<DownloadHistory> history){
-        var content = JsonSerializer.Serialize(history, HistoryJsonContext.Default.ListDownloadHistory);
-        await File.WriteAllTextAsync(_historyPath, content);
+        await WriteJsonToFileCompressedAsync(_historyPath, history, keepBackups: 5);
+    }
+    
+    // Ported from upstream CfgManager.WriteJsonToFileCompressed
+    private static async Task WriteJsonToFileCompressedAsync(string pathToFile, object obj, int keepBackups = 5){
+        string? directoryPath = Path.GetDirectoryName(pathToFile);
+        if (string.IsNullOrEmpty(directoryPath))
+            directoryPath = Environment.CurrentDirectory;
+        
+        Directory.CreateDirectory(directoryPath);
+        string tmp = pathToFile + ".tmp";
+        
+        try{
+            // Write compressed JSON to temp file
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var gzip = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: false))
+            using (var sw = new StreamWriter(gzip)){
+                var content = JsonSerializer.Serialize(obj, obj.GetType(), HistoryJsonContext.Default);
+                await sw.WriteAsync(content);
+            }
+            
+            if (File.Exists(pathToFile)){
+                string backupPath = GetDailyBackupPath(pathToFile, DateTime.Today);
+                File.Replace(tmp, pathToFile, backupPath, ignoreMetadataErrors: true);
+                PruneBackups(pathToFile, keepBackups);
+            } else{
+                File.Move(tmp, pathToFile, overwrite: true);
+            }
+        } catch{
+            try{
+                if (File.Exists(tmp)) File.Delete(tmp);
+            } catch{
+                // ignored
+            }
+            throw;
+        }
+    }
+    
+    // Ported from upstream CfgManager.DecompressJsonFile
+    private static async Task<string?> DecompressJsonFileAsync(string pathToFile){
+        try{
+            using var fs = new FileStream(pathToFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+            // Check if file is gzip compressed by reading magic bytes
+            var magic = new byte[2];
+            await fs.ReadAsync(magic, 0, 2);
+            fs.Position = 0;
+            
+            bool isGzip = magic[0] == 0x1f && magic[1] == 0x8b;
+            
+            if (isGzip){
+                using var gzip = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionMode.Decompress);
+                using var sr = new StreamReader(gzip);
+                return await sr.ReadToEndAsync();
+            } else{
+                using var sr = new StreamReader(fs);
+                return await sr.ReadToEndAsync();
+            }
+        } catch{
+            return null;
+        }
+    }
+    
+    private static string GetDailyBackupPath(string pathToFile, DateTime date){
+        string dir = Path.GetDirectoryName(pathToFile)!;
+        string name = Path.GetFileName(pathToFile);
+        string backupName = $".{name}.{date:yyyy-MM-dd}.bak";
+        return Path.Combine(dir, backupName);
+    }
+    
+    private static void PruneBackups(string pathToFile, int keep){
+        try{
+            string dir = Path.GetDirectoryName(pathToFile)!;
+            string name = Path.GetFileName(pathToFile);
+            string glob = $".{name}.*.bak";
+            var rx = new System.Text.RegularExpressions.Regex(@"^\." + System.Text.RegularExpressions.Regex.Escape(name) + @"\.(\d{4}-\d{2}-\d{2})\.bak$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            
+            var datedBackups = new List<(string Path, DateTime Date)>();
+            foreach (var path in Directory.EnumerateFiles(dir, glob, SearchOption.TopDirectoryOnly)){
+                string file = Path.GetFileName(path);
+                var match = rx.Match(file);
+                if (match.Success && DateTime.TryParseExact(match.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)){
+                    datedBackups.Add((path, date));
+                }
+            }
+            
+            // Sort by date descending and delete oldest
+            foreach (var backup in datedBackups.OrderByDescending(b => b.Date).Skip(keep)){
+                try{
+                    File.Delete(backup.Path);
+                } catch{
+                    // ignored
+                }
+            }
+        } catch{
+            // ignored
+        }
     }
 
     // Sonarr integration methods
@@ -714,6 +816,80 @@ public class HistoryService : IHistoryService{
 
             await UpdateWithSeasonDataAsync(episodeList);
         }
+    }
+    
+    // Ported from upstream History.UpdateWithEpisode - updates history from calendar/browse data
+    public async Task UpdateWithEpisodeAsync(List<CrBrowseEpisode> episodes){
+        if (episodes == null || episodes.Count == 0) return;
+        
+        await EnsureLoadedAsync();
+        
+        // Build history index for quick lookup
+        var historyIndex = _historyList
+            .Where(h => !string.IsNullOrWhiteSpace(h.SeriesId))
+            .ToDictionary(
+                h => h.SeriesId!,
+                h => h.Seasons
+                    .Where(s => !string.IsNullOrWhiteSpace(s.SeasonId))
+                    .ToDictionary(
+                        s => s.SeasonId ?? "UNKNOWN",
+                        s => s.EpisodesList
+                            .Select(ep => ep.EpisodeId)
+                            .Where(id => !string.IsNullOrWhiteSpace(id))
+                            .ToHashSet(StringComparer.Ordinal),
+                        StringComparer.Ordinal
+                    ),
+                StringComparer.Ordinal
+            );
+        
+        // Filter to episodes whose series is in history
+        var relevantEpisodes = episodes
+            .Where(e => !string.IsNullOrWhiteSpace(e.EpisodeMetadata?.SeriesId) 
+                        && historyIndex.ContainsKey(e.EpisodeMetadata!.SeriesId!))
+            .ToList();
+        
+        foreach (var seriesGroup in relevantEpisodes.GroupBy(e => e.EpisodeMetadata?.SeriesId ?? "UNKNOWN_SERIES")){
+            var seriesId = seriesGroup.Key;
+            var convertedEpisodes = seriesGroup.Select(ConvertBrowseEpisodeToEpisodeInfo).ToList();
+            
+            if (convertedEpisodes.Count > 0){
+                _logger?.LogInformation("Updating history from browse data for series {SeriesId} with {Count} episodes", seriesId, convertedEpisodes.Count);
+                await UpdateWithSeasonDataAsync(convertedEpisodes);
+            }
+        }
+        
+        await SaveRichHistoryAsync();
+    }
+    
+    private static EpisodeInfo ConvertBrowseEpisodeToEpisodeInfo(CrBrowseEpisode browseEpisode){
+        var metadata = browseEpisode.EpisodeMetadata;
+        var originalVersion = metadata?.Versions?.FirstOrDefault(v => v.Original);
+        
+        return new EpisodeInfo{
+            Id = browseEpisode.Id ?? originalVersion?.Guid ?? "",
+            Guid = originalVersion?.Guid ?? browseEpisode.Id ?? "",
+            Title = browseEpisode.Title ?? "",
+            SeriesTitle = "", // Not available in browse data
+            SeasonTitle = "",
+            Description = browseEpisode.Description ?? "",
+            EpisodeNumber = metadata?.EpisodeCount ?? 0,
+            SeasonNumber = (int)(metadata?.SeasonNumber ?? 0),
+            SeasonId = originalVersion?.SeasonGuid ?? "",
+            SeriesId = "", // Will be populated by caller if available
+            AudioLocale = metadata?.AudioLocale ?? "ja-JP",
+            Locale = metadata?.AudioLocale ?? "ja-JP",
+            IsPremium = metadata?.IsPremiumOnly ?? false,
+            Versions = metadata?.Versions?.Select(v => new EpisodeVersion{
+                AudioLocale = v.AudioLocale ?? metadata?.AudioLocale ?? "ja-JP",
+                Guid = v.Guid ?? "",
+                MediaGuid = v.MediaGuid,
+                Original = v.Original,
+                SeasonGuid = v.SeasonGuid ?? ""
+            }).ToList(),
+            SubtitleLocales = metadata?.SubtitleLocales ?? new List<string>(),
+            Images = new List<string>(),
+            ThumbnailUrl = null
+        };
     }
     
     public async Task UpdateWithMusicEpisodeListAsync(List<MusicVideo> episodeList){

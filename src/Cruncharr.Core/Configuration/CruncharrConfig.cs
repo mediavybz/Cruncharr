@@ -21,6 +21,10 @@ public class CruncharrConfig{
     [YamlMember(Alias = "history_page_properties", ApplyNamingConventions = false)]
     public HistoryPageProperties HistoryPageProperties { get; set; } = new();
     
+    [JsonPropertyName("seasons_page_properties")]
+    [YamlMember(Alias = "seasons_page_properties", ApplyNamingConventions = false)]
+    public SeasonsPageProperties SeasonsPageProperties { get; set; } = new();
+    
     [JsonPropertyName("queue")]
     [YamlMember(Alias = "queue", ApplyNamingConventions = false)]
     public QueueConfig Queue { get; set; } = new();
@@ -59,26 +63,13 @@ public class CruncharrConfig{
     [YamlMember(Alias = "log_mode", ApplyNamingConventions = false)]
     public bool LogMode { get; set; } = false;
     
-    [JsonPropertyName("remove_finished_downloads")]
-    [YamlMember(Alias = "remove_finished_downloads", ApplyNamingConventions = false)]
+    [JsonPropertyName("remove_finished_download")]
+    [YamlMember(Alias = "remove_finished_download", ApplyNamingConventions = false)]
     public bool RemoveFinishedDownload { get; set; } = false;
     
-    public void ApplyEnvironmentVariables(){
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CRUNCHYROLL_EMAIL")))
-            Crunchyroll.Email = Environment.GetEnvironmentVariable("CRUNCHYROLL_EMAIL")!;
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CRUNCHYROLL_PASSWORD")))
-            Crunchyroll.Password = Environment.GetEnvironmentVariable("CRUNCHYROLL_PASSWORD")!;
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CRUNCHYROLL_OUTPUT_DIR")))
-            Download.OutputDirectory = Environment.GetEnvironmentVariable("CRUNCHYROLL_OUTPUT_DIR")!;
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CRUNCHYROLL_TEMP_DIR")))
-            Download.TempDirectory = Environment.GetEnvironmentVariable("CRUNCHYROLL_TEMP_DIR")!;
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CRUNCHYROLL_WEBHOOK_URL")))
-            Notifications.WebhookUrl = Environment.GetEnvironmentVariable("CRUNCHYROLL_WEBHOOK_URL")!;
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CRUNCHYROLL_QUEUE_PERSIST")))
-            Queue.PersistQueue = Environment.GetEnvironmentVariable("CRUNCHYROLL_QUEUE_PERSIST")!.Equals("true", StringComparison.OrdinalIgnoreCase);
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CRUNCHYROLL_QUEUE_AUTO_DOWNLOAD")))
-            Queue.AutoDownload = Environment.GetEnvironmentVariable("CRUNCHYROLL_QUEUE_AUTO_DOWNLOAD")!.Equals("true", StringComparison.OrdinalIgnoreCase);
-    }
+    [JsonPropertyName("tracked_series_release_last_check_utc")]
+    [YamlMember(Alias = "tracked_series_release_last_check_utc", ApplyNamingConventions = false)]
+    public DateTime? TrackedSeriesReleaseLastCheckUtc { get; set; }
     
     public static CruncharrConfig Load(string configPath){
         if (File.Exists(configPath)){
@@ -107,6 +98,30 @@ public class CruncharrConfig{
             var json = Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
             File.WriteAllText(configPath, json);
         }
+    }
+    
+    public void ApplyEnvironmentVariables(){
+        // Apply common environment variables for Docker deployment
+        var email = Environment.GetEnvironmentVariable("CRUNCHYROLL_EMAIL");
+        if (!string.IsNullOrEmpty(email)) Crunchyroll.Email = email;
+        
+        var password = Environment.GetEnvironmentVariable("CRUNCHYROLL_PASSWORD");
+        if (!string.IsNullOrEmpty(password)) Crunchyroll.Password = password;
+        
+        var outputDir = Environment.GetEnvironmentVariable("CRUNCHYROLL_OUTPUT_DIR");
+        if (!string.IsNullOrEmpty(outputDir)) Download.OutputDirectory = outputDir;
+        
+        var tempDir = Environment.GetEnvironmentVariable("CRUNCHYROLL_TEMP_DIR");
+        if (!string.IsNullOrEmpty(tempDir)) Download.TempDirectory = tempDir;
+        
+        var sonarrHost = Environment.GetEnvironmentVariable("SONARR_HOST");
+        if (!string.IsNullOrEmpty(sonarrHost)) Sonarr.Host = sonarrHost;
+        
+        var sonarrPort = Environment.GetEnvironmentVariable("SONARR_PORT");
+        if (!string.IsNullOrEmpty(sonarrPort) && int.TryParse(sonarrPort, out var port)) Sonarr.Port = port;
+        
+        var sonarrApiKey = Environment.GetEnvironmentVariable("SONARR_API_KEY");
+        if (!string.IsNullOrEmpty(sonarrApiKey)) Sonarr.ApiKey = sonarrApiKey;
     }
 }
 
@@ -220,6 +235,9 @@ public class DownloadConfig{
     [YamlMember(Alias = "dl_video_once", ApplyNamingConventions = false)]
     public bool DlVideoOnce { get; set; } = true;
     
+    [YamlMember(Alias = "download_allow_early_start", ApplyNamingConventions = false)]
+    public bool DownloadAllowEarlyStart { get; set; } = false;
+    
     [YamlMember(Alias = "keep_dubs_separate", ApplyNamingConventions = false)]
     public bool KeepDubsSeparate { get; set; } = false;
     
@@ -231,6 +249,12 @@ public class DownloadConfig{
     
     [YamlMember(Alias = "hard_sub_raw_fallback", ApplyNamingConventions = false)]
     public bool HardSubRawFallback { get; set; } = false;
+    
+    [YamlMember(Alias = "kstream", ApplyNamingConventions = false)]
+    public int Kstream { get; set; } = 0;
+    
+    [YamlMember(Alias = "stream_server", ApplyNamingConventions = false)]
+    public int StreamServer { get; set; } = 0;
     
     [YamlMember(Alias = "subtitle_languages", ApplyNamingConventions = false)]
     public List<string> SubtitleLanguages { get; set; } = new() { "en-US" };
@@ -259,6 +283,15 @@ public class DownloadConfig{
     [YamlMember(Alias = "fix_ccc_subtitles", ApplyNamingConventions = false)]
     public bool FixCccSubtitles { get; set; } = true;
     
+    [YamlMember(Alias = "timeout", ApplyNamingConventions = false)]
+    public int Timeout { get; set; } = 15000;
+    
+    [YamlMember(Alias = "skip_subs", ApplyNamingConventions = false)]
+    public bool SkipSubs { get; set; } = false;
+    
+    [YamlMember(Alias = "cc_tag", ApplyNamingConventions = false)]
+    public string CcTag { get; set; } = "CC";
+    
     [YamlMember(Alias = "convert_vtt_to_ass", ApplyNamingConventions = false)]
     public bool ConvertVttToAss { get; set; } = true;
     
@@ -279,9 +312,6 @@ public class DownloadConfig{
     
     [YamlMember(Alias = "download_methode_new", ApplyNamingConventions = false)]
     public bool DownloadMethodeNew { get; set; } = false;
-    
-    [YamlMember(Alias = "download_allow_early_start", ApplyNamingConventions = false)]
-    public bool DownloadAllowEarlyStart { get; set; } = false;
     
     [YamlMember(Alias = "download_only_with_all_selected_dubsub", ApplyNamingConventions = false)]
     public bool DownloadOnlyWithAllSelectedDubSub { get; set; } = false;
@@ -441,6 +471,9 @@ public class QueueConfig{
     public string QueueFilePath { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), 
         "Cruncharr", "queue.json");
+    
+    [YamlMember(Alias = "shutdown_when_queue_empty", ApplyNamingConventions = false)]
+    public bool ShutdownWhenQueueEmpty { get; set; } = false;
 }
 
 public class NotificationsConfig{

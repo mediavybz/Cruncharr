@@ -16,7 +16,7 @@ using Newtonsoft.Json;
 namespace Cruncharr.Core.Services;
 
 public interface IDownloadService{
-    Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default);
+    Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default, Action? onDownloadComplete = null);
     Task<DownloadResult> DownloadSeriesAsync(string seriesId, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default);
 }
 
@@ -55,7 +55,7 @@ public class DownloadService : IDownloadService{
         _filenameService = new FilenameService();
     }
     
-    public async Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default){
+    public async Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default, Action? onDownloadComplete = null){
         _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", episode.Id, episode.Title);
         progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 0, Doing = "Authenticating..." });
         
@@ -81,6 +81,28 @@ public class DownloadService : IDownloadService{
                     fullEpisode.Id, fullEpisode.Versions?.Count ?? 0, fullEpisode.AudioLocale, fullEpisode.Guid);
             } else{
                 _logger?.LogWarning("Failed to fetch full episode details for {EpisodeId}", episode.Id);
+            }
+        }
+        
+        // Check if episode has all selected dubs/subs before downloading
+        if (config.Download.DownloadOnlyWithAllSelectedDubSub){
+            var availableDubs = episode.Versions?.Select(v => v.AudioLocale).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
+            var missingDubs = config.Download.DubLanguages
+                .Where(d => !availableDubs.Contains(d, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+            
+            var availableSubs = episode.SubtitleLocales ?? new List<string>();
+            var missingSubs = config.Download.SoftSubs
+                .Where(s => !availableSubs.Contains(s, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+            
+            if (missingDubs.Count > 0 || missingSubs.Count > 0){
+                var reasons = new List<string>();
+                if (missingDubs.Count > 0) reasons.Add($"missing dubs: {string.Join(", ", missingDubs)}");
+                if (missingSubs.Count > 0) reasons.Add($"missing subs: {string.Join(", ", missingSubs)}");
+                var message = $"Skipping download - episode does not have all selected languages ({string.Join("; ", reasons)})";
+                _logger?.LogWarning(message);
+                return new DownloadResult{ Success = false, ErrorMessage = message };
             }
         }
         
@@ -448,7 +470,7 @@ public class DownloadService : IDownloadService{
             
             // Download subtitles
             var subtitleFiles = new List<(string Path, string Lang)>();
-            if (playbackData.Subtitles != null && playbackData.Subtitles.Count > 0){
+            if (!config.Download.SkipSubs && playbackData.Subtitles != null && playbackData.Subtitles.Count > 0){
                 progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 80, Doing = "Downloading subtitles..." });
                 foreach (var sub in playbackData.Subtitles){
                     var langCode = sub.Lang.Replace("-", "").ToLower();
@@ -671,6 +693,9 @@ public class DownloadService : IDownloadService{
                 }
             }
             
+            // Notify queue service that download phase is complete (allows next download to start early)
+            onDownloadComplete?.Invoke();
+            
             // Wait for processing slot (muxing/encoding limit)
             bool processingSlotHeld = false;
             try{
@@ -683,11 +708,33 @@ public class DownloadService : IDownloadService{
                 // Mux
                 progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 90, Doing = "Muxing..." });
                 if (!config.Download.SkipMuxing){
-                    await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays, videoLocales);
+                    if (config.Download.KeepDubsSeparate && !config.Download.DlVideoOnce && audioTrackLanguages.Count > 0){
+                        // Group by dub language and create separate output files
+                        var groups = audioTrackLanguages.GroupBy(a => a.Lang).ToList();
+                        foreach (var group in groups){
+                            var locale = group.Key;
+                            var groupAudioTracks = group.Select(a => (a.Path, a.Lang)).ToList();
+                            var groupOutputPath = Path.Combine(
+                                Path.GetDirectoryName(outputPath) ?? "/downloads",
+                                Path.GetFileNameWithoutExtension(outputPath) + $".{locale}" + Path.GetExtension(outputPath)
+                            );
+                            
+                            progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 90, Doing = $"Muxing {locale}..." });
+                            await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupOutputPath, config, cancellationToken, audioDelays, videoLocales);
+                            
+                            // Post-process encoding for this group if configured
+                            if (!string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null){
+                                progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 95, Doing = $"Encoding {locale}..." });
+                                await EncodeOutputAsync(groupOutputPath, config.Download.EncodingPreset, cancellationToken);
+                            }
+                        }
+                    } else{
+                        await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays, videoLocales);
+                    }
                 }
                 
-                // Post-process encoding if configured
-                if (!string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null){
+                // Post-process encoding if configured (for non-separate mode)
+                if (!config.Download.KeepDubsSeparate && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null){
                     progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
                     await EncodeOutputAsync(outputPath, config.Download.EncodingPreset, cancellationToken);
                 }
@@ -1243,10 +1290,10 @@ public class DownloadService : IDownloadService{
                     M3U8Json = videoJson,
                     Threads = config.Download.PartSize > 0 ? config.Download.PartSize : 5,
                     Retries = config.Download.RetryAttempts,
-                    Timeout = 15 * 1000,
+                    Timeout = config.Download.Timeout > 0 ? config.Download.Timeout : 15000,
                     FsRetryTime = config.Download.RetryDelay * 1000
-                }, 
-                true, false, config.Download.DownloadMethodeNew, 
+                },
+                true, false, config.Download.DownloadMethodeNew,
                 _httpClient.Client, config, progress, cancellationToken);
             
             _logger?.LogInformation("Downloading video stream to {Path}", videoOutput);
@@ -1308,10 +1355,10 @@ public class DownloadService : IDownloadService{
                         M3U8Json = audioJson,
                         Threads = config.Download.PartSize > 0 ? config.Download.PartSize : 5,
                         Retries = config.Download.RetryAttempts,
-                        Timeout = 15 * 1000,
+                        Timeout = config.Download.Timeout > 0 ? config.Download.Timeout : 15000,
                         FsRetryTime = config.Download.RetryDelay * 1000
-                    }, 
-                    false, true, config.Download.DownloadMethodeNew, 
+                    },
+                    false, true, config.Download.DownloadMethodeNew,
                     _httpClient.Client, config, progress, cancellationToken);
                 
                 _logger?.LogInformation("Downloading audio stream ({Lang}) to {Path}", lang, audioOutput);
@@ -1644,6 +1691,7 @@ public class DownloadService : IDownloadService{
             SignsSubsAsForced = config.Download.SignsSubsAsForced,
             DefaultSubSigns = config.Download.MuxDefaultSubSigns,
             DefaultSubForcedDisplay = config.Download.MuxDefaultSubForcedDisplay,
+            CcTag = config.Download.CcTag,
             KeepAllVideos = videoLocales != null && videoLocales.Count > 1,
             Options = new MuxOptions{
                 Ffmpeg = config.Download.FfmpegOptions,

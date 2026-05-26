@@ -25,7 +25,7 @@ public class SearchService : ISearchService{
     
     public Task<SeriesInfo?> GetSeriesAsync(string seriesId, CancellationToken cancellationToken = default){
         _logger?.LogInformation("Getting series: {SeriesId}", seriesId);
-        return _api.GetSeriesAsync(seriesId, false, cancellationToken);
+        return _api.GetSeriesAsync(seriesId, false, cancellationToken: cancellationToken);
     }
     
     public Task<List<EpisodeInfo>> GetEpisodesAsync(string seriesId, CancellationToken cancellationToken = default){

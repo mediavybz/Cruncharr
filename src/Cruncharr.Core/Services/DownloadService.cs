@@ -252,7 +252,7 @@ public class DownloadService : IDownloadService{
             if (playbackData.VideoUrl != null && (playbackData.VideoUrl.Contains(".mpd") || playbackData.VideoUrl.Contains("/dash/"))){
                 progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 30, Doing = "Downloading DASH streams..." });
                 var (videoPath, audioPaths) = await DownloadDashTracksAsync(playbackData.VideoUrl, tempDir, config, progress, 30, 80, cancellationToken, playbackData.VideoToken, mediaId);
-                if (videoPath != null) downloadedFiles.Add(videoPath);
+                if (videoPath != null && !config.Download.NoVideo) downloadedFiles.Add(videoPath);
                 foreach (var (path, _) in audioPaths){
                     downloadedFiles.Add(path);
                 }
@@ -266,8 +266,8 @@ public class DownloadService : IDownloadService{
                     _logger?.LogInformation("Using HLS downloader for segmented streams");
                 }
                 
-                // Download video
-                if (playbackData.VideoUrl != null){
+                // Download video (skip if NoVideo is enabled)
+                if (playbackData.VideoUrl != null && !config.Download.NoVideo){
                     progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 30, Doing = "Downloading video..." });
                     var videoPath = Path.Combine(tempDir, "video.mp4");
                     
@@ -278,10 +278,12 @@ public class DownloadService : IDownloadService{
                         await DownloadStreamAsync(playbackData.VideoUrl, videoPath, progress, 30, 60, cancellationToken, playbackData.VideoToken);
                         downloadedFiles.Add(videoPath);
                     }
+                } else if (config.Download.NoVideo){
+                    _logger?.LogInformation("NoVideo enabled, skipping video download");
                 }
                 
-                // Download primary audio
-                if (playbackData.AudioUrl != null){
+                // Download primary audio (skip if NoAudio is enabled)
+                if (playbackData.AudioUrl != null && !config.Download.NoAudio){
                     progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 60, Doing = $"Downloading audio ({episode.AudioLocale ?? config.Download.DefaultAudio})..." });
                     var audioPath = Path.Combine(tempDir, $"audio_{(episode.AudioLocale ?? config.Download.DefaultAudio).Replace("-", "").ToLower()}.m4a");
                     
@@ -296,11 +298,13 @@ public class DownloadService : IDownloadService{
                         downloadedFiles.Add(audioPath);
                         audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? config.Download.DefaultAudio));
                     }
+                } else if (config.Download.NoAudio){
+                    _logger?.LogInformation("NoAudio enabled, skipping audio download");
                 }
                 
-                // Download additional dubs if configured
+                // Download additional dubs if configured (skip if NoAudio is enabled)
                 // Note: Video is only downloaded once (DlVideoOnce optimization). Additional dubs reuse the same video stream.
-                if (config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1){
+                if (!config.Download.NoAudio && config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1){
                     var primaryLocale = episode.AudioLocale ?? config.Download.DefaultAudio;
                     var selectedDubs = config.Download.DubLanguages
                         .Where(dub => !string.Equals(dub, primaryLocale, StringComparison.OrdinalIgnoreCase))
@@ -350,8 +354,8 @@ public class DownloadService : IDownloadService{
                     }
                 }
                 
-                // Download Audio Description (AD) track if configured
-                if (config.Download.DownloadDescriptionAudio && episode.Versions != null){
+                // Download Audio Description (AD) track if configured (skip if NoAudio is enabled)
+                if (!config.Download.NoAudio && config.Download.DownloadDescriptionAudio && episode.Versions != null){
                     var adVersion = episode.Versions.FirstOrDefault(v => 
                         v.Roles?.Any(r => string.Equals(r, "description", StringComparison.OrdinalIgnoreCase)) == true);
                     

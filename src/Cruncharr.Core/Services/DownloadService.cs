@@ -229,7 +229,14 @@ public class DownloadService : IDownloadService{
             AudioLanguage = config.Download.DefaultAudio
         };
         var fileName = _filenameService.FormatFilename(config.Download.Filename, episode, filenameOptions);
-        var outputExtension = config.Download.MuxMp4 ? ".mp4" : ".mkv";
+        string outputExtension;
+        if (config.Download.MuxAudioOnlyToMp3 && config.Download.NoVideo){
+            outputExtension = ".mp3";
+        } else if (config.Download.MuxMp4){
+            outputExtension = ".mp4";
+        } else{
+            outputExtension = ".mkv";
+        }
         var outputPath = Path.Combine(outputDir, fileName + outputExtension);
         
         // Replace existing file if configured

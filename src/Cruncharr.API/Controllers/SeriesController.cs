@@ -1,4 +1,5 @@
 using Cruncharr.Core.Configuration;
+using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -60,6 +61,38 @@ public class SeriesController : ControllerBase{
             return StatusCode(500, new { Error = "Failed to mark as watched", Message = ex.Message });
         }
     }
+    
+    /// <summary>
+    /// Get all browseable series (paginated, alphabetical)
+    /// </summary>
+    [HttpGet("all")]
+    public async Task<ActionResult> GetAllSeries([FromQuery] string? locale = null){
+        try{
+            var results = await _api.GetAllSeriesAsync(locale);
+            return Ok(results);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get all series");
+            return StatusCode(500, new { Error = "Failed to get all series", Message = ex.Message });
+        }
+    }
+    
+    /// <summary>
+    /// Get seasonal series by tag (e.g., winter-2024)
+    /// </summary>
+    [HttpGet("seasonal")]
+    public async Task<ActionResult> GetSeasonalSeries([FromQuery] string season, [FromQuery] string year, [FromQuery] string? locale = null){
+        if (string.IsNullOrWhiteSpace(season) || string.IsNullOrWhiteSpace(year)){
+            return BadRequest(new { Error = "Season and year parameters are required" });
+        }
+        
+        try{
+            var results = await _api.GetSeasonalSeriesAsync(season, year, locale);
+            return Ok(results);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get seasonal series: {Season} {Year}", season, year);
+            return StatusCode(500, new { Error = "Failed to get seasonal series", Message = ex.Message });
+        }
+    }
 }
 
 [ApiController]
@@ -109,6 +142,8 @@ public class ConfigController : ControllerBase{
                 DubDownloadDelaySeconds = _config.Download.DubDownloadDelaySeconds,
                 HardSubLang = _config.Download.HardSubLang,
                 HardSubRawFallback = _config.Download.HardSubRawFallback,
+                Kstream = _config.Download.Kstream,
+                StreamServer = _config.Download.StreamServer,
                 SoftSubs = _config.Download.SoftSubs,
                 DefaultSub = _config.Download.DefaultSub,
                 IncludeSignsSubs = _config.Download.IncludeSignsSubs,
@@ -127,6 +162,9 @@ public class ConfigController : ControllerBase{
                 DownloadOnlyWithAllSelectedDubSub = _config.Download.DownloadOnlyWithAllSelectedDubSub,
                 DownloadSpeedLimit = _config.Download.DownloadSpeedLimit,
                 DownloadSpeedInBits = _config.Download.DownloadSpeedInBits,
+                Timeout = _config.Download.Timeout,
+                SkipSubs = _config.Download.SkipSubs,
+                CcTag = _config.Download.CcTag,
                 RetryAttempts = _config.Download.RetryAttempts,
                 RetryDelay = _config.Download.RetryDelay,
                 PlaybackRateLimitRetryDelaySeconds = _config.Download.PlaybackRateLimitRetryDelaySeconds,
@@ -158,7 +196,8 @@ public class ConfigController : ControllerBase{
                 PersistQueue = _config.Queue.PersistQueue,
                 AutoDownload = _config.Queue.AutoDownload,
                 SimultaneousProcessingJobs = _config.Queue.SimultaneousProcessingJobs,
-                QueueFilePath = _config.Queue.QueueFilePath
+                QueueFilePath = _config.Queue.QueueFilePath,
+                ShutdownWhenQueueEmpty = _config.Queue.ShutdownWhenQueueEmpty
             },
             History = new{
                 Enabled = _config.History.Enabled,
@@ -173,6 +212,9 @@ public class ConfigController : ControllerBase{
                 AutoRefreshMode = _config.History.AutoRefreshMode,
                 AutoRefreshAddToQueue = _config.History.AutoRefreshAddToQueue
             },
+            HistoryPageProperties = _config.HistoryPageProperties,
+            SeasonsPageProperties = _config.SeasonsPageProperties,
+            TrackedSeriesReleaseLastCheckUtc = _config.TrackedSeriesReleaseLastCheckUtc,
             Notifications = new{
                 WebhookUrl = _config.Notifications.WebhookUrl,
                 WebhookEnabled = _config.Notifications.WebhookEnabled,
@@ -299,6 +341,8 @@ public class ConfigController : ControllerBase{
             if (dl.DubDownloadDelaySeconds.HasValue) _config.Download.DubDownloadDelaySeconds = dl.DubDownloadDelaySeconds.Value;
             if (!string.IsNullOrEmpty(dl.HardSubLang)) _config.Download.HardSubLang = dl.HardSubLang;
             if (dl.HardSubRawFallback.HasValue) _config.Download.HardSubRawFallback = dl.HardSubRawFallback.Value;
+            if (dl.Kstream.HasValue) _config.Download.Kstream = dl.Kstream.Value;
+            if (dl.StreamServer.HasValue) _config.Download.StreamServer = dl.StreamServer.Value;
             if (dl.SoftSubs != null && dl.SoftSubs.Count > 0) _config.Download.SoftSubs = dl.SoftSubs;
             else if (dl.SoftSubs != null && dl.SoftSubs.Count == 0) _config.Download.SoftSubs = new List<string>{ "en-US" }; // Prevent empty - default to English
             if (!string.IsNullOrEmpty(dl.DefaultSub)) _config.Download.DefaultSub = dl.DefaultSub;
@@ -308,6 +352,9 @@ public class ConfigController : ControllerBase{
             if (dl.CcSubsMuxingFlag.HasValue) _config.Download.CcSubsMuxingFlag = dl.CcSubsMuxingFlag.Value;
             if (dl.SubsDownloadDuplicate.HasValue) _config.Download.SubsDownloadDuplicate = dl.SubsDownloadDuplicate.Value;
             if (dl.FixCccSubtitles.HasValue) _config.Download.FixCccSubtitles = dl.FixCccSubtitles.Value;
+            if (dl.Timeout.HasValue) _config.Download.Timeout = dl.Timeout.Value;
+            if (dl.SkipSubs.HasValue) _config.Download.SkipSubs = dl.SkipSubs.Value;
+            if (!string.IsNullOrEmpty(dl.CcTag)) _config.Download.CcTag = dl.CcTag;
             if (dl.ConvertVtt2Ass.HasValue) _config.Download.ConvertVtt2Ass = dl.ConvertVtt2Ass.Value;
             if (!string.IsNullOrEmpty(dl.CcSubsFont)) _config.Download.CcSubsFont = dl.CcSubsFont;
             if (!string.IsNullOrEmpty(dl.SubsAddScaledBorder)) _config.Download.SubsAddScaledBorder = dl.SubsAddScaledBorder;
@@ -349,6 +396,7 @@ public class ConfigController : ControllerBase{
         if (request.Queue != null){
             if (request.Queue.PersistQueue.HasValue) _config.Queue.PersistQueue = request.Queue.PersistQueue.Value;
             if (request.Queue.AutoDownload.HasValue) _config.Queue.AutoDownload = request.Queue.AutoDownload.Value;
+            if (request.Queue.ShutdownWhenQueueEmpty.HasValue) _config.Queue.ShutdownWhenQueueEmpty = request.Queue.ShutdownWhenQueueEmpty.Value;
         }
         
         if (request.History != null){
@@ -365,6 +413,10 @@ public class ConfigController : ControllerBase{
             if (h.AutoRefreshMode.HasValue) _config.History.AutoRefreshMode = h.AutoRefreshMode.Value;
             if (h.AutoRefreshAddToQueue.HasValue) _config.History.AutoRefreshAddToQueue = h.AutoRefreshAddToQueue.Value;
         }
+        
+        if (request.TrackedSeriesReleaseLastCheckUtc.HasValue) _config.TrackedSeriesReleaseLastCheckUtc = request.TrackedSeriesReleaseLastCheckUtc.Value;
+        if (request.HistoryPageProperties != null) _config.HistoryPageProperties = request.HistoryPageProperties;
+        if (request.SeasonsPageProperties != null) _config.SeasonsPageProperties = request.SeasonsPageProperties;
         
         if (request.Notifications != null){
             var n = request.Notifications;
@@ -458,6 +510,9 @@ public class ConfigUpdateRequest{
     public CalendarUpdateConfig? Calendar { get; set; }
     public AppearanceUpdateConfig? Appearance { get; set; }
     public GeneralUpdateConfig? General { get; set; }
+    public DateTime? TrackedSeriesReleaseLastCheckUtc { get; set; }
+    public HistoryPageProperties? HistoryPageProperties { get; set; }
+    public SeasonsPageProperties? SeasonsPageProperties { get; set; }
 }
 
 public class CrunchyrollUpdateConfig{
@@ -491,6 +546,8 @@ public class DownloadUpdateConfig{
     public int? DubDownloadDelaySeconds { get; set; }
     public string? HardSubLang { get; set; }
     public bool? HardSubRawFallback { get; set; }
+    public int? Kstream { get; set; }
+    public int? StreamServer { get; set; }
     public List<string>? SoftSubs { get; set; }
     public string? DefaultSub { get; set; }
     public bool? IncludeSignsSubs { get; set; }
@@ -499,6 +556,9 @@ public class DownloadUpdateConfig{
     public bool? CcSubsMuxingFlag { get; set; }
     public bool? SubsDownloadDuplicate { get; set; }
     public bool? FixCccSubtitles { get; set; }
+    public int? Timeout { get; set; }
+    public bool? SkipSubs { get; set; }
+    public string? CcTag { get; set; }
     public bool? ConvertVtt2Ass { get; set; }
     public string? CcSubsFont { get; set; }
     public string? SubsAddScaledBorder { get; set; }
@@ -540,6 +600,7 @@ public class DownloadUpdateConfig{
 public class QueueUpdateConfig{
     public bool? PersistQueue { get; set; }
     public bool? AutoDownload { get; set; }
+    public bool? ShutdownWhenQueueEmpty { get; set; }
 }
 
 public class HistoryUpdateConfig{

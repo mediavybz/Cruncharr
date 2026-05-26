@@ -170,8 +170,13 @@ public enum SortingType{
 }
 
 public class HistoryPageProperties{
-    public SortingType SelectedSorting { get; set; } = SortingType.SeriesTitle;
-    public bool Ascending { get; set; } = false;
+	public SortingType SelectedSorting { get; set; } = SortingType.SeriesTitle;
+	public bool Ascending { get; set; } = false;
+}
+
+public class SeasonsPageProperties{
+	public SortingType SelectedSorting { get; set; } = SortingType.SeriesTitle;
+	public bool Ascending { get; set; } = false;
 }
 
 public class SeriesDataCache{

@@ -32,6 +32,15 @@ public class AuthController : ControllerBase{
             }
         }
         
+        // If we have a token but profile is not loaded, fetch it
+        if (_auth.Token?.access_token != null && _auth.Profile.Username == "???"){
+            try{
+                await _auth.GetMultiProfileAsync(_config?.Crunchyroll?.UseBetaApi ?? true);
+            } catch (Exception ex){
+                _logger?.LogWarning(ex, "Failed to fetch profile during status check");
+            }
+        }
+        
         return Ok(new AuthStatusResponse{
             IsAuthenticated = _auth.IsAuthenticated,
             Username = _auth.Profile.Username,
@@ -131,6 +140,23 @@ public class AuthController : ControllerBase{
             Success = true,
             Message = "Logged out successfully"
         });
+    }
+    
+    /// <summary>
+    /// Fetch the Base64-encoded client token from Crunchyroll's JS bundle
+    /// </summary>
+    [HttpGet("client-token")]
+    public async Task<ActionResult> GetClientToken(){
+        try{
+            var token = await _auth.GetBase64EncodedTokenAsync();
+            if (string.IsNullOrEmpty(token)){
+                return StatusCode(500, new { Error = "Failed to extract client token" });
+            }
+            return Ok(new { Token = token });
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to fetch client token");
+            return StatusCode(500, new { Error = "Failed to fetch client token", Message = ex.Message });
+        }
     }
 }
 

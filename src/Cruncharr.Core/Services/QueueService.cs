@@ -77,7 +77,22 @@ public class QueueService : IQueueService, IDisposable{
                     _queue[item.Id] = item;
                 }
                 _logger?.LogInformation("Restored {Count} items from persisted queue", savedQueue.Count);
+                RestoreRetryStateFromQueue();
             }
+        }
+    }
+
+    // Ported from upstream: Restore retry states when queue is loaded from persistence
+    private void RestoreRetryStateFromQueue(){
+        var retryItems = _queue.Values.Where(i => i.DownloadProgress.IsWaitingForRetry).ToList();
+        if (retryItems.Count == 0) return;
+
+        var earliestRetry = retryItems.Min(i => i.DownloadProgress.RetryAtUtc);
+        if (earliestRetry.HasValue){
+            lock (_autoDownloadBlockLock){
+                _autoDownloadBlockedUntilUtc = earliestRetry.Value;
+            }
+            _logger?.LogInformation("Restored retry state: {Count} items waiting, blocked until {Time}", retryItems.Count, earliestRetry.Value);
         }
     }
 
@@ -223,6 +238,32 @@ public class QueueService : IQueueService, IDisposable{
             if (_config?.Queue.AutoDownload == true){
                 RequestPump();
             }
+            
+            // Check if queue is empty and shutdown is enabled
+            CheckShutdownWhenQueueEmpty();
+        }
+    }
+    
+    private void CheckShutdownWhenQueueEmpty(){
+        if (_config?.Queue.ShutdownWhenQueueEmpty != true)
+            return;
+        
+        bool hasUnfinishedItems = _queue.Values.Any(q => !q.DownloadProgress.IsDone && !q.DownloadProgress.IsError);
+        
+        lock (_downloadStartLock){
+            if (!hasUnfinishedItems && _activeOrStarting.Count == 0){
+                _logger?.LogInformation("Queue is empty and ShutdownWhenQueueEmpty is enabled - shutting down");
+                _config.Queue.ShutdownWhenQueueEmpty = false;
+                
+                // Trigger application shutdown
+                _ = Task.Run(() =>{
+                    try{
+                        Environment.Exit(0);
+                    } catch (Exception ex){
+                        _logger?.LogError(ex, "Failed to shutdown application");
+                    }
+                });
+            }
         }
     }
 
@@ -363,7 +404,12 @@ public class QueueService : IQueueService, IDisposable{
             });
             
             var downloadService = _serviceProvider.GetRequiredService<IDownloadService>();
-            var result = await downloadService.DownloadEpisodeAsync(item.Episode, _config!, queueProgress, cancellationToken);
+            var result = await downloadService.DownloadEpisodeAsync(item.Episode, _config!, queueProgress, cancellationToken, onDownloadComplete: () =>{
+                // Release download slot early so next download can start while this one is still processing (muxing/encoding)
+                if (_config?.Download.DownloadAllowEarlyStart == true){
+                    ReleaseDownloadSlot(item);
+                }
+            });
             
             if (!result.Success){
                 throw new Exception(result.ErrorMessage ?? "Download failed");

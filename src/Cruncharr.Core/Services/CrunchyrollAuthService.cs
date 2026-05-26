@@ -32,6 +32,7 @@ public interface ICrunchyrollAuthService{
     void LoadToken();
     void SaveToken();
     void DeleteToken();
+    Task<string> GetBase64EncodedTokenAsync(CancellationToken cancellationToken = default);
 }
 
 public class CrunchyrollAuthService : ICrunchyrollAuthService{
@@ -386,10 +387,6 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             }
         }
         
-        if (Profile.Username == "???"){
-            return false;
-        }
-        
         var hadUserSession = !string.IsNullOrWhiteSpace(Token?.refresh_token) && !string.IsNullOrWhiteSpace(Profile.Username) && Profile.Username != "???";
         
         string uuid = string.IsNullOrEmpty(Token?.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
@@ -657,6 +654,33 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             }
         } catch (Exception ex){
             _logger?.LogWarning(ex, "Failed to delete token from file");
+        }
+    }
+    
+    // Ported from upstream CrunchyrollManager.GetBase64EncodedTokenAsync
+    // Fetches and extracts the client token from Crunchyroll's JS bundle
+    public async Task<string> GetBase64EncodedTokenAsync(CancellationToken cancellationToken = default){
+        const string url = "https://static.crunchyroll.com/vilos-v2/web/vilos/js/bundle.js";
+        
+        try{
+            _logger?.LogInformation("Fetching client token from {Url}", url);
+            var response = await _httpClient.Client.GetStringAsync(url, cancellationToken);
+            
+            var match = System.Text.RegularExpressions.Regex.Match(response, @"prod=""([\w-]+:[\w-]+)""");
+            
+            if (!match.Success){
+                _logger?.LogError("Token not found in JS bundle");
+                return "";
+            }
+            
+            var token = match.Groups[1].Value;
+            var base64Token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(token));
+            
+            _logger?.LogInformation("Successfully extracted client token");
+            return base64Token;
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to fetch client token from JS bundle");
+            return "";
         }
     }
 }

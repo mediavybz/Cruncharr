@@ -40,6 +40,12 @@ public interface IHistoryService{
     
     // Utilities
     double CalculateSimilarity(string source, string target);
+    
+    // Browse/Calendar metadata refresh
+    Task RefreshExistingEpisodesFromBrowseAsync(List<CrBrowseEpisode> episodes);
+    
+    // Thumbnail
+    Task<string?> GetSeriesThumbnailAsync(string seriesId);
 }
 
 public class HistoryService : IHistoryService{
@@ -1239,6 +1245,114 @@ public class HistoryService : IHistoryService{
         }
 
         return null;
+    }
+    
+    // Updates existing history episodes with metadata from browse/calendar data without triggering a full series refresh
+    public async Task RefreshExistingEpisodesFromBrowseAsync(List<CrBrowseEpisode> episodes){
+        if (episodes == null || episodes.Count == 0) return;
+        
+        await _lock.WaitAsync();
+        try{
+            await EnsureLoadedAsync();
+            
+            bool anyUpdated = false;
+            
+            foreach (var browseEpisode in episodes){
+                if (string.IsNullOrWhiteSpace(browseEpisode.Id)) continue;
+                
+                // Find the episode in history
+                var historyEpisode = _historyList
+                    .SelectMany(s => s.Seasons)
+                    .SelectMany(se => se.EpisodesList)
+                    .FirstOrDefault(e => e.EpisodeId == browseEpisode.Id);
+                
+                if (historyEpisode == null) continue;
+                
+                // Update available dubs from versions
+                var availableDubs = new List<string>();
+                if (browseEpisode.EpisodeMetadata?.Versions != null){
+                    foreach (var version in browseEpisode.EpisodeMetadata.Versions){
+                        if (!string.IsNullOrWhiteSpace(version.AudioLocale) && 
+                            !availableDubs.Contains(version.AudioLocale, StringComparer.OrdinalIgnoreCase)){
+                            availableDubs.Add(version.AudioLocale);
+                        }
+                    }
+                }
+                
+                // Also add the primary audio locale if present
+                if (!string.IsNullOrWhiteSpace(browseEpisode.EpisodeMetadata?.AudioLocale) &&
+                    !availableDubs.Contains(browseEpisode.EpisodeMetadata.AudioLocale, StringComparer.OrdinalIgnoreCase)){
+                    availableDubs.Add(browseEpisode.EpisodeMetadata.AudioLocale);
+                }
+                
+                // Update available subs
+                var availableSubs = browseEpisode.EpisodeMetadata?.SubtitleLocales?.ToList() ?? new List<string>();
+                
+                // Only update if there's a meaningful change
+                var dubsChanged = !historyEpisode.HistoryEpisodeAvailableDubLang.SequenceEqual(availableDubs, StringComparer.OrdinalIgnoreCase);
+                var subsChanged = !historyEpisode.HistoryEpisodeAvailableSoftSubs.SequenceEqual(availableSubs, StringComparer.OrdinalIgnoreCase);
+                
+                if (dubsChanged || subsChanged){
+                    historyEpisode.HistoryEpisodeAvailableDubLang = availableDubs;
+                    historyEpisode.HistoryEpisodeAvailableSoftSubs = availableSubs;
+                    historyEpisode.IsEpisodeAvailableOnStreamingService = true;
+                    anyUpdated = true;
+                    
+                    _logger?.LogDebug("Updated episode {EpisodeId} metadata from browse data: dubs=[{Dubs}], subs=[{Subs}]", 
+                        browseEpisode.Id, 
+                        string.Join(",", availableDubs), 
+                        string.Join(",", availableSubs));
+                }
+            }
+            
+            if (anyUpdated){
+                // Update series-level aggregated metadata
+                foreach (var series in _historyList){
+                    series.UpdateNewEpisodes();
+                }
+                
+                await SaveRichHistoryAsync();
+                _logger?.LogInformation("Refreshed {Count} existing episodes from browse data", episodes.Count);
+            }
+        } finally{
+            _lock.Release();
+        }
+    }
+    
+    // Fetches series from API and returns the thumbnail URL
+    public async Task<string?> GetSeriesThumbnailAsync(string seriesId){
+        if (string.IsNullOrWhiteSpace(seriesId) || _apiService == null){
+            return null;
+        }
+        
+        try{
+            var lang = string.IsNullOrEmpty(_config.History.Lang) ? "en-US" : _config.History.Lang;
+            var seriesData = await _apiService.SeriesByIdAsync(seriesId, lang, true);
+            
+            if (seriesData == null){
+                return null;
+            }
+            
+            // Prefer ThumbnailUrl if available
+            if (!string.IsNullOrWhiteSpace(seriesData.ThumbnailUrl)){
+                return seriesData.ThumbnailUrl;
+            }
+            
+            // Fallback to CoverArtUrl
+            if (!string.IsNullOrWhiteSpace(seriesData.CoverArtUrl)){
+                return seriesData.CoverArtUrl;
+            }
+            
+            // Fallback to first image in Images list
+            if (seriesData.Images.Count > 0){
+                return seriesData.Images.First();
+            }
+            
+            return null;
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to get series thumbnail for {SeriesId}", seriesId);
+            return null;
+        }
     }
     
     private static List<string> NormalizeLocales(IEnumerable<string?>? locales){

@@ -25,6 +25,9 @@ public interface IQueueService{
     bool HasActiveDownloads { get; }
     event EventHandler? QueueStateChanged;
     
+    // Replace entire queue
+    void ReplaceQueue(List<QueueItem> newQueue);
+    
     // Processing slot management (ported from upstream QueueManager)
     Task WaitForProcessingSlotAsync(CancellationToken cancellationToken = default);
     void ReleaseProcessingSlot();
@@ -138,6 +141,18 @@ public class QueueService : IQueueService, IDisposable{
     public void ClearQueue(){
         _queue.Clear();
         _logger?.LogInformation("Queue cleared");
+        OnQueueStateChanged();
+        ScheduleSave();
+    }
+
+    public void ReplaceQueue(List<QueueItem> newQueue){
+        _queue.Clear();
+        foreach (var item in newQueue){
+            if (item != null){
+                _queue[item.Id] = item;
+            }
+        }
+        _logger?.LogInformation("Queue replaced with {Count} items", newQueue.Count);
         OnQueueStateChanged();
         ScheduleSave();
     }

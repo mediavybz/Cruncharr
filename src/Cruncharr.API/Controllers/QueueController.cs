@@ -111,6 +111,16 @@ public class QueueController : ControllerBase{
     }
 
     /// <summary>
+    /// Replace entire queue with new items
+    /// </summary>
+    [HttpPost("replace")]
+    public IActionResult ReplaceQueue([FromBody] List<QueueItem> newQueue){
+        _queueService.ReplaceQueue(newQueue ?? new List<QueueItem>());
+        _logger.LogInformation("Queue replaced with {Count} items", newQueue?.Count ?? 0);
+        return Ok(new { Message = "Queue replaced", Count = newQueue?.Count ?? 0 });
+    }
+
+    /// <summary>
     /// Retry specific item
     /// </summary>
     [HttpPost("{id}/retry")]

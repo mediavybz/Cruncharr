@@ -3,6 +3,7 @@ using System.Threading;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Cruncharr.Core.Services;
@@ -32,7 +33,7 @@ public interface IQueueService{
 
 public class QueueService : IQueueService, IDisposable{
     private readonly ConcurrentDictionary<string, QueueItem> _queue = new();
-    private readonly IDownloadService _downloadService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly IQueuePersistenceService? _persistenceService;
     private readonly ILogger<QueueService>? _logger;
     private ProcessingSlotManager? _processingSlots;
@@ -63,8 +64,8 @@ public class QueueService : IQueueService, IDisposable{
 
     public event EventHandler? QueueStateChanged;
 
-    public QueueService(IDownloadService downloadService, ILogger<QueueService>? logger = null, IQueuePersistenceService? persistenceService = null){
-        _downloadService = downloadService;
+    public QueueService(IServiceProvider serviceProvider, ILogger<QueueService>? logger = null, IQueuePersistenceService? persistenceService = null){
+        _serviceProvider = serviceProvider;
         _logger = logger;
         _persistenceService = persistenceService;
         
@@ -361,7 +362,8 @@ public class QueueService : IQueueService, IDisposable{
                 OnQueueStateChanged();
             });
             
-            var result = await _downloadService.DownloadEpisodeAsync(item.Episode, _config!, queueProgress, cancellationToken);
+            var downloadService = _serviceProvider.GetRequiredService<IDownloadService>();
+            var result = await downloadService.DownloadEpisodeAsync(item.Episode, _config!, queueProgress, cancellationToken);
             
             if (!result.Success){
                 throw new Exception(result.ErrorMessage ?? "Download failed");

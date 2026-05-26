@@ -257,6 +257,7 @@ public class DownloadService : IDownloadService{
             var downloadedFiles = new List<string>();
             var audioTrackLanguages = new List<(string Path, string Lang)>();
             var syncVideos = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var videoLocales = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // Track video file -> locale mapping
             
             // Handle DASH manifest (contains both video and audio)
             if (playbackData.VideoUrl != null && (playbackData.VideoUrl.Contains(".mpd") || playbackData.VideoUrl.Contains("/dash/"))){
@@ -283,10 +284,14 @@ public class DownloadService : IDownloadService{
                     
                     if (videoIsHls){
                         var hlsResult = await DownloadHlsStreamAsync(playbackData.VideoUrl, videoPath, true, false, config, progress, 30, 60, cancellationToken);
-                        if (hlsResult.Ok) downloadedFiles.Add(videoPath);
+                        if (hlsResult.Ok){
+                            downloadedFiles.Add(videoPath);
+                            videoLocales[videoPath] = episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP";
+                        }
                     } else{
                         await DownloadStreamAsync(playbackData.VideoUrl, videoPath, progress, 30, 60, cancellationToken, playbackData.VideoToken);
                         downloadedFiles.Add(videoPath);
+                        videoLocales[videoPath] = episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP";
                     }
                 } else if (config.Download.NoVideo){
                     _logger?.LogInformation("NoVideo enabled, skipping video download");
@@ -587,9 +592,32 @@ public class DownloadService : IDownloadService{
                         }
                     }
                     
-                    // TODO: SyncTimingFullQualityFallback - re-download full quality video for failed dubs
+                    // SyncTimingFullQualityFallback - re-download full quality video for failed dubs
                     if (syncErrors.Count > 0 && config.Download.SyncTimingFullQualityFallback){
-                        _logger?.LogWarning("Sync timing fallback not yet implemented for dubs: {Dubs}", string.Join(", ", syncErrors));
+                        _logger?.LogInformation("Sync timing fallback enabled for failed dubs: {Dubs}", string.Join(", ", syncErrors));
+                        
+                        foreach (var failedLocale in syncErrors.Distinct(StringComparer.OrdinalIgnoreCase)){
+                            try{
+                                var fallbackVideoPath = await DownloadFallbackVideoAsync(episode, failedLocale, tempDir, config, progress, cancellationToken);
+                                if (!string.IsNullOrEmpty(fallbackVideoPath)){
+                                    // Remove old video for this locale if exists
+                                    var oldVideo = downloadedFiles.FirstOrDefault(f => 
+                                        videoLocales.TryGetValue(f, out var vl) && 
+                                        vl.Equals(failedLocale, StringComparison.OrdinalIgnoreCase));
+                                    if (oldVideo != null){
+                                        downloadedFiles.Remove(oldVideo);
+                                        videoLocales.Remove(oldVideo);
+                                        try{ if (File.Exists(oldVideo)) File.Delete(oldVideo); } catch{ }
+                                    }
+                                    
+                                    downloadedFiles.Add(fallbackVideoPath);
+                                    videoLocales[fallbackVideoPath] = failedLocale;
+                                    _logger?.LogInformation("Added fallback video for {Locale}: {Path}", failedLocale, fallbackVideoPath);
+                                }
+                            } catch (Exception ex){
+                                _logger?.LogError(ex, "Failed to download fallback video for {Locale}", failedLocale);
+                            }
+                        }
                     }
                 } else{
                     _logger?.LogWarning("Could not find base video path for sync timing");
@@ -608,7 +636,7 @@ public class DownloadService : IDownloadService{
                 // Mux
                 progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 90, Doing = "Muxing..." });
                 if (!config.Download.SkipMuxing){
-                    await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays);
+                    await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays, videoLocales);
                 }
                 
                 // Post-process encoding if configured
@@ -1549,7 +1577,7 @@ public class DownloadService : IDownloadService{
     private static string FormatKey(byte[] keyBytes) =>
         BitConverter.ToString(keyBytes).Replace("-", "").ToLower();
     
-    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null){
+    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null){
         var mergerOptions = new MergerOptions{
             Output = outputPath,
             VideoTitle = config.Download.VideoTitle,
@@ -1560,6 +1588,7 @@ public class DownloadService : IDownloadService{
             SignsSubsAsForced = config.Download.SignsSubsAsForced,
             DefaultSubSigns = config.Download.MuxDefaultSubSigns,
             DefaultSubForcedDisplay = config.Download.MuxDefaultSubForcedDisplay,
+            KeepAllVideos = videoLocales != null && videoLocales.Count > 1,
             Options = new MuxOptions{
                 Ffmpeg = config.Download.FfmpegOptions,
                 Mkvmerge = config.Download.MkvmergeOptions
@@ -1593,10 +1622,11 @@ public class DownloadService : IDownloadService{
                 mergerOptions.OnlyAudio.Add(mergerInput);
             } else{
                 // Video-only file
-                _logger?.LogInformation("MUX DEBUG: Adding to OnlyVid: {File}", file);
+                var vidLang = videoLocales?.TryGetValue(file, out var vl) == true ? Languages.FindLang(vl) : Languages.DEFAULT_lang;
+                _logger?.LogInformation("MUX DEBUG: Adding to OnlyVid: {File} ({Lang})", file, vidLang?.CrLocale ?? "default");
                 mergerOptions.OnlyVid.Add(new MergerInput{
                     Path = file,
-                    Language = Languages.DEFAULT_lang
+                    Language = vidLang ?? Languages.DEFAULT_lang
                 });
             }
         }
@@ -1799,6 +1829,58 @@ public class DownloadService : IDownloadService{
         } catch (Exception ex){
             _logger?.LogError(ex, "HLS download failed for {Url}", playlistUrl);
             return (false, new PartsData());
+        }
+    }
+    
+    private async Task<string?> DownloadFallbackVideoAsync(EpisodeInfo episode, string locale, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, CancellationToken cancellationToken){
+        _logger?.LogInformation("Downloading fallback video for locale: {Locale}", locale);
+        
+        try{
+            // Find version for this locale
+            var version = episode.Versions?.FirstOrDefault(v => 
+                v.AudioLocale.Equals(locale, StringComparison.OrdinalIgnoreCase));
+            
+            if (version == null){
+                _logger?.LogWarning("No version found for locale {Locale}", locale);
+                return null;
+            }
+            
+            var mediaGuid = version.Guid;
+            if (mediaGuid.Contains(':')) mediaGuid = mediaGuid.Split(':')[1];
+            
+            // Get playback data
+            progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 0, Doing = $"Fetching playback data for fallback ({locale})..." });
+            var playbackData = await GetPlaybackDataAsync(mediaGuid, true, cancellationToken);
+            if (playbackData?.VideoUrl == null){
+                _logger?.LogWarning("No video URL in playback data for fallback ({Locale})", locale);
+                return null;
+            }
+            
+            // Download video at best quality (no audio, no subs)
+            var fallbackPath = Path.Combine(tempDir, $"video_fallback_{locale.Replace("-", "").ToLower()}.mp4");
+            var videoIsHls = IsHlsUrl(playbackData.VideoUrl);
+            
+            progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 30, Doing = $"Downloading fallback video ({locale})..." });
+            
+            if (videoIsHls){
+                var hlsResult = await DownloadHlsStreamAsync(playbackData.VideoUrl, fallbackPath, true, false, config, progress, 30, 90, cancellationToken);
+                if (!hlsResult.Ok){
+                    _logger?.LogWarning("HLS fallback download failed for {Locale}", locale);
+                    return null;
+                }
+            } else{
+                await DownloadStreamAsync(playbackData.VideoUrl, fallbackPath, progress, 30, 90, cancellationToken, playbackData.VideoToken);
+            }
+            
+            if (File.Exists(fallbackPath)){
+                _logger?.LogInformation("Fallback video downloaded for {Locale}: {Path}", locale, fallbackPath);
+                return fallbackPath;
+            }
+            
+            return null;
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Error downloading fallback video for {Locale}", locale);
+            return null;
         }
     }
     

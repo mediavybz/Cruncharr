@@ -19,6 +19,10 @@ public interface ICrunchyrollApiService{
     Task<List<SeasonInfo>> ParseSeriesByIdAsync(string id, string? crLocale, bool forced = false, CancellationToken cancellationToken = default);
     Task<List<EpisodeInfo>> GetSeasonDataByIdAsync(string seasonId, string? crLocale, bool forcedLang = false, CancellationToken cancellationToken = default);
     Task<SeriesInfo?> SeriesByIdAsync(string id, string? crLocale, bool forced = false, CancellationToken cancellationToken = default);
+    
+    // Methods ported from upstream CrEpisode
+    Task<EpisodeInfo?> ParseEpisodeByIdAsync(string id, string? crLocale, bool forcedLang = false, CancellationToken cancellationToken = default);
+    Task MarkAsWatchedAsync(string episodeId, CancellationToken cancellationToken = default);
 }
 
 public class CrunchyrollApiService : ICrunchyrollApiService{
@@ -237,6 +241,141 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to parse new episodes data");
             return null;
+        }
+    }
+    
+    /// <summary>
+    /// Parses episode by ID with version deduplication.
+    /// Ported from upstream CrEpisode.ParseEpisodeById.
+    /// Handles duplicate audio locale versions by validating each one.
+    /// </summary>
+    public async Task<EpisodeInfo?> ParseEpisodeByIdAsync(string id, string? crLocale, bool forcedLang = false, CancellationToken cancellationToken = default){
+        _logger?.LogInformation("Parsing episode by ID: {EpisodeId}, locale: {Locale}", id, crLocale);
+        
+        if (!await EnsureAuthenticatedAsync(true, cancellationToken)){
+            return null;
+        }
+        
+        var queryParams = new NameValueCollection();
+        queryParams["preferred_audio_language"] = "ja-JP";
+        if (!string.IsNullOrEmpty(crLocale)){
+            queryParams["locale"] = crLocale;
+            if (forcedLang){
+                queryParams["force_locale"] = crLocale;
+            }
+        }
+        
+        var uriBuilder = new UriBuilder($"{ApiUrls.Cms(true)}/episodes/{id}"){
+            Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
+        };
+        
+        var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        
+        if (!isOk){
+            _logger?.LogError("ParseEpisodeById failed: {Error}", error);
+            return null;
+        }
+        
+        try{
+            var episodeList = JsonConvert.DeserializeObject<CrCmsListResponse<CrEpisodeDetail>>(content);
+            
+            if (episodeList?.Data == null || episodeList.Total < 1){
+                _logger?.LogWarning("Episode not found: {EpisodeId}", id);
+                return null;
+            }
+            
+            var episode = episodeList.Data.First();
+            
+            // [PT] Ported from upstream: handle duplicate audio locale versions
+            if (episodeList.Total == 1 && episode.Versions != null){
+                var duplicateGroups = episode.Versions
+                    .GroupBy(v => v.AudioLocale)
+                    .Where(g => g.Count() > 1)
+                    .ToList();
+                
+                if (duplicateGroups.Count > 0){
+                    _logger?.LogWarning("Episode {EpisodeId} has duplicate audio locales, validating versions...", id);
+                    
+                    foreach (var group in duplicateGroups){
+                        foreach (var version in group.ToList()){
+                            var checkUriBuilder = new UriBuilder($"{ApiUrls.Cms(true)}/episodes/{version.Guid}"){
+                                Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
+                            };
+                            
+                            var checkRequest = HttpClientWrapper.CreateRequest(checkUriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+                            var (checkOk, _, _) = await _httpClient.SendRequestAsync(checkRequest);
+                            
+                            if (!checkOk){
+                                _logger?.LogWarning("Removing invalid version {VersionGuid} for locale {Locale}", version.Guid, version.AudioLocale);
+                                episode.Versions.Remove(version);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            var originalVersion = episode.Versions?.FirstOrDefault(v => v.Original);
+            var guid = originalVersion?.Guid ?? episode.Id;
+            
+            return new EpisodeInfo{
+                Id = episode.Id,
+                Guid = guid,
+                Title = episode.Title,
+                EpisodeNumber = episode.EpisodeNumber ?? 0,
+                SeasonNumber = episode.SeasonNumber,
+                Description = episode.Description,
+                SeriesTitle = episode.SeriesTitle,
+                Locale = episode.AudioLocale ?? "ja-JP",
+                AudioLocale = episode.AudioLocale,
+                IsPremium = episode.IsPremiumOnly,
+                Versions = episode.Versions?.Select(v => new EpisodeVersion{
+                    AudioLocale = v.AudioLocale,
+                    Guid = v.Guid,
+                    MediaGuid = v.MediaGuid,
+                    Original = v.Original,
+                    SeasonGuid = v.SeasonGuid
+                }).ToList(),
+                Images = ExtractImageUrls(episode.Images),
+                ThumbnailUrl = ExtractBestImage(episode.Images, "thumbnail") ?? ExtractBestImage(episode.Images, "episode_thumbnail"),
+                CoverArtUrl = ExtractBestImage(episode.Images, "poster_tall"),
+                SubtitleLocales = episode.SubtitleLocales ?? new List<string>()
+            };
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to parse episode data for {EpisodeId}", id);
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Marks an episode as watched on Crunchyroll.
+    /// Ported from upstream CrEpisode.MarkAsWatched.
+    /// </summary>
+    public async Task MarkAsWatchedAsync(string episodeId, CancellationToken cancellationToken = default){
+        _logger?.LogInformation("Marking episode as watched: {EpisodeId}", episodeId);
+        
+        if (!await EnsureAuthenticatedAsync(true, cancellationToken)){
+            _logger?.LogWarning("Cannot mark as watched: not authenticated");
+            return;
+        }
+        
+        if (_authService.Token?.account_id == null){
+            _logger?.LogWarning("Cannot mark as watched: no account ID");
+            return;
+        }
+        
+        var request = HttpClientWrapper.CreateRequest(
+            $"{ApiUrls.Content}/discover/{_authService.Token.account_id}/mark_as_watched/{episodeId}",
+            HttpMethod.Post,
+            true,
+            _authService.Token.access_token);
+        
+        var (isOk, _, error) = await _httpClient.SendRequestAsync(request);
+        
+        if (!isOk){
+            _logger?.LogError("MarkAsWatched failed: {Error}", error);
+        } else{
+            _logger?.LogInformation("Marked episode {EpisodeId} as watched", episodeId);
         }
     }
     

@@ -69,9 +69,10 @@ public class DownloadService : IDownloadService{
         }
         
         // Fetch full episode details with versions if not already loaded
+        // [PT] Using ParseEpisodeByIdAsync instead of GetEpisodeAsync to get version deduplication
         if (episode.Versions == null || episode.Versions.Count == 0){
             progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 10, Doing = "Fetching episode info..." });
-            var fullEpisode = await _api.GetEpisodeAsync(episode.Id, true, cancellationToken);
+            var fullEpisode = await _api.ParseEpisodeByIdAsync(episode.Id, null, false, cancellationToken);
             if (fullEpisode != null){
                 episode.Versions = fullEpisode.Versions;
                 episode.AudioLocale = fullEpisode.AudioLocale ?? episode.AudioLocale;
@@ -723,6 +724,15 @@ public class DownloadService : IDownloadService{
                     await _history.SetAsDownloadedAsync(episode.Guid, episode.SeasonId, episode.Id, downloadedDubs, downloadedSubs);
                 } catch (Exception ex){
                     _logger?.LogWarning(ex, "Failed to record download history");
+                }
+            }
+            
+            // [PT] Mark as watched on Crunchyroll if configured
+            if (config.Crunchyroll.MarkAsWatched){
+                try{
+                    await _api.MarkAsWatchedAsync(episode.Id, cancellationToken);
+                } catch (Exception ex){
+                    _logger?.LogWarning(ex, "Failed to mark episode as watched");
                 }
             }
             

@@ -78,6 +78,7 @@ public class ConfigController : ControllerBase{
                 TempDirectory = _config.Download.TempDirectory,
                 UseTempFolder = _config.Download.UseTempFolder,
                 Filename = _config.Download.Filename,
+                FilenameTemplate = _config.Download.FilenameTemplate,
                 FilenameWhitespaceSubstitute = _config.Download.FilenameWhitespaceSubstitute,
                 VideoTitle = _config.Download.VideoTitle,
                 IncludeVideoDescription = _config.Download.IncludeVideoDescription,
@@ -266,6 +267,7 @@ public class ConfigController : ControllerBase{
             if (!string.IsNullOrEmpty(dl.TempDirectory)) _config.Download.TempDirectory = dl.TempDirectory;
             if (dl.UseTempFolder.HasValue) _config.Download.UseTempFolder = dl.UseTempFolder.Value;
             if (!string.IsNullOrEmpty(dl.Filename)) _config.Download.Filename = dl.Filename;
+            if (!string.IsNullOrEmpty(dl.FilenameTemplate)) _config.Download.FilenameTemplate = dl.FilenameTemplate;
             if (!string.IsNullOrEmpty(dl.FilenameWhitespaceSubstitute)) _config.Download.FilenameWhitespaceSubstitute = dl.FilenameWhitespaceSubstitute;
             if (dl.VideoTitle != null) _config.Download.VideoTitle = dl.VideoTitle;
             if (dl.IncludeVideoDescription.HasValue) _config.Download.IncludeVideoDescription = dl.IncludeVideoDescription.Value;
@@ -458,6 +460,7 @@ public class DownloadUpdateConfig{
     public string? TempDirectory { get; set; }
     public bool? UseTempFolder { get; set; }
     public string? Filename { get; set; }
+    public string? FilenameTemplate { get; set; }
     public string? FilenameWhitespaceSubstitute { get; set; }
     public string? VideoTitle { get; set; }
     public bool? IncludeVideoDescription { get; set; }

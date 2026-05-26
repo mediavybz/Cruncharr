@@ -225,12 +225,18 @@ public class DownloadService : IDownloadService{
         var outputDir = config.Download.OutputDirectory;
         Directory.CreateDirectory(outputDir);
         
+        // Use FilenameTemplate if user configured it, otherwise fall back to Filename
+        var filenameTemplate = !string.IsNullOrEmpty(config.Download.FilenameTemplate) && 
+                               config.Download.FilenameTemplate != "{SeriesTitle} - S{season:00}E{episode:00} - {EpisodeTitle}"
+            ? config.Download.FilenameTemplate 
+            : config.Download.Filename;
+        
         var filenameOptions = new FilenameOptions{
             NumberPadding = config.Download.LeadingNumbers,
             Quality = config.Download.QualityVideo,
             AudioLanguage = config.Download.DefaultAudio
         };
-        var fileName = _filenameService.FormatFilename(config.Download.Filename, episode, filenameOptions);
+        var fileName = _filenameService.FormatFilename(filenameTemplate, episode, filenameOptions);
         string outputExtension;
         if (config.Download.MuxAudioOnlyToMp3 && config.Download.NoVideo){
             outputExtension = ".mp3";
@@ -621,6 +627,46 @@ public class DownloadService : IDownloadService{
                     }
                 } else{
                     _logger?.LogWarning("Could not find base video path for sync timing");
+                }
+            }
+            
+            // Probe actual video resolution and fix filename if needed
+            var firstVideoFile = downloadedFiles.FirstOrDefault(f => !audioTrackLanguages.Any(a => a.Path == f));
+            if (firstVideoFile != null && !config.Download.NoVideo){
+                progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 85, Doing = "Probing video resolution..." });
+                var (actualHeight, actualWidth) = await ProbeVideoResolutionAsync(firstVideoFile, cancellationToken);
+                
+                if (actualHeight.HasValue){
+                    // Check if current filename uses quality preference instead of actual resolution
+                    var qualityPref = config.Download.QualityVideo?.ToLowerInvariant();
+                    bool needsRename = qualityPref == "best" || qualityPref == "worst" || 
+                                       (outputPath.Contains($"[{config.Download.QualityVideo}p]") && config.Download.QualityVideo != actualHeight.Value.ToString());
+                    
+                    if (needsRename){
+                        _logger?.LogInformation("Renaming output file to use actual resolution {Height}p instead of quality preference '{Quality}'", 
+                            actualHeight.Value, config.Download.QualityVideo);
+                        
+                        var newFilenameOptions = new FilenameOptions{
+                            NumberPadding = config.Download.LeadingNumbers,
+                            Quality = actualHeight.Value.ToString(),
+                            AudioLanguage = config.Download.DefaultAudio
+                        };
+                        var newFileName = _filenameService.FormatFilename(filenameTemplate, episode, newFilenameOptions);
+                        var newOutputPath = Path.Combine(outputDir, newFileName + outputExtension);
+                        
+                        // Handle collisions
+                        if (File.Exists(newOutputPath) && !config.Download.ReplaceExistingFiles){
+                            int counter = 1;
+                            var baseNewPath = newOutputPath;
+                            while (File.Exists(newOutputPath)){
+                                newOutputPath = Path.Combine(outputDir, $"{newFileName}({counter}){outputExtension}");
+                                counter++;
+                            }
+                            _logger?.LogWarning("Collision detected, using {Path}", newOutputPath);
+                        }
+                        
+                        outputPath = newOutputPath;
+                    }
                 }
             }
             
@@ -1725,6 +1771,66 @@ public class DownloadService : IDownloadService{
                 _logger?.LogDebug("Process stderr: {Error}", error);
             }
         }
+    }
+    
+    private async Task<string> RunProcessWithOutputAsync(string executable, List<string> args, CancellationToken cancellationToken){
+        var startInfo = new ProcessStartInfo{
+            FileName = executable,
+            Arguments = string.Join(" ", args.Select(a => a.Contains(" ") ? $"\"{a}\"" : a)),
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        
+        _logger?.LogDebug("Running: {Executable} {Args}", executable, startInfo.Arguments);
+        
+        using var process = Process.Start(startInfo);
+        if (process == null){
+            _logger?.LogError("Failed to start process: {Executable}", executable);
+            return "";
+        }
+        
+        await process.WaitForExitAsync(cancellationToken);
+        
+        var output = await process.StandardOutput.ReadToEndAsync();
+        var error = await process.StandardError.ReadToEndAsync();
+        
+        if (process.ExitCode != 0){
+            _logger?.LogError("Process failed with exit code {ExitCode}: {Error}", process.ExitCode, error);
+            return "";
+        }
+        
+        return output.Trim();
+    }
+    
+    private async Task<(int? Height, int? Width)> ProbeVideoResolutionAsync(string videoPath, CancellationToken cancellationToken){
+        try{
+            if (!File.Exists(videoPath)) return (null, null);
+            
+            var ffprobePath = FindExecutable("ffprobe") ?? "ffprobe";
+            var args = new List<string>{
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=p=0",
+                videoPath
+            };
+            
+            var output = await RunProcessWithOutputAsync(ffprobePath, args, cancellationToken);
+            if (string.IsNullOrEmpty(output)) return (null, null);
+            
+            var parts = output.Split(',');
+            if (parts.Length >= 2 && 
+                int.TryParse(parts[0].Trim(), out var width) && 
+                int.TryParse(parts[1].Trim(), out var height)){
+                _logger?.LogInformation("Probed video resolution: {Width}x{Height}", width, height);
+                return (height, width);
+            }
+        } catch (Exception ex){
+            _logger?.LogWarning(ex, "Failed to probe video resolution for {Path}", videoPath);
+        }
+        return (null, null);
     }
     
     private async Task EncodeOutputAsync(string inputPath, string presetName, CancellationToken cancellationToken){

@@ -204,7 +204,7 @@ public class DownloadConfig{
     public string DefaultAudio { get; set; } = "ja-JP";
     
     [YamlMember(Alias = "download_description_audio", ApplyNamingConventions = false)]
-    public bool DownloadDescriptionAudio { get; set; } = true;
+    public bool DownloadDescriptionAudio { get; set; } = false;
     
     [YamlMember(Alias = "download_first_available_dub", ApplyNamingConventions = false)]
     public bool DownloadFirstAvailableDub { get; set; } = false;
@@ -427,7 +427,7 @@ public class QueueConfig{
     public bool PersistQueue { get; set; } = false;
     
     [YamlMember(Alias = "auto_download", ApplyNamingConventions = false)]
-    public bool AutoDownload { get; set; } = true;
+    public bool AutoDownload { get; set; } = false;
     
     [YamlMember(Alias = "simultaneous_processing_jobs", ApplyNamingConventions = false)]
     public int SimultaneousProcessingJobs { get; set; } = 2;

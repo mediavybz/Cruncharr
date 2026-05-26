@@ -46,6 +46,20 @@ public class SeriesController : ControllerBase{
             return StatusCode(500, new { Error = "Failed to get episodes", Message = ex.Message });
         }
     }
+    
+    /// <summary>
+    /// Mark an episode as watched on Crunchyroll
+    /// </summary>
+    [HttpPost("episodes/{episodeId}/mark-watched")]
+    public async Task<ActionResult> MarkAsWatched(string episodeId){
+        try{
+            await _api.MarkAsWatchedAsync(episodeId);
+            return Ok(new { Message = "Episode marked as watched" });
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to mark episode as watched: {EpisodeId}", episodeId);
+            return StatusCode(500, new { Error = "Failed to mark as watched", Message = ex.Message });
+        }
+    }
 }
 
 [ApiController]

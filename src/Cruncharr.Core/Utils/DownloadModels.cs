@@ -5,7 +5,8 @@ public enum DownloadMediaType{
     Audio,
     Subtitle,
     Chapters,
-    Font
+    Font,
+    SyncVideo
 }
 
 public class SxItem{

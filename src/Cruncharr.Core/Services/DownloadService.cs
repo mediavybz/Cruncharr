@@ -253,8 +253,8 @@ public class DownloadService : IDownloadService{
         
         try{
             var downloadedFiles = new List<string>();
-            
             var audioTrackLanguages = new List<(string Path, string Lang)>();
+            var syncVideos = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             
             // Handle DASH manifest (contains both video and audio)
             if (playbackData.VideoUrl != null && (playbackData.VideoUrl.Contains(".mpd") || playbackData.VideoUrl.Contains("/dash/"))){
@@ -336,6 +336,26 @@ public class DownloadService : IDownloadService{
                         
                         try{
                             var dubPlayback = await GetPlaybackDataAsync(dubMediaGuid, true, cancellationToken);
+                            
+                            // Download sync video for timing comparison if SyncTiming is enabled
+                            if (config.Download.SyncTiming && config.Download.DlVideoOnce && dubPlayback?.VideoUrl != null){
+                                progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 62, Doing = $"Downloading sync video ({dub})..." });
+                                var syncVideoPath = Path.Combine(tempDir, $"syncvideo_{dub.Replace("-", "").ToLower()}.mp4");
+                                var dubVideoIsHls = IsHlsUrl(dubPlayback.VideoUrl);
+                                
+                                if (dubVideoIsHls){
+                                    var hlsResult = await DownloadHlsStreamAsync(dubPlayback.VideoUrl, syncVideoPath, true, false, config, progress, 60, 65, cancellationToken);
+                                    if (hlsResult.Ok){
+                                        syncVideos[dub] = syncVideoPath;
+                                        _logger?.LogInformation("Downloaded sync video for dub: {Dub} -> {Path}", dub, syncVideoPath);
+                                    }
+                                } else{
+                                    await DownloadStreamAsync(dubPlayback.VideoUrl, syncVideoPath, progress, 60, 65, cancellationToken, dubPlayback.VideoToken);
+                                    syncVideos[dub] = syncVideoPath;
+                                    _logger?.LogInformation("Downloaded sync video for dub: {Dub} -> {Path}", dub, syncVideoPath);
+                                }
+                            }
+                            
                             if (dubPlayback?.AudioUrl != null){
                                 progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 65, Doing = $"Downloading audio ({dub})..." });
                                 
@@ -343,14 +363,14 @@ public class DownloadService : IDownloadService{
                                 var dubAudioIsHls = IsHlsUrl(dubPlayback.AudioUrl);
                                 
                                 if (dubAudioIsHls){
-                                    var hlsResult = await DownloadHlsStreamAsync(dubPlayback.AudioUrl, dubAudioPath, false, true, config, progress, 60, 80, cancellationToken);
+                                    var hlsResult = await DownloadHlsStreamAsync(dubPlayback.AudioUrl, dubAudioPath, false, true, config, progress, 65, 80, cancellationToken);
                                     if (hlsResult.Ok){
                                         downloadedFiles.Add(dubAudioPath);
                                         audioTrackLanguages.Add((dubAudioPath, dub));
                                         _logger?.LogInformation("Downloaded additional audio track: {Dub} -> {Path}", dub, dubAudioPath);
                                     }
                                 } else{
-                                    await DownloadStreamAsync(dubPlayback.AudioUrl, dubAudioPath, progress, 60, 80, cancellationToken, dubPlayback.VideoToken);
+                                    await DownloadStreamAsync(dubPlayback.AudioUrl, dubAudioPath, progress, 65, 80, cancellationToken, dubPlayback.VideoToken);
                                     downloadedFiles.Add(dubAudioPath);
                                     audioTrackLanguages.Add((dubAudioPath, dub));
                                     _logger?.LogInformation("Downloaded additional audio track: {Dub} -> {Path}", dub, dubAudioPath);
@@ -516,10 +536,68 @@ public class DownloadService : IDownloadService{
                 }).ToList();
             }
             
+            // Sync Timing: Calculate delays for dubs if enabled
+            var audioDelays = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (config.Download.SyncTiming && config.Download.DlVideoOnce && syncVideos.Count > 0 && _videoSyncer != null){
+                progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 86, Doing = "Syncing dub timings..." });
+                
+                // Find base video path (first video file that's not a sync video)
+                var baseVideoPath = downloadedFiles.FirstOrDefault(f => 
+                    !syncVideos.Values.Any(sv => sv.Equals(f, StringComparison.OrdinalIgnoreCase)) &&
+                    (f.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase)));
+                
+                if (!string.IsNullOrEmpty(baseVideoPath)){
+                    var ffmpegPath = FindExecutable("ffmpeg") ?? "ffmpeg";
+                    var syncErrors = new List<string>();
+                    
+                    foreach (var (dubLocale, syncVideoPath) in syncVideos){
+                        try{
+                            _logger?.LogInformation("Syncing dub timing for {Dub}: base={Base}, sync={Sync}", dubLocale, baseVideoPath, syncVideoPath);
+                            var delay = await _videoSyncer.ProcessVideo(baseVideoPath, syncVideoPath, tempDir, ffmpegPath);
+                            
+                            if (delay.offSet <= -100){
+                                _logger?.LogWarning("Sync failed for dub {Dub}: offset={Offset}", dubLocale, delay.offSet);
+                                syncErrors.Add(dubLocale);
+                                continue;
+                            }
+                            
+                            var delayMs = (int)(delay.offSet * 1000);
+                            audioDelays[dubLocale] = delayMs;
+                            _logger?.LogInformation("Sync delay for dub {Dub}: {Delay}ms", dubLocale, delayMs);
+                            
+                            if (delay.lengthDiff > 0.1){
+                                _logger?.LogWarning("Dub length difference for {Dub}: {LengthDiff}s", dubLocale, delay.lengthDiff);
+                            }
+                        } catch (Exception ex){
+                            _logger?.LogError(ex, "Error syncing dub {Dub}", dubLocale);
+                            syncErrors.Add(dubLocale);
+                        }
+                    }
+                    
+                    // Clean up sync videos after processing
+                    foreach (var syncVideoPath in syncVideos.Values){
+                        try{
+                            if (File.Exists(syncVideoPath)) File.Delete(syncVideoPath);
+                            var resumeFile = syncVideoPath + ".resume";
+                            if (File.Exists(resumeFile)) File.Delete(resumeFile);
+                        } catch (Exception ex){
+                            _logger?.LogWarning(ex, "Failed to delete sync video: {Path}", syncVideoPath);
+                        }
+                    }
+                    
+                    // TODO: SyncTimingFullQualityFallback - re-download full quality video for failed dubs
+                    if (syncErrors.Count > 0 && config.Download.SyncTimingFullQualityFallback){
+                        _logger?.LogWarning("Sync timing fallback not yet implemented for dubs: {Dubs}", string.Join(", ", syncErrors));
+                    }
+                } else{
+                    _logger?.LogWarning("Could not find base video path for sync timing");
+                }
+            }
+            
             // Mux
             progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 90, Doing = "Muxing..." });
             if (!config.Download.SkipMuxing){
-                await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken);
+                await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays);
             }
             
             // Post-process encoding if configured
@@ -1455,7 +1533,7 @@ public class DownloadService : IDownloadService{
     private static string FormatKey(byte[] keyBytes) =>
         BitConverter.ToString(keyBytes).Replace("-", "").ToLower();
     
-    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken){
+    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null){
         var mergerOptions = new MergerOptions{
             Output = outputPath,
             VideoTitle = config.Download.VideoTitle,
@@ -1487,10 +1565,16 @@ public class DownloadService : IDownloadService{
             if (audioTrack != default){
                 // Audio file
                 _logger?.LogInformation("MUX DEBUG: Adding to OnlyAudio: {File} ({Lang})", file, audioTrack.Lang);
-                mergerOptions.OnlyAudio.Add(new MergerInput{
+                var mergerInput = new MergerInput{
                     Path = file,
                     Language = Languages.FindLang(audioTrack.Lang)
-                });
+                };
+                // Apply sync delay if available
+                if (audioDelays != null && audioDelays.TryGetValue(audioTrack.Lang, out var delay)){
+                    mergerInput.Delay = delay;
+                    _logger?.LogInformation("MUX DEBUG: Applying sync delay {Delay}ms to audio: {Lang}", delay, audioTrack.Lang);
+                }
+                mergerOptions.OnlyAudio.Add(mergerInput);
             } else{
                 // Video-only file
                 _logger?.LogInformation("MUX DEBUG: Adding to OnlyVid: {File}", file);

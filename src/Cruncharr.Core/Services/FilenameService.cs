@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Cruncharr.Core.Models;
+using Cruncharr.Core.Utils.Files;
 
 namespace Cruncharr.Core.Services;
 
@@ -16,61 +17,88 @@ public class FilenameOptions{
     public string? AudioLanguage { get; set; }
     public SonarrSeries? SonarrSeries { get; set; }
     public SonarrEpisode? SonarrEpisode { get; set; }
+    public List<string>? Overrides { get; set; }
+    public List<string>? SelectedDubs { get; set; }
 }
 
 public class FilenameService : IFilenameService{
     public string FormatFilename(string template, EpisodeInfo episode, FilenameOptions? options = null){
         options ??= new FilenameOptions();
         
-        // Support both {var} and ${var} syntax
-        var result = template;
+        var variables = new List<Variable>();
         
-        // Build variable replacements
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase){
-            ["seriesTitle"] = SanitizeFilename(episode.SeriesTitle),
-            ["episodeTitle"] = SanitizeFilename(episode.Title),
-            ["season"] = episode.SeasonNumber.ToString(),
-            ["season00"] = episode.SeasonNumber.ToString($"D{options.NumberPadding}"),
-            ["episode"] = episode.EpisodeNumber.ToString(),
-            ["episode00"] = episode.EpisodeNumber.ToString($"D{options.NumberPadding}"),
-            ["id"] = episode.Id ?? "",
-            ["guid"] = episode.Guid ?? "",
-            ["seriesId"] = episode.SeriesId ?? "",
-            ["seasonId"] = episode.SeasonId ?? "",
-            ["seasonTitle"] = SanitizeFilename(episode.SeasonTitle ?? ""),
-        };
+        // Upstream variables
+        variables.Add(new Variable("title", episode.Title, true));
         
-        if (!string.IsNullOrEmpty(options.Quality)){
-            replacements["height"] = options.Quality;
-            replacements["quality"] = options.Quality;
+        // Episode: try to parse as double for fractional episodes (e.g., 12.5), fallback to int
+        object episodeValue;
+        if (!string.IsNullOrEmpty(episode.Episode) && double.TryParse(episode.Episode, NumberStyles.Any, CultureInfo.InvariantCulture, out var epDouble)){
+            episodeValue = Math.Round(epDouble, 1);
+        } else {
+            episodeValue = episode.EpisodeNumber;
         }
+        variables.Add(new Variable("episode", episodeValue, false));
         
-        if (!string.IsNullOrEmpty(options.AudioLanguage)){
-            replacements["audioLang"] = options.AudioLanguage;
-            replacements["audioLanguage"] = options.AudioLanguage;
-        }
+        variables.Add(new Variable("seriesTitle", episode.SeriesTitle, true));
+        variables.Add(new Variable("seasonTitle", episode.SeasonTitle ?? string.Empty, true));
+        variables.Add(new Variable("season", (double)episode.SeasonNumber, false));
+        variables.Add(new Variable("dubs", string.Join(", ", options.SelectedDubs ?? new List<string>()), true));
         
         // Sonarr variables (ported from upstream FileNameManager)
         if (options.SonarrSeries != null){
-            replacements["sonarrSeriesTitle"] = SanitizeFilename(options.SonarrSeries.Title ?? "");
-            replacements["sonarrSeriesReleaseYear"] = options.SonarrSeries.Year.ToString();
+            variables.Add(new Variable("sonarrSeriesTitle", options.SonarrSeries.Title ?? string.Empty, true));
+            variables.Add(new Variable("sonarrSeriesReleaseYear", options.SonarrSeries.Year, true));
         }
         if (options.SonarrEpisode != null){
-            replacements["sonarrEpisodeTitle"] = SanitizeFilename(options.SonarrEpisode.Title ?? "");
+            variables.Add(new Variable("sonarrEpisodeTitle", options.SonarrEpisode.Title ?? string.Empty, true));
         }
         
-        // Replace ${var} syntax
-        result = Regex.Replace(result, @"\$\{([A-Za-z0-9]+)\}", m =>{
-            var key = m.Groups[1].Value;
-            return replacements.TryGetValue(key, out var value) ? value : m.Value;
-        });
+        // Height/width from quality config when available
+        int height = 0;
+        int width = 0;
+        if (!string.IsNullOrEmpty(options.Quality)){
+            var qualityStr = options.Quality.Replace("p", "").Trim();
+            if (int.TryParse(qualityStr, out height)){
+                width = (int)Math.Round(height * 16.0 / 9.0);
+            }
+        }
+        variables.Add(new Variable("height", height, false));
+        variables.Add(new Variable("width", width, false));
         
-        // Replace {var} syntax (with optional format like {season:00})
-        result = Regex.Replace(result, @"\{([A-Za-z0-9]+)(?::([^}]+))?\}", m =>{
+        // Backward compatibility variables (not in upstream but supported by previous implementation)
+        if (!string.IsNullOrEmpty(options.Quality)){
+            variables.Add(new Variable("quality", options.Quality, false));
+        }
+        if (!string.IsNullOrEmpty(options.AudioLanguage)){
+            variables.Add(new Variable("audioLang", options.AudioLanguage, false));
+            variables.Add(new Variable("audioLanguage", options.AudioLanguage, false));
+        }
+        variables.Add(new Variable("id", episode.Id, false));
+        variables.Add(new Variable("guid", episode.Guid, false));
+        variables.Add(new Variable("seriesId", episode.SeriesId ?? string.Empty, false));
+        variables.Add(new Variable("seasonId", episode.SeasonId ?? string.Empty, false));
+        
+        // Use upstream FileNameManager for ${var} syntax
+        var result = FileNameManager.ParseFileName(
+            template, 
+            variables, 
+            options.NumberPadding, 
+            options.WhitespaceReplace ?? string.Empty, 
+            options.Overrides ?? new List<string>()
+        );
+        
+        // Join path segments
+        var joinedResult = string.Join(Path.DirectorySeparatorChar, result);
+        
+        // Also support legacy {var} syntax with optional formatting (e.g., {season:00})
+        joinedResult = Regex.Replace(joinedResult, @"\{([A-Za-z0-9]+)(?::([^}]+))?\}", m =>{
             var key = m.Groups[1].Value;
             var format = m.Groups[2].Success ? m.Groups[2].Value : null;
             
-            if (!replacements.TryGetValue(key, out var value)) return m.Value;
+            var variable = variables.FirstOrDefault(v => v.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (variable == null) return m.Value;
+            
+            var value = variable.ReplaceWith?.ToString() ?? string.Empty;
             
             if (format != null && int.TryParse(value, out var num)){
                 if (format == "00" || format == "D2") return num.ToString("D2");
@@ -82,36 +110,10 @@ public class FilenameService : IFilenameService{
             return value;
         });
         
-        // Apply whitespace replacement if configured
-        if (!string.IsNullOrEmpty(options.WhitespaceReplace)){
-            result = result.Replace(" ", options.WhitespaceReplace);
-        }
-        
-        return SanitizeFilename(result);
+        return joinedResult;
     }
     
     public string SanitizeFilename(string filename){
-        if (string.IsNullOrEmpty(filename)) return "unknown";
-        
-        // Remove illegal characters
-        var illegal = new Regex(@"[\/\?<>\\:\*\|"":]");
-        var control = new Regex(@"[\x00-\x1f\x80-\x9f]");
-        var reserved = new Regex(@"^\.\.?$");
-        var windowsReserved = new Regex(@"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", RegexOptions.IgnoreCase);
-        var trailing = new Regex(@"[\. ]+$");
-        
-        filename = illegal.Replace(filename, "");
-        filename = control.Replace(filename, "");
-        filename = reserved.Replace(filename, "");
-        filename = windowsReserved.Replace(filename, "");
-        filename = trailing.Replace(filename, "");
-        
-        // Trim and limit length
-        filename = filename.Trim();
-        if (filename.Length > 200){
-            filename = filename.Substring(0, 200);
-        }
-        
-        return string.IsNullOrEmpty(filename) ? "unknown" : filename;
+        return FileNameManager.CleanupFilename(filename);
     }
 }

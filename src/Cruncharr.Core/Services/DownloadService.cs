@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
@@ -279,7 +280,8 @@ public class DownloadService : IDownloadService{
             Quality = config.Download.QualityVideo,
             AudioLanguage = config.Download.DefaultAudio,
             SonarrSeries = sonarrSeries,
-            SonarrEpisode = sonarrEpisode
+            SonarrEpisode = sonarrEpisode,
+            SelectedDubs = config.Download.DubLanguages
         };
         var fileName = _filenameService.FormatFilename(filenameTemplate, episode, filenameOptions);
         string outputExtension;
@@ -578,6 +580,32 @@ public class DownloadService : IDownloadService{
                 }
             }
             
+            // Generate description XML if enabled
+            string? descriptionPath = null;
+            if (config.Download.IncludeVideoDescription && !string.IsNullOrEmpty(episode.Description) && !config.Download.SkipMuxing){
+                descriptionPath = Path.Combine(tempDir, "description.xml");
+                try{
+                    using var writer = XmlWriter.Create(descriptionPath);
+                    writer.WriteStartDocument();
+                    writer.WriteStartElement("Tags");
+                    writer.WriteStartElement("Tag");
+                    writer.WriteStartElement("Targets");
+                    writer.WriteElementString("TargetTypeValue", "50");
+                    writer.WriteEndElement(); // Targets
+                    writer.WriteStartElement("Simple");
+                    writer.WriteElementString("Name", "DESCRIPTION");
+                    writer.WriteElementString("String", episode.Description);
+                    writer.WriteEndElement(); // Simple
+                    writer.WriteEndElement(); // Tag
+                    writer.WriteEndElement(); // Tags
+                    writer.WriteEndDocument();
+                    _logger?.LogInformation("Generated description XML: {Path}", descriptionPath);
+                } catch (Exception ex){
+                    _logger?.LogWarning(ex, "Failed to generate description XML");
+                    descriptionPath = null;
+                }
+            }
+            
             // Extract fonts from subtitles if muxing is enabled
             var fontAttachments = new List<FontAttachment>();
             if (config.Download.MuxFonts && subtitleFiles.Count > 0){
@@ -727,7 +755,8 @@ public class DownloadService : IDownloadService{
                         var newFilenameOptions = new FilenameOptions{
                             NumberPadding = config.Download.LeadingNumbers,
                             Quality = actualHeight.Value.ToString(),
-                            AudioLanguage = config.Download.DefaultAudio
+                            AudioLanguage = config.Download.DefaultAudio,
+                            SelectedDubs = config.Download.DubLanguages
                         };
                         var newFileName = _filenameService.FormatFilename(filenameTemplate, episode, newFilenameOptions);
                         var newOutputPath = Path.Combine(outputDir, newFileName + outputExtension);
@@ -775,7 +804,7 @@ public class DownloadService : IDownloadService{
                             );
                             
                             progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 90, Doing = $"Muxing {locale}..." });
-                            await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupOutputPath, config, cancellationToken, audioDelays, videoLocales);
+                            await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupOutputPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
                             
                             // Post-process encoding for this group if configured
                             if (!string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null){
@@ -784,7 +813,7 @@ public class DownloadService : IDownloadService{
                             }
                         }
                     } else{
-                        await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays, videoLocales);
+                        await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
                     }
                 }
                 
@@ -923,6 +952,10 @@ public class DownloadService : IDownloadService{
         // Fallback endpoint
         endpoints.Add(($"{ApiUrls.Playback}/{episodeId}/web/firefox/play", ApiUrls.FirefoxUserAgent, streamEndpoint));
         
+        PlaybackData? mergedData = null;
+        bool rateLimited = false;
+        int retryDelaySeconds = GetRetryDelaySeconds(retryAttempt);
+        
         foreach (var (endpoint, userAgent, settings) in endpoints){
             var request = HttpClientWrapper.CreateRequest(endpoint, HttpMethod.Get, true, _auth.Token.access_token);
             request.Headers.Add("User-Agent", userAgent);
@@ -944,7 +977,35 @@ public class DownloadService : IDownloadService{
             }
             
             if (isOk){
-                return await ParsePlaybackDataAsync(content, cancellationToken);
+                var data = await ParsePlaybackDataAsync(content, cancellationToken);
+                if (data != null){
+                    if (mergedData == null){
+                        mergedData = data;
+                    } else {
+                        // Merge hardsubs from multiple endpoints
+                        if (data.HardSubs != null){
+                            mergedData.HardSubs ??= new Dictionary<string, HardSub>();
+                            foreach (var kvp in data.HardSubs){
+                                if (!mergedData.HardSubs.ContainsKey(kvp.Key)){
+                                    mergedData.HardSubs[kvp.Key] = kvp.Value;
+                                }
+                            }
+                        }
+                        // Merge subtitles from multiple endpoints
+                        if (data.Subtitles != null){
+                            mergedData.Subtitles ??= new List<SubtitleInfo>();
+                            var existing = new HashSet<string>(mergedData.Subtitles.Select(s => s.Lang));
+                            foreach (var sub in data.Subtitles.Where(s => !existing.Contains(s.Lang))){
+                                mergedData.Subtitles.Add(sub);
+                            }
+                        }
+                        // Fill missing primary URLs from secondary endpoint
+                        if (string.IsNullOrEmpty(mergedData.VideoUrl)) mergedData.VideoUrl = data.VideoUrl;
+                        if (string.IsNullOrEmpty(mergedData.AudioUrl)) mergedData.AudioUrl = data.AudioUrl;
+                        if (string.IsNullOrEmpty(mergedData.Pssh)) mergedData.Pssh = data.Pssh;
+                    }
+                }
+                continue;
             }
             
             // Check for stream errors
@@ -970,18 +1031,12 @@ public class DownloadService : IDownloadService{
                 }
                 
                 if (streamError?.IsPlaybackRateLimitError() == true){
-                    int retryDelaySeconds = GetRetryDelaySeconds(retryAttempt);
+                    rateLimited = true;
+                    retryDelaySeconds = GetRetryDelaySeconds(retryAttempt);
                     if (headers.TryGetValue("retry-after", out var retryAfter) && int.TryParse(retryAfter, out var parsedRetryAfter)){
                         retryDelaySeconds = parsedRetryAfter;
                     }
-                    
-                    _logger?.LogWarning("Playback API rate limited (4294). Retrying in {Delay}s...", retryDelaySeconds);
-                    
-                    if (retryAttempt < maxRetries){
-                        await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), cancellationToken);
-                        return await GetPlaybackDataAsync(episodeId, useBetaApi, cancellationToken, retryAttempt + 1);
-                    }
-                    throw new DownloadException("Rate limit exceeded. Please wait a few minutes and try again.", DownloadErrorType.RateLimited);
+                    continue;
                 }
                 
                 // Check for subscription/auth errors
@@ -1010,6 +1065,16 @@ public class DownloadService : IDownloadService{
                     _logger?.LogError("Playback API error: {Error}", streamError.Error);
                 }
             }
+        }
+        
+        if (mergedData != null){
+            return mergedData;
+        }
+        
+        if (rateLimited && retryAttempt < maxRetries){
+            _logger?.LogWarning("Playback API rate limited on all endpoints. Retrying in {Delay}s...", retryDelaySeconds);
+            await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), cancellationToken);
+            return await GetPlaybackDataAsync(episodeId, useBetaApi, cancellationToken, retryAttempt + 1);
         }
         
         throw new DownloadException("Failed to get playback data from all endpoints. The content may not be available in your region.", DownloadErrorType.NetworkError);
@@ -1735,7 +1800,7 @@ public class DownloadService : IDownloadService{
     private static string FormatKey(byte[] keyBytes) =>
         BitConverter.ToString(keyBytes).Replace("-", "").ToLower();
     
-    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null){
+    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null, string? descriptionPath = null){
         var mergerOptions = new MergerOptions{
             Output = outputPath,
             VideoTitle = config.Download.VideoTitle,
@@ -1814,6 +1879,13 @@ public class DownloadService : IDownloadService{
         if (!string.IsNullOrEmpty(coverPath) && File.Exists(coverPath)){
             mergerOptions.Cover.Add(new MergerInput{
                 Path = coverPath
+            });
+        }
+        
+        // Map description
+        if (!string.IsNullOrEmpty(descriptionPath) && File.Exists(descriptionPath)){
+            mergerOptions.Description.Add(new MergerInput{
+                Path = descriptionPath
             });
         }
         

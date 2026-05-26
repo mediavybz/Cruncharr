@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Linq;
 using Cruncharr.Core.Models;
 using YamlDotNet.Serialization;
 
@@ -98,6 +99,43 @@ public class CruncharrConfig{
             var json = Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
             File.WriteAllText(configPath, json);
         }
+    }
+    
+    public void NormalizeNotificationSettings(){
+        if (Notifications == null){
+            Notifications = new NotificationsConfig();
+        }
+        
+        // Ensure webhook URL is valid or null
+        if (string.IsNullOrWhiteSpace(Notifications.WebhookUrl)){
+            Notifications.WebhookUrl = null;
+        }
+        
+        // Ensure webhook method is a valid HTTP method
+        var validMethods = new[] { "GET", "POST", "PUT", "PATCH", "DELETE" };
+        if (string.IsNullOrWhiteSpace(Notifications.WebhookMethod) || 
+            !validMethods.Contains(Notifications.WebhookMethod.ToUpper())){
+            Notifications.WebhookMethod = "POST";
+        }
+        
+        // Ensure content type is valid
+        if (string.IsNullOrWhiteSpace(Notifications.WebhookContentType)){
+            Notifications.WebhookContentType = "application/json";
+        }
+        
+        // Ensure headers dictionary is initialized
+        Notifications.WebhookHeaders ??= new Dictionary<string, string>();
+        
+        // Normalize boolean flags - ensure they have explicit values
+        // (booleans are already non-nullable with defaults in the class)
+    }
+    
+    public void SyncLegacyNotificationFields(){
+        // Map old field names to new ones if config was loaded from older version
+        // Currently no legacy field renames, but this method provides the hook
+        // for future migrations without breaking existing configs
+        
+        // Example: if (Notifications.LegacyField != default) Notifications.NewField = Notifications.LegacyField;
     }
     
     public void ApplyEnvironmentVariables(){

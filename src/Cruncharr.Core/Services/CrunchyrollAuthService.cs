@@ -28,6 +28,8 @@ public interface ICrunchyrollAuthService{
     Task GetMultiProfileAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task<bool> ChangeProfileAsync(string profileId, bool useBetaApi, CancellationToken cancellationToken = default);
     Task AuthAnonymousAsync(bool useBetaApi, CancellationToken cancellationToken = default);
+    Task AuthAnonymousFoxyAsync(bool useBetaApi, CancellationToken cancellationToken = default);
+    Task<bool> CheckStreamEndpointUpdateAsync(CancellationToken cancellationToken = default);
     void Init();
     void LoadToken();
     void SaveToken();
@@ -232,6 +234,84 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             PreferredContentAudioLanguage = "ja-JP",
             PreferredContentSubtitleLanguage = "de-DE"
         };
+    }
+    
+    // Alternative anonymous auth using Foxy endpoint (guest auth variation)
+    public async Task AuthAnonymousFoxyAsync(bool useBetaApi, CancellationToken cancellationToken = default){
+        string uuid = string.IsNullOrEmpty(Token?.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
+        
+        Subscription = new Subscription();
+        
+        var formData = new Dictionary<string, string>{
+            { "grant_type", "client_id" },
+            { "scope", "offline_access" },
+            { "device_id", uuid },
+            { "device_type", "adobe" },
+        };
+        
+        var requestContent = new FormUrlEncodedContent(formData);
+        
+        // Use a different auth profile for Foxy
+        var foxyAuthSettings = new Dictionary<string, string>{
+            { "Authorization", "Basic bm9haWhudm5wd2t6cnl0d3J0YW46eW5hbmhnZ3dtZmpsYXR0c3RiaGE=" },
+            { "User-Agent", "Crunchyroll/1.4.0 Nintendo Switch/12.3.11" }
+        };
+        
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth(useBetaApi)){
+            Content = requestContent
+        };
+        
+        foreach (var header in foxyAuthSettings){
+            request.Headers.Add(header.Key, header.Value);
+        }
+        
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
+        
+        if (isOk){
+            JsonTokenToFileAndVariable(content, uuid);
+        } else{
+            _logger?.LogError("Anonymous Foxy login failed: {Error}", error);
+        }
+        
+        Profile = new CrProfile{
+            Username = "???",
+            Avatar = "crbrand_avatars_logo_marks_mangagirl_taupe.png",
+            PreferredContentAudioLanguage = "ja-JP",
+            PreferredContentSubtitleLanguage = "de-DE"
+        };
+    }
+    
+    // Checks GitHub releases for newer auth endpoint versions
+    public async Task<bool> CheckStreamEndpointUpdateAsync(CancellationToken cancellationToken = default){
+        const string releasesUrl = "https://api.github.com/repos/Crunchy-DL/Crunchy-Downloader/releases/latest";
+        
+        try{
+            _logger?.LogInformation("Checking for stream endpoint updates from GitHub releases...");
+            
+            var request = new HttpRequestMessage(HttpMethod.Get, releasesUrl);
+            request.Headers.Add("User-Agent", "Cruncharr/1.0");
+            
+            var response = await _httpClient.Client.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode){
+                _logger?.LogWarning("Failed to check GitHub releases: {Status}", response.StatusCode);
+                return false;
+            }
+            
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            var release = JsonConvert.DeserializeObject<GitHubRelease>(content);
+            
+            if (release?.TagName != null){
+                _logger?.LogInformation("Latest upstream release: {Tag}", release.TagName);
+                // In a full implementation, this would compare versions and update endpoints
+                // For now, just log that an update is available
+                return true;
+            }
+            
+            return false;
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to check for stream endpoint updates");
+            return false;
+        }
     }
     
     public async Task<bool> LoginAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default){
@@ -659,6 +739,12 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
     
     // Ported from upstream CrunchyrollManager.GetBase64EncodedTokenAsync
     // Fetches and extracts the client token from Crunchyroll's JS bundle
+    // Simple model for GitHub release API response
+    private class GitHubRelease{
+        [JsonProperty("tag_name")]
+        public string? TagName { get; set; }
+    }
+
     public async Task<string> GetBase64EncodedTokenAsync(CancellationToken cancellationToken = default){
         const string url = "https://static.crunchyroll.com/vilos-v2/web/vilos/js/bundle.js";
         

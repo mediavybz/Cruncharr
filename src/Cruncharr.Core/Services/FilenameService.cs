@@ -14,6 +14,8 @@ public class FilenameOptions{
     public string? WhitespaceReplace { get; set; }
     public string? Quality { get; set; }
     public string? AudioLanguage { get; set; }
+    public SonarrSeries? SonarrSeries { get; set; }
+    public SonarrEpisode? SonarrEpisode { get; set; }
 }
 
 public class FilenameService : IFilenameService{
@@ -46,6 +48,15 @@ public class FilenameService : IFilenameService{
         if (!string.IsNullOrEmpty(options.AudioLanguage)){
             replacements["audioLang"] = options.AudioLanguage;
             replacements["audioLanguage"] = options.AudioLanguage;
+        }
+        
+        // Sonarr variables (ported from upstream FileNameManager)
+        if (options.SonarrSeries != null){
+            replacements["sonarrSeriesTitle"] = SanitizeFilename(options.SonarrSeries.Title ?? "");
+            replacements["sonarrSeriesReleaseYear"] = options.SonarrSeries.Year.ToString();
+        }
+        if (options.SonarrEpisode != null){
+            replacements["sonarrEpisodeTitle"] = SanitizeFilename(options.SonarrEpisode.Title ?? "");
         }
         
         // Replace ${var} syntax

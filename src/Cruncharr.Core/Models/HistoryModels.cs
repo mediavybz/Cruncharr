@@ -151,6 +151,7 @@ public class HistoryEpisode{
 }
 
 public enum EpisodeType{
+    Unknown,
     Episode,
     Concert,
     MusicVideo

@@ -93,6 +93,49 @@ public class SeriesController : ControllerBase{
             return StatusCode(500, new { Error = "Failed to get seasonal series", Message = ex.Message });
         }
     }
+    
+    /// <summary>
+    /// Get grouped episode list with versions for a series (ported from upstream ListSeriesId)
+    /// </summary>
+    [HttpGet("{seriesId}/list")]
+    public async Task<ActionResult> ListSeriesId(string seriesId, [FromQuery] string? locale = null, [FromQuery] bool forcedLocale = false, [FromQuery] string? seasonId = null, [FromQuery] List<string>? dubLang = null, [FromQuery] bool? all = null, [FromQuery] List<string>? e = null){
+        try{
+            var data = new CrunchyMultiDownload(dubLang ?? new List<string>(), all, e: e, s: seasonId);
+            var result = await _api.ListSeriesIdAsync(seriesId, locale ?? "", data, forcedLocale);
+            if (result == null){
+                return NotFound(new { Error = "Series not found or no episodes available" });
+            }
+            return Ok(result);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to list series episodes: {SeriesId}", seriesId);
+            return StatusCode(500, new { Error = "Failed to list series episodes", Message = ex.Message });
+        }
+    }
+    
+    /// <summary>
+    /// Select multi-dub episodes for queue (ported from upstream ItemSelectMultiDub)
+    /// </summary>
+    [HttpPost("item-select-multi-dub")]
+    public ActionResult ItemSelectMultiDub([FromBody] ItemSelectMultiDubRequest request){
+        try{
+            if (request.Episodes == null || request.Episodes.Count == 0){
+                return BadRequest(new { Error = "Episodes dictionary is required" });
+            }
+            
+            var result = _api.ItemSelectMultiDub(request.Episodes, request.DubLang, request.All, request.E);
+            return Ok(result);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to select multi-dub episodes");
+            return StatusCode(500, new { Error = "Failed to select multi-dub episodes", Message = ex.Message });
+        }
+    }
+}
+
+public class ItemSelectMultiDubRequest{
+    public Dictionary<string, EpisodeAndLanguage> Episodes{ get; set; } = new();
+    public List<string> DubLang{ get; set; } = new();
+    public bool? All{ get; set; }
+    public List<string>? E{ get; set; }
 }
 
 [ApiController]

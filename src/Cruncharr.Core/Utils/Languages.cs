@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 
@@ -35,7 +32,7 @@ public class Languages{
         new(){ CrLocale = "ko-KR", Locale = "ko", Code = "kor", Name = "Korean" },
         new(){ CrLocale = "th-TH", Locale = "th-TH", Code = "tha", Name = "Thai", Language = "ไทย" },
     };
-
+    
     public static readonly LanguageItem DEFAULT_lang = new LanguageItem{
         CrLocale = "und",
         Locale = "un",
@@ -43,6 +40,53 @@ public class Languages{
         Name = string.Empty,
         Language = string.Empty
     };
+
+    public static List<string> SortListByLangList(List<string> langList){
+        var orderMap = languages.Select((value, index) => new{ Value = value.CrLocale, Index = index })
+            .ToDictionary(x => x.Value, x => x.Index);
+        langList.Sort((x, y) => {
+            bool xExists = orderMap.ContainsKey(x);
+            bool yExists = orderMap.ContainsKey(y);
+
+            if (xExists && yExists)
+                return orderMap[x].CompareTo(orderMap[y]);
+            else if (xExists)
+                return -1;
+            else if (yExists)
+                return 1;
+            else
+                return string.CompareOrdinal(x, y);
+        });
+
+        return langList;
+    }
+
+    public static LanguageItem FixAndFindCrLc(string cr_locale){
+        if (string.IsNullOrEmpty(cr_locale)){
+            return DEFAULT_lang;
+        }
+
+        string str = FixLanguageTag(cr_locale);
+        return FindLang(str);
+    }
+
+    public static string FixLanguageTag(string tag){
+        tag = tag ?? "und";
+
+        var match = Regex.Match(tag, @"^(\w{2})-?(\w{2})$");
+        if (match.Success){
+            string tagLang = $"{match.Groups[1].Value}-{match.Groups[2].Value.ToUpper()}";
+
+            var langObj = FindLang(tagLang);
+            if (langObj.CrLocale != "und"){
+                return langObj.CrLocale;
+            }
+
+            return tagLang;
+        }
+
+        return tag;
+    }
 
     public static LanguageItem FindLang(string crLocale){
         LanguageItem? lang = languages.FirstOrDefault(l => l.CrLocale == crLocale);
@@ -62,12 +106,6 @@ public class Languages{
         }
     }
 
-    public static List<string> SortTags(List<string> data){
-        var retData = data.Select(e => new LanguageItem{ Locale = e }).ToList();
-        var sorted = SortSubtitles(retData);
-        return sorted.Select(e => e.Locale).ToList();
-    }
-
     public static List<T> SortSubtitles<T>(List<T> data, string sortKey = "locale"){
         var idx = new Dictionary<string, int>();
         var tags = new HashSet<string>(languages.Select(e => e.Locale));
@@ -85,23 +123,5 @@ public class Languages{
             int index = idx.ContainsKey(value) ? idx[value] : 50;
             return index;
         }).ToList();
-    }
-
-    public static string FixLanguageTag(string tag){
-        tag = tag ?? "und";
-
-        var match = Regex.Match(tag, @"^(\w{2})-?(\w{2})$");
-        if (match.Success){
-            string tagLang = $"{match.Groups[1].Value}-{match.Groups[2].Value.ToUpper()}";
-
-            var langObj = FindLang(tagLang);
-            if (langObj.CrLocale != "und"){
-                return langObj.CrLocale;
-            }
-
-            return tagLang;
-        }
-
-        return tag;
     }
 }

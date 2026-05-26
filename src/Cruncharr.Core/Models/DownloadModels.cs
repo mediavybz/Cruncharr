@@ -81,12 +81,23 @@ public class EpisodeInfo{
     public string? ThumbnailUrl { get; set; }
     public string? CoverArtUrl { get; set; }
     public List<string> Images { get; set; } = new();
+    public Dictionary<string, List<List<object>>>? RawImages { get; set; }
     public string Locale { get; set; } = "ja-JP";
     public bool IsPremium { get; set; }
+    public bool IsDubbed { get; set; }
+    public bool IsSubbed { get; set; }
     public DateTime? ReleaseDate { get; set; }
     public List<EpisodeVersion>? Versions { get; set; }
     public string? AudioLocale { get; set; }
     public List<string> SubtitleLocales { get; set; } = new();
+    public string? Identifier { get; set; }
+    public string? Episode { get; set; }
+    public string? Playback { get; set; }
+    public string? StreamsLink { get; set; }
+    public int DurationMs { get; set; }
+    public bool? HideSeasonTitle { get; set; }
+    public bool? HideSeasonNumber { get; set; }
+    public string? SeqId { get; set; }
 }
 
 public class SeriesInfo{
@@ -103,6 +114,7 @@ public class SeasonInfo{
     public string Id { get; set; } = "";
     public string Title { get; set; } = "";
     public int SeasonNumber { get; set; }
+    public string? Identifier { get; set; }
     public List<EpisodeInfo> Episodes { get; set; } = new();
 }
 

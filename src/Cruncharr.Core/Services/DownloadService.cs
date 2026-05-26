@@ -34,8 +34,9 @@ public class DownloadService : IDownloadService{
     
     private readonly IHistoryService? _history;
     private readonly IQueueService? _queueService;
+    private readonly ISonarrService? _sonarrService;
     
-    public DownloadService(ICrunchyrollAuthService auth, ICrunchyrollApiService api, ILogger<DownloadService>? logger = null, IHistoryService? history = null, IVideoSyncer? videoSyncer = null, IEncodingService? encodingService = null, IQueueService? queueService = null){
+    public DownloadService(ICrunchyrollAuthService auth, ICrunchyrollApiService api, ILogger<DownloadService>? logger = null, IHistoryService? history = null, IVideoSyncer? videoSyncer = null, IEncodingService? encodingService = null, IQueueService? queueService = null, ISonarrService? sonarrService = null){
         _auth = auth;
         _api = api;
         _logger = logger;
@@ -43,6 +44,7 @@ public class DownloadService : IDownloadService{
         _videoSyncer = videoSyncer;
         _encodingService = encodingService;
         _queueService = queueService;
+        _sonarrService = sonarrService;
         _httpClient = auth.HttpClient;
         // Use /widevine for Docker, fallback to default path
         var widevineDir = "/widevine";
@@ -248,6 +250,24 @@ public class DownloadService : IDownloadService{
         var outputDir = config.Download.OutputDirectory;
         Directory.CreateDirectory(outputDir);
         
+        // Fetch Sonarr data for filename variables if enabled
+        SonarrSeries? sonarrSeries = null;
+        SonarrEpisode? sonarrEpisode = null;
+        if (config.Sonarr.Enabled && _sonarrService != null){
+            try{
+                sonarrSeries = await _sonarrService.GetSeriesByTitleAsync(episode.SeriesTitle, config.Sonarr);
+                if (sonarrSeries != null){
+                    var sonarrEpisodes = await _sonarrService.GetEpisodesAsync(sonarrSeries.Id, config.Sonarr);
+                    sonarrEpisode = sonarrEpisodes.FirstOrDefault(ep => 
+                        ep.SeasonNumber == episode.SeasonNumber && ep.EpisodeNumber == episode.EpisodeNumber);
+                    _logger?.LogInformation("Sonarr match: Series={SeriesTitle}, Episode={EpisodeTitle}", 
+                        sonarrSeries.Title, sonarrEpisode?.Title);
+                }
+            } catch (Exception ex){
+                _logger?.LogWarning(ex, "Failed to fetch Sonarr data for filename variables");
+            }
+        }
+        
         // Use FilenameTemplate if user configured it, otherwise fall back to Filename
         var filenameTemplate = !string.IsNullOrEmpty(config.Download.FilenameTemplate) && 
                                config.Download.FilenameTemplate != "{SeriesTitle} - S{season:00}E{episode:00} - {EpisodeTitle}"
@@ -257,7 +277,9 @@ public class DownloadService : IDownloadService{
         var filenameOptions = new FilenameOptions{
             NumberPadding = config.Download.LeadingNumbers,
             Quality = config.Download.QualityVideo,
-            AudioLanguage = config.Download.DefaultAudio
+            AudioLanguage = config.Download.DefaultAudio,
+            SonarrSeries = sonarrSeries,
+            SonarrEpisode = sonarrEpisode
         };
         var fileName = _filenameService.FormatFilename(filenameTemplate, episode, filenameOptions);
         string outputExtension;
@@ -346,6 +368,33 @@ public class DownloadService : IDownloadService{
                     _logger?.LogInformation("NoAudio enabled, skipping audio download");
                 }
                 
+                // [PT] Ported from upstream: Auto-generate AD track from primary audio if DownloadDescriptionAudio is enabled
+                // and no separate AD version exists in episode versions
+                if (!config.Download.NoAudio && config.Download.DownloadDescriptionAudio && 
+                    episode.Versions != null && !string.IsNullOrEmpty(episode.AudioLocale)){
+                    var hasAdVersion = episode.Versions.Any(v => 
+                        v.Roles?.Contains("description", StringComparer.OrdinalIgnoreCase) == true);
+                    
+                    if (!hasAdVersion && audioTrackLanguages.Count > 0){
+                        var primaryAudio = audioTrackLanguages.FirstOrDefault(a => 
+                            a.Lang.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
+                        
+                        if (primaryAudio.Path != null && File.Exists(primaryAudio.Path)){
+                            var adLocale = episode.AudioLocale ?? config.Download.DefaultAudio;
+                            var adPath = Path.Combine(tempDir, $"audio_{adLocale.Replace("-", "").ToLower()}_ad.m4a");
+                            
+                            try{
+                                File.Copy(primaryAudio.Path, adPath, true);
+                                downloadedFiles.Add(adPath);
+                                audioTrackLanguages.Add((adPath, adLocale));
+                                _logger?.LogInformation("Auto-generated AD track from primary audio: {Locale} -> {Path}", adLocale, adPath);
+                            } catch (Exception ex){
+                                _logger?.LogWarning(ex, "Failed to auto-generate AD track from primary audio");
+                            }
+                        }
+                    }
+                }
+                
                 // Download additional dubs if configured (skip if NoAudio is enabled)
                 // Note: Video is only downloaded once (DlVideoOnce optimization). Additional dubs reuse the same video stream.
                 if (!config.Download.NoAudio && config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1){
@@ -414,6 +463,12 @@ public class DownloadService : IDownloadService{
                             }
                         } catch (Exception ex){
                             _logger?.LogWarning(ex, "Failed to download additional dub: {Dub}", dub);
+                        }
+                        
+                        // [PT] Ported from upstream: Dub download delay between dubs
+                        if (config.Download.DubDownloadDelaySeconds > 0){
+                            _logger?.LogInformation("Waiting {Delay}s before next dub download...", config.Download.DubDownloadDelaySeconds);
+                            await Task.Delay(TimeSpan.FromSeconds(config.Download.DubDownloadDelaySeconds), cancellationToken);
                         }
                     }
                 }

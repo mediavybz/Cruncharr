@@ -212,7 +212,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             { "User-Agent", StreamEndpoint.UserAgent }
         };
         
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth(useBetaApi)){
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
             Content = requestContent
         };
         
@@ -257,7 +257,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             { "User-Agent", "Crunchyroll/1.4.0 Nintendo Switch/12.3.11" }
         };
         
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth(useBetaApi)){
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
             Content = requestContent
         };
         
@@ -315,7 +315,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
     }
     
     public async Task<bool> LoginAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default){
-        _logger?.LogInformation("Logging in as {Email}", email);
+        _logger?.LogInformation("Logging in as {Email} (BetaAPI: {UseBeta})", email, useBetaApi);
         
         string uuid = Guid.NewGuid().ToString();
         
@@ -339,7 +339,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             { "User-Agent", StreamEndpoint.UserAgent }
         };
         
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth(useBetaApi)){
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
             Content = requestContent
         };
         
@@ -347,14 +347,21 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             request.Headers.Add(header.Key, header.Value);
         }
         
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
+        _logger?.LogDebug("Login request to {Url} with auth: {Auth}", ApiUrls.Auth, StreamEndpoint.Authorization.Substring(0, 20) + "...");
+        
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, suppressError: false, attachCookies: false);
+        
+        _logger?.LogDebug("Login response: IsOk={IsOk}, Error={Error}, Content={Content}", isOk, error, content?.Substring(0, Math.Min(500, content?.Length ?? 0)));
         
         if (isOk){
             JsonTokenToFileAndVariable(content, uuid);
+            _logger?.LogInformation("Login successful, token received");
         } else{
-            _logger?.LogError("Login failed: {Error}", error);
+            _logger?.LogError("Login failed: HTTP Error={Error}, Response={Response}", error, content);
             string errorMessage;
-            if (content.Contains("invalid_credentials")){
+            if (string.IsNullOrEmpty(content)){
+                errorMessage = $"Login failed: {error}";
+            } else if (content.Contains("invalid_credentials")){
                 errorMessage = "Invalid credentials - please check your email and password";
                 _logger?.LogError("Invalid credentials");
             } else if (content.Contains("<title>Just a moment...</title>") ||
@@ -365,7 +372,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
                 errorMessage = "Cloudflare/DDOS protection detected - try enabling Beta API in settings";
                 _logger?.LogError("Cloudflare/DDOS protection detected during login");
             } else{
-                var responsePreview = content.Substring(0, content.Length < 200 ? content.Length : 200);
+                var responsePreview = content.Substring(0, Math.Min(500, content.Length));
                 errorMessage = $"Login failed: {responsePreview}";
                 _logger?.LogError("Login error response: {Response}", responsePreview);
             }
@@ -410,7 +417,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             { "User-Agent", StreamEndpoint.UserAgent }
         };
         
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth(useBetaApi)){
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
             Content = requestContent
         };
         
@@ -496,7 +503,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             { "User-Agent", StreamEndpoint.UserAgent }
         };
         
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth(useBetaApi)){
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
             Content = requestContent
         };
         
@@ -526,7 +533,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             return;
         }
         
-        var request = HttpClientWrapper.CreateRequest(ApiUrls.MultiProfile(useBetaApi), HttpMethod.Get, true, Token.access_token);
+        var request = HttpClientWrapper.CreateRequest(ApiUrls.MultiProfile, HttpMethod.Get, true, Token.access_token);
         var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
         
         if (isOk){
@@ -583,7 +590,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             { "User-Agent", StreamEndpoint.UserAgent }
         };
         
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth(useBetaApi)){
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
             Content = requestContent
         };
         
@@ -619,7 +626,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             return;
         }
         
-        var request = HttpClientWrapper.CreateRequest(ApiUrls.Profile(useBetaApi), HttpMethod.Get, true, Token.access_token);
+        var request = HttpClientWrapper.CreateRequest(ApiUrls.Profile, HttpMethod.Get, true, Token.access_token);
         var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
         
         if (isOk){
@@ -640,7 +647,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             return;
         }
         
-        var request = HttpClientWrapper.CreateRequest(ApiUrls.Subscription(useBetaApi) + Token.account_id, HttpMethod.Get, true, Token.access_token);
+        var request = HttpClientWrapper.CreateRequest(ApiUrls.Subscription + Token.account_id, HttpMethod.Get, true, Token.access_token);
         var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
         
         if (isOk){

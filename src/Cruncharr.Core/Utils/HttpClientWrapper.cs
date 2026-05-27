@@ -109,16 +109,18 @@ public class HttpClientWrapper{
         return flareResponse;
     }
     
-    public async Task<(bool IsOk, string ResponseContent, string Error)> SendRequestAsync(HttpRequestMessage request, bool suppressError = false){
-        var result = await SendRequestWithHeadersAsync(request, suppressError);
+    public async Task<(bool IsOk, string ResponseContent, string Error)> SendRequestAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true){
+        var result = await SendRequestWithHeadersAsync(request, suppressError, attachCookies);
         return (result.IsOk, result.ResponseContent, result.Error);
     }
     
-    public async Task<(bool IsOk, string ResponseContent, string Error, Dictionary<string, string> Headers)> SendRequestWithHeadersAsync(HttpRequestMessage request, bool suppressError = false){
+    public async Task<(bool IsOk, string ResponseContent, string Error, Dictionary<string, string> Headers)> SendRequestWithHeadersAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true){
         string content = string.Empty;
         var headers = new Dictionary<string, string>();
         try{
-            AttachCookies(request);
+            if (attachCookies){
+                AttachCookies(request);
+            }
             var response = await _client.SendAsync(request);
             content = await response.Content.ReadAsStringAsync();
             foreach (var header in response.Headers){

@@ -30,6 +30,7 @@ public interface ICrunchyrollAuthService{
     Task AuthAnonymousAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task AuthAnonymousFoxyAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task<bool> CheckStreamEndpointUpdateAsync(CancellationToken cancellationToken = default);
+    Task<bool> UpdateAuthCredentialsAsync(CancellationToken cancellationToken = default);
     void Init();
     void LoadToken();
     void SaveToken();
@@ -130,6 +131,13 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         
         Init();
         LoadToken();
+        
+        // Try to update auth credentials from upstream on startup
+        try{
+            UpdateAuthCredentialsAsync().GetAwaiter().GetResult();
+        } catch (Exception ex){
+            _logger?.LogWarning(ex, "Failed to update auth credentials on startup");
+        }
     }
     
     private static string GetDefaultTokenPath(){
@@ -281,12 +289,17 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         };
     }
     
-    // Checks GitHub releases for newer auth endpoint versions
+    // Legacy method - delegates to UpdateAuthCredentialsAsync
     public async Task<bool> CheckStreamEndpointUpdateAsync(CancellationToken cancellationToken = default){
+        return await UpdateAuthCredentialsAsync(cancellationToken);
+    }
+    
+    // Fetches updated auth credentials from GitHub releases
+    public async Task<bool> UpdateAuthCredentialsAsync(CancellationToken cancellationToken = default){
         const string releasesUrl = "https://api.github.com/repos/Crunchy-DL/Crunchy-Downloader/releases/latest";
         
         try{
-            _logger?.LogInformation("Checking for stream endpoint updates from GitHub releases...");
+            _logger?.LogInformation("Checking for auth credential updates from GitHub releases...");
             
             var request = new HttpRequestMessage(HttpMethod.Get, releasesUrl);
             request.Headers.Add("User-Agent", "Cruncharr/1.0");
@@ -300,17 +313,90 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             var release = JsonConvert.DeserializeObject<GitHubRelease>(content);
             
-            if (release?.TagName != null){
-                _logger?.LogInformation("Latest upstream release: {Tag}", release.TagName);
-                // In a full implementation, this would compare versions and update endpoints
-                // For now, just log that an update is available
-                return true;
+            if (release?.Assets == null || release.Assets.Count == 0){
+                _logger?.LogWarning("No assets found in latest release");
+                return false;
             }
             
-            return false;
+            // Find auth.json asset
+            var authAsset = release.Assets.FirstOrDefault(a => 
+                a.Name?.Equals("auth.json", StringComparison.OrdinalIgnoreCase) == true);
+            
+            if (authAsset?.BrowserDownloadUrl == null){
+                _logger?.LogWarning("No auth.json found in release assets");
+                return false;
+            }
+            
+            _logger?.LogInformation("Fetching auth.json from {Url}", authAsset.BrowserDownloadUrl);
+            
+            var authResponse = await _httpClient.Client.GetStringAsync(authAsset.BrowserDownloadUrl, cancellationToken);
+            var authEntries = JsonConvert.DeserializeObject<List<GhAuthEntry>>(authResponse);
+            
+            if (authEntries == null || authEntries.Count == 0){
+                _logger?.LogWarning("No auth entries found in auth.json");
+                return false;
+            }
+            
+            var ghAuthTv = authEntries.FirstOrDefault(e => e.Type?.Equals("tv", StringComparison.OrdinalIgnoreCase) == true);
+            var ghAuthMobile = authEntries.FirstOrDefault(e => e.Type?.Equals("mobile", StringComparison.OrdinalIgnoreCase) == true);
+            
+            // Update TV endpoint
+            if (StreamEndpoint.UseDefault && ghAuthTv != null &&
+                !string.IsNullOrEmpty(ghAuthTv.Authorization) &&
+                !string.IsNullOrEmpty(ghAuthTv.VersionName)){
+                
+                var currentVersion = ExtractClientVersion(StreamEndpoint.UserAgent);
+                if (CompareVersions(ghAuthTv.VersionName, currentVersion) > 0){
+                    _logger?.LogInformation("Updating TV auth from version {Old} to {New}", currentVersion, ghAuthTv.VersionName);
+                    StreamEndpoint.Authorization = ghAuthTv.Authorization;
+                    StreamEndpoint.UserAgent = $"ANDROIDTV/{ghAuthTv.VersionName} Android/16";
+                }
+            }
+            
+            // Update Mobile endpoint
+            if (StreamEndpointSecondary.UseDefault && ghAuthMobile != null &&
+                !string.IsNullOrEmpty(ghAuthMobile.Authorization) &&
+                !string.IsNullOrEmpty(ghAuthMobile.VersionName)){
+                
+                var currentVersion = ExtractClientVersion(StreamEndpointSecondary.UserAgent);
+                if (CompareVersions(ghAuthMobile.VersionName, currentVersion) > 0){
+                    _logger?.LogInformation("Updating Mobile auth from version {Old} to {New}", currentVersion, ghAuthMobile.VersionName);
+                    StreamEndpointSecondary.Authorization = ghAuthMobile.Authorization;
+                    StreamEndpointSecondary.UserAgent = $"Crunchyroll/{ghAuthMobile.VersionName} Android/16 okhttp/4.12.0";
+                }
+            }
+            
+            return true;
         } catch (Exception ex){
-            _logger?.LogError(ex, "Failed to check for stream endpoint updates");
+            _logger?.LogError(ex, "Failed to update auth credentials");
             return false;
+        }
+    }
+    
+    private static string ExtractClientVersion(string userAgent){
+        if (string.IsNullOrEmpty(userAgent)) return "0.0.0";
+        
+        // Extract version from strings like "ANDROIDTV/3.59.0 Android/16" or "Crunchyroll/3.97.0 Android/16"
+        var match = System.Text.RegularExpressions.Regex.Match(userAgent, @"[\w]+/(\d+\.\d+\.\d+)");
+        return match.Success ? match.Groups[1].Value : "0.0.0";
+    }
+    
+    private static int CompareVersions(string versionA, string versionB){
+        try{
+            var partsA = versionA.Split('.');
+            var partsB = versionB.Split('.');
+            
+            for (int i = 0; i < Math.Max(partsA.Length, partsB.Length); i++){
+                int a = i < partsA.Length && int.TryParse(partsA[i], out int pa) ? pa : 0;
+                int b = i < partsB.Length && int.TryParse(partsB[i], out int pb) ? pb : 0;
+                
+                if (a > b) return 1;
+                if (a < b) return -1;
+            }
+            
+            return 0;
+        } catch{
+            return 0;
         }
     }
     
@@ -358,25 +444,63 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             _logger?.LogInformation("Login successful, token received");
         } else{
             _logger?.LogError("Login failed: HTTP Error={Error}, Response={Response}", error, content);
-            string errorMessage;
-            if (string.IsNullOrEmpty(content)){
-                errorMessage = $"Login failed: {error}";
-            } else if (content.Contains("invalid_credentials")){
-                errorMessage = "Invalid credentials - please check your email and password";
-                _logger?.LogError("Invalid credentials");
-            } else if (content.Contains("<title>Just a moment...</title>") ||
-                       content.Contains("<title>Access denied</title>") ||
-                       content.Contains("<title>Attention Required! | Cloudflare</title>") ||
-                       content.Trim().Equals("error code: 1020") ||
-                       content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1){
-                errorMessage = "Cloudflare/DDOS protection detected - try enabling Beta API in settings";
-                _logger?.LogError("Cloudflare/DDOS protection detected during login");
-            } else{
-                var responsePreview = content.Substring(0, Math.Min(500, content.Length));
-                errorMessage = $"Login failed: {responsePreview}";
-                _logger?.LogError("Login error response: {Response}", responsePreview);
+            
+            // If client is inactive, try to update auth credentials and retry once
+            if (content?.Contains("client_inactive") == true || content?.Contains("invalid_client") == true){
+                _logger?.LogWarning("Auth client inactive, attempting to fetch updated credentials...");
+                var updated = await UpdateAuthCredentialsAsync(cancellationToken);
+                
+                if (updated){
+                    _logger?.LogInformation("Auth credentials updated, retrying login...");
+                    // Retry login with updated credentials
+                    crunchyAuthHeaders["Authorization"] = StreamEndpoint.Authorization;
+                    crunchyAuthHeaders["User-Agent"] = StreamEndpoint.UserAgent;
+                    
+                    request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){
+                        Content = requestContent
+                    };
+                    
+                    foreach (var header in crunchyAuthHeaders){
+                        request.Headers.Add(header.Key, header.Value);
+                    }
+                    
+                    var (retryIsOk, retryContent, retryError) = await _httpClient.SendRequestAsync(request, suppressError: false, attachCookies: false);
+                    
+                    if (retryIsOk){
+                        JsonTokenToFileAndVariable(retryContent, uuid);
+                        _logger?.LogInformation("Login successful after auth update");
+                        isOk = true;
+                    } else{
+                        content = retryContent;
+                        error = retryError;
+                    }
+                }
             }
-            throw new Exception(errorMessage);
+            
+            if (!isOk){
+                string errorMessage;
+                if (string.IsNullOrEmpty(content)){
+                    errorMessage = $"Login failed: {error}";
+                } else if (content.Contains("invalid_credentials")){
+                    errorMessage = "Invalid credentials - please check your email and password";
+                    _logger?.LogError("Invalid credentials");
+                } else if (content.Contains("<title>Just a moment...</title>") ||
+                           content.Contains("<title>Access denied</title>") ||
+                           content.Contains("<title>Attention Required! | Cloudflare</title>") ||
+                           content.Trim().Equals("error code: 1020") ||
+                           content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1){
+                    errorMessage = "Cloudflare/DDOS protection detected - try enabling Beta API in settings";
+                    _logger?.LogError("Cloudflare/DDOS protection detected during login");
+                } else if (content.Contains("client_inactive")){
+                    errorMessage = "Login failed: Crunchyroll has deactivated this client. Please check for application updates.";
+                    _logger?.LogError("Client deactivated by Crunchyroll");
+                } else{
+                    var responsePreview = content.Substring(0, Math.Min(500, content.Length));
+                    errorMessage = $"Login failed: {responsePreview}";
+                    _logger?.LogError("Login error response: {Response}", responsePreview);
+                }
+                throw new Exception(errorMessage);
+            }
         }
         
         if (Token?.refresh_token != null){
@@ -756,6 +880,28 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
     private class GitHubRelease{
         [JsonProperty("tag_name")]
         public string? TagName { get; set; }
+        
+        [JsonProperty("assets")]
+        public List<GitHubAsset>? Assets { get; set; }
+    }
+    
+    private class GitHubAsset{
+        [JsonProperty("name")]
+        public string? Name { get; set; }
+        
+        [JsonProperty("browser_download_url")]
+        public string? BrowserDownloadUrl { get; set; }
+    }
+    
+    private class GhAuthEntry{
+        [JsonProperty("type")]
+        public string? Type { get; set; }
+        
+        [JsonProperty("authorization")]
+        public string? Authorization { get; set; }
+        
+        [JsonProperty("versionName")]
+        public string? VersionName { get; set; }
     }
 
     public async Task<string> GetBase64EncodedTokenAsync(CancellationToken cancellationToken = default){

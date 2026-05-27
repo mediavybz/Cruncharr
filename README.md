@@ -163,8 +163,9 @@ The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 This project is based on the original **Crunchy-Downloader** desktop application by [Crunchy-DL](https://github.com/Crunchy-DL/Crunchy-Downloader). All core download logic, Crunchyroll API integration, and media processing is ported from the upstream source.
 
 - **Upstream**: https://github.com/Crunchy-DL/Crunchy-Downloader
+- **Upstream License**: MIT License (Copyright (c) 2024 Crunchy DL)
 - **Port**: Dockerized web UI version with REST API and headless backend
 
 ## License
 
-MIT
+MIT License - See upstream [LICENSE](https://github.com/Crunchy-DL/Crunchy-Downloader/blob/master/LICENSE) for full text.

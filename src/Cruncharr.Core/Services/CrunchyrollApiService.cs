@@ -550,8 +550,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
         var hasPremium = _authService.Profile?.HasPremium ?? false;
         var hslang = "none"; // Use default, could be fetched from config if needed
 
-        bool ShouldInclude(string epNum) =>
-            all is true || (e != null && e.Contains(epNum));
+        bool ShouldInclude(string checkKey) =>
+            all is true || (e != null && e.Contains(checkKey));
 
         foreach (var (key, episode) in eps){
             var epNum = key.StartsWith('E') ? key[1..] : key;
@@ -587,7 +587,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 }
 
                 // selection gate
-                if (!ShouldInclude(epNum))
+                if (!ShouldInclude(key))
                     continue;
 
                 // Create base queue item once per key

@@ -98,6 +98,8 @@ public class EpisodeInfo{
     public bool? HideSeasonTitle { get; set; }
     public bool? HideSeasonNumber { get; set; }
     public string? SeqId { get; set; }
+    public List<string>? SelectedDubs { get; set; }
+    public List<string>? SelectedSubs { get; set; }
 }
 
 public class SeriesInfo{

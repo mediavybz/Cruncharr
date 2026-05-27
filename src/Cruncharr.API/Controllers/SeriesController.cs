@@ -161,7 +161,25 @@ public class ConfigController : ControllerBase{
                 MarkAsWatched = _config.Crunchyroll.MarkAsWatched,
                 SearchFetchFeaturedMusic = _config.Crunchyroll.SearchFetchFeaturedMusic,
                 StreamEndpoint = _config.Crunchyroll.StreamEndpoint,
-                StreamEndpointSecondary = _config.Crunchyroll.StreamEndpointSecondary
+                StreamEndpointSecondary = _config.Crunchyroll.StreamEndpointSecondary,
+                DefaultStreamEndpoint = new{
+                    Endpoint = "tv/android_tv",
+                    Authorization = "Basic bm1oaGcwbDZ4eXhjZm02aHQ2aGY6SjR6bU1mdjNkMVFkWHk4dDk2d1NjeDdoUnkzclBHLTM=",
+                    UserAgent = "ANDROIDTV/3.61.0_22341 Android/16",
+                    DeviceType = "Android TV",
+                    DeviceName = "Android TV",
+                    Video = true,
+                    Audio = true
+                },
+                DefaultStreamEndpointSecondary = new{
+                    Endpoint = "android/phone",
+                    Authorization = "Basic Z24wdTU4dGNoMXRxaXZwNHlsbG46TXFoTlFpRnlHSEZKblNRYjZHTjlRQjhENVNTbUllVVQ=",
+                    UserAgent = "Crunchyroll/3.109.2 Android/16 okhttp/4.12.0",
+                    DeviceType = "OnePlus CPH2449",
+                    DeviceName = "CPH2449",
+                    Video = true,
+                    Audio = true
+                }
             },
             Download = new{
                 OutputDirectory = _config.Download.OutputDirectory,

@@ -294,42 +294,23 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         return await UpdateAuthCredentialsAsync(cancellationToken);
     }
     
-    // Fetches updated auth credentials from GitHub releases
+    // Fetches updated auth credentials from upstream data endpoint
     public async Task<bool> UpdateAuthCredentialsAsync(CancellationToken cancellationToken = default){
-        const string releasesUrl = "https://api.github.com/repos/Crunchy-DL/Crunchy-Downloader/releases/latest";
+        const string dataUrl = "https://crunchy-dl.github.io/Crunchy-Downloader/data.json";
         
         try{
-            _logger?.LogInformation("Checking for auth credential updates from GitHub releases...");
+            _logger?.LogInformation("Checking for auth credential updates from {Url}...", dataUrl);
             
-            var request = new HttpRequestMessage(HttpMethod.Get, releasesUrl);
+            var request = new HttpRequestMessage(HttpMethod.Get, dataUrl);
             request.Headers.Add("User-Agent", "Cruncharr/1.0");
             
             var response = await _httpClient.Client.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode){
-                _logger?.LogWarning("Failed to check GitHub releases: {Status}", response.StatusCode);
+                _logger?.LogWarning("Failed to fetch auth data: {Status}", response.StatusCode);
                 return false;
             }
             
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            var release = JsonConvert.DeserializeObject<GitHubRelease>(content);
-            
-            if (release?.Assets == null || release.Assets.Count == 0){
-                _logger?.LogWarning("No assets found in latest release");
-                return false;
-            }
-            
-            // Find auth.json asset
-            var authAsset = release.Assets.FirstOrDefault(a => 
-                a.Name?.Equals("auth.json", StringComparison.OrdinalIgnoreCase) == true);
-            
-            if (authAsset?.BrowserDownloadUrl == null){
-                _logger?.LogWarning("No auth.json found in release assets");
-                return false;
-            }
-            
-            _logger?.LogInformation("Fetching auth.json from {Url}", authAsset.BrowserDownloadUrl);
-            
-            var authResponse = await _httpClient.Client.GetStringAsync(authAsset.BrowserDownloadUrl, cancellationToken);
+            var authResponse = await response.Content.ReadAsStringAsync(cancellationToken);
             var authEntries = JsonConvert.DeserializeObject<List<GhAuthEntry>>(authResponse);
             
             if (authEntries == null || authEntries.Count == 0){

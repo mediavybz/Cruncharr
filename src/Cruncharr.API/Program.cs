@@ -31,6 +31,7 @@ public class Program{
         // Load configuration
         var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
         var config = File.Exists(configPath) ? CruncharrConfig.Load(configPath) : new CruncharrConfig();
+        config.ValidateAndFix(); // Fix any corrupted config values from old bugs
         config.ApplyEnvironmentVariables();
         builder.Services.AddSingleton(config);
         

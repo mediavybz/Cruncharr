@@ -101,6 +101,37 @@ public class CruncharrConfig{
         }
     }
     
+    /// <summary>
+    /// Validates and fixes corrupted config values (e.g., all languages selected due to old bugs)
+    /// </summary>
+    public void ValidateAndFix(){
+        // Fix corrupted dub languages - if all languages are selected, reset to default
+        var allLangs = new[]{ "ja-JP", "en-US", "de-DE", "es-ES", "es-419", "fr-FR", "it-IT", "pt-BR", "pt-PT", "ru-RU", "hi-IN", "ar-SA", "zh-CN", "ko-KR", "pl-PL", "tr-TR", "th-TH", "vi-VN", "id-ID", "ms-MY", "ta-IN", "te-IN" };
+        if (Download.DubLanguages != null && Download.DubLanguages.Count >= allLangs.Length){
+            Download.DubLanguages = new List<string>{ "ja-JP" };
+        }
+        if (Download.DubLanguages == null || Download.DubLanguages.Count == 0){
+            Download.DubLanguages = new List<string>{ "ja-JP" };
+        }
+        
+        // Fix corrupted soft subs - if all languages are selected, reset to default
+        if (Download.SoftSubs != null && Download.SoftSubs.Count >= allLangs.Length){
+            Download.SoftSubs = new List<string>{ "en-US" };
+        }
+        if (Download.SoftSubs == null || Download.SoftSubs.Count == 0){
+            Download.SoftSubs = new List<string>{ "en-US" };
+        }
+        
+        // Ensure other defaults
+        if (string.IsNullOrEmpty(Download.QualityVideo)) Download.QualityVideo = "best";
+        if (string.IsNullOrEmpty(Download.QualityAudio)) Download.QualityAudio = "best";
+        if (string.IsNullOrEmpty(Download.DefaultAudio)) Download.DefaultAudio = "ja-JP";
+        if (string.IsNullOrEmpty(Download.DefaultSub)) Download.DefaultSub = "en-US";
+        if (string.IsNullOrEmpty(Download.HardSubLang)) Download.HardSubLang = "none";
+        if (Download.SimultaneousDownloads < 1) Download.SimultaneousDownloads = 2;
+        if (Download.SimultaneousProcessingJobs < 1) Download.SimultaneousProcessingJobs = 2;
+    }
+    
     public void NormalizeNotificationSettings(){
         if (Notifications == null){
             Notifications = new NotificationsConfig();

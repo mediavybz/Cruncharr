@@ -2781,7 +2781,7 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Dub Languages</span><span class="settings-section-desc">Select languages to download</span></div>
                             <div class="settings-section-body">
-                                ${renderMultiSelect('setting-dub-langs', dl.dubLanguages||LANG_OPTIONS.map(o=>o.value), LANG_OPTIONS)}
+                                ${renderMultiSelect('setting-dub-langs', dl.dubLanguages||['ja-JP'], LANG_OPTIONS)}
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Download AD for Selected Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-ad" ${dl.downloadDescriptionAudio?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download First Available Dub</div></div><label class="toggle-switch"><input type="checkbox" id="setting-first-dub" ${dl.downloadFirstAvailableDub?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Multiple Dubs</div><div class="setting-desc">Download all selected dubs per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-multi-dub" ${dl.downloadMultipleDubs?'checked':''}><span class="toggle-slider"></span></label></div>
@@ -2798,7 +2798,7 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">Softsubs</span><span class="settings-section-desc">Subtitle download options</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Softsubs Languages</div></div></div>
-                                ${renderMultiSelect('setting-soft-subs', dl.softSubs||LANG_OPTIONS.map(o=>o.value), LANG_OPTIONS)}
+                                ${renderMultiSelect('setting-soft-subs', dl.softSubs||['en-US'], LANG_OPTIONS)}
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Fix CCC Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-fix-ccc" ${dl.fixCccSubtitles?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Duplicate</div></div><label class="toggle-switch"><input type="checkbox" id="setting-subs-dup" ${dl.subsDownloadDuplicate?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Add ScaledBorderAndShadow</div></div><select class="form-select" id="setting-scaled-border" style="min-width:150px;"><option value="DontAdd" ${dl.subsAddScaledBorder==='DontAdd'?'selected':''}>Don't Add</option><option value="ScaledBorderAndShadowYes" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowYes'?'selected':''}>yes</option><option value="ScaledBorderAndShadowNo" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowNo'?'selected':''}>no</option></select></div>

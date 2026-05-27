@@ -941,16 +941,25 @@ public class DownloadService : IDownloadService{
         
         var endpoints = new List<(string Endpoint, string UserAgent, CrAuthSettings Settings)>();
         
+        var primaryUrl = $"{ApiUrls.Playback}/{episodeId}/{streamEndpoint.Endpoint}/play";
         if (streamEndpoint.Video || streamEndpoint.Audio){
-            endpoints.Add(($"{ApiUrls.Playback}/{episodeId}/{streamEndpoint.Endpoint}/play", streamEndpoint.UserAgent, streamEndpoint));
+            endpoints.Add((primaryUrl, streamEndpoint.UserAgent, streamEndpoint));
         }
         
-        if (!string.IsNullOrEmpty(streamEndpointSecondary.Endpoint) && (streamEndpointSecondary.Video || streamEndpointSecondary.Audio)){
-            endpoints.Add(($"{ApiUrls.Playback}/{episodeId}/{streamEndpointSecondary.Endpoint}/play", streamEndpointSecondary.UserAgent, streamEndpointSecondary));
+        var secondaryUrl = !string.IsNullOrEmpty(streamEndpointSecondary.Endpoint) 
+            ? $"{ApiUrls.Playback}/{episodeId}/{streamEndpointSecondary.Endpoint}/play" 
+            : null;
+        
+        // Only add secondary endpoint if it's different from primary
+        if (!string.IsNullOrEmpty(secondaryUrl) && secondaryUrl != primaryUrl && (streamEndpointSecondary.Video || streamEndpointSecondary.Audio)){
+            endpoints.Add((secondaryUrl, streamEndpointSecondary.UserAgent, streamEndpointSecondary));
         }
         
-        // Fallback endpoint
-        endpoints.Add(($"{ApiUrls.Playback}/{episodeId}/web/firefox/play", ApiUrls.FirefoxUserAgent, streamEndpoint));
+        // Fallback endpoint - only add if different from primary and secondary
+        var fallbackUrl = $"{ApiUrls.Playback}/{episodeId}/web/firefox/play";
+        if (fallbackUrl != primaryUrl && fallbackUrl != secondaryUrl){
+            endpoints.Add((fallbackUrl, ApiUrls.FirefoxUserAgent, streamEndpoint));
+        }
         
         PlaybackData? mergedData = null;
         bool rateLimited = false;
@@ -1043,6 +1052,11 @@ public class DownloadService : IDownloadService{
                 if (streamError?.Error?.Contains("subscription", StringComparison.OrdinalIgnoreCase) == true ||
                     streamError?.Error?.Contains("access", StringComparison.OrdinalIgnoreCase) == true ||
                     streamError?.RawJson?.Contains("40016") == true){
+                    // If we already have data from a previous endpoint, just log and continue
+                    if (mergedData != null){
+                        _logger?.LogWarning("Token invalidated on secondary endpoint, using data from primary endpoint");
+                        continue;
+                    }
                     if (streamError?.Error?.Contains("does not have access", StringComparison.OrdinalIgnoreCase) == true){
                         throw new DownloadException("Premium subscription required. This content is only available to premium subscribers.", DownloadErrorType.PremiumContent);
                     }
@@ -1058,6 +1072,11 @@ public class DownloadService : IDownloadService{
                     streamError?.Error?.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) == true ||
                     streamError?.Error?.Contains("invalid token", StringComparison.OrdinalIgnoreCase) == true ||
                     streamError?.Error?.Contains("not authenticated", StringComparison.OrdinalIgnoreCase) == true){
+                    // If we already have data from a previous endpoint, just log and continue
+                    if (mergedData != null){
+                        _logger?.LogWarning("Auth error on secondary endpoint, using data from primary endpoint");
+                        continue;
+                    }
                     throw new DownloadException("Authentication failed. Please log in again.", DownloadErrorType.NotAuthenticated);
                 }
                 

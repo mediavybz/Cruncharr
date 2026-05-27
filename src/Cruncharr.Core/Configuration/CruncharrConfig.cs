@@ -101,30 +101,6 @@ public class CruncharrConfig{
         }
     }
     
-    /// <summary>
-    /// Validates and fixes corrupted config values. Only runs safe fixes that don't undo user choices.
-    /// </summary>
-    public void ValidateAndFix(){
-        // Only fix null/empty lists - NEVER reset user-selected values
-        // The old bug that selected all languages is already fixed in the frontend
-        if (Download.DubLanguages == null || Download.DubLanguages.Count == 0){
-            Download.DubLanguages = new List<string>{ "ja-JP" };
-        }
-        
-        if (Download.SoftSubs == null || Download.SoftSubs.Count == 0){
-            Download.SoftSubs = new List<string>{ "en-US" };
-        }
-        
-        // Only set defaults for truly missing values
-        if (string.IsNullOrEmpty(Download.QualityVideo)) Download.QualityVideo = "best";
-        if (string.IsNullOrEmpty(Download.QualityAudio)) Download.QualityAudio = "best";
-        if (string.IsNullOrEmpty(Download.DefaultAudio)) Download.DefaultAudio = "ja-JP";
-        if (string.IsNullOrEmpty(Download.DefaultSub)) Download.DefaultSub = "en-US";
-        if (string.IsNullOrEmpty(Download.HardSubLang)) Download.HardSubLang = "none";
-        if (Download.SimultaneousDownloads < 1) Download.SimultaneousDownloads = 2;
-        if (Download.SimultaneousProcessingJobs < 1) Download.SimultaneousProcessingJobs = 2;
-    }
-    
     public void NormalizeNotificationSettings(){
         if (Notifications == null){
             Notifications = new NotificationsConfig();

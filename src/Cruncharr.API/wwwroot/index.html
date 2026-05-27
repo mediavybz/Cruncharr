@@ -1672,11 +1672,7 @@ MAINTENANCE NOTES:
                 });
                 
                 if (Object.keys(episodes).length === 0) {
-                    console.error('DEBUG: No valid episodes selected');
-                    console.error('DEBUG: selectedEpisodes:', Array.from(selectedEpisodes));
-                    console.error('DEBUG: addDownloadSeriesData keys:', Object.keys(addDownloadSeriesData || {}));
-                    console.error('DEBUG: addDownloadSeriesData:', addDownloadSeriesData);
-                    showToast('No valid episodes selected (check console for details)', 'error');
+                    showToast('No valid episodes selected', 'error');
                     return;
                 }
                 

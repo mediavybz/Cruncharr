@@ -71,7 +71,9 @@ public class QueueController : ControllerBase{
             AudioLocale = request.AudioLocale ?? request.Locale ?? "ja-JP",
             ThumbnailUrl = request.ThumbnailUrl,
             CoverArtUrl = request.CoverArtUrl,
-            Description = request.Description
+            Description = request.Description,
+            SelectedDubs = request.SelectedDubs,
+            SelectedSubs = request.SelectedSubs
         };
 
         _queueService.AddToQueue(episode);
@@ -219,6 +221,8 @@ public class QueueRequest{
     public string? ThumbnailUrl { get; set; }
     public string? CoverArtUrl { get; set; }
     public string? Description { get; set; }
+    public List<string>? SelectedDubs { get; set; }
+    public List<string>? SelectedSubs { get; set; }
 }
 
 public class QueueResponse{

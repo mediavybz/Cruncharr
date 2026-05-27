@@ -90,12 +90,20 @@ public class DownloadService : IDownloadService{
         // Check if episode has all selected dubs/subs before downloading
         if (config.Download.DownloadOnlyWithAllSelectedDubSub){
             var availableDubs = episode.Versions?.Select(v => v.AudioLocale).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
-            var missingDubs = config.Download.DubLanguages
+            // Use episode's SelectedDubs if set, otherwise fall back to config
+            var requiredDubs = episode.SelectedDubs?.Count > 0 
+                ? episode.SelectedDubs 
+                : config.Download.DubLanguages;
+            var missingDubs = requiredDubs
                 .Where(d => !availableDubs.Contains(d, StringComparer.OrdinalIgnoreCase))
                 .ToList();
             
             var availableSubs = episode.SubtitleLocales ?? new List<string>();
-            var missingSubs = config.Download.SoftSubs
+            // Use episode's SelectedSubs if set, otherwise fall back to config
+            var requiredSubs = episode.SelectedSubs?.Count > 0
+                ? episode.SelectedSubs
+                : config.Download.SoftSubs;
+            var missingSubs = requiredSubs
                 .Where(s => !availableSubs.Contains(s, StringComparer.OrdinalIgnoreCase))
                 .ToList();
             
@@ -132,8 +140,11 @@ public class DownloadService : IDownloadService{
                     v.AudioLocale.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
             }
             
-            // If episode's locale not found or not in DubLanguages, try DubLanguages priority
-            var dubLangs = config.Download.DubLanguages;
+            // Use episode's SelectedDubs if set (from queue item), otherwise fall back to config
+            var dubLangs = episode.SelectedDubs?.Count > 0 
+                ? episode.SelectedDubs 
+                : config.Download.DubLanguages;
+            
             if (currentVersion == null || 
                 (dubLangs.Count > 0 && !dubLangs.Any(d => d.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase)))){
                 
@@ -143,7 +154,7 @@ public class DownloadService : IDownloadService{
                         v.AudioLocale.Equals(dubLang, StringComparison.OrdinalIgnoreCase));
                     if (matchingVersion != null){
                         currentVersion = matchingVersion;
-                        _logger?.LogInformation("DubLanguages override: selected {DubLang} version instead of {OriginalLocale}", 
+                        _logger?.LogInformation("SelectedDubs override: selected {DubLang} version instead of {OriginalLocale}", 
                             dubLang, episode.AudioLocale);
                         break;
                     }
@@ -281,7 +292,9 @@ public class DownloadService : IDownloadService{
             AudioLanguage = config.Download.DefaultAudio,
             SonarrSeries = sonarrSeries,
             SonarrEpisode = sonarrEpisode,
-            SelectedDubs = config.Download.DubLanguages
+            SelectedDubs = episode.SelectedDubs?.Count > 0 
+                ? episode.SelectedDubs 
+                : config.Download.DubLanguages
         };
         var fileName = _filenameService.FormatFilename(filenameTemplate, episode, filenameOptions);
         string outputExtension;
@@ -315,7 +328,7 @@ public class DownloadService : IDownloadService{
             // Handle DASH manifest (contains both video and audio)
             if (playbackData.VideoUrl != null && (playbackData.VideoUrl.Contains(".mpd") || playbackData.VideoUrl.Contains("/dash/"))){
                 progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 30, Doing = "Downloading DASH streams..." });
-                var (videoPath, audioPaths) = await DownloadDashTracksAsync(playbackData.VideoUrl, tempDir, config, progress, 30, 80, cancellationToken, playbackData.VideoToken, mediaId);
+                var (videoPath, audioPaths) = await DownloadDashTracksAsync(playbackData.VideoUrl, tempDir, config, progress, 30, 80, cancellationToken, playbackData.VideoToken, mediaId, episode.SelectedDubs);
                 if (videoPath != null && !config.Download.NoVideo) downloadedFiles.Add(videoPath);
                 foreach (var (path, _) in audioPaths){
                     downloadedFiles.Add(path);
@@ -401,7 +414,10 @@ public class DownloadService : IDownloadService{
                 // Note: Video is only downloaded once (DlVideoOnce optimization). Additional dubs reuse the same video stream.
                 if (!config.Download.NoAudio && config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1){
                     var primaryLocale = episode.AudioLocale ?? config.Download.DefaultAudio;
-                    var selectedDubs = config.Download.DubLanguages
+                    // Use episode's SelectedDubs if set, otherwise fall back to config
+                    var selectedDubs = (episode.SelectedDubs?.Count > 0 
+                        ? episode.SelectedDubs 
+                        : config.Download.DubLanguages)
                         .Where(dub => !string.Equals(dub, primaryLocale, StringComparison.OrdinalIgnoreCase))
                         .ToList();
                     
@@ -756,7 +772,9 @@ public class DownloadService : IDownloadService{
                             NumberPadding = config.Download.LeadingNumbers,
                             Quality = actualHeight.Value.ToString(),
                             AudioLanguage = config.Download.DefaultAudio,
-                            SelectedDubs = config.Download.DubLanguages
+                            SelectedDubs = episode.SelectedDubs?.Count > 0 
+                                ? episode.SelectedDubs 
+                                : config.Download.DubLanguages
                         };
                         var newFileName = _filenameService.FormatFilename(filenameTemplate, episode, newFilenameOptions);
                         var newOutputPath = Path.Combine(outputDir, newFileName + outputExtension);
@@ -1342,7 +1360,7 @@ public class DownloadService : IDownloadService{
         }
     }
     
-    private async Task<(string? VideoPath, List<(string Path, string Lang)> AudioPaths)> DownloadDashTracksAsync(string manifestUrl, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null, string? mediaGuid = null){
+    private async Task<(string? VideoPath, List<(string Path, string Lang)> AudioPaths)> DownloadDashTracksAsync(string manifestUrl, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null, string? mediaGuid = null, List<string>? selectedDubs = null){
         // Download manifest with auth headers
         var manifestRequest = new HttpRequestMessage(HttpMethod.Get, manifestUrl);
         manifestRequest.Headers.Add("Authorization", $"Bearer {_auth.Token?.access_token}");
@@ -1402,7 +1420,9 @@ public class DownloadService : IDownloadService{
         
         // Select video/audio tracks using ported upstream logic
         var chosenVideo = SelectVideoTrackQma(videoItems, config.Download.QualityVideo);
-        var chosenAudios = SelectAudioTracksUpstream(audioItems, config.Download.DubLanguages);
+        var chosenAudios = SelectAudioTracksUpstream(audioItems, selectedDubs?.Count > 0 
+            ? selectedDubs 
+            : config.Download.DubLanguages);
         
         // Apply QualityAudio filter (ported from upstream DownloadMediaList lines 1874-1895)
         chosenAudios = FilterAudioByQuality(chosenAudios, config.Download.QualityAudio);

@@ -24,7 +24,7 @@ public class HttpClientWrapper{
         var handler = new SocketsHttpHandler{
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
             CookieContainer = _cookieContainer,
-            UseCookies = true,
+            UseCookies = false,
             ConnectCallback = async (context, cancellationToken) => {
                 var entry = await Dns.GetHostEntryAsync(context.DnsEndPoint.Host, AddressFamily.InterNetwork, cancellationToken).ConfigureAwait(false);
                 var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);

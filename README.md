@@ -55,7 +55,9 @@ docker-compose up -d
    - Download directory: `/downloads` (inside container)
    - Temp directory: `/tmp/cruncharr`
    - Stream endpoints: Use defaults (recommended)
-   - Languages: All languages selected by default
+   - Dub Languages: `ja-JP` (Japanese) by default
+   - Soft Subs: `en-US` (English) by default
+   - Change these in Settings → Crunchyroll tab, then click Save
 
 ## Volume Mounts
 
@@ -88,55 +90,14 @@ download:
   quality_video: best
   quality_audio: best
   dub_languages:
-    - ja-JP
-    - en-US
-    - de-DE
-    - es-ES
-    - es-419
-    - fr-FR
-    - it-IT
-    - pt-BR
-    - pt-PT
-    - ru-RU
-    - hi-IN
-    - ar-SA
-    - zh-CN
-    - ko-KR
-    - pl-PL
-    - tr-TR
-    - th-TH
-    - vi-VN
-    - id-ID
-    - ms-MY
-    - ta-IN
-    - te-IN
+    - ja-JP  # Default: Japanese only
   soft_subs:
-    - ja-JP
-    - en-US
-    - de-DE
-    - es-ES
-    - es-419
-    - fr-FR
-    - it-IT
-    - pt-BR
-    - pt-PT
-    - ru-RU
-    - hi-IN
-    - ar-SA
-    - zh-CN
-    - ko-KR
-    - pl-PL
-    - tr-TR
-    - th-TH
-    - vi-VN
-    - id-ID
-    - ms-MY
-    - ta-IN
-    - te-IN
+    - en-US  # Default: English only
   simultaneous_downloads: 2
   simultaneous_processing_jobs: 2
 queue:
-  auto_download: true
+  persist_queue: false
+  auto_download: false
 history:
   enabled: true
   remove_missing_episodes: true
@@ -166,25 +127,32 @@ The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 
 ## Features
 
-- **Web UI**: Single-page app at `/` - search, queue, settings, history
-- **Auth**: Automatic token refresh, profile switching
-- **Downloads**: Concurrent downloads with progress tracking
-- **Queue**: Auto-download, manual start, pause/resume
-- **History**: Track downloaded episodes, prevent duplicates
-- **Stream Endpoints**: Configurable device endpoints (Android TV, Web, Console)
-- **Languages**: All audio dubs and subtitle languages supported
-- **Muxing**: Automatic muxing with ffmpeg/mkvtoolnix
-- **Notifications**: Webhook support for completion/failure
+- **Web UI**: Single-page app at `/` - search series, browse episodes, manage downloads, configure settings
+- **Auth**: Login with Crunchyroll credentials, automatic token refresh
+- **Downloads**: Select episodes with multi-dub support, concurrent downloads with progress tracking
+- **Queue**: Add episodes to queue, auto-download option, download management
+- **History**: Track downloaded episodes, Sonarr integration, refresh series data
+- **Calendar**: View upcoming episode releases
+- **Stream Endpoints**: Configurable device endpoints (Android TV, Web, Console) with working defaults
+- **Languages**: Select audio dubs and subtitle languages (default: Japanese audio, English subs)
+- **Muxing**: Automatic muxing with ffmpeg/mkvtoolnix, MP4/MP3 output options
+- **Settings**: Full settings panel with download, queue, history, notifications, appearance options
+- **Notifications**: Webhook support for completion/failure events
 
 ## Troubleshooting
 
 ### No Audio Track
-- Check `dub_languages` in config includes the episode's audio language
-- Default is all 22 languages
+- Check that `dub_languages` in config includes the episode's audio language
+- Default is `ja-JP` only - add more languages in Settings if needed
 
 ### Auth Issues
-- Delete `config/token_tv.json` to force re-login
-- Check `stream_endpoint.use_default: true`
+- Delete `config/token.json` to force re-login
+- Check that stream endpoint "Use Default" is enabled
+
+### Reset All Settings
+- Stop the container
+- Delete `config/cruncharr.yaml`
+- Restart the container - it will recreate with defaults
 
 ### Widevine/DRM
 - Place `device_private_key.pem` and `device_client_id_blob.bin` in `widevine/` directory

@@ -63,6 +63,7 @@ status.md
 AGENTS.md
 PORTING_LOG.md
 *.local.md
+AUDIT_REPORT*.md
 
 # Upstream source reference (fetched on demand)
 upstream_src/

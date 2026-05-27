@@ -15,7 +15,7 @@ public class Program{
         builder.Services.AddControllers()
             .AddNewtonsoftJson(options =>{
                 options.SerializerSettings.Converters.Add(new StringEnumConverter());
-                options.SerializerSettings.ContractResolver = new CamelCasePropertyNamesContractResolver();
+                options.SerializerSettings.ContractResolver = new PreserveDictionaryKeysContractResolver();
                 options.SerializerSettings.NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore;
             });
 

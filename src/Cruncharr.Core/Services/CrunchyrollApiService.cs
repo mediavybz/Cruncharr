@@ -560,6 +560,12 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 var item = v.Item;
                 var lang = v.Lang;
 
+                // Skip variants with missing data
+                if (item == null || string.IsNullOrEmpty(item.Id)){
+                    _logger?.LogWarning("Skipping variant with missing item data for key {Key}", key);
+                    continue;
+                }
+
                 item.SeqId = epNum;
 
                 if (item.IsPremiumOnly && !hasPremium){
@@ -568,9 +574,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 }
 
                 // history override could be added here if HistoryService is injected
-                var effectiveDubs = dubLang;
+                var effectiveDubs = dubLang ?? new List<string>();
 
-                if (!effectiveDubs.Contains(lang.CrLocale))
+                if (string.IsNullOrEmpty(lang.CrLocale) || !effectiveDubs.Contains(lang.CrLocale))
                     continue;
 
                 // season title fallbacks
@@ -593,15 +599,15 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 // Create base queue item once per key
                 if (!ret.TryGetValue(key, out var qItem)){
                     var seriesTitle = DownloadQueueItemFactory.CanonicalTitle(
-                        episode.Variants.Select(x => (string?)x.Item.SeriesTitle));
+                        episode.Variants.Where(x => x.Item != null).Select(x => (string?)x.Item.SeriesTitle));
 
                     var seasonTitle = DownloadQueueItemFactory.CanonicalTitle(
-                        episode.Variants.Select(x => (string?)x.Item.SeasonTitle));
+                        episode.Variants.Where(x => x.Item != null).Select(x => (string?)x.Item.SeasonTitle));
 
                     var (img, imgBig) = DownloadQueueItemFactory.GetThumbSmallBig(item.Images);
 
                     var selectedDubs = effectiveDubs
-                        .Where(d => episode.Variants.Any(x => x.Lang.CrLocale == d))
+                        .Where(d => episode.Variants.Any(x => !string.IsNullOrEmpty(x.Lang.CrLocale) && x.Lang.CrLocale == d))
                         .ToList();
 
                     qItem = DownloadQueueItemFactory.CreateShell(
@@ -619,7 +625,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                         image: img,
                         imageBig: imgBig,
                         hslang: hslang,
-                        availableSubs: item.SubtitleLocales,
+                        availableSubs: item.SubtitleLocales ?? new List<string>(),
                         selectedDubs: selectedDubs
                     );
 

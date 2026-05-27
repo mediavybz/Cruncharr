@@ -59,8 +59,8 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
 
     private static readonly CrAuthSettings DefaultAndroidTvAuthSettings = new(){
         Endpoint = "tv/android_tv",
-        Authorization = "Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=",
-        UserAgent = "ANDROIDTV/3.59.0 Android/16",
+        Authorization = "Basic bm1oaGcwbDZ4eXhjZm02aHQ2aGY6SjR6bU1mdjNkMVFkWHk4dDk2d1NjeDdoUnkzclBHLTM=",
+        UserAgent = "ANDROIDTV/3.61.0_22341 Android/16",
         Device_name = "Android TV",
         Device_type = "Android TV",
         Video = true,
@@ -69,8 +69,8 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
 
     private static readonly CrAuthSettings DefaultAndroidAuthSettings = new(){
         Endpoint = "android/phone",
-        Authorization = "Basic bzJhNndsamdub3FtdjloMWJ5bHI6Ujk3S3ExZm5faExZVFk0bDJxTjJIT2lDQnpfYnpBSUU=",
-        UserAgent = "Crunchyroll/3.97.0 Android/16 okhttp/4.12.0",
+        Authorization = "Basic Z24wdTU4dGNoMXRxaXZwNHlsbG46TXFoTlFpRnlHSEZKblNRYjZHTjlRQjhENVNTbUllVVQ=",
+        UserAgent = "Crunchyroll/3.109.2 Android/16 okhttp/4.12.0",
         Device_name = "CPH2449",
         Device_type = "OnePlus CPH2449",
         Video = true,

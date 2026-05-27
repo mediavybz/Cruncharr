@@ -792,7 +792,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
 
             if (value.Variants.Count == 0){
                 return new EpisodeDisplay{
-                    E = key.StartsWith("E") ? key.Substring(1) : key,
+                    E = key,
                     Lang = new List<string>(),
                     Name = string.Empty,
                     Season = string.Empty,
@@ -812,7 +812,20 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
             var thumbRow = baseEp.Images?.ContainsKey("thumbnail") == true 
                 ? baseEp.Images["thumbnail"]?.FirstOrDefault() 
                 : null;
-            var img = thumbRow?.FirstOrDefault() is string s ? s : "/notFound.jpg";
+            string img = "/notFound.jpg";
+            if (thumbRow != null && thumbRow.Count > 0){
+                var firstImg = thumbRow[0];
+                if (firstImg is string s){
+                    img = s;
+                } else if (firstImg is Newtonsoft.Json.Linq.JObject jo){
+                    var source = jo["source"]?.ToString();
+                    if (!string.IsNullOrEmpty(source)) img = source;
+                } else if (firstImg is System.Collections.Generic.Dictionary<string, object> dict){
+                    if (dict.TryGetValue("source", out var sourceObj) && sourceObj is string sourceStr){
+                        img = sourceStr;
+                    }
+                }
+            }
 
             var seconds = (int)Math.Floor((baseEp.DurationMs) / 1000.0);
 
@@ -824,7 +837,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
             Languages.SortListByLangList(langList);
 
             return new EpisodeDisplay{
-                E = key.StartsWith("E") ? key.Substring(1) : key,
+                E = key,
                 Lang = langList,
                 Name = baseEp.Title ?? string.Empty,
                 Season = (Helpers.ExtractNumberAfterS(baseEp.Identifier) ?? baseEp.SeasonNumber.ToString()) ?? string.Empty,

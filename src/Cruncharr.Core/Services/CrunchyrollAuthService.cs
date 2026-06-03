@@ -77,6 +77,8 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         Audio = true
     };
 
+    private const string EmbeddedAuthData = @"[{""type"":""tv"",""authorization"":""Basic bm1oaGcwbDZ4eXhjZm02aHQ2aGY6SjR6bU1mdjNkMVFkWHk4dDk2d1NjeDdoUnkzclBHLTM="",""versionName"":""3.61.0""},{""type"":""mobile"",""authorization"":""Basic Z24wdTU4dGNoMXRxaXZwNHlsbG46TXFoTlFpRnlHSEZKblNRYjZHTjlRQjhENVNTbUllVVQ="",""versionName"":""3.97.0""}]";
+
     public CrunchyrollAuthService(CruncharrConfig? config = null, ILogger<CrunchyrollAuthService>? logger = null){
         _logger = logger;
         _httpClient = new HttpClientWrapper(config);
@@ -297,7 +299,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
     // Fetches updated auth credentials from upstream data endpoint
     public async Task<bool> UpdateAuthCredentialsAsync(CancellationToken cancellationToken = default){
         const string dataUrl = "https://crunchy-dl.github.io/Crunchy-Downloader/data.json";
+        const string fallbackUrl = "https://raw.githubusercontent.com/Crunchy-DL/Crunchy-Downloader/main/data.json";
         
+        string? authResponse = null;
+        
+        // Try original URL first
         try{
             _logger?.LogInformation("Checking for auth credential updates from {Url}...", dataUrl);
             
@@ -305,17 +311,47 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             request.Headers.Add("User-Agent", "Cruncharr/1.0");
             
             var response = await _httpClient.Client.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode){
-                _logger?.LogWarning("Failed to fetch auth data: {Status}", response.StatusCode);
-                return false;
+            if (response.IsSuccessStatusCode){
+                authResponse = await response.Content.ReadAsStringAsync(cancellationToken);
+            } else{
+                _logger?.LogWarning("Failed to fetch auth data from primary URL: {Status}", response.StatusCode);
             }
-            
-            var authResponse = await response.Content.ReadAsStringAsync(cancellationToken);
+        } catch (Exception ex){
+            _logger?.LogWarning(ex, "Failed to fetch auth data from primary URL");
+        }
+        
+        // Try fallback GitHub raw URL
+        if (authResponse == null){
+            try{
+                _logger?.LogInformation("Trying fallback URL {Url}...", fallbackUrl);
+                
+                var request = new HttpRequestMessage(HttpMethod.Get, fallbackUrl);
+                request.Headers.Add("User-Agent", "Cruncharr/1.0");
+                
+                var response = await _httpClient.Client.SendAsync(request, cancellationToken);
+                if (response.IsSuccessStatusCode){
+                    authResponse = await response.Content.ReadAsStringAsync(cancellationToken);
+                } else{
+                    _logger?.LogWarning("Failed to fetch auth data from fallback URL: {Status}", response.StatusCode);
+                }
+            } catch (Exception ex){
+                _logger?.LogWarning(ex, "Failed to fetch auth data from fallback URL");
+            }
+        }
+        
+        // Use embedded fallback data if all URLs fail
+        if (authResponse == null){
+            _logger?.LogInformation("Using embedded auth credentials fallback...");
+            authResponse = EmbeddedAuthData;
+        }
+        
+        try{
             var authEntries = JsonConvert.DeserializeObject<List<GhAuthEntry>>(authResponse);
             
             if (authEntries == null || authEntries.Count == 0){
-                _logger?.LogWarning("No auth entries found in auth.json");
-                return false;
+                _logger?.LogWarning("No auth entries found in auth data");
+                // Return true if current credentials are already set (non-empty)
+                return !string.IsNullOrEmpty(StreamEndpoint.Authorization) && !string.IsNullOrEmpty(StreamEndpointSecondary.Authorization);
             }
             
             var ghAuthTv = authEntries.FirstOrDefault(e => e.Type?.Equals("tv", StringComparison.OrdinalIgnoreCase) == true);
@@ -349,8 +385,9 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             
             return true;
         } catch (Exception ex){
-            _logger?.LogError(ex, "Failed to update auth credentials");
-            return false;
+            _logger?.LogError(ex, "Failed to parse auth credentials");
+            // Return true if current credentials are already set (non-empty)
+            return !string.IsNullOrEmpty(StreamEndpoint.Authorization) && !string.IsNullOrEmpty(StreamEndpointSecondary.Authorization);
         }
     }
     

@@ -18,9 +18,9 @@ public class SonarrService : ISonarrService{
     private readonly ILogger<SonarrService>? _logger;
     private readonly HttpClient _httpClient;
 
-    public SonarrService(ILogger<SonarrService>? logger = null){
+    public SonarrService(IHttpClientFactory httpClientFactory, ILogger<SonarrService>? logger = null){
         _logger = logger;
-        _httpClient = new HttpClient();
+        _httpClient = httpClientFactory.CreateClient();
     }
 
     private string BuildBaseUrl(SonarrConfig config){

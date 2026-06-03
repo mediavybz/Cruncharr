@@ -32,7 +32,7 @@ public class ConfigController : ControllerBase{
                 StreamEndpointSecondary = _config.Crunchyroll.StreamEndpointSecondary,
                 DefaultStreamEndpoint = new{
                     Endpoint = "tv/android_tv",
-                    Authorization = "Basic bm1oaGcwbDZ4eXhjZm02aHQ2aGY6SjR6bU1mdjNkMVFkWHk4dDk2d1NjeDdoUnkzclBHLTM=",
+                    Authorization = "", // Server-managed, not exposed to client
                     UserAgent = "ANDROIDTV/3.61.0_22341 Android/16",
                     DeviceType = "Android TV",
                     DeviceName = "Android TV",
@@ -41,7 +41,7 @@ public class ConfigController : ControllerBase{
                 },
                 DefaultStreamEndpointSecondary = new{
                     Endpoint = "android/phone",
-                    Authorization = "Basic Z24wdTU4dGNoMXRxaXZwNHlsbG46TXFoTlFpRnlHSEZKblNRYjZHTjlRQjhENVNTbUllVVQ=",
+                    Authorization = "", // Server-managed, not exposed to client
                     UserAgent = "Crunchyroll/3.109.2 Android/16 okhttp/4.12.0",
                     DeviceType = "OnePlus CPH2449",
                     DeviceName = "CPH2449",
@@ -69,6 +69,7 @@ public class ConfigController : ControllerBase{
                 DlVideoOnce = _config.Download.DlVideoOnce,
                 KeepDubsSeparate = _config.Download.KeepDubsSeparate,
                 DubDownloadDelaySeconds = _config.Download.DubDownloadDelaySeconds,
+                CooldownDelaySeconds = _config.Download.CooldownDelaySeconds,
                 HardSubLang = _config.Download.HardSubLang,
                 HardSubRawFallback = _config.Download.HardSubRawFallback,
                 Kstream = _config.Download.Kstream,
@@ -337,6 +338,7 @@ public class ConfigController : ControllerBase{
             if (dl.DlVideoOnce.HasValue) _config.Download.DlVideoOnce = dl.DlVideoOnce.Value;
             if (dl.KeepDubsSeparate.HasValue) _config.Download.KeepDubsSeparate = dl.KeepDubsSeparate.Value;
             if (dl.DubDownloadDelaySeconds.HasValue) _config.Download.DubDownloadDelaySeconds = dl.DubDownloadDelaySeconds.Value;
+            if (dl.CooldownDelaySeconds.HasValue) _config.Download.CooldownDelaySeconds = dl.CooldownDelaySeconds.Value;
             if (!string.IsNullOrEmpty(dl.HardSubLang)) _config.Download.HardSubLang = dl.HardSubLang;
             if (dl.HardSubRawFallback.HasValue) _config.Download.HardSubRawFallback = dl.HardSubRawFallback.Value;
             if (dl.Kstream.HasValue) _config.Download.Kstream = dl.Kstream.Value;
@@ -547,6 +549,7 @@ public class DownloadUpdateConfig{
     public bool? DlVideoOnce { get; set; }
     public bool? KeepDubsSeparate { get; set; }
     public int? DubDownloadDelaySeconds { get; set; }
+    public int? CooldownDelaySeconds { get; set; }
     public string? HardSubLang { get; set; }
     public bool? HardSubRawFallback { get; set; }
     public int? Kstream { get; set; }

@@ -23,6 +23,7 @@ public interface IQueueService{
     bool StartItem(string queueItemId);
     int ActiveDownloads { get; }
     bool HasActiveDownloads { get; }
+    bool ShutdownRequested { get; }
     event EventHandler? QueueStateChanged;
     
     // Replace entire queue
@@ -35,6 +36,9 @@ public interface IQueueService{
     
     // Init-completion gate (ported from upstream c123093)
     void SetInitialized(bool initialized);
+    bool IsGloballyPaused { get; }
+    void PauseGlobally();
+    void ResumeGlobally();
 }
 
 public class QueueService : IQueueService, IDisposable{
@@ -60,6 +64,15 @@ public class QueueService : IQueueService, IDisposable{
     
     // [PT] Ported from upstream c123093: init-completion gate
     private bool _isInitialized;
+    
+    // Shutdown flag replaces Environment.Exit for Docker compatibility
+    private bool _shutdownRequested;
+    
+    // Global pause flag
+    private bool _isGloballyPaused;
+    
+    public bool ShutdownRequested => _shutdownRequested;
+    public bool IsGloballyPaused => _isGloballyPaused;
 
     public int ActiveDownloads{
         get{
@@ -297,14 +310,8 @@ public class QueueService : IQueueService, IDisposable{
         }
         
         if (shouldShutdown){
-            _logger?.LogInformation("Queue empty, shutting down...");
-            _ = Task.Run(() =>{
-                try{
-                    Environment.Exit(0);
-                } catch (Exception ex){
-                    _logger?.LogError(ex, "Failed to shutdown application");
-                }
-            });
+            _logger?.LogInformation("Queue empty, requesting shutdown...");
+            _shutdownRequested = true;
         }
     }
 
@@ -366,6 +373,7 @@ public class QueueService : IQueueService, IDisposable{
         if (!_isInitialized) return;
         if (_config == null) return;
         if (!_config.Queue.AutoDownload) return;
+        if (_isGloballyPaused) return;
 
         lock (_autoDownloadBlockLock){
             if (_autoDownloadBlockedUntilUtc.HasValue && !HasPendingRetryItems()){
@@ -424,6 +432,10 @@ public class QueueService : IQueueService, IDisposable{
         foreach (var item in toStart){
             _ = Task.Run(async () =>{
                 try{
+                    // Apply cooldown delay between downloads (upstream #445)
+                    if (_config?.Download.CooldownDelaySeconds > 0){
+                        await Task.Delay(TimeSpan.FromSeconds(_config.Download.CooldownDelaySeconds), _cancellationToken);
+                    }
                     await RunDownloadAsync(item, _cancellationToken);
                 } finally{
                     ReleaseDownloadSlot(item);
@@ -614,6 +626,17 @@ public class QueueService : IQueueService, IDisposable{
         if (initialized){
             RequestPump();
         }
+    }
+
+    public void PauseGlobally(){
+        _isGloballyPaused = true;
+        _logger?.LogInformation("Queue globally paused");
+    }
+
+    public void ResumeGlobally(){
+        _isGloballyPaused = false;
+        _logger?.LogInformation("Queue globally resumed");
+        RequestPump();
     }
 
     public void Dispose(){

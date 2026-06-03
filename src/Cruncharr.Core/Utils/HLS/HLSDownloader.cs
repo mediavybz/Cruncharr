@@ -632,7 +632,7 @@ public class HlsDownloader{
         HttpResponseMessage response;
         for (int attempt = 0; attempt < retryCount + 1; attempt++){
             cancellationToken.ThrowIfCancellationRequested();
-            using (var request = CloneHttpRequestMessage(requestPara)){
+            using (var request = await CloneHttpRequestMessageAsync(requestPara)){
                 try{
                     response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                     response.EnsureSuccessStatusCode();
@@ -672,9 +672,9 @@ public class HlsDownloader{
         }
     }
 
-    private HttpRequestMessage CloneHttpRequestMessage(HttpRequestMessage originalRequest){
+    private async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage originalRequest){
         var clone = new HttpRequestMessage(originalRequest.Method, originalRequest.RequestUri){
-            Content = originalRequest.Content?.Clone(),
+            Content = originalRequest.Content != null ? await originalRequest.Content.CloneAsync() : null,
             Version = originalRequest.Version
         };
         foreach (var header in originalRequest.Headers){
@@ -707,6 +707,19 @@ public static class HttpContentExtensions{
         if (content == null) return null;
         var memStream = new MemoryStream();
         content.CopyToAsync(memStream).Wait();
+        memStream.Position = 0;
+        var newContent = new StreamContent(memStream);
+        foreach (var header in content.Headers){
+            newContent.Headers.Add(header.Key, header.Value);
+        }
+
+        return newContent;
+    }
+    
+    public static async Task<HttpContent?> CloneAsync(this HttpContent? content){
+        if (content == null) return null;
+        var memStream = new MemoryStream();
+        await content.CopyToAsync(memStream);
         memStream.Position = 0;
         var newContent = new StreamContent(memStream);
         foreach (var header in content.Headers){

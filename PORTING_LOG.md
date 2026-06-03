@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: Latest upstream from https://github.com/Crunchy-DL/Crunchy-Downloader
-## Last Updated: 2026-06-03 (Final fixes: multi-dub, version display, ARM64, webhook dispatch, GitHub Actions removal)
+## Last Updated: 2026-06-03 (Frontend security audit: hardcoded credentials removed, XSS fixes, event handling, AbortController, Docker rebuild)
 
 ---
 
@@ -70,12 +70,17 @@
 | src/Cruncharr.API/wwwroot/index.html | SettingsPageView | GET/POST /api/v1/config | 2026-06-02 |
 | src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-004**: Added authIntervalId/historyIntervalId, clear on beforeunload, clear history interval on nav away | 2026-06-02 |
 | src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-005**: Added res.ok checks before res.json() on all fetch calls (20 locations) | 2026-06-02 |
+| src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-006**: Removed hardcoded Crunchyroll API credentials from STREAM_DEFAULTS; server-side defaults only | 2026-06-03 |
+| src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-007**: Fixed XSS vulnerabilities: added escapeHtml() to search results, episode lists, calendar, queue, history table | 2026-06-03 |
+| src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-008**: Fixed setSettingsTab global event usage - passes event param instead of relying on window.event | 2026-06-03 |
+| src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-009**: Added AbortController to search fetch to cancel previous requests on new input | 2026-06-03 |
 
 ### Infrastructure
 | File | Purpose | Date |
 |------|---------|------|
 | PORTING_LOG.md | Updated API contract with /v1 prefix, added completion entries | 2026-06-02 |
 | Docker image | Multi-platform build (linux/amd64 + linux/arm64) pushed to ghcr.io/mediavybz/cruncharr:latest | 2026-06-03 |
+| Docker image | Rebuilt with frontend security fixes (XSS, credentials, events, AbortController) - digest: sha256:8a5bac0a559373a2374347705b474961457950733ac67c8afe1fd60a1c154c09 | 2026-06-03 |
 | src/Cruncharr.Core.Tests | Sonarr integration test suite (44 tests) | 2026-06-03 |
 
 ---
@@ -91,7 +96,7 @@
 - Missing API methods: 2 / 2 (GetAllSeries, GetSeasonalSeries done)
 - Missing auth features: 1 / 1 (GetBase64EncodedTokenAsync done)
 - Missing history features: 3 / 3 (UpdateWithEpisode, GZip compression, backup rotation done)
-- Frontend audit gaps resolved: 9 / 9 (mark-as-watched, browse/seasonal multi-dub, history filter, encoding preset dropdown, webhook test, series settings override, season settings override, interval cleanup, res.ok checks)
+- Frontend audit gaps resolved: 13 / 13 (mark-as-watched, browse/seasonal multi-dub, history filter, encoding preset dropdown, webhook test, series settings override, season settings override, interval cleanup, res.ok checks, hardcoded credentials removed, XSS fixed, setSettingsTab event fixed, search AbortController)
 - Settings sync fixes: 3 / 3 (dub/subs fallback defaults, stream endpoint defaults, config validation)
 - **UI Improvements: 4 / 4 (dead toggles removed, refresh persistence, loading spinner, multi-select dropdowns)**
 - **Build warnings: 306 → 35 (89% reduction)**

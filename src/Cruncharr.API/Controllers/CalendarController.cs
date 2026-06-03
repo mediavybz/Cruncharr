@@ -99,60 +99,26 @@ public class CalendarController : ControllerBase{
                 DayName = day.DayName ?? day.DateTime.ToString("dddd"),
                 Episodes = day.CalendarEpisodes
                     .Where(e => !hideDubs || !CrSimulcastCalendarFilter.IsDubOrAltLanguageSeason(e.SeasonName))
-                    .Where(e => MatchesLanguage(e.SeasonName, language))
                     .Select(MapEpisodeToResponse)
                     .ToList()
             }).ToList() ?? new List<CalendarDayResponse>()
         };
     }
 
-    private static bool MatchesLanguage(string? seasonName, string language){
-        if (string.IsNullOrEmpty(seasonName)) return true;
-        
-        // Extract content inside last parentheses (handles nested parens like "(Português (Brasil))")
-        var lastOpenParen = seasonName.LastIndexOf('(');
-        var lastCloseParen = seasonName.LastIndexOf(')');
-        
-        if (lastOpenParen == -1 || lastCloseParen == -1 || lastOpenParen > lastCloseParen)
-            return true; // No language tag = original/Japanese, always show
-        
-        // Extract the full parenthetical content
-        var tag = seasonName.Substring(lastOpenParen + 1, lastCloseParen - lastOpenParen - 1).Trim().ToLowerInvariant();
-        
-        // Map language codes to common tags
-        var langMap = new Dictionary<string, string[]>{
-            ["en-us"] = new[] { "english", "en-us" },
-            ["ja-jp"] = new[] { "japanese", "ja-jp", "日本語" },
-            ["es"] = new[] { "español", "espanol", "spanish", "américa latina", "america latina", "latin america", "español (latinoamérica)", "espanol (latinoamerica)" },
-            ["es-es"] = new[] { "español (españa)", "espanol (espana)", "spanish (spain)", "españa", "espana" },
-            ["pt-br"] = new[] { "português (brasil)", "portugues (brasil)", "portuguese (brazil)", "brasil", "brazil" },
-            ["pt-pt"] = new[] { "português (portugal)", "portugues (portugal)", "portuguese (portugal)", "portugal" },
-            ["fr"] = new[] { "français", "francais", "french" },
-            ["de"] = new[] { "deutsch", "german" },
-            ["it"] = new[] { "italiano", "italian" },
-            ["ru"] = new[] { "рус", "russian", "русский" },
-            ["ar"] = new[] { "العربية", "arabic" },
-            ["hi"] = new[] { "हिन्दी", "hindi" }
-        };
-        
-        if (langMap.TryGetValue(language.ToLowerInvariant(), out var keywords)){
-            return keywords.Any(k => tag.Contains(k, StringComparison.OrdinalIgnoreCase));
-        }
-        
-        return true;
-    }
-
     private static CalendarEpisodeResponse MapEpisodeToResponse(CalendarEpisode episode){
-        // Extract episode ID from EpisodeUrl (e.g., /watch/G0DUN2EZP/to-defeat-muzan-kibutsuji)
+        // Extract episode ID from EpisodeUrl
+        // Handles: /watch/G0DUN2EZP/... , /es/watch/G0DUN2EZP/... , https://crunchyroll.com/watch/G0DUN2EZP/...
         var episodeId = episode.CrSeriesID ?? "";
         if (!string.IsNullOrEmpty(episode.EpisodeUrl)){
-            var parts = episode.EpisodeUrl.Trim('/').Split('/');
-            if (parts.Length >= 2 && parts[^2] == "watch" && parts[^1].Length > 0){
-                // URL format: /watch/{episodeId}/{slug}
-                episodeId = parts[^1];
-            } else if (parts.Length >= 2 && parts[0] == "watch"){
-                // URL format: watch/{episodeId}/{slug}
-                episodeId = parts[1];
+            var url = episode.EpisodeUrl.Trim('/');
+            // Find the segment after "watch/"
+            var watchIndex = url.IndexOf("watch/", StringComparison.OrdinalIgnoreCase);
+            if (watchIndex >= 0){
+                var afterWatch = url.Substring(watchIndex + 6); // 6 = "watch/".Length
+                var parts = afterWatch.Split('/');
+                if (parts.Length > 0 && !string.IsNullOrEmpty(parts[0])){
+                    episodeId = parts[0]; // The episode ID is the first segment after watch/
+                }
             }
         }
         

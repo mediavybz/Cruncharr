@@ -22,8 +22,13 @@ public class HistoryController : ControllerBase{
     public async Task<ActionResult<List<DownloadHistory>>> GetHistory(
         [FromQuery] int limit = 100,
         [FromQuery] int offset = 0){
-        var history = await _historyService.GetAllAsync(offset, limit);
-        return Ok(history);
+        try{
+            var history = await _historyService.GetAllAsync(offset, limit);
+            return Ok(history);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Error in GetHistory");
+            return StatusCode(500, new { Error = "GetHistory failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -31,9 +36,15 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("rich")]
     public async Task<ActionResult<List<HistorySeriesResponse>>> GetRichHistory(){
-        var history = await _historyService.GetHistorySeriesAsync();
-        var response = history.Select(MapToResponse).ToList();
-        return Ok(response);
+        try{
+            var history = await _historyService.GetHistorySeriesAsync();
+            var response = history.Select(MapToResponse).ToList();
+            return Ok(response);
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in GetRichHistory");
+            return StatusCode(500, new { Error = "GetRichHistory failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -41,12 +52,18 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("check/{episodeId}/{audioLanguage}")]
     public async Task<ActionResult<HistoryCheckResponse>> CheckHistory(string episodeId, string audioLanguage){
-        var exists = await _historyService.IsDownloadedAsync(episodeId, audioLanguage);
-        return Ok(new HistoryCheckResponse{
-            EpisodeId = episodeId,
-            AudioLanguage = audioLanguage,
-            Exists = exists
-        });
+        try{
+            var exists = await _historyService.IsDownloadedAsync(episodeId, audioLanguage);
+            return Ok(new HistoryCheckResponse{
+                EpisodeId = episodeId,
+                AudioLanguage = audioLanguage,
+                Exists = exists
+            });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in CheckHistory");
+            return StatusCode(500, new { Error = "CheckHistory failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -54,8 +71,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> AddToHistory([FromBody] DownloadHistory entry){
-        await _historyService.AddAsync(entry);
-        return Ok(new { Message = "Added to history" });
+        try{
+            await _historyService.AddAsync(entry);
+            return Ok(new { Message = "Added to history" });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in AddToHistory");
+            return StatusCode(500, new { Error = "AddToHistory failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -63,10 +86,16 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("series/{seriesId}")]
     public async Task<ActionResult<HistorySeriesResponse?>> GetSeriesHistory(string seriesId){
-        var history = await _historyService.GetHistorySeriesAsync();
-        var series = history.FirstOrDefault(s => s.SeriesId == seriesId);
-        if (series == null) return NotFound();
-        return Ok(MapToResponse(series));
+        try{
+            var history = await _historyService.GetHistorySeriesAsync();
+            var series = history.FirstOrDefault(s => s.SeriesId == seriesId);
+            if (series == null) return NotFound();
+            return Ok(MapToResponse(series));
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in GetSeriesHistory");
+            return StatusCode(500, new { Error = "GetSeriesHistory failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -74,8 +103,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("downloaded/{seriesId}/{seasonId}/{episodeId}")]
     public async Task<IActionResult> SetDownloaded(string seriesId, string seasonId, string episodeId){
-        await _historyService.SetAsDownloadedAsync(seriesId, seasonId, episodeId);
-        return Ok(new { Message = "Marked as downloaded" });
+        try{
+            await _historyService.SetAsDownloadedAsync(seriesId, seasonId, episodeId);
+            return Ok(new { Message = "Marked as downloaded" });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in SetDownloaded");
+            return StatusCode(500, new { Error = "SetDownloaded failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -83,8 +118,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("cleanup")]
     public async Task<IActionResult> Cleanup(){
-        await _historyService.RemoveUnavailableEpisodesAsync();
-        return Ok(new { Message = "Cleaned up unavailable episodes" });
+        try{
+            await _historyService.RemoveUnavailableEpisodesAsync();
+            return Ok(new { Message = "Cleaned up unavailable episodes" });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in Cleanup");
+            return StatusCode(500, new { Error = "Cleanup failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -92,8 +133,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("update-series/{seriesId}")]
     public async Task<IActionResult> UpdateSeries(string seriesId, [FromQuery] string? seasonId = null){
-        var result = await _historyService.CrUpdateSeriesAsync(seriesId, seasonId);
-        return Ok(new { Success = result });
+        try{
+            var result = await _historyService.CrUpdateSeriesAsync(seriesId, seasonId);
+            return Ok(new { Success = result });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in UpdateSeries");
+            return StatusCode(500, new { Error = "UpdateSeries failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -101,8 +148,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("sort")]
     public async Task<IActionResult> Sort(){
-        await _historyService.SortItemsAsync();
-        return Ok(new { Message = "History sorted" });
+        try{
+            await _historyService.SortItemsAsync();
+            return Ok(new { Message = "History sorted" });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in Sort");
+            return StatusCode(500, new { Error = "Sort failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -110,9 +163,15 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("episode-with-dir/{seriesId}/{seasonId}/{episodeId}")]
     public async Task<ActionResult> GetEpisodeWithDir(string seriesId, string seasonId, string episodeId){
-        var (episode, dir) = await _historyService.GetHistoryEpisodeWithDownloadDirAsync(seriesId, seasonId, episodeId);
-        if (episode == null) return NotFound();
-        return Ok(new { Episode = episode, DownloadDir = dir });
+        try{
+            var (episode, dir) = await _historyService.GetHistoryEpisodeWithDownloadDirAsync(seriesId, seasonId, episodeId);
+            if (episode == null) return NotFound();
+            return Ok(new { Episode = episode, DownloadDir = dir });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in GetEpisodeWithDir");
+            return StatusCode(500, new { Error = "GetEpisodeWithDir failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -120,9 +179,15 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("episode-with-dubs/{seriesId}/{seasonId}/{episodeId}")]
     public async Task<ActionResult> GetEpisodeWithDubs(string seriesId, string seasonId, string episodeId){
-        var (episode, dubs, subs, dir, quality) = await _historyService.GetHistoryEpisodeWithDubListAndDownloadDirAsync(seriesId, seasonId, episodeId);
-        if (episode == null) return NotFound();
-        return Ok(new { Episode = episode, DubList = dubs, SubList = subs, DownloadDir = dir, VideoQuality = quality });
+        try{
+            var (episode, dubs, subs, dir, quality) = await _historyService.GetHistoryEpisodeWithDubListAndDownloadDirAsync(seriesId, seasonId, episodeId);
+            if (episode == null) return NotFound();
+            return Ok(new { Episode = episode, DubList = dubs, SubList = subs, DownloadDir = dir, VideoQuality = quality });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in GetEpisodeWithDubs");
+            return StatusCode(500, new { Error = "GetEpisodeWithDubs failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -130,8 +195,13 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("dubs/{seriesId}/{seasonId}")]
     public async Task<ActionResult<List<string>>> GetDubList(string seriesId, string seasonId){
-        var dubs = await _historyService.GetDubListAsync(seriesId, seasonId);
-        return Ok(dubs);
+        try{
+            var dubs = await _historyService.GetDubListAsync(seriesId, seasonId);
+            return Ok(dubs);
+        } catch (Exception ex){
+            _logger.LogError(ex, "Error in GetDubList");
+            return StatusCode(500, new { Error = "GetDubList failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -139,8 +209,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("subs/{seriesId}/{seasonId}")]
     public async Task<ActionResult> GetSubList(string seriesId, string seasonId){
-        var (subs, quality) = await _historyService.GetSubListAsync(seriesId, seasonId);
-        return Ok(new { SubList = subs, VideoQuality = quality });
+        try{
+            var (subs, quality) = await _historyService.GetSubListAsync(seriesId, seasonId);
+            return Ok(new { SubList = subs, VideoQuality = quality });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in GetSubList");
+            return StatusCode(500, new { Error = "GetSubList failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -148,8 +224,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("sonarr/match-series")]
     public async Task<IActionResult> MatchHistorySeriesWithSonarr([FromQuery] bool updateAll = false){
-        await _historyService.MatchHistorySeriesWithSonarrAsync(updateAll);
-        return Ok(new { Message = "Series matching completed" });
+        try{
+            await _historyService.MatchHistorySeriesWithSonarrAsync(updateAll);
+            return Ok(new { Message = "Series matching completed" });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in MatchHistorySeriesWithSonarr");
+            return StatusCode(500, new { Error = "MatchHistorySeriesWithSonarr failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -157,8 +239,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("sonarr/match-episodes/{seriesId}")]
     public async Task<IActionResult> MatchHistoryEpisodesWithSonarr(string seriesId, [FromQuery] bool rematchAll = false){
-        await _historyService.MatchHistoryEpisodesWithSonarrAsync(seriesId, rematchAll);
-        return Ok(new { Message = "Episode matching completed" });
+        try{
+            await _historyService.MatchHistoryEpisodesWithSonarrAsync(seriesId, rematchAll);
+            return Ok(new { Message = "Episode matching completed" });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in MatchHistoryEpisodesWithSonarr");
+            return StatusCode(500, new { Error = "MatchHistoryEpisodesWithSonarr failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -166,8 +254,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("series/{seriesId}/settings")]
     public async Task<IActionResult> SetSeriesSettingsOverride(string seriesId, [FromBody] HistorySettingsOverrideRequest request){
-        await _historyService.SetSeriesSettingsOverrideAsync(seriesId, request.VideoQuality, request.DubLanguages, request.SoftSubs);
-        return Ok(new { Message = "Series settings updated" });
+        try{
+            await _historyService.SetSeriesSettingsOverrideAsync(seriesId, request.VideoQuality, request.DubLanguages, request.SoftSubs);
+            return Ok(new { Message = "Series settings updated" });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in SetSeriesSettingsOverride");
+            return StatusCode(500, new { Error = "SetSeriesSettingsOverride failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -175,8 +269,14 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("season/{seasonId}/settings")]
     public async Task<IActionResult> SetSeasonSettingsOverride(string seasonId, [FromBody] HistorySettingsOverrideRequest request){
-        await _historyService.SetSeasonSettingsOverrideAsync(seasonId, request.VideoQuality, request.DubLanguages, request.SoftSubs);
-        return Ok(new { Message = "Season settings updated" });
+        try{
+            await _historyService.SetSeasonSettingsOverrideAsync(seasonId, request.VideoQuality, request.DubLanguages, request.SoftSubs);
+            return Ok(new { Message = "Season settings updated" });
+        } catch (Exception ex){
+            
+            _logger.LogError(ex, "Error in SetSeasonSettingsOverride");
+            return StatusCode(500, new { Error = "SetSeasonSettingsOverride failed", Message = ex.Message });
+        }
     }
 
     private static HistorySeriesResponse MapToResponse(HistorySeries series){

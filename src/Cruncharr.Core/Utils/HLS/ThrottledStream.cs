@@ -99,6 +99,18 @@ public class ThrottledStream : Stream{
         return bytesRead;
     }
 
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default){
+        int bytesRead = 0;
+        if (_downloadSpeedLimit != 0){
+            int bytesToRead = Math.Min(buffer.Length, (_downloadSpeedLimit * 1024) / 10);
+            bytesRead = await _baseStream.ReadAsync(buffer.Slice(0, bytesToRead), cancellationToken);
+            _throttler.Throttle(bytesRead);
+        } else{
+            bytesRead = await _baseStream.ReadAsync(buffer, cancellationToken);
+        }
+        return bytesRead;
+    }
+
     protected override void Dispose(bool disposing){
         if (disposing){
             _baseStream.Dispose();

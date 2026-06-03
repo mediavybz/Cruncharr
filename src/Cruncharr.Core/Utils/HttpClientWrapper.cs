@@ -12,7 +12,7 @@ namespace Cruncharr.Core.Utils;
 public class HttpClientWrapper{
     private readonly HttpClient _client;
     private readonly CookieContainer _cookieContainer;
-    private readonly Dictionary<string, CookieCollection> _cookieStore = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CookieCollection> _cookieStore = new();
     private readonly CruncharrConfig? _config;
     private readonly HttpClient? _flareSolverrClient;
     

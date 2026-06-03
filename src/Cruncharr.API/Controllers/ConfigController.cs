@@ -28,8 +28,8 @@ public class ConfigController : ControllerBase{
                 UseBetaApi = _config.Crunchyroll.UseBetaApi,
                 MarkAsWatched = _config.Crunchyroll.MarkAsWatched,
                 SearchFetchFeaturedMusic = _config.Crunchyroll.SearchFetchFeaturedMusic,
-                StreamEndpoint = _config.Crunchyroll.StreamEndpoint,
-                StreamEndpointSecondary = _config.Crunchyroll.StreamEndpointSecondary,
+                StreamEndpoint = SanitizeStreamEndpoint(_config.Crunchyroll.StreamEndpoint),
+                StreamEndpointSecondary = SanitizeStreamEndpoint(_config.Crunchyroll.StreamEndpointSecondary),
                 DefaultStreamEndpoint = new{
                     Endpoint = "tv/android_tv",
                     Authorization = "", // Server-managed, not exposed to client
@@ -290,6 +290,23 @@ public class ConfigController : ControllerBase{
         }
     }
     
+    private static object? SanitizeStreamEndpoint(object? endpoint){
+        if (endpoint == null) return null;
+        // Create a shallow copy with Authorization stripped
+        var json = System.Text.Json.JsonSerializer.Serialize(endpoint);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var dict = new Dictionary<string, object?>();
+        foreach (var prop in root.EnumerateObject()){
+            if (prop.NameEquals("Authorization") || prop.NameEquals("authorization")){
+                dict[prop.Name] = ""; // Strip auth token
+            } else{
+                dict[prop.Name] = System.Text.Json.JsonSerializer.Deserialize<object>(prop.Value.GetRawText());
+            }
+        }
+        return dict;
+    }
+
     private static string ValidatePath(string? path, string fieldName){
         if (string.IsNullOrWhiteSpace(path)) return path ?? "";
         // Reject paths with directory traversal

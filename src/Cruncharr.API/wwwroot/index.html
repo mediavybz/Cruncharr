@@ -2834,8 +2834,9 @@ MAINTENANCE NOTES:
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ profileId })
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                if (res.ok && data.success) {
+                if (data.success) {
                     showToast('Profile switched successfully', 'success');
                     fetchAuthStatus();
                 } else {
@@ -3459,6 +3460,8 @@ MAINTENANCE NOTES:
                     break;
                     
                 case 'download':
+                case 'filename':
+                case 'muxing':
                     newConfig.download = {
                         outputDirectory: document.getElementById('setting-output-dir')?.value || '/downloads',
                         tempDirectory: document.getElementById('setting-temp-dir')?.value || '/tmp/cruncharr',
@@ -3483,6 +3486,17 @@ MAINTENANCE NOTES:
                         replaceExistingFiles: document.getElementById('setting-replace-existing')?.checked || false,
                         downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
                         downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
+                        defaultVideo: document.getElementById('setting-default-video')?.value || 'none',
+                        defaultSubSigns: document.getElementById('setting-default-sub-signs')?.checked || false,
+                        defaultSubForcedDisplay: document.getElementById('setting-default-sub-forced')?.checked || false,
+                        muxFonts: document.getElementById('setting-mux-fonts')?.checked || false,
+                        muxTypesettingFonts: document.getElementById('setting-mux-ts-fonts')?.checked || false,
+                        muxCover: document.getElementById('setting-mux-cover')?.checked || false,
+                        syncTiming: document.getElementById('setting-sync-timing')?.checked || false,
+                        syncTimingFullQualityFallback: document.getElementById('setting-sync-fallback')?.checked || false,
+                        syncHwAccel: document.getElementById('setting-sync-hwaccel')?.value || '',
+                        mkvmergeOptions: getListInputValues('setting-mkvmerge'),
+                        ffmpegOptions: getListInputValues('setting-ffmpeg'),
                         downloadSpeedLimit: parseInt(document.getElementById('setting-speed-limit')?.value) || 0,
                         downloadSpeedInBits: document.getElementById('setting-speed-bits')?.checked || false,
                         retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 5,
@@ -3640,7 +3654,7 @@ MAINTENANCE NOTES:
                 return;
             }
             try {
-                const res = await fetch('/api/v1/webhook/test', {
+                const res = await fetch('/api/v1/config/webhook/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url: url })

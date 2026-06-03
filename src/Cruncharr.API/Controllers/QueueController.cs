@@ -57,7 +57,8 @@ public class QueueController : ControllerBase{
             CoverArtUrl = request.CoverArtUrl,
             Description = request.Description,
             SelectedDubs = request.SelectedDubs,
-            SelectedSubs = request.SelectedSubs
+            SelectedSubs = request.SelectedSubs,
+            Versions = request.Versions
         };
 
         _queueService.AddToQueue(episode);
@@ -207,6 +208,7 @@ public class QueueRequest{
     public string? Description { get; set; }
     public List<string>? SelectedDubs { get; set; }
     public List<string>? SelectedSubs { get; set; }
+    public List<EpisodeVersion>? Versions { get; set; }
 }
 
 public class QueueResponse{

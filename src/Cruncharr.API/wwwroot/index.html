@@ -1988,7 +1988,14 @@ MAINTENANCE NOTES:
                                 selectedDubs: item.selectedDubs || [],
                                 downloadSubs: item.downloadSubs || [],
                                 hslang: item.hslang || 'none',
-                                videoQuality: item.videoQuality || 'best'
+                                videoQuality: item.videoQuality || 'best',
+                                versions: item.data?.map(v => ({
+                                    audioLocale: v.lang?.crLocale || v.lang?.locale || '',
+                                    guid: v.mediaId || '',
+                                    mediaGuid: v.mediaId || '',
+                                    original: v.versions?.some(ver => ver.original) || false,
+                                    seasonGuid: v.versions?.[0]?.seasonGuid || ''
+                                })) || []
                             })
                         });
                         // Mark as watched if enabled

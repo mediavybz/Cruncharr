@@ -202,7 +202,9 @@ public class HistoryController : ControllerBase{
                     SonarrIsMonitored = e.SonarrIsMonitored,
                     SonarrAbsolutNumber = e.SonarrAbsolutNumber,
                     SonarrSeasonNumber = e.SonarrSeasonNumber,
-                    SonarrSeasonEpisodeText = e.SonarrSeasonEpisodeText
+                    SonarrSeasonEpisodeText = e.SonarrSeasonEpisodeText,
+                    DownloadedDubLang = e.DownloadedDubLang,
+                    DownloadedSoftSubs = e.DownloadedSoftSubs
                 }).ToList()
             }).ToList()
         };
@@ -259,4 +261,6 @@ public class HistoryEpisodeResponse{
     public string? SonarrAbsolutNumber { get; set; }
     public string? SonarrSeasonNumber { get; set; }
     public string SonarrSeasonEpisodeText { get; set; } = "";
+    public List<string> DownloadedDubLang { get; set; } = [];
+    public List<string> DownloadedSoftSubs { get; set; } = [];
 }

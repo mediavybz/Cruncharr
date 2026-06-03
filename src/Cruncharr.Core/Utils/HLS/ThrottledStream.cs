@@ -5,7 +5,7 @@ using System.Threading;
 namespace Cruncharr.Core.Utils.HLS;
 
 public class GlobalThrottler{
-    private static GlobalThrottler _instance;
+    private static GlobalThrottler? _instance;
     private static readonly object _lock = new object();
     private long _totalBytesRead;
     private DateTime _lastReadTime;

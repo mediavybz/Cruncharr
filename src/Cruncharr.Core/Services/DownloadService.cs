@@ -582,14 +582,19 @@ public class DownloadService : IDownloadService{
             if (!string.IsNullOrEmpty(episode.CoverArtUrl) && config.Download.MuxCover && !config.Download.SkipMuxing){
                 try{
                     progress?.Report(new DownloadProgress{ State = DownloadState.Processing, Percent = 83, Doing = "Downloading cover art..." });
-                    using var coverResponse = await _httpClient.Client.GetAsync(episode.CoverArtUrl, cancellationToken);
-                    if (coverResponse.IsSuccessStatusCode){
-                        var coverBytes = await coverResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-                        if (coverBytes != null && coverBytes.Length > 0){
-                            coverPath = Path.Combine(tempDir, "cover.png");
-                            await File.WriteAllBytesAsync(coverPath, coverBytes, cancellationToken);
-                            _logger?.LogDebug("Downloaded cover art to {Path}", coverPath);
+                    // [PT] Ported from upstream c123093: unique cover path per episode to avoid collisions
+                    coverPath = Path.Combine(tempDir, $"{fileName}.cover.png");
+                    if (!File.Exists(coverPath)){
+                        using var coverResponse = await _httpClient.Client.GetAsync(episode.CoverArtUrl, cancellationToken);
+                        if (coverResponse.IsSuccessStatusCode){
+                            var coverBytes = await coverResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+                            if (coverBytes != null && coverBytes.Length > 0){
+                                await File.WriteAllBytesAsync(coverPath, coverBytes, cancellationToken);
+                                _logger?.LogDebug("Downloaded cover art to {Path}", coverPath);
+                            }
                         }
+                    } else{
+                        _logger?.LogDebug("Cover art already exists at {Path}, skipping download", coverPath);
                     }
                 } catch (Exception ex){
                     _logger?.LogWarning(ex, "Failed to download cover art for {EpisodeId}", episode.Id);
@@ -779,15 +784,21 @@ public class DownloadService : IDownloadService{
                         var newFileName = _filenameService.FormatFilename(filenameTemplate, episode, newFilenameOptions);
                         var newOutputPath = Path.Combine(outputDir, newFileName + outputExtension);
                         
-                        // Handle collisions
-                        if (File.Exists(newOutputPath) && !config.Download.ReplaceExistingFiles){
-                            int counter = 1;
-                            var baseNewPath = newOutputPath;
-                            while (File.Exists(newOutputPath)){
-                                newOutputPath = Path.Combine(outputDir, $"{newFileName}({counter}){outputExtension}");
-                                counter++;
+                        // Handle collisions or replace existing
+                        if (File.Exists(newOutputPath)){
+                            if (config.Download.ReplaceExistingFiles){
+                                // [PT] Ported from upstream c123093: respect ReplaceExistingFiles config in quality-probe rename path
+                                _logger?.LogInformation("Replacing existing file: {OutputPath}", newOutputPath);
+                                File.Delete(newOutputPath);
+                            } else{
+                                int counter = 1;
+                                var baseNewPath = newOutputPath;
+                                while (File.Exists(newOutputPath)){
+                                    newOutputPath = Path.Combine(outputDir, $"{newFileName}({counter}){outputExtension}");
+                                    counter++;
+                                }
+                                _logger?.LogWarning("Collision detected, using {Path}", newOutputPath);
                             }
-                            _logger?.LogWarning("Collision detected, using {Path}", newOutputPath);
                         }
                         
                         outputPath = newOutputPath;

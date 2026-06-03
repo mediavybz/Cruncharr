@@ -49,13 +49,13 @@ public class HistorySeries{
             
             // Episode downloaded but selected dubs/subs may be missing
             // Check if any selected dubs are newly available but not downloaded
-            var missingDubs = selectedDubs
+            var missingDubs = selectedDubs?
                 .Where(dub => e.HistoryEpisodeAvailableDubLang.Contains(dub) && !e.DownloadedDubLang.Contains(dub))
-                .Any();
+                .Any() ?? false;
             
-            var missingSubs = selectedSubs
+            var missingSubs = selectedSubs?
                 .Where(sub => e.HistoryEpisodeAvailableSoftSubs.Contains(sub) && !e.DownloadedSoftSubs.Contains(sub))
-                .Any();
+                .Any() ?? false;
             
             return missingDubs || missingSubs;
         }));
@@ -77,6 +77,10 @@ public class HistorySeason{
     public string SeasonDownloadPath { get; set; } = "";
     
     public void UpdateDownloaded(){
+        DownloadedEpisodes = EpisodesList.Count(e => e.WasDownloaded);
+    }
+    
+    public void UpdateDownloadedSilent(){
         DownloadedEpisodes = EpisodesList.Count(e => e.WasDownloaded);
     }
 }
@@ -147,6 +151,30 @@ public class HistoryEpisode{
     public void SetDownloadedMedia(List<string> downloadedDubs, List<string> downloadedSubs){
         DownloadedDubLang = downloadedDubs;
         DownloadedSoftSubs = downloadedSubs;
+    }
+    
+    public bool IsPartiallyDownloaded(IEnumerable<string> requestedDubs, IEnumerable<string> requestedSoftSubs){
+        return WasDownloaded &&
+               (IsMissingAny(requestedDubs, DownloadedDubLang) ||
+                IsMissingAny(requestedSoftSubs, DownloadedSoftSubs));
+    }
+    
+    public bool HasAvailableMissingDownloadedMedia(IEnumerable<string> requestedDubs, IEnumerable<string> requestedSoftSubs){
+        return WasDownloaded &&
+               (HasMissingAvailableItem(requestedDubs, DownloadedDubLang, HistoryEpisodeAvailableDubLang) ||
+                HasMissingAvailableItem(requestedSoftSubs, DownloadedSoftSubs, HistoryEpisodeAvailableSoftSubs));
+    }
+    
+    public void ToggleWasDownloaded(){
+        WasDownloaded = !WasDownloaded;
+    }
+    
+    private static bool IsMissingAny(IEnumerable<string> requested, List<string> downloaded){
+        return requested.Any(r => !downloaded.Contains(r, StringComparer.OrdinalIgnoreCase));
+    }
+    
+    private static bool HasMissingAvailableItem(IEnumerable<string> requested, List<string> downloaded, List<string> available){
+        return requested.Any(r => available.Contains(r, StringComparer.OrdinalIgnoreCase) && !downloaded.Contains(r, StringComparer.OrdinalIgnoreCase));
     }
 }
 

@@ -1,3 +1,4 @@
+#nullable disable
 using System.Dynamic;
 
 namespace Cruncharr.Core.Utils;

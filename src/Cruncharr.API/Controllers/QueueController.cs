@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Cruncharr.API.Services;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -11,7 +12,6 @@ namespace Cruncharr.API.Controllers;
 public class QueueController : ControllerBase{
     private readonly IQueueService _queueService;
     private readonly ILogger<QueueController> _logger;
-    private static readonly Channel<string> _queueUpdatesChannel = Channel.CreateUnbounded<string>();
     private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings{
         ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver(),
         Converters = { new Newtonsoft.Json.Converters.StringEnumConverter() },
@@ -21,22 +21,6 @@ public class QueueController : ControllerBase{
     public QueueController(IQueueService queueService, ILogger<QueueController> logger){
         _queueService = queueService;
         _logger = logger;
-        _queueService.QueueStateChanged += OnQueueStateChanged;
-    }
-
-    private void OnQueueStateChanged(object? sender, EventArgs e){
-        try{
-            var queue = _queueService.GetQueue();
-            var response = new QueueResponse{
-                Items = queue,
-                ActiveDownloads = _queueService.ActiveDownloads,
-                HasActiveDownloads = _queueService.HasActiveDownloads
-            };
-            var json = JsonConvert.SerializeObject(response, _sseJsonSettings);
-            _queueUpdatesChannel.Writer.TryWrite(json);
-        } catch (Exception ex){
-            _logger.LogError(ex, "Failed to broadcast queue update");
-        }
     }
 
     /// <summary>
@@ -182,7 +166,7 @@ public class QueueController : ControllerBase{
     /// Server-Sent Events endpoint for real-time queue updates
     /// </summary>
     [HttpGet("sse")]
-    public async Task GetQueueUpdates(CancellationToken cancellationToken){
+    public async Task GetQueueUpdates([FromServices] QueueBroadcastService broadcastService, CancellationToken cancellationToken){
         Response.Headers.Append("Content-Type", "text/event-stream");
         Response.Headers.Append("Cache-Control", "no-cache");
         Response.Headers.Append("Connection", "keep-alive");
@@ -197,7 +181,7 @@ public class QueueController : ControllerBase{
         await WriteSseEventAsync(JsonConvert.SerializeObject(initialResponse, _sseJsonSettings), cancellationToken);
 
         // Listen for updates
-        await foreach (var update in _queueUpdatesChannel.Reader.ReadAllAsync(cancellationToken)){
+        await foreach (var update in broadcastService.Reader.ReadAllAsync(cancellationToken)){
             if (cancellationToken.IsCancellationRequested) break;
             await WriteSseEventAsync(update, cancellationToken);
             await Response.Body.FlushAsync(cancellationToken);

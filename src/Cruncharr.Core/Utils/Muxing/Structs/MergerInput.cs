@@ -3,8 +3,8 @@ using Cruncharr.Core.Utils;
 namespace Cruncharr.Core.Utils.Muxing.Structs;
 
 public class MergerInput{
-    public string Path{ get; set; }
-    public LanguageItem Language{ get; set; }
+    public string Path{ get; set; } = "";
+    public LanguageItem Language{ get; set; } = new();
     public int? Duration{ get; set; }
     public int? Delay{ get; set; }
     public bool IsAudioRoleDescription{ get; set; }

@@ -420,7 +420,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         
         _logger?.LogDebug("Login response: IsOk={IsOk}, Error={Error}, Content={Content}", isOk, error, content?.Substring(0, Math.Min(500, content?.Length ?? 0)));
         
-        if (isOk){
+        if (isOk && content != null){
             JsonTokenToFileAndVariable(content, uuid);
             _logger?.LogInformation("Login successful, token received");
         } else{

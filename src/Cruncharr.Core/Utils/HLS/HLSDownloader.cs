@@ -681,9 +681,11 @@ public class HlsDownloader{
             clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
 
+#pragma warning disable CS0618
         foreach (var property in originalRequest.Properties){
             clone.Properties.Add(property);
         }
+#pragma warning restore CS0618
 
         return clone;
     }

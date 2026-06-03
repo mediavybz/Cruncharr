@@ -33,7 +33,7 @@ public class SegmentList{
             }
 
             return null;
-        }).Where(segment => segment != null).ToList();
+        }).Where(segment => segment != null).Cast<dynamic>().ToList();
 
         return segments;
     }

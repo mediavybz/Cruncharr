@@ -40,7 +40,7 @@ public class QueueController : ControllerBase{
     /// Add episode to download queue
     /// </summary>
     [HttpPost]
-    public ActionResult<QueueItem> AddToQueue([FromBody] QueueRequest request){
+    public IActionResult AddToQueue([FromBody] QueueRequest request){
         if (string.IsNullOrEmpty(request.EpisodeId)){
             return BadRequest(new { Error = "EpisodeId is required" });
         }
@@ -72,7 +72,8 @@ public class QueueController : ControllerBase{
     /// </summary>
     [HttpDelete("{id}")]
     public IActionResult RemoveFromQueue(string id){
-        _queueService.RemoveFromQueue(id);
+        var found = _queueService.RemoveFromQueue(id);
+        if (!found) return NotFound(new { Message = "Item not found in queue" });
         _logger.LogInformation("Removed item {QueueItemId} from queue", id);
         return NoContent();
     }
@@ -112,7 +113,8 @@ public class QueueController : ControllerBase{
     /// </summary>
     [HttpPost("{id}/retry")]
     public IActionResult RetryItem(string id){
-        _queueService.RetryItem(id);
+        var found = _queueService.RetryItem(id);
+        if (!found) return NotFound(new { Message = "Item not found in queue" });
         _logger.LogInformation("Retrying item {QueueItemId}", id);
         return Ok(new { Message = "Retrying item", Id = id });
     }
@@ -122,7 +124,8 @@ public class QueueController : ControllerBase{
     /// </summary>
     [HttpPost("{id}/pause")]
     public IActionResult PauseItem(string id){
-        _queueService.PauseItem(id);
+        var found = _queueService.PauseItem(id);
+        if (!found) return NotFound(new { Message = "Item not found in queue" });
         _logger.LogInformation("Paused item {QueueItemId}", id);
         return Ok(new { Message = "Paused item", Id = id });
     }
@@ -132,7 +135,8 @@ public class QueueController : ControllerBase{
     /// </summary>
     [HttpPost("{id}/resume")]
     public IActionResult ResumeItem(string id){
-        _queueService.ResumeItem(id);
+        var found = _queueService.ResumeItem(id);
+        if (!found) return NotFound(new { Message = "Item not found in queue" });
         _logger.LogInformation("Resumed item {QueueItemId}", id);
         return Ok(new { Message = "Resumed item", Id = id });
     }
@@ -142,7 +146,8 @@ public class QueueController : ControllerBase{
     /// </summary>
     [HttpPost("{id}/start")]
     public IActionResult StartItem(string id){
-        _queueService.StartItem(id);
+        var found = _queueService.StartItem(id);
+        if (!found) return NotFound(new { Message = "Item not found in queue" });
         _logger.LogInformation("Started item {QueueItemId}", id);
         return Ok(new { Message = "Started item", Id = id });
     }
@@ -190,8 +195,14 @@ public class QueueController : ControllerBase{
     }
 
     private async Task WriteSseEventAsync(string data, CancellationToken cancellationToken){
-        await Response.WriteAsync($"data: {data}\n\n", cancellationToken);
-        await Response.Body.FlushAsync(cancellationToken);
+        try{
+            await Response.WriteAsync($"data: {data}\n\n", cancellationToken);
+            await Response.Body.FlushAsync(cancellationToken);
+        } catch (IOException){
+            // Client disconnected, ignore
+        } catch (OperationCanceledException){
+            // Cancellation requested, ignore
+        }
     }
 }
 

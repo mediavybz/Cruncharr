@@ -59,10 +59,11 @@ public class Program{
         builder.Services.AddSingleton<IMusicService, MusicService>();
         builder.Services.AddSingleton<IEncodingService, EncodingService>();
 
-        // Add CORS restricted to specific origins
+        // Add CORS - configurable via environment variable
+        var corsOrigins = Environment.GetEnvironmentVariable("CORS_ORIGINS")?.Split(',') ?? new[] { "http://localhost:8585" };
         builder.Services.AddCors(options =>{
             options.AddPolicy("AllowSpecific", policy =>{
-                policy.WithOrigins("http://localhost:8585")
+                policy.WithOrigins(corsOrigins)
                       .AllowAnyMethod()
                       .AllowAnyHeader();
             });
@@ -76,7 +77,10 @@ public class Program{
             app.UseSwaggerUI();
         }
 
-        app.UseHttpsRedirection();
+        // Only use HTTPS redirection if HTTPS is configured
+        if (Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?.Contains("https:") == true){
+            app.UseHttpsRedirection();
+        }
         app.UseCors("AllowSpecific");
         app.UseAuthorization();
         app.MapControllers();

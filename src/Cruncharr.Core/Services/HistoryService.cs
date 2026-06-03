@@ -106,8 +106,13 @@ public class HistoryService : IHistoryService{
     }
     
     public async Task<bool> IsDownloadedAsync(string episodeId, string audioLanguage){
-        var history = await GetAllAsync();
-        return history.Any(h => h.EpisodeId == episodeId && h.AudioLanguage == audioLanguage);
+        await _lock.WaitAsync();
+        try{
+            var history = await LoadHistoryAsync();
+            return history.Any(h => h.EpisodeId == episodeId && h.AudioLanguage == audioLanguage);
+        } finally{
+            _lock.Release();
+        }
     }
     
     public async Task RemoveAsync(string episodeId){
@@ -742,6 +747,8 @@ public class HistoryService : IHistoryService{
             await _authService.AuthenticateAsync(true);
         }
 
+        await _lock.WaitAsync();
+        try{
         var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
 
         if (historySeries != null){
@@ -769,7 +776,6 @@ public class HistoryService : IHistoryService{
             return false;
         }
 
-        var result = false;
         foreach (var season in seasons){
             var lang = string.IsNullOrEmpty(_config.History.Lang)
                 ? "en-US"
@@ -788,7 +794,6 @@ public class HistoryService : IHistoryService{
                     var seasonEpisodes = await _apiService.GetSeasonDataByIdAsync(candidateId, lang, true);
 
                     if (seasonEpisodes != null && seasonEpisodes.Count > 0){
-                        result = true;
                         await UpdateWithSeasonDataAsync(seasonEpisodes);
                         break;
                     }
@@ -805,15 +810,15 @@ public class HistoryService : IHistoryService{
             if (historySeries.Seasons.Count == 0){
                 _historyList.Remove(historySeries);
                 await SaveRichHistoryAsync();
-                return result;
+            } else {
+                await MatchHistorySeriesWithSonarrAsync(false);
+                await MatchHistoryEpisodesWithSonarrAsync(historySeries.SeriesId ?? "", false);
+                await SaveRichHistoryAsync();
             }
-
-            await MatchHistorySeriesWithSonarrAsync(false);
-            await MatchHistoryEpisodesWithSonarrAsync(historySeries.SeriesId ?? "", false);
-            await SaveRichHistoryAsync();
-            return result;
         }
-
+        } finally{
+            _lock.Release();
+        }
         return false;
     }
     
@@ -1060,7 +1065,9 @@ public class HistoryService : IHistoryService{
     }
     
     public async Task SortItemsAsync(){
-        await EnsureLoadedAsync();
+        await _lock.WaitAsync();
+        try{
+            await EnsureLoadedAsync();
         
         var currentSortingType = _config.HistoryPageProperties?.SelectedSorting ?? SortingType.SeriesTitle;
         var sortingDir = _config.HistoryPageProperties?.Ascending ?? false;
@@ -1112,6 +1119,9 @@ public class HistoryService : IHistoryService{
                 _historyList.Clear();
                 _historyList.AddRange(sortedSeriesAddDates);
                 return;
+        }
+        } finally{
+            _lock.Release();
         }
     }
     

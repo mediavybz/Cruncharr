@@ -10,17 +10,17 @@ namespace Cruncharr.Core.Services;
 
 public interface IQueueService{
     void AddToQueue(EpisodeInfo episode);
-    void RemoveFromQueue(string queueItemId);
+    bool RemoveFromQueue(string queueItemId);
     List<QueueItem> GetQueue();
     Task ProcessQueueAsync(CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default);
     void ScheduleRetry(string queueItemId, TimeSpan delay, string statusText);
     void BlockAutoDownloadUntil(TimeSpan delay);
     void RetryAllFailed();
     void ClearQueue();
-    void RetryItem(string queueItemId);
-    void PauseItem(string queueItemId);
-    void ResumeItem(string queueItemId);
-    void StartItem(string queueItemId);
+    bool RetryItem(string queueItemId);
+    bool PauseItem(string queueItemId);
+    bool ResumeItem(string queueItemId);
+    bool StartItem(string queueItemId);
     int ActiveDownloads { get; }
     bool HasActiveDownloads { get; }
     event EventHandler? QueueStateChanged;
@@ -125,12 +125,14 @@ public class QueueService : IQueueService, IDisposable{
         }
     }
     
-    public void RemoveFromQueue(string queueItemId){
+    public bool RemoveFromQueue(string queueItemId){
         if (_queue.TryRemove(queueItemId, out _)){
             _logger?.LogInformation("Removed from queue: {QueueItemId}", queueItemId);
             OnQueueStateChanged();
             ScheduleSave();
+            return true;
         }
+        return false;
     }
     
     public List<QueueItem> GetQueue(){
@@ -169,7 +171,7 @@ public class QueueService : IQueueService, IDisposable{
         ScheduleSave();
     }
 
-    public void RetryItem(string queueItemId){
+    public bool RetryItem(string queueItemId){
         if (_queue.TryGetValue(queueItemId, out var item)){
             item.DownloadProgress.RetryAttemptCount = 0;
             item.DownloadProgress.State = DownloadState.Queued;
@@ -179,20 +181,24 @@ public class QueueService : IQueueService, IDisposable{
             OnQueueStateChanged();
             ScheduleSave();
             RequestPump();
+            return true;
         }
+        return false;
     }
 
-    public void PauseItem(string queueItemId){
+    public bool PauseItem(string queueItemId){
         if (_queue.TryGetValue(queueItemId, out var item)){
             item.DownloadProgress.State = DownloadState.Paused;
             item.DownloadProgress.Doing = "Paused";
             _logger?.LogInformation("Paused item {QueueItemId}", queueItemId);
             OnQueueStateChanged();
             ScheduleSave();
+            return true;
         }
+        return false;
     }
 
-    public void ResumeItem(string queueItemId){
+    public bool ResumeItem(string queueItemId){
         if (_queue.TryGetValue(queueItemId, out var item)){
             item.DownloadProgress.State = DownloadState.Queued;
             item.DownloadProgress.Doing = "Queued";
@@ -200,15 +206,17 @@ public class QueueService : IQueueService, IDisposable{
             OnQueueStateChanged();
             ScheduleSave();
             RequestPump();
+            return true;
         }
+        return false;
     }
 
     // Ported from upstream QueueManager.TryStartDownload
-    public void StartItem(string queueItemId){
+    public bool StartItem(string queueItemId){
         if (_queue.TryGetValue(queueItemId, out var item)){
             if (!TryStartDownload(item)){
                 _logger?.LogWarning("Cannot start {QueueItemId} - already active or no slots", queueItemId);
-                return;
+                return true; // Item exists but couldn't start
             }
             
             _ = Task.Run(async () =>{
@@ -218,7 +226,9 @@ public class QueueService : IQueueService, IDisposable{
                     ReleaseDownloadSlot(item);
                 }
             }, _cancellationToken);
+            return true;
         }
+        return false;
     }
 
     // Ported from upstream QueueManager.TryStartDownload
@@ -329,14 +339,20 @@ public class QueueService : IQueueService, IDisposable{
                     await PumpQueueAsync();
                     await Task.Delay(100, _cancellationToken);
                 }
+            } catch (Exception ex){
+                _logger?.LogError(ex, "Unhandled exception in queue pump");
             } finally{
                 Interlocked.Exchange(ref _pumpScheduled, 0);
 
                 if (Volatile.Read(ref _pumpDirty) == 1 &&
                     Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) == 0){
                     _ = Task.Run(async () =>{
-                        await Task.Delay(100, _cancellationToken);
-                        RequestPump();
+                        try{
+                            await Task.Delay(100, _cancellationToken);
+                            RequestPump();
+                        } catch (Exception ex){
+                            _logger?.LogError(ex, "Unhandled exception in queue pump reschedule");
+                        }
                     });
                 }
             }

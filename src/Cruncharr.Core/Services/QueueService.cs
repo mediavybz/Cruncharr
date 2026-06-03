@@ -96,7 +96,10 @@ public class QueueService : IQueueService, IDisposable{
         var retryItems = _queue.Values.Where(i => i.DownloadProgress.IsWaitingForRetry).ToList();
         if (retryItems.Count == 0) return;
 
-        var earliestRetry = retryItems.Min(i => i.DownloadProgress.RetryAtUtc);
+        var retryTimes = retryItems.Select(i => i.DownloadProgress.RetryAtUtc).Where(t => t.HasValue).ToList();
+        if (retryTimes.Count == 0) return;
+
+        var earliestRetry = retryTimes.Min();
         if (earliestRetry.HasValue){
             lock (_autoDownloadBlockLock){
                 _autoDownloadBlockedUntilUtc = earliestRetry.Value;
@@ -270,21 +273,25 @@ public class QueueService : IQueueService, IDisposable{
             return;
         
         bool hasUnfinishedItems = _queue.Values.Any(q => !q.DownloadProgress.IsDone && !q.DownloadProgress.IsError);
+        bool shouldShutdown = false;
         
         lock (_downloadStartLock){
             if (!hasUnfinishedItems && _activeOrStarting.Count == 0){
                 _logger?.LogInformation("Queue is empty and ShutdownWhenQueueEmpty is enabled - shutting down");
                 _config.Queue.ShutdownWhenQueueEmpty = false;
-                
-                // Trigger application shutdown
-                _ = Task.Run(() =>{
-                    try{
-                        Environment.Exit(0);
-                    } catch (Exception ex){
-                        _logger?.LogError(ex, "Failed to shutdown application");
-                    }
-                });
+                shouldShutdown = true;
             }
+        }
+        
+        if (shouldShutdown){
+            _logger?.LogInformation("Queue empty, shutting down...");
+            _ = Task.Run(() =>{
+                try{
+                    Environment.Exit(0);
+                } catch (Exception ex){
+                    _logger?.LogError(ex, "Failed to shutdown application");
+                }
+            });
         }
     }
 

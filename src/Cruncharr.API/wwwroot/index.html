@@ -1367,6 +1367,7 @@ MAINTENANCE NOTES:
         let historySearchQuery = '';
         let historySearchPopupOpen = false;
         let onlyDownloadMode = { video: true, audio: true, sub: true };
+        let authIntervalId, historyIntervalId;
 
         document.addEventListener('DOMContentLoaded', async () => {
             // Load config first so toggles are initialized correctly
@@ -1417,6 +1418,11 @@ MAINTENANCE NOTES:
         }
 
         function loadPage(page) {
+            // Clear history polling when navigating away from history page
+            if (currentPage === 'history' && page !== 'history' && historyIntervalId) {
+                clearInterval(historyIntervalId);
+                historyIntervalId = null;
+            }
             currentPage = page;
             const content = document.getElementById('content');
             switch(page) {
@@ -1504,6 +1510,7 @@ MAINTENANCE NOTES:
         async function fetchQueueStats() {
             try {
                 const res = await fetch('/api/v1/queue/stats');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 document.getElementById('stat-total').textContent = data.total ?? 0;
                 document.getElementById('stat-active').textContent = data.active ?? 0;
@@ -1521,6 +1528,7 @@ MAINTENANCE NOTES:
         async function fetchDownloads() {
             try {
                 const res = await fetch('/api/v1/queue');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 updateQueueData(data.items || []);
             } catch (e) {
@@ -1664,6 +1672,7 @@ MAINTENANCE NOTES:
             const popup = document.getElementById('search-popup');
             try {
                 const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const results = await res.json();
                 addDownloadSearchResults = results || [];
                 if (addDownloadSearchResults.length === 0) {
@@ -1706,6 +1715,7 @@ MAINTENANCE NOTES:
                 const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
                 const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
                 const res = await fetch(`/api/v1/series/${seriesId}/list?${dubLangParam}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const result = await res.json();
                 
                 if (!result || !result.list) {
@@ -1833,7 +1843,7 @@ MAINTENANCE NOTES:
                         </div>
                         <div class="episode-info">
                             <div class="episode-title">${ep.name || 'Unknown Episode'}</div>
-                            <div class="episode-meta">${ep.seasonTitle || ''} - ${ep.time || ''}</div>
+                            <div class="episode-meta">${ep.seasonTitle || ''} - ${ep.airDate ? new Date(ep.airDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
                             ${ep.description ? `<div class="episode-desc" style="font-size:0.85em; color:var(--text-secondary); margin-bottom:6px;">${ep.description}</div>` : ''}
                             <div class="dub-section-label">Select Dubs:</div>
                             <div class="dub-selector">
@@ -2114,6 +2124,7 @@ MAINTENANCE NOTES:
                 const language = langSelect ? langSelect.value : 'en-us';
                 
                 const res = await fetch(`/api/v1/calendar?date=${dateStr}&language=${language}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const grid = document.getElementById('calendar-grid');
                 if (!data.days || data.days.length === 0) {
@@ -2138,7 +2149,7 @@ MAINTENANCE NOTES:
                             <div class="calendar-day-content">
                                 ${day.episodes && day.episodes.length > 0 ? day.episodes.map(ep => `
                                     <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''}">
-                                        <div class="calendar-episode-time">${ep.time || ''}</div>
+                                        <div class="calendar-episode-time">${ep.airDate ? new Date(ep.airDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
                                         <div class="calendar-episode-thumb">
                                             ${ep.thumbnailUrl ? `<img src="${ep.thumbnailUrl}" alt="">` : '📺'}
                                             <div class="calendar-episode-number">${ep.episodeNumber || ''}</div>
@@ -2189,6 +2200,7 @@ MAINTENANCE NOTES:
         async function fetchUpcomingSeasons() {
             try {
                 const res = await fetch('/api/v1/calendar/upcoming');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const episodes = await res.json();
                 renderUpcomingSeasonsContent(episodes || []);
             } catch (e) {
@@ -2263,6 +2275,7 @@ MAINTENANCE NOTES:
         async function fetchAllSeries() {
             try {
                 const res = await fetch('/api/v1/series/all');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 renderBrowseContent(data || []);
             } catch (e) {
@@ -2315,6 +2328,7 @@ MAINTENANCE NOTES:
                     const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
                     const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
                     const res = await fetch(`/api/v1/series/${seriesId}/list?${dubLangParam}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const result = await res.json();
                     
                     if (!result || !result.list) {
@@ -2429,6 +2443,7 @@ MAINTENANCE NOTES:
 
             try {
                 const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(season)}&year=${encodeURIComponent(year)}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 renderSeasonalContent(data || []);
             } catch (e) {
@@ -2506,7 +2521,10 @@ MAINTENANCE NOTES:
             document.getElementById('modal').classList.add('active');
             
             // Fetch and show episodes
-            fetch(`/api/v1/series/${seriesId}/episodes`).then(res => res.json()).then(episodes => {
+            fetch(`/api/v1/series/${seriesId}/episodes`).then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            }).then(episodes => {
                 document.getElementById('modal-body').innerHTML = `
                     <div style="max-height: 400px; overflow-y: auto;">
                         ${(episodes || []).slice(0, 10).map(ep => `
@@ -2628,6 +2646,7 @@ MAINTENANCE NOTES:
         async function fetchHistoryData() {
             try {
                 const res = await fetch('/api/v1/history');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 historyData = data || [];
                 renderHistoryContent();
@@ -2664,14 +2683,14 @@ MAINTENANCE NOTES:
                 content.innerHTML = '<div class="history-poster-grid">' + filteredData.map(item => `
                     <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${item.seriesId}')" style="cursor:pointer;">
                         <div class="history-poster-img">
-                            ${item.thumbnailUrl ? `<img src="${item.thumbnailUrl}" alt="">` : '📺'}
-                            ${item.newEpisodes ? `<div class="history-poster-badge">${item.newEpisodes}</div>` : ''}
+                            ${item.thumbnailImageUrl ? `<img src="${item.thumbnailImageUrl}" alt="">` : '📺'}
+                            ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
                         </div>
                         <div class="history-poster-info">
                             <div class="history-poster-title" title="${item.seriesTitle || ''}">${item.seriesTitle || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
                             <div class="history-poster-meta">${item.sonarrNextAirDate || ''}</div>
                             <div class="history-poster-meta" style="font-size:0.7em; margin-top:4px;">
-                                ${(item.availableDubs || []).slice(0, 3).map(d => `<span class="lang-badge ${(config?.download?.dubLanguages || []).includes(d) ? 'selected' : ''}">${d}</span>`).join('')}
+                                ${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0} episodes
                             </div>
                         </div>
                     </div>
@@ -2685,8 +2704,8 @@ MAINTENANCE NOTES:
                                     <th>Series</th>
                                     <th>Status</th>
                                     <th>Sonarr</th>
-                                    <th>Dubs</th>
-                                    <th>Subs</th>
+                                    <th>Progress</th>
+                                    <th>New</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -2700,8 +2719,8 @@ MAINTENANCE NOTES:
                                         </td>
                                         <td>${getStatusBadge(item.downloadStatus || 'done')}</td>
                                         <td>${item.sonarrSeriesId ? `✓ ${item.sonarrSlugTitle || 'Matched'}` : '—'}</td>
-                                        <td>${(item.availableDubs || []).map(d => `<span class="lang-badge ${(config?.download?.dubLanguages || []).includes(d) ? 'selected' : ''}">${d}</span>`).join(' ') || '-'}</td>
-                                        <td>${(item.availableSubs || []).map(s => `<span class="lang-badge ${(config?.download?.softSubs || []).includes(s) ? 'selected' : ''}">${s}</span>`).join(' ') || '-'}</td>
+                                        <td>${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0}</td>
+                                        <td>${item.hasNewEpisodes ? '✓' : '—'}</td>
                                         <td>
                                             <button class="btn-icon" onclick="event.stopPropagation(); refreshSeries('${item.seriesId}')">&#128260;</button>
                                             <button class="btn-icon" onclick="event.stopPropagation(); downloadSeries('${item.seriesId}')">&#9660;</button>
@@ -2755,6 +2774,7 @@ MAINTENANCE NOTES:
         async function fetchAuthStatus() {
             try {
                 const res = await fetch('/api/v1/auth/status');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 authStatus = await res.json();
                 const nameEl = document.getElementById('account-name');
                 const subEl = document.getElementById('account-subscription');
@@ -2829,6 +2849,7 @@ MAINTENANCE NOTES:
         async function showClientToken() {
             try {
                 const res = await fetch('/api/v1/auth/client-token');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 if (res.ok && data.token) {
                     document.getElementById('modal-title').textContent = 'Client Token';
@@ -2881,6 +2902,7 @@ MAINTENANCE NOTES:
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password })
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 if (res.ok && data.success) {
                     showToast('Logged in successfully', 'success');
@@ -3014,6 +3036,7 @@ MAINTENANCE NOTES:
             if (!select || select.dataset.loaded) return;
             try {
                 const res = await fetch('/api/v1/encoding/presets');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const presets = await res.json();
                 const currentValue = select.value;
                 select.innerHTML = '<option value="">None</option>' + 
@@ -3351,6 +3374,7 @@ MAINTENANCE NOTES:
         async function fetchConfig() {
             try {
                 const res = await fetch('/api/v1/config');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 config = await res.json();
                 applyTheme();
             } catch (e) { console.error('Failed to load config:', e); }
@@ -3749,16 +3773,16 @@ MAINTENANCE NOTES:
                 for (const series of (data || [])) {
                     for (const season of (series.seasons || [])) {
                         for (const episode of (season.episodes || [])) {
-                            if (!episode.isDownloaded && episode.episodeId) {
+                            if (!episode.wasDownloaded && episode.episodeId) {
                                 await fetch('/api/v1/queue', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
                                         episodeId: episode.episodeId,
-                                        title: episode.title || 'Unknown',
-                                        seriesTitle: series.title || 'Unknown',
-                                        seasonNumber: season.seasonNumber || 1,
-                                        episodeNumber: episode.episodeNumber || 1
+                                        title: episode.episodeTitle || 'Unknown',
+                                        seriesTitle: series.seriesTitle || 'Unknown',
+                                        seasonNumber: season.seasonNum || 1,
+                                        episodeNumber: episode.episode || 1
                                     })
                                 });
                                 added++;
@@ -3903,9 +3927,7 @@ MAINTENANCE NOTES:
                 <div class="dropdown-item" onclick="sortHistoryBy('title'); document.getElementById('sort-dropdown').remove();">
                     <span>&#128199;</span> By Title
                 </div>
-                <div class="dropdown-item" onclick="sortHistoryBy('date'); document.getElementById('sort-dropdown').remove();">
-                    <span>&#128197;</span> By Date
-                </div>
+
                 <div class="dropdown-item" onclick="sortHistoryBy('status'); document.getElementById('sort-dropdown').remove();">
                     <span>&#9989;</span> By Status
                 </div>
@@ -3926,7 +3948,7 @@ MAINTENANCE NOTES:
             if (!historyData) return;
             historyData.sort((a, b) => {
                 if (field === 'title') return (a.seriesTitle || '').localeCompare(b.seriesTitle || '');
-                if (field === 'date') return (b.lastUpdated || '').localeCompare(a.lastUpdated || '');
+
                 if (field === 'status') return (a.downloadStatus || '').localeCompare(b.downloadStatus || '');
                 return 0;
             });
@@ -3952,7 +3974,7 @@ MAINTENANCE NOTES:
         }
         
         function getEpisodeDownloadStatus(episode) {
-            if (episode.isDownloaded) {
+            if (episode.wasDownloaded) {
                 return { class: 'status-full', icon: '&#10004;' };
             }
             if (isEpisodePartiallyDownloaded(episode)) {
@@ -4002,15 +4024,16 @@ MAINTENANCE NOTES:
             // Fetch rich data if needed
             let richSeries = null;
             if (historyRichData && historyRichData.length > 0) {
-                richSeries = historyRichData.find(s => s.seriesId === seriesId || s.id === seriesId);
+                richSeries = historyRichData.find(s => s.seriesId === seriesId);
             }
             
             if (!richSeries) {
                 try {
                     const res = await fetch('/api/v1/history/rich');
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     historyRichData = data || [];
-                    richSeries = historyRichData.find(s => s.seriesId === seriesId || s.id === seriesId);
+                    richSeries = historyRichData.find(s => s.seriesId === seriesId);
                 } catch (e) {
                     document.getElementById('modal-body').innerHTML = '<div class="empty-state"><div class="empty-state-title">Failed to load episodes</div></div>';
                     return;
@@ -4030,35 +4053,17 @@ MAINTENANCE NOTES:
             const requestedDubs = config?.download?.dubLanguages || ['ja-JP'];
             const requestedSubs = config?.download?.softSubs || ['en-US'];
             
-            // Build header with available dubs/subs
-            const availableDubs = series.availableDubs || [];
-            const availableSubs = series.availableSubs || [];
-            
-            const dubBadges = availableDubs.map(dub => {
-                const isSelected = requestedDubs.includes(dub);
-                return `<span class="lang-badge ${isSelected ? 'selected' : ''}">${dub}</span>`;
-            }).join('');
-            
-            const subBadges = availableSubs.map(sub => {
-                const isSelected = requestedSubs.includes(sub);
-                return `<span class="lang-badge ${isSelected ? 'selected' : ''}">${sub}</span>`;
-            }).join('');
-            
             let html = `
                 <div class="history-detail-header">
                     <div class="history-detail-poster">
-                        ${series.thumbnailUrl ? `<img src="${series.thumbnailUrl}" alt="">` : '📺'}
+                        ${series.thumbnailImageUrl ? `<img src="${series.thumbnailImageUrl}" alt="">` : '📺'}
                     </div>
                     <div class="history-detail-info">
-                        <div class="history-detail-title">${escapeHtml(series.seriesTitle || series.title || 'Unknown')}</div>
+                        <div class="history-detail-title">${escapeHtml(series.seriesTitle || 'Unknown')}</div>
                         <div class="history-detail-meta">${escapeHtml(series.seriesDescription || '')}</div>
                         <div style="margin-top:10px;">
-                            <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Available Dubs:</div>
-                            <div>${dubBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
-                        </div>
-                        <div style="margin-top:8px;">
-                            <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Available Subs:</div>
-                            <div>${subBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
+                            <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Episodes:</div>
+                            <div>${series.downloadedEpisodes || 0} / ${series.totalEpisodes || 0} downloaded${series.hasNewEpisodes ? ' <span class="lang-badge selected">New</span>' : ''}</div>
                         </div>
                     </div>
                 </div>
@@ -4073,31 +4078,14 @@ MAINTENANCE NOTES:
             }
             
             html += seasons.map(season => {
-                const seasonDubs = season.availableDubs || [];
-                const seasonSubs = season.availableSubs || [];
-                const seasonDownloadedDubs = season.downloadedDubs || [];
-                const seasonDownloadedSubs = season.downloadedSubs || [];
-                
-                const seasonDubBadges = seasonDubs.map(dub => {
-                    const isSelected = requestedDubs.includes(dub);
-                    const isDownloaded = seasonDownloadedDubs.includes(dub);
-                    return `<span class="lang-badge ${isSelected ? 'selected' : ''} ${isDownloaded ? 'downloaded' : ''}">${dub}</span>`;
-                }).join('');
-                
-                const seasonSubBadges = seasonSubs.map(sub => {
-                    const isSelected = requestedSubs.includes(sub);
-                    const isDownloaded = seasonDownloadedSubs.includes(sub);
-                    return `<span class="lang-badge ${isSelected ? 'selected' : ''} ${isDownloaded ? 'downloaded' : ''}">${sub}</span>`;
-                }).join('');
-                
                 const episodesHtml = (season.episodes || []).map(ep => {
                     const status = getEpisodeDownloadStatus(ep);
                     const tooltip = getEpisodeStatusTooltip(ep);
                     
                     return `
                         <div class="history-episode">
-                            <div class="history-episode-number">${ep.episodeNumber || '?'}</div>
-                            <div class="history-episode-title">${escapeHtml(ep.title || 'Unknown Episode')}</div>
+                            <div class="history-episode-number">${ep.episode || '?'}</div>
+                            <div class="history-episode-title">${escapeHtml(ep.episodeTitle || 'Unknown Episode')}</div>
                             <div class="history-episode-langs">
                                 ${(ep.downloadedDubLang || []).map(d => `<span class="lang-badge downloaded">${d}</span>`).join('')}
                             </div>
@@ -4107,7 +4095,7 @@ MAINTENANCE NOTES:
                                     <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
                                 </div>
                             </div>
-                            ${!ep.isDownloaded ? `<button class="btn-icon" onclick="addHistoryEpisodeToQueue('${ep.episodeId}', '${escapeHtml(series.seriesTitle || '')}')" title="Add to queue">&#128229;</button>` : ''}
+                            ${!ep.wasDownloaded ? `<button class="btn-icon" onclick="addHistoryEpisodeToQueue('${ep.episodeId}', '${escapeHtml(series.seriesTitle || '')}')" title="Add to queue">&#128229;</button>` : ''}
                         </div>
                     `;
                 }).join('');
@@ -4116,23 +4104,15 @@ MAINTENANCE NOTES:
                     <div class="history-season">
                         <div class="history-season-header" onclick="toggleSeasonCollapse(this)">
                             <div>
-                                <span class="history-season-title">${escapeHtml(season.seasonTitle || `Season ${season.seasonNumber || 1}`)}</span>
+                                <span class="history-season-title">${escapeHtml(season.seasonTitle || `Season ${season.seasonNum || 1}`)}</span>
                                 <span style="font-size:0.8em; color:var(--text-muted); margin-left:8px;">${season.episodes?.length || 0} episodes</span>
                             </div>
                             <div class="history-season-actions">
-                                <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${season.seasonId || season.id}')" title="Settings">&#9881;</button>
-                                <button class="btn-icon" onclick="event.stopPropagation(); downloadSeason('${series.seriesId}', '${season.seasonId || season.id}')" title="Download season">&#9660;</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${season.seasonId}')" title="Settings">&#9881;</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); downloadSeason('${series.seriesId}', '${season.seasonId}')" title="Download season">&#9660;</button>
                             </div>
                         </div>
                         <div class="history-season-body">
-                            <div style="padding:8px 15px; border-bottom:1px solid var(--border-color);">
-                                <div style="font-size:0.75em; color:var(--text-muted); margin-bottom:4px;">Dubs:</div>
-                                <div>${seasonDubBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
-                            </div>
-                            <div style="padding:8px 15px; border-bottom:1px solid var(--border-color);">
-                                <div style="font-size:0.75em; color:var(--text-muted); margin-bottom:4px;">Subs:</div>
-                                <div>${seasonSubBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
-                            </div>
                             ${episodesHtml}
                         </div>
                     </div>
@@ -4169,6 +4149,7 @@ MAINTENANCE NOTES:
         async function downloadSeason(seriesId, seasonId) {
             try {
                 const res = await fetch(`/api/v1/series/${seriesId}/episodes`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const episodes = await res.json();
                 let added = 0;
                 
@@ -4475,6 +4456,7 @@ MAINTENANCE NOTES:
             try {
                 // Get episodes and add all to queue
                 const res = await fetch(`/api/v1/series/${id}/episodes`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const episodes = await res.json();
                 let added = 0;
                 
@@ -4581,15 +4563,21 @@ MAINTENANCE NOTES:
         function startPolling() {
             // Check auth status periodically
             checkAuthStatus();
-            setInterval(checkAuthStatus, 30000);
+            authIntervalId = setInterval(checkAuthStatus, 30000);
             
             // Use SSE for real-time queue updates instead of polling
             startQueueSSE();
             
             // Keep polling history (no SSE for history yet)
-            setInterval(() => {
+            historyIntervalId = setInterval(() => {
                 if (currentPage === 'history') fetchHistoryData();
             }, 5000);
+            
+            // Clear intervals on page unload
+            window.addEventListener('beforeunload', () => {
+                if (authIntervalId) clearInterval(authIntervalId);
+                if (historyIntervalId) clearInterval(historyIntervalId);
+            });
         }
         
         function startQueueSSE() {
@@ -4627,6 +4615,7 @@ MAINTENANCE NOTES:
         async function checkAuthStatus() {
             try {
                 const res = await fetch('/api/v1/auth/status');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const status = await res.json();
                 authStatus = status;
                 

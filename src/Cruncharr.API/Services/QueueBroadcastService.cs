@@ -8,7 +8,9 @@ namespace Cruncharr.API.Services;
 
 public class QueueBroadcastService
 {
-    private readonly Channel<string> _channel = Channel.CreateUnbounded<string>();
+    private readonly Channel<string> _channel = Channel.CreateBounded<string>(new BoundedChannelOptions(100) {
+        FullMode = BoundedChannelFullMode.DropWrite
+    });
     private readonly IQueueService _queueService;
     private readonly ILogger<QueueBroadcastService> _logger;
     private readonly JsonSerializerSettings _sseJsonSettings;

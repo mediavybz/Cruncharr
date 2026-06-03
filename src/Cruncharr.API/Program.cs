@@ -58,10 +58,10 @@ public class Program{
         builder.Services.AddSingleton<IMusicService, MusicService>();
         builder.Services.AddSingleton<IEncodingService, EncodingService>();
 
-        // Add CORS for *arr integration
+        // Add CORS restricted to specific origins
         builder.Services.AddCors(options =>{
-            options.AddPolicy("AllowAll", policy =>{
-                policy.AllowAnyOrigin()
+            options.AddPolicy("AllowSpecific", policy =>{
+                policy.WithOrigins("http://localhost:8585")
                       .AllowAnyMethod()
                       .AllowAnyHeader();
             });
@@ -76,7 +76,7 @@ public class Program{
         }
 
         app.UseHttpsRedirection();
-        app.UseCors("AllowAll");
+        app.UseCors("AllowSpecific");
         app.UseAuthorization();
         app.MapControllers();
 

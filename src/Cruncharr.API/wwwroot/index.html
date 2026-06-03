@@ -1395,17 +1395,18 @@ MAINTENANCE NOTES:
         });
 
         function setupMultiSelectDropdowns() {
-            document.querySelectorAll('select[multiple]').forEach(select => {
-                select.addEventListener('mousedown', function(e) {
-                    e.preventDefault();
-                    const option = e.target.closest('option');
-                    if (!option) return;
-                    option.selected = !option.selected;
-                    this.dispatchEvent(new Event('change', { bubbles: true }));
-                });
-                select.addEventListener('mousemove', function(e) {
-                    e.preventDefault();
-                });
+            // Use event delegation for dynamically created selects
+            document.body.addEventListener('mousedown', function(e) {
+                const select = e.target.closest('select[multiple]');
+                if (!select) return;
+                const option = e.target.closest('option');
+                if (!option) return;
+                e.preventDefault();
+                option.selected = !option.selected;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            document.body.addEventListener('mousemove', function(e) {
+                if (e.target.closest('select[multiple]')) e.preventDefault();
             });
         }
 
@@ -1601,13 +1602,13 @@ MAINTENANCE NOTES:
                     return `
                         <div class="download-item">
                             <div class="download-thumb">
-                                ${item.episode?.thumbnailUrl ? `<img src="${item.episode.thumbnailUrl}" alt="">` : '📺'}
+                                ${item.episode?.thumbnailUrl ? `<img src="${escapeHtml(item.episode.thumbnailUrl)}" alt="">` : '📺'}
                             </div>
                             <div class="download-content">
                                 <div class="download-header">
                                     <div style="min-width:0;">
-                                        <div class="download-title ${item.episode?.highlightAllAvailable ? 'highlight' : ''}">${item.episode?.title || 'Unknown'}</div>
-                                        <div class="download-info" title="${item.infoText || item.infoTextHover || item.episode?.description || ''}">${item.infoText || item.episode?.seriesTitle || ''}</div>
+                                        <div class="download-title ${item.episode?.highlightAllAvailable ? 'highlight' : ''}">${escapeHtml(item.episode?.title) || 'Unknown'}</div>
+                                        <div class="download-info" title="${escapeHtml(item.infoText || item.infoTextHover || item.episode?.description || '')}">${escapeHtml(item.infoText || item.episode?.seriesTitle || '')}</div>
                                     </div>
                                     <div class="download-actions">
                                         ${state === 'queued' || state === 'waitingforretry'
@@ -1671,6 +1672,7 @@ MAINTENANCE NOTES:
         }
 
         let searchDebounce;
+        let searchAbortController = null;
         function onAddSearchInput(value) {
             clearTimeout(searchDebounce);
             const popup = document.getElementById('search-popup');
@@ -1680,8 +1682,14 @@ MAINTENANCE NOTES:
 
         async function doAddSearch(query) {
             const popup = document.getElementById('search-popup');
+            if (searchAbortController) {
+                searchAbortController.abort();
+            }
+            searchAbortController = new AbortController();
             try {
-                const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`);
+                const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`, {
+                    signal: searchAbortController.signal
+                });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const results = await res.json();
                 addDownloadSearchResults = results || [];
@@ -1693,18 +1701,21 @@ MAINTENANCE NOTES:
                 popup.innerHTML = addDownloadSearchResults.map(s => `
                     <div class="search-result-item" onclick="selectSearchResult('${s.id}')">
                         <div class="search-result-poster">
-                            ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${s.coverArtUrl || s.thumbnailUrl}" alt="">` : '📺'}
+                            ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" alt="">` : '📺'}
                         </div>
                         <div class="search-result-info">
-                            <div class="search-result-title">${s.title}</div>
-                            <div class="search-result-desc">${s.description || ''}</div>
+                            <div class="search-result-title">${escapeHtml(s.title)}</div>
+                            <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
                         </div>
                     </div>
                 `).join('');
                 popup.style.display = 'block';
             } catch (e) {
+                if (e.name === 'AbortError') return;
                 popup.innerHTML = '<div style="padding:15px; color:var(--accent-red);">Search failed</div>';
                 popup.style.display = 'block';
+            } finally {
+                searchAbortController = null;
             }
         }
 
@@ -1852,9 +1863,9 @@ MAINTENANCE NOTES:
                             ${ep.img ? `<img src="${ep.img}" alt="">` : '📺'}
                         </div>
                         <div class="episode-info">
-                            <div class="episode-title">${ep.name || 'Unknown Episode'}</div>
-                            <div class="episode-meta">${ep.seasonTitle || ''} - ${ep.airDate ? new Date(ep.airDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
-                            ${ep.description ? `<div class="episode-desc" style="font-size:0.85em; color:var(--text-secondary); margin-bottom:6px;">${ep.description}</div>` : ''}
+                            <div class="episode-title">${escapeHtml(ep.name) || 'Unknown Episode'}</div>
+                            <div class="episode-meta">${escapeHtml(ep.seasonTitle || '')} - ${ep.airDate ? new Date(ep.airDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
+                            ${ep.description ? `<div class="episode-desc" style="font-size:0.85em; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(ep.description)}</div>` : ''}
                             <div class="dub-section-label">Select Dubs:</div>
                             <div class="dub-selector">
                                 ${dubOptionsHtml || '<span style="color:var(--text-muted); font-size:0.8em;">No dubs available</span>'}
@@ -2175,7 +2186,7 @@ MAINTENANCE NOTES:
                                             ${ep.thumbnailUrl ? `<img src="${ep.thumbnailUrl}" alt="">` : '📺'}
                                             <div class="calendar-episode-number">${ep.episodeNumber || ''}</div>
                                         </div>
-                                        <div class="calendar-episode-title">${ep.seriesTitle || ep.seasonName || ''}</div>
+                                        <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
                                         ${ep.hasPassed ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${ep.id}')">Download</button>` : ''}
                                     </div>
@@ -2706,12 +2717,12 @@ MAINTENANCE NOTES:
                 content.innerHTML = '<div class="history-poster-grid">' + filteredData.map(item => `
                     <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${item.seriesId}')" style="cursor:pointer;">
                         <div class="history-poster-img">
-                            ${item.thumbnailImageUrl ? `<img src="${item.thumbnailImageUrl}" alt="">` : '📺'}
+                            ${item.thumbnailImageUrl ? `<img src="${escapeHtml(item.thumbnailImageUrl)}" alt="">` : '📺'}
                             ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
                         </div>
                         <div class="history-poster-info">
-                            <div class="history-poster-title" title="${item.seriesTitle || ''}">${item.seriesTitle || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
-                            <div class="history-poster-meta">${item.sonarrNextAirDate || ''}</div>
+                            <div class="history-poster-title" title="${escapeHtml(item.seriesTitle || '')}">${escapeHtml(item.seriesTitle) || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
+                            <div class="history-poster-meta">${escapeHtml(item.sonarrNextAirDate || '')}</div>
                             <div class="history-poster-meta" style="font-size:0.7em; margin-top:4px;">
                                 ${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0} episodes
                             </div>
@@ -2736,12 +2747,12 @@ MAINTENANCE NOTES:
                                 ${filteredData.map(item => `
                                     <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${item.seriesId}')" style="cursor:pointer;">
                                         <td>
-                                            <strong>${item.seriesTitle || 'Unknown'}</strong>
+                                            <strong>${escapeHtml(item.seriesTitle) || 'Unknown'}</strong>
                                             ${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}
-                                            <br><small style="color:var(--text-secondary);">${item.seriesDescription ? item.seriesDescription.substring(0, 80) + '...' : ''}</small>
+                                            <br><small style="color:var(--text-secondary);">${item.seriesDescription ? escapeHtml(item.seriesDescription.substring(0, 80)) + '...' : ''}</small>
                                         </td>
                                         <td>${getStatusBadge(item.downloadStatus || 'done')}</td>
-                                        <td>${item.sonarrSeriesId ? `✓ ${item.sonarrSlugTitle || 'Matched'}` : '—'}</td>
+                                        <td>${item.sonarrSeriesId ? `✓ ${escapeHtml(item.sonarrSlugTitle) || 'Matched'}` : '—'}</td>
                                         <td>${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0}</td>
                                         <td>${item.hasNewEpisodes ? '✓' : '—'}</td>
                                         <td>
@@ -2974,20 +2985,21 @@ MAINTENANCE NOTES:
             {value:'console/xbox_one',label:'Xbox One'}
         ];
 
-        const STREAM_DEFAULTS = {
-            'tv/android_tv': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'ANDROIDTV/3.59.0 Android/16', deviceType:'Android TV', deviceName:'Android TV'},
-            'android/phone': {auth:'Basic bzJhNndsamdub3FtdjloMWJ5bHI6Ujk3S3ExZm5faExZVFk0bDJxTjJIT2lDQnpfYnpBSUU=', ua:'Crunchyroll/3.97.0 Android/16 okhttp/4.12.0', deviceType:'OnePlus CPH2449', deviceName:'CPH2449'},
-            'android/tablet': {auth:'Basic bzJhNndsamdub3FtdjloMWJ5bHI6Ujk3S3ExZm5faExZVFk0bDJxTjJIT2lDQnpfYnpBSUU=', ua:'Crunchyroll/3.97.0 Android/16 okhttp/4.12.0', deviceType:'Android Tablet', deviceName:'Android Tablet'},
-            'tv/samsung': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'SAMSUNG-TV/1.0', deviceType:'Samsung TV', deviceName:'Samsung TV'},
-            'tv/vidaa': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'VIDAA-TV/1.0', deviceType:'Vidaa TV', deviceName:'Vidaa TV'},
-            'web/firefox': {auth:'Basic bm9haWhkZmNtb3R0YXR0dXU6Z2d0dW9odXJxZXZoaW1ubGtpaHRvbmV0bQ==', ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0', deviceType:'Firefox', deviceName:'Firefox'},
-            'web/chrome': {auth:'Basic bm9haWhkZmNtb3R0YXR0dXU6Z2d0dW9odXJxZXZoaW1ubGtpaHRvbmV0bQ==', ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36', deviceType:'Chrome', deviceName:'Chrome'},
-            'web/edge': {auth:'Basic bm9haWhkZmNtb3R0YXR0dXU6Z2d0dW9odXJxZXZoaW1ubGtpaHRvbmV0bQ==', ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0', deviceType:'Edge', deviceName:'Edge'},
-            'web/fallback': {auth:'Basic bm9haWhkZmNtb3R0YXR0dXU6Z2d0dW9odXJxZXZoaW1ubGtpaHRvbmV0bQ==', ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', deviceType:'Web', deviceName:'Web'},
-            'console/switch': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'NintendoSwitch/1.0', deviceType:'Nintendo Switch', deviceName:'Nintendo Switch'},
-            'console/ps4': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'PlayStation4/1.0', deviceType:'PlayStation 4', deviceName:'PlayStation 4'},
-            'console/ps5': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'PlayStation5/1.0', deviceType:'PlayStation 5', deviceName:'PlayStation 5'},
-            'console/xbox_one': {auth:'Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=', ua:'XboxOne/1.0', deviceType:'Xbox One', deviceName:'Xbox One'}
+        // Device labels only - auth credentials managed server-side
+        const STREAM_DEVICE_LABELS = {
+            'tv/android_tv': 'Android TV',
+            'android/phone': 'Android Phone',
+            'android/tablet': 'Android Tablet',
+            'tv/samsung': 'Samsung TV',
+            'tv/vidaa': 'Vidaa TV',
+            'web/firefox': 'Firefox',
+            'web/chrome': 'Chrome',
+            'web/edge': 'Edge',
+            'web/fallback': 'Web',
+            'console/switch': 'Nintendo Switch',
+            'console/ps4': 'PlayStation 4',
+            'console/ps5': 'PlayStation 5',
+            'console/xbox_one': 'Xbox One'
         };
 
         function updateStreamDefaults(endpointNum){
@@ -3001,13 +3013,12 @@ MAINTENANCE NOTES:
             
             if (useDefault){
                 const endpoint = document.getElementById('setting-stream-endpoint' + (endpointNum===2?'-2':''))?.value || 'tv/android_tv';
-                const defaults = STREAM_DEFAULTS[endpoint];
-                if (defaults){
-                    document.getElementById('setting-stream-auth' + (endpointNum===2?'-2':'')).value = defaults.auth;
-                    document.getElementById('setting-stream-ua' + (endpointNum===2?'-2':'')).value = defaults.ua;
-                    document.getElementById('setting-stream-device-type' + (endpointNum===2?'-2':'')).value = defaults.deviceType;
-                    document.getElementById('setting-stream-device-name' + (endpointNum===2?'-2':'')).value = defaults.deviceName;
-                }
+                const label = STREAM_DEVICE_LABELS[endpoint] || endpoint;
+                document.getElementById('setting-stream-device-type' + (endpointNum===2?'-2':'')).value = label;
+                document.getElementById('setting-stream-device-name' + (endpointNum===2?'-2':'')).value = label;
+                // Auth/User-Agent cleared - server handles defaults when useDefault=true
+                document.getElementById('setting-stream-auth' + (endpointNum===2?'-2':'')).value = '';
+                document.getElementById('setting-stream-ua' + (endpointNum===2?'-2':'')).value = '';
             }
         }
 
@@ -3031,19 +3042,19 @@ MAINTENANCE NOTES:
                 <div class="page-title">Settings</div>
                 <div class="page-subtitle">Configure Cruncharr</div>
                 <div class="settings-tabs">
-                    <button class="settings-tab ${settingsTab === 'general' ? 'active' : ''}" onclick="setSettingsTab('general')">General</button>
-                    <button class="settings-tab ${settingsTab === 'crunchyroll' ? 'active' : ''}" onclick="setSettingsTab('crunchyroll')">Crunchyroll</button>
-                    <button class="settings-tab ${settingsTab === 'download' ? 'active' : ''}" onclick="setSettingsTab('download')">Download</button>
-                    <button class="settings-tab ${settingsTab === 'filename' ? 'active' : ''}" onclick="setSettingsTab('filename')">Filename</button>
-                    <button class="settings-tab ${settingsTab === 'muxing' ? 'active' : ''}" onclick="setSettingsTab('muxing')">Muxing</button>
-                    <button class="settings-tab ${settingsTab === 'queue' ? 'active' : ''}" onclick="setSettingsTab('queue')">Queue</button>
-                    <button class="settings-tab ${settingsTab === 'history' ? 'active' : ''}" onclick="setSettingsTab('history')">History</button>
-                    <button class="settings-tab ${settingsTab === 'sonarr' ? 'active' : ''}" onclick="setSettingsTab('sonarr')">Sonarr</button>
-                    <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications')">Notifications</button>
-                    <button class="settings-tab ${settingsTab === 'proxy' ? 'active' : ''}" onclick="setSettingsTab('proxy')">Proxy</button>
-                    <button class="settings-tab ${settingsTab === 'flaresolverr' ? 'active' : ''}" onclick="setSettingsTab('flaresolverr')">FlareSolverr</button>
-                    <button class="settings-tab ${settingsTab === 'calendar' ? 'active' : ''}" onclick="setSettingsTab('calendar')">Calendar</button>
-                    <button class="settings-tab ${settingsTab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Appearance</button>
+                    <button class="settings-tab ${settingsTab === 'general' ? 'active' : ''}" onclick="setSettingsTab('general', event)">General</button>
+                    <button class="settings-tab ${settingsTab === 'crunchyroll' ? 'active' : ''}" onclick="setSettingsTab('crunchyroll', event)">Crunchyroll</button>
+                    <button class="settings-tab ${settingsTab === 'download' ? 'active' : ''}" onclick="setSettingsTab('download', event)">Download</button>
+                    <button class="settings-tab ${settingsTab === 'filename' ? 'active' : ''}" onclick="setSettingsTab('filename', event)">Filename</button>
+                    <button class="settings-tab ${settingsTab === 'muxing' ? 'active' : ''}" onclick="setSettingsTab('muxing', event)">Muxing</button>
+                    <button class="settings-tab ${settingsTab === 'queue' ? 'active' : ''}" onclick="setSettingsTab('queue', event)">Queue</button>
+                    <button class="settings-tab ${settingsTab === 'history' ? 'active' : ''}" onclick="setSettingsTab('history', event)">History</button>
+                    <button class="settings-tab ${settingsTab === 'sonarr' ? 'active' : ''}" onclick="setSettingsTab('sonarr', event)">Sonarr</button>
+                    <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications', event)">Notifications</button>
+                    <button class="settings-tab ${settingsTab === 'proxy' ? 'active' : ''}" onclick="setSettingsTab('proxy', event)">Proxy</button>
+                    <button class="settings-tab ${settingsTab === 'flaresolverr' ? 'active' : ''}" onclick="setSettingsTab('flaresolverr', event)">FlareSolverr</button>
+                    <button class="settings-tab ${settingsTab === 'calendar' ? 'active' : ''}" onclick="setSettingsTab('calendar', event)">Calendar</button>
+                    <button class="settings-tab ${settingsTab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance', event)">Appearance</button>
                 </div>
                 <div id="settings-content">
                     <div class="loading"><div class="spinner"></div>Loading settings...</div>
@@ -3071,10 +3082,10 @@ MAINTENANCE NOTES:
             }
         }
 
-        function setSettingsTab(tab) {
+        function setSettingsTab(tab, evt) {
             settingsTab = tab;
             document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
-            event.target.classList.add('active');
+            if (evt && evt.target) evt.target.classList.add('active');
             renderSettingsTab();
         }
 
@@ -4630,9 +4641,7 @@ MAINTENANCE NOTES:
             eventSource.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.stats) queueStats = data.stats;
-                    if (data.items) queueItems = data.items;
-                    renderDownloads();
+                    updateQueueData(data.items || []);
                 } catch (e) {
                     console.error('Failed to parse SSE data:', e);
                 }
@@ -4653,32 +4662,6 @@ MAINTENANCE NOTES:
             eventSource.onopen = () => {
                 console.log('SSE connection established');
                 sseRetryCount = 0;
-            };
-        }
-            
-            eventSource = new EventSource('/api/v1/queue/sse');
-            
-            eventSource.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    updateQueueData(data.items || []);
-                } catch (e) {
-                    console.error('Failed to parse SSE data:', e);
-                }
-            };
-            
-            eventSource.onerror = (error) => {
-                console.error('SSE connection error:', error);
-                // Reconnect after 3 seconds
-                setTimeout(() => {
-                    if (eventSource && eventSource.readyState === EventSource.CLOSED) {
-                        startQueueSSE();
-                    }
-                }, 3000);
-            };
-            
-            eventSource.onopen = () => {
-                console.log('SSE connection established');
             };
         }
         

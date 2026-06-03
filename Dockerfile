@@ -1,6 +1,7 @@
 # Build stage
-FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
 WORKDIR /src
+ARG TARGETARCH
 
 # Copy project files
 COPY src/Cruncharr.Core/Cruncharr.Core.csproj src/Cruncharr.Core/
@@ -15,18 +16,23 @@ RUN dotnet restore src/Cruncharr.API/Cruncharr.API.csproj \
 COPY src/ src/
 
 # Build and publish API (self-contained trimmed single-file)
-RUN dotnet publish src/Cruncharr.API/Cruncharr.API.csproj -c Release -o /app/publish \
+# TARGETARCH=amd64 -> linux-musl-x64, TARGETARCH=arm64 -> linux-musl-arm64
+RUN if [ "$TARGETARCH" = "amd64" ]; then RID=linux-musl-x64; elif [ "$TARGETARCH" = "arm64" ]; then RID=linux-musl-arm64; else RID=linux-musl-$TARGETARCH; fi \
+    && echo "Building for $RID" \
+    && dotnet publish src/Cruncharr.API/Cruncharr.API.csproj -c Release -o /app/publish \
     --self-contained true \
-    --runtime linux-musl-x64 \
+    --runtime $RID \
     /p:PublishSingleFile=true \
     /p:PublishTrimmed=true \
     /p:TrimMode=partial \
     /p:InvariantGlobalization=true
 
 # Build and publish CLI
-RUN dotnet publish src/Cruncharr.CLI/Cruncharr.CLI.csproj -c Release -o /app/cli \
+RUN if [ "$TARGETARCH" = "amd64" ]; then RID=linux-musl-x64; elif [ "$TARGETARCH" = "arm64" ]; then RID=linux-musl-arm64; else RID=linux-musl-$TARGETARCH; fi \
+    && echo "Building CLI for $RID" \
+    && dotnet publish src/Cruncharr.CLI/Cruncharr.CLI.csproj -c Release -o /app/cli \
     --self-contained true \
-    --runtime linux-musl-x64 \
+    --runtime $RID \
     /p:PublishSingleFile=true \
     /p:PublishTrimmed=true \
     /p:TrimMode=partial \

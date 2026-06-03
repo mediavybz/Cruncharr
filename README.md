@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Cruncharr
 
 Dockerized Crunchyroll downloader with web UI. Headless backend with REST API + single-page web frontend.
@@ -54,7 +53,7 @@ docker-compose up -d
 2. **Login** with your Crunchyroll credentials
 3. **Configure settings**:
    - Download directory: `/downloads` (inside container)
-   - Temp directory: `/tmp/cruncharr`
+   - Temp directory: `/tmp/cruncharr.`
    - Stream endpoints: Use defaults (recommended)
    - Dub Languages: `ja-JP` (Japanese) by default
    - Soft Subs: `en-US` (English) by default
@@ -109,7 +108,7 @@ history:
 ```bash
 git clone https://github.com/mediavybz/Cruncharr.git
 cd Cruncharr
-docker build -t cruncharr .
+docker build -t cruncharr.
 docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncharr
 ```
 
@@ -137,7 +136,7 @@ The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 - **Stream Endpoints**: Configurable device endpoints (Android TV, Web, Console) with working defaults
 - **Languages**: Select audio dubs and subtitle languages (default: Japanese audio, English subs)
 - **Muxing**: Automatic muxing with ffmpeg/mkvtoolnix, MP4/MP3 output options
-- **Settings**: Full settings panel with download, queue, history, notifications, appearance options
+- **Settings**: Full settings panel with download, queue, history, notifications, and appearance options
 - **Notifications**: Webhook support for completion/failure events
 
 ## Troubleshooting
@@ -152,7 +151,7 @@ The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 
 ### Reset All Settings
 - Stop the container
-- Delete `config/cruncharr.yaml`
+- Delete `config/cruncharr.yaml.`
 - Restart the container - it will recreate with defaults
 
 ### Widevine/DRM
@@ -173,7 +172,7 @@ MIT License - See upstream [LICENSE](https://github.com/Crunchy-DL/Crunchy-Downl
 =======
 # 💾 Crunchyroll-Downloader
 
-A simple crunchyroll downloader that allows you to download your favorite series and episodes directly from [Crunchyroll](https://www.crunchyroll.com).
+A simple Crunchyroll downloader that allows you to download your favorite series and episodes directly from [Crunchyroll](https://www.crunchyroll.com).
 
 > ⚠️ **Disclaimer:** This tool is intended for private use only. It is not affiliated with, maintained, authorized, sponsored, or officially associated with Crunchyroll LLC or any of its subsidiaries or affiliates. Use of this application may violate Crunchyroll's Terms of Service and could be illegal in your country. You are solely responsible for your use of Crunchy-Downloader. You need a [Crunchyroll Premium](https://www.crunchyroll.com/premium) subscription to access premium content.
 
@@ -208,7 +207,7 @@ A simple crunchyroll downloader that allows you to download your favorite series
 ## 🖥️ Features
 
 - **Download Episodes and Series:** Fetch individual episodes or entire series from Crunchyroll
-- **Multiple Subtitle and Audio Tracks:** Support for downloading videos with various subtitles and audio tracks
+- **Multiple Subtitles and Audio Tracks:** Support for downloading videos with various subtitles and audio tracks
 - **User-Friendly Interface:** Intuitive GUI for easy navigation and operation
 - **Calendar View:** View upcoming episodes and schedule downloads
 - **Download History:** Keep track of your downloaded content

@@ -164,7 +164,7 @@ public class CrAuthSettings{
     public string Device_type{ get; set; } = "Android TV";
     public string Device_name{ get; set; } = "Android TV";
     public string UserAgent{ get; set; } = "ANDROIDTV/3.59.0 Android/16";
-    public string Authorization{ get; set; } = "Basic eTJhcnZqYjBoMHJndnRpemxvdnk6SlZMdndkSXBYdnhVLXFJQnZUMU04b1FUcjFxbFFKWDI=";
+    public string Authorization{ get; set; } = ""; // Server provides default based on endpoint
     public bool Video{ get; set; } = true;
     public bool Audio{ get; set; } = true;
     public bool UseDefault{ get; set; } = true;

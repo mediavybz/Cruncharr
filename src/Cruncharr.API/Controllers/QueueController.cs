@@ -32,7 +32,8 @@ public class QueueController : ControllerBase{
         return Ok(new QueueResponse{
             Items = items,
             ActiveDownloads = _queueService.ActiveDownloads,
-            HasActiveDownloads = _queueService.HasActiveDownloads
+            HasActiveDownloads = _queueService.HasActiveDownloads,
+            IsGloballyPaused = _queueService.IsGloballyPaused
         });
     }
 
@@ -156,15 +157,23 @@ public class QueueController : ControllerBase{
     /// Get queue statistics
     /// </summary>
     [HttpGet("stats")]
-    public ActionResult<QueueStats> GetStats(){
+    public ActionResult<QueueStats> GetQueueStats(){
         var items = _queueService.GetQueue();
+        var total = items.Count;
+        var active = items.Count(i => i.DownloadProgress.State == DownloadState.Downloading || i.DownloadProgress.State == DownloadState.Processing);
+        var queued = items.Count(i => i.DownloadProgress.State == DownloadState.Queued);
+        var completed = items.Count(i => i.DownloadProgress.State == DownloadState.Done);
+        var failed = items.Count(i => i.DownloadProgress.State == DownloadState.Error);
+        var waitingForRetry = items.Count(i => i.DownloadProgress.IsWaitingForRetry);
+        
         return Ok(new QueueStats{
-            Total = items.Count,
-            Active = _queueService.ActiveDownloads,
-            Queued = items.Count(i => i.DownloadProgress.IsQueued),
-            Completed = items.Count(i => i.DownloadProgress.IsDone),
-            Failed = items.Count(i => i.DownloadProgress.IsError),
-            WaitingForRetry = items.Count(i => i.DownloadProgress.IsWaitingForRetry)
+            Total = total,
+            Active = active,
+            Queued = queued,
+            Completed = completed,
+            Failed = failed,
+            WaitingForRetry = waitingForRetry,
+            IsGloballyPaused = _queueService.IsGloballyPaused
         });
     }
 
@@ -192,6 +201,24 @@ public class QueueController : ControllerBase{
             await WriteSseEventAsync(update, cancellationToken);
             await Response.Body.FlushAsync(cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Pause all queue processing globally
+    /// </summary>
+    [HttpPost("pause")]
+    public IActionResult PauseGlobally(){
+        _queueService.PauseGlobally();
+        return Ok(new { Message = "Queue paused globally" });
+    }
+
+    /// <summary>
+    /// Resume queue processing globally
+    /// </summary>
+    [HttpPost("resume")]
+    public IActionResult ResumeGlobally(){
+        _queueService.ResumeGlobally();
+        return Ok(new { Message = "Queue resumed globally" });
     }
 
     private async Task WriteSseEventAsync(string data, CancellationToken cancellationToken){
@@ -226,6 +253,7 @@ public class QueueResponse{
     public List<QueueItem> Items { get; set; } = new();
     public int ActiveDownloads { get; set; }
     public bool HasActiveDownloads { get; set; }
+    public bool IsGloballyPaused { get; set; }
 }
 
 public class QueueStats{
@@ -235,4 +263,5 @@ public class QueueStats{
     public int Completed { get; set; }
     public int Failed { get; set; }
     public int WaitingForRetry { get; set; }
+    public bool IsGloballyPaused { get; set; }
 }

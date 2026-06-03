@@ -16,9 +16,9 @@ public class NotificationService : INotificationService{
     private readonly ILogger<NotificationService>? _logger;
     private readonly HttpClient _httpClient;
     
-    public NotificationService(ILogger<NotificationService>? logger = null){
+    public NotificationService(IHttpClientFactory httpClientFactory, ILogger<NotificationService>? logger = null){
         _logger = logger;
-        _httpClient = new HttpClient();
+        _httpClient = httpClientFactory.CreateClient();
     }
     
     public async Task NotifyCompleteAsync(DownloadResult result, CruncharrConfig config){

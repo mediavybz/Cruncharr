@@ -282,6 +282,9 @@ public class DownloadConfig{
     [YamlMember(Alias = "dub_download_delay_seconds", ApplyNamingConventions = false)]
     public int DubDownloadDelaySeconds { get; set; } = 0;
     
+    [YamlMember(Alias = "cooldown_delay_seconds", ApplyNamingConventions = false)]
+    public int CooldownDelaySeconds { get; set; } = 0;
+    
     [YamlMember(Alias = "hard_sub_lang", ApplyNamingConventions = false)]
     public string HardSubLang { get; set; } = "none";
     

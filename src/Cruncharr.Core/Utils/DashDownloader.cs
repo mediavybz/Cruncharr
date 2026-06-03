@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Cruncharr.Core.Utils.HLS;
 using Microsoft.Extensions.Logging;
 
 namespace Cruncharr.Core.Utils;
@@ -14,12 +15,14 @@ public class DashDownloader{
     private readonly ILogger? _logger;
     private readonly int _threads;
     private readonly int _maxRetries;
+    private readonly int _speedLimitKbPerSecond;
     
-    public DashDownloader(HttpClientWrapper httpClient, int threads = 5, int maxRetries = 3, ILogger? logger = null){
+    public DashDownloader(HttpClientWrapper httpClient, int threads = 5, int maxRetries = 3, int speedLimitKbPerSecond = 0, ILogger? logger = null){
         _httpClient = httpClient;
         _logger = logger;
         _threads = threads;
         _maxRetries = maxRetries;
+        _speedLimitKbPerSecond = speedLimitKbPerSecond;
     }
     
     public async Task<bool> DownloadTrackAsync(DashTrack track, string outputPath, IProgress<double>? progress = null, CancellationToken cancellationToken = default){
@@ -65,19 +68,20 @@ public class DashDownloader{
         
         var mode = isInit ? FileMode.Create : FileMode.Append;
         await using var fileStream = new FileStream(outputPath, mode, FileAccess.Write);
-        await response.Content.CopyToAsync(fileStream, cancellationToken);
+        
+        if (_speedLimitKbPerSecond > 0){
+            var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var throttledStream = new ThrottledStream(contentStream, _speedLimitKbPerSecond);
+            await throttledStream.CopyToAsync(fileStream, cancellationToken);
+        } else{
+            await response.Content.CopyToAsync(fileStream, cancellationToken);
+        }
     }
     
     public static async Task<DashManifest> ParseManifestAsync(string manifestXml, string manifestUrl, HttpClient httpClient){
         // Use the ported MpdParser and convert to DashManifest format
         var parsed = await Cruncharr.Core.Utils.Parser.MpdParser.Parse(manifestXml, null, manifestUrl, httpClient);
         return ConvertToDashManifest(parsed);
-    }
-    
-    public static DashManifest ParseManifest(string manifestXml, string manifestUrl){
-        // Fallback: use async version with a temporary HttpClient
-        using var httpClient = new HttpClient();
-        return ParseManifestAsync(manifestXml, manifestUrl, httpClient).GetAwaiter().GetResult();
     }
     
     private static DashManifest ConvertToDashManifest(Cruncharr.Core.Utils.Parser.MPDParsed parsed){

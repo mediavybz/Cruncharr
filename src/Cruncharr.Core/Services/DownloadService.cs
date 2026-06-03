@@ -199,10 +199,10 @@ public class DownloadService : IDownloadService{
         }
         
         // Strip any prefix from mediaId/mediaGuid
-        if (mediaId.Contains(':')){
+        if (!string.IsNullOrEmpty(mediaId) && mediaId.Contains(':')){
             mediaId = mediaId.Split(':')[1];
         }
-        if (mediaGuid.Contains(':')){
+        if (!string.IsNullOrEmpty(mediaGuid) && mediaGuid.Contains(':')){
             mediaGuid = mediaGuid.Split(':')[1];
         }
         
@@ -226,7 +226,7 @@ public class DownloadService : IDownloadService{
             manifestRequest.Headers.Add("Authorization", $"Bearer {_auth.Token?.access_token}");
             var (manifestOk, manifestContent, _) = await _httpClient.SendRequestAsync(manifestRequest);
             if (manifestOk && !string.IsNullOrEmpty(manifestContent)){
-                var manifest = DashDownloader.ParseManifest(manifestContent, playbackData.VideoUrl);
+                var manifest = await DashDownloader.ParseManifestAsync(manifestContent, playbackData.VideoUrl, _httpClient.Client);
                 pssh = manifest.VideoTracks.FirstOrDefault()?.Pssh ?? manifest.AudioTracks.FirstOrDefault()?.Pssh;
                 _logger?.LogInformation("PSSH from manifest: {Pssh}", pssh ?? "(null)");
             }

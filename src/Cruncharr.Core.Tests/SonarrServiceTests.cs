@@ -10,11 +10,14 @@ namespace Cruncharr.Core.Tests;
 
 public class SonarrServiceTests{
     private readonly Mock<ILogger<SonarrService>> _loggerMock;
+    private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
     private readonly SonarrService _service;
 
     public SonarrServiceTests(){
         _loggerMock = new Mock<ILogger<SonarrService>>();
-        _service = new SonarrService(_loggerMock.Object);
+        _httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        _httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
+        _service = new SonarrService(_httpClientFactoryMock.Object, _loggerMock.Object);
     }
 
     [Fact]
@@ -357,7 +360,7 @@ public class SonarrServiceTests{
 public class SonarrServiceWithHttpClient : SonarrService{
     private readonly HttpClient _httpClient;
 
-    public SonarrServiceWithHttpClient(ILogger<SonarrService>? logger, HttpClient httpClient) : base(logger){
+    public SonarrServiceWithHttpClient(ILogger<SonarrService>? logger, HttpClient httpClient) : base(new TestHttpClientFactory(httpClient), logger){
         _httpClient = httpClient;
     }
 
@@ -414,4 +417,10 @@ public class SonarrServiceWithHttpClient : SonarrService{
             return new List<SonarrEpisode>();
         }
     }
+}
+
+public class TestHttpClientFactory : IHttpClientFactory{
+    private readonly HttpClient _httpClient;
+    public TestHttpClientFactory(HttpClient httpClient) => _httpClient = httpClient;
+    public HttpClient CreateClient(string name) => _httpClient;
 }

@@ -973,10 +973,9 @@ MAINTENANCE NOTES:
         .sonarr-icon { width: 24px; height: 24px; background: var(--accent-green); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7em; color: #fff; }
 
         /* Dropdown menu */
-        .dropdown-menu { position: absolute; background: var(--surface); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100; min-width: 200px; display: none; }
-        .dropdown-menu.active { display: block; }
-        .dropdown-item { padding: 10px 15px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.9em; }
-        .dropdown-item:hover { background: var(--hover); }
+        .dropdown-menu { position: absolute; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100; min-width: 200px; display: none; }
+        .dropdown-item { padding: 10px 15px; cursor: pointer; font-size: 0.9em; color: var(--text-primary); }
+        .dropdown-item:hover { background: var(--bg-hover); }
         .dropdown-divider { height: 1px; background: var(--border-color); margin: 5px 0; }
 
         /* Sonarr match status indicators */
@@ -1499,6 +1498,9 @@ MAINTENANCE NOTES:
                     </label>
 
                     <div style="margin-left:auto; display:flex; gap:8px;">
+                        <button class="btn-icon" id="btn-global-pause" onclick="toggleGlobalPause()" title="Pause/Resume Queue" style="display:none;">
+                            &#10074;&#10074; Pause All
+                        </button>
                         <button class="btn-icon" id="btn-retry-failed" onclick="retryFailed()" title="Retry Failed" disabled>
                             &#8635; Retry
                         </button>
@@ -1529,6 +1531,19 @@ MAINTENANCE NOTES:
                 document.getElementById('stat-completed').textContent = data.completed ?? 0;
                 document.getElementById('stat-failed').textContent = data.failed ?? 0;
                 document.getElementById('stat-retry').textContent = data.waitingForRetry ?? 0;
+                
+                // Update global pause button
+                const pauseBtn = document.getElementById('btn-global-pause');
+                if (pauseBtn) {
+                    pauseBtn.style.display = 'inline-flex';
+                    if (data.isGloballyPaused) {
+                        pauseBtn.innerHTML = '&#9654; Resume All';
+                        pauseBtn.title = 'Resume Queue';
+                    } else {
+                        pauseBtn.innerHTML = '&#10074;&#10074; Pause All';
+                        pauseBtn.title = 'Pause Queue';
+                    }
+                }
             } catch (e) {
                 console.error('Failed to fetch queue stats:', e);
             }
@@ -2062,7 +2077,7 @@ MAINTENANCE NOTES:
                     <div style="max-height: 400px; overflow-y: auto;">
                         ${videos.map(video => `
                             <div style="padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px;">
-                                <div style="width: 80px; height: 45px; background: var(--surface-light); border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                                <div style="width: 80px; height: 45px; background: var(--bg-tertiary); border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
                                     ${video.thumbnailUrl ? `<img src="${video.thumbnailUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="">` : '🎵'}
                                 </div>
                                 <div style="flex: 1;">
@@ -3169,6 +3184,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Use Temp Folder</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-temp" ${dl.useTempFolder?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Part Size</div></div><input type="number" class="form-input" id="setting-part-size" value="${dl.partSize||10}" min="1" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Dub Download Delay (seconds)</div></div><input type="number" class="form-input" id="setting-dub-delay" value="${dl.dubDownloadDelaySeconds||0}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Cooldown Between Downloads (seconds)</div><div class="setting-desc">Delay before starting next download</div></div><input type="number" class="form-input" id="setting-cooldown" value="${dl.cooldownDelaySeconds||0}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Downloads</div></div><input type="number" class="form-input" id="setting-concurrent" value="${dl.simultaneousDownloads||2}" min="1" max="10" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-proc-jobs" value="${dl.simultaneousProcessingJobs||2}" min="1" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Speed Limit (KB/s)</div><div class="setting-desc">0 = unlimited</div></div><input type="number" class="form-input" id="setting-speed-limit" value="${dl.downloadSpeedLimit||0}" min="0" style="width:120px;"></div>
@@ -3513,6 +3529,7 @@ MAINTENANCE NOTES:
                         dlVideoOnce: !(document.getElementById('setting-dl-video-every')?.checked ?? false),
                         keepDubsSeparate: document.getElementById('setting-keep-separate')?.checked || false,
                         dubDownloadDelaySeconds: parseInt(document.getElementById('setting-dub-delay')?.value) || 0,
+                        cooldownDelaySeconds: parseInt(document.getElementById('setting-cooldown')?.value) || 0,
                         defaultSub: document.getElementById('setting-default-sub')?.value || document.getElementById('setting-mux-default-sub')?.value || 'en-US',
                         simultaneousDownloads: parseInt(document.getElementById('setting-concurrent')?.value) || 2,
                         simultaneousProcessingJobs: parseInt(document.getElementById('setting-proc-jobs')?.value) || 2,
@@ -3731,6 +3748,16 @@ MAINTENANCE NOTES:
                 const checkbox = document.getElementById(key === 'removeFinished' ? 'toggle-remove-finished' : 'toggle-auto-download');
                 if (checkbox) checkbox.checked = !value;
             }
+        }
+
+        async function toggleGlobalPause() {
+            const btn = document.getElementById('btn-global-pause');
+            const isPaused = btn.textContent.includes('Resume');
+            try {
+                await fetch(`/api/v1/queue/${isPaused ? 'resume' : 'pause'}`, { method: 'POST' });
+                showToast(isPaused ? 'Queue resumed' : 'Queue paused globally', 'success');
+                fetchDownloads();
+            } catch (e) { showToast('Failed to toggle pause', 'error'); }
         }
 
         async function retryFailed() {
@@ -4537,7 +4564,7 @@ MAINTENANCE NOTES:
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
-            toast.innerHTML = `<span>${type === 'success' ? '&#10004;' : type === 'error' ? '&#10060;' : '&#9888;'}</span><span>${message}</span>`;
+            toast.innerHTML = `<span>${type === 'success' ? '&#10004;' : type === 'error' ? '&#10060;' : '&#9888;'}</span><span>${escapeHtml(message)}</span>`;
             container.appendChild(toast);
             setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; setTimeout(() => toast.remove(), 300); }, 3000);
         }
@@ -4586,7 +4613,7 @@ MAINTENANCE NOTES:
             }
             // Use doing if not empty, otherwise derive from state
             if (progress.doing && progress.doing.trim().length > 0) {
-                return progress.doing;
+                return escapeHtml(progress.doing);
             }
             const state = (progress.state || 'queued').toLowerCase();
             if (state === 'downloading') return 'Downloading...';

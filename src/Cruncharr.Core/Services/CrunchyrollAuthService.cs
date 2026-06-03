@@ -134,12 +134,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         Init();
         LoadToken();
         
-        // Try to update auth credentials from upstream on startup
-        try{
-            UpdateAuthCredentialsAsync().GetAwaiter().GetResult();
-        } catch (Exception ex){
-            _logger?.LogWarning(ex, "Failed to update auth credentials on startup");
-        }
+        // [PT] Lazy auth update - will be called on first token refresh instead of sync-over-async in constructor
     }
     
     private static string GetDefaultTokenPath(){

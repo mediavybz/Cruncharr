@@ -697,6 +697,12 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             await AuthAnonymousAsync(useBetaApi, cancellationToken);
         }
         
+        // Verify token was obtained after anonymous auth fallback
+        if (Token == null){
+            _logger?.LogError("ChangeProfileAsync failed: Token is null after AuthAnonymousAsync");
+            return false;
+        }
+        
         if (Profile.Username == "???"){
             return false;
         }

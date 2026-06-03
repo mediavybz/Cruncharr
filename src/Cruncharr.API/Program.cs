@@ -52,6 +52,7 @@ public class Program{
         builder.Services.AddSingleton<IQueueService, QueueService>();
         builder.Services.AddSingleton<QueueBroadcastService>();
         builder.Services.AddSingleton<ISonarrService, SonarrService>();
+        builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<ISyncingService, SyncingService>();
         builder.Services.AddSingleton<IVideoSyncer, VideoSyncer>();
         builder.Services.AddSingleton<IMovieService, MovieService>();

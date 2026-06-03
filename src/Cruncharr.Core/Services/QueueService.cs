@@ -73,10 +73,13 @@ public class QueueService : IQueueService, IDisposable{
 
     public event EventHandler? QueueStateChanged;
 
-    public QueueService(IServiceProvider serviceProvider, ILogger<QueueService>? logger = null, IQueuePersistenceService? persistenceService = null){
+    private readonly INotificationService? _notificationService;
+
+    public QueueService(IServiceProvider serviceProvider, ILogger<QueueService>? logger = null, IQueuePersistenceService? persistenceService = null, INotificationService? notificationService = null){
         _serviceProvider = serviceProvider;
         _logger = logger;
         _persistenceService = persistenceService;
+        _notificationService = notificationService;
         
         // Restore persisted queue
         if (_persistenceService != null){
@@ -451,12 +454,23 @@ public class QueueService : IQueueService, IDisposable{
             item.DownloadProgress.Doing = "Complete";
             _logger?.LogInformation("Download complete: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
             
+            // Send webhook notification
+            if (_notificationService != null && _config != null){
+                _ = Task.Run(async () => await _notificationService.NotifyCompleteAsync(result, _config));
+            }
+            
             if (_config?.RemoveFinishedDownload == true){
                 _queue.TryRemove(item.Id, out _);
                 _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
             }
         } catch (DownloadException dex){
             _logger?.LogError("Download failed: {ErrorType} - {Message}", dex.ErrorType, dex.Message);
+            
+            // Send webhook error notification
+            if (_notificationService != null && _config != null){
+                var errorResult = new DownloadResult{ Success = false, ErrorMessage = dex.Message };
+                _ = Task.Run(async () => await _notificationService.NotifyErrorAsync(errorResult, _config));
+            }
             
             bool isAuthError = dex.ErrorType == DownloadErrorType.NotAuthenticated ||
                               dex.ErrorType == DownloadErrorType.SubscriptionExpired ||

@@ -1,3 +1,4 @@
+#pragma warning disable IL2026 // Using dynamic types might cause types or members to be removed by trimmer
 using System;
 using System.Collections.Generic;
 using System.Dynamic;
@@ -57,3 +58,4 @@ public class ToPlaylistsClass{
         return segmentsInfo;
     }
 }
+#pragma warning restore IL2026

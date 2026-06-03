@@ -1,4 +1,5 @@
 #nullable disable
+#pragma warning disable IL2026 // Using dynamic types might cause types or members to be removed by trimmer
 using System.Collections.Generic;
 using System.Dynamic;
 using System.Linq;
@@ -504,3 +505,4 @@ public class ToM3u8Class{
         return $"{uri}-{UrlType.ByteRangeToString(byteRange)}";
     }
 }
+#pragma warning restore IL2026

@@ -58,6 +58,7 @@ public class Program{
         builder.Services.AddSingleton<IMovieService, MovieService>();
         builder.Services.AddSingleton<IMusicService, MusicService>();
         builder.Services.AddSingleton<IEncodingService, EncodingService>();
+        builder.Services.AddHostedService<AutoDownloadSchedulerService>();
 
         // Add CORS - configurable via environment variable
         var corsOrigins = Environment.GetEnvironmentVariable("CORS_ORIGINS")?.Split(',') ?? new[] { "http://localhost:8585" };

@@ -201,6 +201,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 Id = ep.Id,
                 Guid = guid,
                 Title = ep.Title,
+                Episode = ep.Episode,
                 EpisodeNumber = ep.EpisodeNumber ?? 0,
                 SeasonNumber = ep.SeasonNumber,
                 Description = ep.Description,
@@ -344,6 +345,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 Id = episode.Id,
                 Guid = guid,
                 Title = episode.Title,
+                Episode = episode.Episode,
                 EpisodeNumber = episode.EpisodeNumber ?? 0,
                 SeasonNumber = episode.SeasonNumber,
                 Description = episode.Description,
@@ -464,8 +466,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 return new EpisodeInfo{
                     Id = e.Id,
                     Guid = guid,
-                    Title = e.Title,
-                    EpisodeNumber = e.EpisodeNumber ?? 0,
+                Title = e.Title,
+                Episode = e.Episode,
+                EpisodeNumber = e.EpisodeNumber ?? 0,
                     SeasonNumber = e.SeasonNumber,
                     SeasonTitle = e.SeasonTitle,
                     SeasonId = e.SeasonId,
@@ -732,7 +735,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
             var baseEp = item.Variants[0].Item;
 
             var epStr = baseEp.Episode;
-            var isSpecial = epStr != null && !Regex.IsMatch(epStr, @"^\d+(\.\d+)?$");
+            var isSpecial = epStr != null && !Regex.IsMatch(epStr, @"^\d+(\.\d+)?(-\d+)?$");
 
             string newKey;
             if (isSpecial && !string.IsNullOrEmpty(baseEp.Episode)){
@@ -1122,7 +1125,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
 
         var baseEp = data.EpisodeAndLanguages.Variants[0].Item;
 
-        bool isSpecial = !string.IsNullOrEmpty(baseEp.Episode) && !Regex.IsMatch(baseEp.Episode, @"^\d+(\.\d+)?$");
+        bool isSpecial = !string.IsNullOrEmpty(baseEp.Episode) && !Regex.IsMatch(baseEp.Episode, @"^\d+(\.\d+)?(-\d+)?$");
 
         string newKey;
         if (isSpecial && !string.IsNullOrEmpty(baseEp.Episode)){

@@ -635,7 +635,7 @@ public class DownloadService : IDownloadService{
                     var allFontNames = new List<string>();
                     foreach (var (subPath, _) in subtitleFiles.Where(s => s.Path.EndsWith(".ass", StringComparison.OrdinalIgnoreCase))){
                         var assContent = await File.ReadAllTextAsync(subPath, cancellationToken);
-                        var fonts = _fontService.ExtractFontsFromAss(assContent, true);
+                        var fonts = _fontService.ExtractFontsFromAss(assContent, config.Download.MuxTypesettingFonts);
                         allFontNames.AddRange(fonts);
                     }
                     if (allFontNames.Count > 0){

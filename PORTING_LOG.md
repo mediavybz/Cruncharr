@@ -92,6 +92,11 @@
 | src/Cruncharr.API/Controllers/ConfigController.cs | N/A (API layer) | [PT] Hide Authorization tokens from GET /api/v1/config response | 2026-06-03 |
 | src/Cruncharr.API/Controllers/QueueController.cs | N/A (API layer) | [PT] Added POST /api/v1/queue/pause, /resume, /stats includes IsGloballyPaused | 2026-06-03 |
 | src/Cruncharr.Core/Configuration/CruncharrConfig.cs | upstream | [PT] Added CooldownDelaySeconds property | 2026-06-03 |
+| src/Cruncharr.Core/Services/DownloadService.cs | upstream | [PT] Wired MuxTypesettingFonts config instead of hardcoded true | 2026-06-03 |
+| src/Cruncharr.Core/Services/CrunchyrollApiService.cs | upstream | [PT] Fixed multi-episode regex (upstream #447); added Episode property mapping | 2026-06-03 |
+| src/Cruncharr.API/Services/AutoDownloadSchedulerService.cs | upstream ProgramManager | [PT] New IHostedService for auto-download scheduler with 3 modes | 2026-06-03 |
+| src/Cruncharr.API/Controllers/SchedulerController.cs | N/A (API layer) | [PT] Added GET /api/v1/scheduler/status, POST /api/v1/scheduler/trigger | 2026-06-03 |
+| src/Cruncharr.API/Program.cs | N/A (DI wiring) | [PT] Registered AutoDownloadSchedulerService as hosted service | 2026-06-03 |
 
 ### Infrastructure
 | File | Purpose | Date |
@@ -116,7 +121,7 @@
 - Missing history features: 3 / 3 (UpdateWithEpisode, GZip compression, backup rotation done)
 - Frontend audit gaps resolved: 15 / 15 (previous + global pause UI, cooldown setting, getDoingText/showToast XSS escaped)
 - Backend critical issues fixed: 8 / 8 (hardcoded tokens, sync-over-async x3, null ref, Environment.Exit, undisposed HttpClients x2)
-- Upstream feature gaps: 3 / 6 (global queue pause, download cooldown, speed limiting wired; missing: auto-download scheduler, font muxing, multi-episode parsing)
+- Upstream feature gaps: 6 / 6 COMPLETE (global queue pause, download cooldown, speed limiting, auto-download scheduler, font muxing, multi-episode parsing)
 - Settings sync fixes: 3 / 3 (dub/subs fallback defaults, stream endpoint defaults, config validation)
 - **UI Improvements: 4 / 4 (dead toggles removed, refresh persistence, loading spinner, multi-select dropdowns)**
 - **Build warnings: 306 → 35 (89% reduction)**

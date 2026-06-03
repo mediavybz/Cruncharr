@@ -1,4 +1,5 @@
 #nullable disable
+#pragma warning disable CS8632
 #pragma warning disable IL2026 // Using dynamic types might cause types or members to be removed by trimmer
 using System.Collections.Generic;
 using System.Dynamic;

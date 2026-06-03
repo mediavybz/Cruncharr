@@ -1168,10 +1168,11 @@ public class HistoryService : IHistoryService{
     }
     
     private async Task RefreshSeriesDataAsync(string seriesId, HistorySeries historySeries){
+        if (_apiService == null) return;
         if (_cachedSeries == null || (!string.IsNullOrEmpty(_cachedSeries.SeriesId) && _cachedSeries.SeriesId != seriesId)){
             if (historySeries.SeriesType is SeriesType.Series or SeriesType.Movie){
-                var seriesData = await _apiService?.SeriesByIdAsync(seriesId, 
-                    string.IsNullOrEmpty(_config.History.Lang) ? "en-US" : _config.History.Lang, true);
+                var lang = _config.History.Lang ?? "en-US";
+                var seriesData = await _apiService.SeriesByIdAsync(seriesId, lang, true);
                 if (seriesData != null){
                     _cachedSeries = new SeriesDataCache{
                         SeriesDescription = seriesData.Description ?? "",

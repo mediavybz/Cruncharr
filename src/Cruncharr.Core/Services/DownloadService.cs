@@ -366,18 +366,18 @@ public class DownloadService : IDownloadService{
                 // Download primary audio (skip if NoAudio is enabled)
                 if (playbackData.AudioUrl != null && !config.Download.NoAudio){
                     progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 60, Doing = $"Downloading audio ({episode.AudioLocale ?? config.Download.DefaultAudio})..." });
-                    var audioPath = Path.Combine(tempDir, $"audio_{(episode.AudioLocale ?? config.Download.DefaultAudio).Replace("-", "").ToLower()}.m4a");
+                    var audioPath = Path.Combine(tempDir, $"audio_{(episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP").Replace("-", "").ToLower()}.m4a");
                     
                     if (audioIsHls){
                         var hlsResult = await DownloadHlsStreamAsync(playbackData.AudioUrl, audioPath, false, true, config, progress, 60, 80, cancellationToken);
                         if (hlsResult.Ok){
                             downloadedFiles.Add(audioPath);
-                            audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? config.Download.DefaultAudio));
+                            audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP"));
                         }
                     } else{
                         await DownloadStreamAsync(playbackData.AudioUrl, audioPath, progress, 60, 80, cancellationToken, playbackData.VideoToken);
                         downloadedFiles.Add(audioPath);
-                        audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? config.Download.DefaultAudio));
+                            audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP"));
                     }
                 } else if (config.Download.NoAudio){
                     _logger?.LogInformation("NoAudio enabled, skipping audio download");
@@ -395,7 +395,7 @@ public class DownloadService : IDownloadService{
                             a.Lang.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
                         
                         if (primaryAudio.Path != null && File.Exists(primaryAudio.Path)){
-                            var adLocale = episode.AudioLocale ?? config.Download.DefaultAudio;
+                            var adLocale = episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP";
                             var adPath = Path.Combine(tempDir, $"audio_{adLocale.Replace("-", "").ToLower()}_ad.m4a");
                             
                             try{
@@ -1014,7 +1014,7 @@ public class DownloadService : IDownloadService{
                 _logger?.LogWarning("[PLAYBACK ERROR BODY] {Content}", content);
             }
             
-            if (isOk){
+            if (isOk && content != null){
                 var data = await ParsePlaybackDataAsync(content, cancellationToken);
                 if (data != null){
                     if (mergedData == null){
@@ -1398,8 +1398,8 @@ public class DownloadService : IDownloadService{
                     videoItems.Add(new Cruncharr.Core.Utils.Parser.VideoItem{
                         bandwidth = vp.bandwidth,
                         codecs = vp.codecs,
-                        quality = vp.quality,
-                        resolutionText = $"{vp.quality?.width}x{vp.quality?.height}",
+                        quality = vp.quality ?? new Cruncharr.Core.Utils.Parser.Quality(),
+                        resolutionText = $"{vp.quality?.width ?? 0}x{vp.quality?.height ?? 0}",
                         segments = vp.segments,
                         pssh = vp.pssh,
                         encryptionKeys = vp.encryptionKeys
@@ -1853,7 +1853,7 @@ public class DownloadService : IDownloadService{
     private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null, string? descriptionPath = null){
         var mergerOptions = new MergerOptions{
             Output = outputPath,
-            VideoTitle = config.Download.VideoTitle,
+            VideoTitle = config.Download.VideoTitle ?? "",
             DubLangList = config.Download.DubLanguages,
             SubLangList = config.Download.SoftSubs,
             SkipSubMux = config.Download.SkipSubMux,
@@ -2133,12 +2133,13 @@ public class DownloadService : IDownloadService{
             // Parse playlist
             var m3u8 = M3u8MediaPlaylistParser.Parse(content, playlistUrl);
             
-            if (m3u8.Segments == null || m3u8.Segments.Count == 0){
+            var segments = m3u8.Segments as List<dynamic>;
+            if (segments == null || segments.Count == 0){
                 _logger?.LogWarning("No segments found in HLS playlist");
                 return (false, new PartsData());
             }
             
-            int segmentCount = ((List<dynamic>)m3u8.Segments).Count;
+            int segmentCount = segments.Count;
             _logger?.LogInformation("HLS playlist has {Count} segments", segmentCount);
             
             // Download with HlsDownloader

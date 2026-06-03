@@ -43,10 +43,10 @@ public class AuthController : ControllerBase{
         
         return Ok(new AuthStatusResponse{
             IsAuthenticated = _auth.IsAuthenticated,
-            Username = _auth.Profile.Username,
+            Username = _auth.Profile.Username ?? "",
             HasPremium = _auth.Profile.HasPremium,
-            PreferredAudioLanguage = _auth.Profile.PreferredContentAudioLanguage,
-            PreferredSubtitleLanguage = _auth.Profile.PreferredContentSubtitleLanguage,
+            PreferredAudioLanguage = _auth.Profile.PreferredContentAudioLanguage ?? "",
+            PreferredSubtitleLanguage = _auth.Profile.PreferredContentSubtitleLanguage ?? "",
             Avatar = _auth.Profile.Avatar,
             MultiProfile = _auth.MultiProfile.Profiles.Select(p => new ProfileDto{
                 ProfileId = p.ProfileId,
@@ -141,7 +141,7 @@ public class AuthController : ControllerBase{
                 return Ok(new LoginResponse{
                     Success = true,
                     Message = $"Logged in as {_auth.Profile.Username}",
-                    Username = _auth.Profile.Username,
+                    Username = _auth.Profile.Username ?? "",
                     HasPremium = _auth.Profile.HasPremium
                 });
             } else{

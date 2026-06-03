@@ -2830,7 +2830,7 @@ MAINTENANCE NOTES:
                                 </div>
                                 ${p.isSelected 
                                     ? '<span style="color:var(--accent-orange); font-size:0.85em; font-weight:600;">Active</span>'
-                                    : `<button class="btn-icon" onclick="switchProfile('${p.profileId}')" ${!p.canSwitch ? 'disabled' : ''}>Switch</button>`
+                                    : `<button class="btn-icon" onclick="switchProfile('${p.profileId || ''}')" ${(!p.canSwitch || !p.profileId) ? 'disabled' : ''}>Switch</button>`
                                 }
                             </div>
                         `).join('');

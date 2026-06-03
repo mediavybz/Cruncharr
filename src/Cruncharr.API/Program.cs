@@ -1,3 +1,4 @@
+using Cruncharr.API.Services;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
@@ -44,19 +45,12 @@ public class Program{
             new CrunchyrollAuthService(config, sp.GetService<ILogger<CrunchyrollAuthService>>()));
         builder.Services.AddSingleton<ICrunchyrollApiService, CrunchyrollApiService>();
         builder.Services.AddSingleton<IDownloadService, DownloadService>();
-        builder.Services.AddSingleton<IHistoryService>(sp =>
-            new HistoryService(
-                null,
-                sp.GetService<ILogger<HistoryService>>(),
-                sp.GetService<ISonarrService>(),
-                sp.GetService<ICrunchyrollApiService>(),
-                sp.GetService<IMusicService>(),
-                sp.GetService<ICrunchyrollAuthService>(),
-                config));
+        builder.Services.AddSingleton<IHistoryService, HistoryService>();
         builder.Services.AddSingleton<IQueuePersistenceService>(
             _ => new QueuePersistenceService(config.Queue.QueueFilePath));
         builder.Services.AddSingleton<ICalendarService, CalendarService>();
         builder.Services.AddSingleton<IQueueService, QueueService>();
+        builder.Services.AddSingleton<QueueBroadcastService>();
         builder.Services.AddSingleton<ISonarrService, SonarrService>();
         builder.Services.AddSingleton<ISyncingService, SyncingService>();
         builder.Services.AddSingleton<IVideoSyncer, VideoSyncer>();
@@ -122,6 +116,8 @@ public class Program{
             var queueService = scope.ServiceProvider.GetRequiredService<IQueueService>();
             var configService = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
             _ = queueService.ProcessQueueAsync(configService, null, CancellationToken.None);
+            // [PT] Ported from upstream c123093: set initialized flag after auth init completes
+            queueService.SetInitialized(true);
         }
 
         app.Run();

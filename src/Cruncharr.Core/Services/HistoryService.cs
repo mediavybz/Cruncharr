@@ -186,6 +186,9 @@ public class HistoryService : IHistoryService{
     }
 
     public async Task SetAsDownloadedAsync(string? seriesId, string? seasonId, string episodeId, List<string>? downloadedDubs = null, List<string>? downloadedSubs = null){
+        var normalizedDubs = NormalizeLocales(downloadedDubs);
+        var normalizedSubs = NormalizeLocales(downloadedSubs);
+        
         await _lock.WaitAsync();
         try{
             await EnsureLoadedAsync();
@@ -198,13 +201,13 @@ public class HistoryService : IHistoryService{
                     if (historyEpisode != null){
                         historyEpisode.WasDownloaded = true;
                         // Track downloaded dubs/subs for partial download detection
-                        if (downloadedDubs != null){
-                            foreach (var dub in downloadedDubs.Where(d => !historyEpisode.DownloadedDubLang.Contains(d))){
+                        if (normalizedDubs.Count > 0){
+                            foreach (var dub in normalizedDubs.Where(d => !historyEpisode.DownloadedDubLang.Contains(d, StringComparer.OrdinalIgnoreCase))){
                                 historyEpisode.DownloadedDubLang.Add(dub);
                             }
                         }
-                        if (downloadedSubs != null){
-                            foreach (var sub in downloadedSubs.Where(s => !historyEpisode.DownloadedSoftSubs.Contains(s))){
+                        if (normalizedSubs.Count > 0){
+                            foreach (var sub in normalizedSubs.Where(s => !historyEpisode.DownloadedSoftSubs.Contains(s, StringComparer.OrdinalIgnoreCase))){
                                 historyEpisode.DownloadedSoftSubs.Add(sub);
                             }
                         }
@@ -902,12 +905,12 @@ public class HistoryService : IHistoryService{
         if (episodeList is { Count: > 0 } && _config.History.Enabled && _config.History.IncludeCrArtists){
             // Group all music videos together since we don't have artist info in the model yet
             await UpdateWithSeasonDataAsync(episodeList.Select(mv => new EpisodeInfo{
-                Id = mv.Id,
-                Title = mv.Title,
+                Id = mv.Id ?? "",
+                Title = mv.Title ?? "",
                 SeriesId = mv.Id,
                 SeasonId = mv.Id,
-                SeriesTitle = mv.Title,
-                SeasonTitle = mv.Title,
+                SeriesTitle = mv.Title ?? "",
+                SeasonTitle = mv.Title ?? "",
                 Description = mv.Description,
                 EpisodeNumber = 0,
                 SeasonNumber = 0

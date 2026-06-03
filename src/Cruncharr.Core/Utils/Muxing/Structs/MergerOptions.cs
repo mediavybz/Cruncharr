@@ -10,14 +10,14 @@ public class MergerOptions{
     public List<MergerInput> OnlyAudio{ get; set; } = [];
     public List<SubtitleInput> Subtitles{ get; set; } = [];
     public List<MergerInput> Chapters{ get; set; } = [];
-    public string CcTag{ get; set; }
-    public string Output{ get; set; }
-    public string VideoTitle{ get; set; }
+    public string CcTag{ get; set; } = "";
+    public string Output{ get; set; } = "";
+    public string VideoTitle{ get; set; } = "";
     public bool KeepAllVideos{ get; set; }
     public List<ParsedFont> Fonts{ get; set; } = [];
     public bool SkipSubMux{ get; set; }
-    public MuxOptions Options{ get; set; }
-    public Defaults Defaults{ get; set; }
+    public MuxOptions Options{ get; set; } = new();
+    public Defaults Defaults{ get; set; } = new();
     public bool mp3{ get; set; }
     public bool DefaultSubSigns{ get; set; }
     public bool DefaultSubForcedDisplay{ get; set; }

@@ -7,7 +7,7 @@ namespace Cruncharr.Core.Utils.DRM;
 // </auto-generated>
 
 #region Designer generated code
-#pragma warning disable CS0612, CS0618, CS1591, CS3021, IDE0079, IDE1006, RCS1036, RCS1057, RCS1085, RCS1192
+#pragma warning disable CS0612, CS0618, CS1591, CS3021, IDE0079, IDE1006, RCS1036, RCS1057, RCS1085, RCS1192, CS8618, CS8625
 [global::ProtoBuf.ProtoContract()]
 public partial class ClientIdentification : global::ProtoBuf.IExtensible
 {

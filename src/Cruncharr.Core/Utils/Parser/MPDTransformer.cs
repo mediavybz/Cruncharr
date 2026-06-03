@@ -13,10 +13,10 @@ using Cruncharr.Core.Utils.Parser.Utils;
 namespace Cruncharr.Core.Utils.Parser;
 
 public class Segment{
-    public string uri{ get; set; }
+    public string uri{ get; set; } = "";
     public double timeline{ get; set; }
     public double duration{ get; set; }
-    public Map map{ get; set; }
+    public Map map{ get; set; } = new();
 
     public ByteRange? byteRange{ get; set; }
     public double? number{ get; set; }
@@ -24,7 +24,7 @@ public class Segment{
 }
 
 public class Map{
-    public string uri{ get; set; }
+    public string uri{ get; set; } = "";
 
     public ByteRange? byteRange{ get; set; }
 }
@@ -34,7 +34,7 @@ public class PlaylistItem{
 
     public List<ContentKey> encryptionKeys{ get; set; } = [];
     public int bandwidth{ get; set; }
-    public List<Segment> segments{ get; set; }
+    public List<Segment> segments{ get; set; } = [];
 }
 
 public class AudioPlaylist : PlaylistItem{
@@ -44,17 +44,17 @@ public class AudioPlaylist : PlaylistItem{
 }
 
 public class VideoPlaylist : PlaylistItem{
-    public Quality quality{ get; set; }
-    public string codecs{ get; set; }
+    public Quality quality{ get; set; } = new();
+    public string codecs{ get; set; } = "";
 }
 
 public class VideoItem : VideoPlaylist{
-    public string resolutionText{ get; set; }
+    public string resolutionText{ get; set; } = "";
 }
 
 public class AudioItem : AudioPlaylist{
-    public string resolutionText{ get; set; }
-    public string resolutionTextSnap{ get; set; }
+    public string resolutionText{ get; set; } = "";
+    public string resolutionTextSnap{ get; set; } = "";
 }
 
 public class Quality{
@@ -63,7 +63,7 @@ public class Quality{
 }
 
 public class MPDParsed{
-    public Dictionary<string, ServerData> Data{ get; set; }
+    public Dictionary<string, ServerData> Data{ get; set; } = new();
 }
 
 public class ServerData{
@@ -369,7 +369,7 @@ public static class MpdParser{
 
     public class SidxInfo{
         public uint Timescale{ get; set; }
-        public List<SidxReference> References{ get; set; }
+        public List<SidxReference> References{ get; set; } = [];
     }
 
     public class SidxReference{

@@ -790,9 +790,45 @@ MAINTENANCE NOTES:
 
         .form-input[type="number"] { width: 120px; }
 
-        .multi-select { display: flex; flex-wrap: wrap; gap: 8px; max-height: 200px; overflow-y: auto; padding: 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; }
-        .multi-opt { display: flex; align-items: center; gap: 4px; font-size: 0.85em; cursor: pointer; }
-        .multi-opt input { cursor: pointer; }
+        select[multiple].form-select { min-height: 120px; padding: 4px; background: var(--bg-primary); }
+        select[multiple].form-select option { 
+            padding: 6px 10px; 
+            border-radius: 4px; 
+            margin: 2px 0; 
+            cursor: pointer;
+            position: relative;
+            padding-left: 28px;
+        }
+        select[multiple].form-select option::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border-color);
+            border-radius: 3px;
+            background: var(--bg-primary);
+        }
+        select[multiple].form-select option:checked { 
+            background: rgba(244,117,33,0.15); 
+            color: var(--accent-orange); 
+        }
+        select[multiple].form-select option:checked::before {
+            background: var(--accent-orange);
+            border-color: var(--accent-orange);
+        }
+        select[multiple].form-select option:checked::after {
+            content: '\2713';
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+        }
 
         .list-input { display: flex; flex-direction: column; gap: 6px; }
         .list-row { display: flex; gap: 6px; align-items: center; }
@@ -1037,6 +1073,187 @@ MAINTENANCE NOTES:
             letter-spacing: 0.5px;
         }
 
+        /* Tooltip */
+        .tooltip-container {
+            position: relative;
+            display: inline-flex;
+            cursor: help;
+        }
+        .tooltip-text {
+            visibility: hidden;
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 0.8em;
+            white-space: nowrap;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            color: var(--text-primary);
+        }
+        .tooltip-container:hover .tooltip-text {
+            visibility: visible;
+        }
+
+        /* Partial download indicators */
+        .status-icon {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .status-full { background: var(--accent-green); color: #000; }
+        .status-partial { background: var(--accent-orange); color: #000; }
+        .status-none { background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border-color); }
+
+        /* Search popup active indicator */
+        .search-active-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent-orange);
+            border-radius: 50%;
+            position: absolute;
+            top: -2px;
+            right: -2px;
+        }
+
+        /* Settings override popup */
+        .settings-override-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .settings-override-row:last-child { border-bottom: none; }
+
+        /* Only Download mode selector */
+        .mode-selector {
+            display: flex;
+            gap: 4px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            padding: 4px;
+            border: 1px solid var(--border-color);
+        }
+        .mode-btn {
+            padding: 6px 12px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.2s;
+        }
+        .mode-btn.active {
+            background: var(--accent-orange);
+            color: #000;
+            font-weight: 600;
+        }
+
+        /* History detail view */
+        .history-detail-header {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .history-detail-poster {
+            width: 150px;
+            aspect-ratio: 2/3;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            overflow: hidden;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .history-detail-poster img { width: 100%; height: 100%; object-fit: cover; }
+        .history-detail-info { flex: 1; }
+        .history-detail-title { font-size: 1.4em; font-weight: 600; margin-bottom: 8px; }
+        .history-detail-meta { color: var(--text-secondary); font-size: 0.9em; margin-bottom: 8px; }
+
+        .history-season {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        .history-season-header {
+            padding: 12px 15px;
+            background: var(--bg-tertiary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        .history-season-title { font-weight: 600; }
+        .history-season-actions { display: flex; gap: 8px; }
+
+        .history-episode {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .history-episode:last-child { border-bottom: none; }
+        .history-episode:hover { background: var(--bg-hover); }
+        .history-episode-number {
+            width: 40px;
+            text-align: center;
+            font-weight: 600;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+        .history-episode-title { flex: 1; font-size: 0.95em; min-width: 0; }
+        .history-episode-status {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .history-episode-langs {
+            font-size: 0.8em;
+            color: var(--text-muted);
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .lang-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+        .lang-badge.selected {
+            background: rgba(244, 117, 33, 0.2);
+            border-color: var(--accent-orange);
+            color: var(--accent-orange);
+        }
+        .lang-badge.downloaded {
+            background: rgba(78, 204, 163, 0.2);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar { width: 60px; }
@@ -1146,15 +1363,40 @@ MAINTENANCE NOTES:
         let addDownloadSeriesData = null; // Stores EpisodeAndLanguage data from ListSeriesId
         let addDownloadEpisodeList = []; // Stores EpisodeDisplay list from ListSeriesId
         let selectedEpisodeDubs = new Map(); // episodeKey -> Set of selected dub locales
+        let historyRichData = []; // Cache for rich history data with episodes
+        let historySearchQuery = '';
+        let historySearchPopupOpen = false;
+        let onlyDownloadMode = { video: true, audio: true, sub: true };
 
         document.addEventListener('DOMContentLoaded', async () => {
             // Load config first so toggles are initialized correctly
             await fetchConfig();
-            // Now render the initial page with correct toggle states
-            loadPage('downloads');
+            // Restore last visited page or default to downloads
+            const savedPage = localStorage.getItem('cruncharr_current_page') || 'downloads';
+            loadPage(savedPage);
+            // Mark nav item active for restored page
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            const navItem = document.querySelector(`.nav-item[data-page="${savedPage}"]`);
+            if (navItem) navItem.classList.add('active');
             startPolling();
             setupNavigation();
+            setupMultiSelectDropdowns();
         });
+
+        function setupMultiSelectDropdowns() {
+            document.querySelectorAll('select[multiple]').forEach(select => {
+                select.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    const option = e.target.closest('option');
+                    if (!option) return;
+                    option.selected = !option.selected;
+                    this.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+                select.addEventListener('mousemove', function(e) {
+                    e.preventDefault();
+                });
+            });
+        }
 
         function setupNavigation() {
             document.querySelectorAll('.nav-item').forEach(item => {
@@ -1167,6 +1409,7 @@ MAINTENANCE NOTES:
         }
 
         function navigateTo(page) {
+            localStorage.setItem('cruncharr_current_page', page);
             loadPage(page);
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
             const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
@@ -1346,7 +1589,7 @@ MAINTENANCE NOTES:
                                 <div class="download-header">
                                     <div style="min-width:0;">
                                         <div class="download-title ${item.episode?.highlightAllAvailable ? 'highlight' : ''}">${item.episode?.title || 'Unknown'}</div>
-                                        <div class="download-info" title="${item.infoTextHover || item.episode?.description || ''}">${item.infoText || item.episode?.seriesTitle || ''}</div>
+                                        <div class="download-info" title="${item.infoText || item.infoTextHover || item.episode?.description || ''}">${item.infoText || item.episode?.seriesTitle || ''}</div>
                                     </div>
                                     <div class="download-actions">
                                         ${state === 'queued' || state === 'waitingforretry'
@@ -1453,6 +1696,11 @@ MAINTENANCE NOTES:
             if (!series) return;
             document.getElementById('add-search-input').value = series.title;
             document.getElementById('music-btn').style.display = 'inline-flex';
+            // Show loading spinner while fetching episodes
+            const listContainer = document.getElementById('add-episodes-list');
+            if (listContainer) {
+                listContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
+            }
             try {
                 // Use ListSeriesId endpoint to get episodes with dub version info
                 const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
@@ -1510,6 +1758,16 @@ MAINTENANCE NOTES:
             } catch (e) {
                 console.error('Failed to load series episodes:', e);
                 showToast('Failed to load episodes', 'error');
+                const listContainer = document.getElementById('add-episodes-list');
+                if (listContainer) {
+                    listContainer.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">❌</div>
+                            <div class="empty-state-title">Failed to load episodes</div>
+                            <div>Please try again</div>
+                        </div>
+                    `;
+                }
             }
         }
 
@@ -2048,6 +2306,11 @@ MAINTENANCE NOTES:
             navigateTo('add-download');
             // Wait for render then load series with dub info
             setTimeout(async () => {
+                // Show loading spinner while fetching episodes
+                const listContainer = document.getElementById('add-episodes-list');
+                if (listContainer) {
+                    listContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
+                }
                 try {
                     const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
                     const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
@@ -2112,6 +2375,16 @@ MAINTENANCE NOTES:
                 } catch (e) {
                     console.error('Failed to load series:', e);
                     showToast('Failed to load series episodes', 'error');
+                    const listContainer = document.getElementById('add-episodes-list');
+                    if (listContainer) {
+                        listContainer.innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-state-icon">❌</div>
+                                <div class="empty-state-title">Failed to load episodes</div>
+                                <div>Please try again</div>
+                            </div>
+                        `;
+                    }
                 }
             }, 100);
         }
@@ -2256,12 +2529,18 @@ MAINTENANCE NOTES:
             });
         }
 
+        function performSearch() {
+            const searchInput = document.getElementById('add-search-input');
+            if (searchInput && searchInput.value.trim()) {
+                doAddSearch(searchInput.value.trim());
+            }
+        }
+
         function searchSeriesById(seriesId) {
             closeModal();
             navigateTo('add-download');
-            // Trigger search after a short delay to let the page render
             setTimeout(() => {
-                const searchInput = document.getElementById('search-input');
+                const searchInput = document.getElementById('add-search-input');
                 if (searchInput) {
                     searchInput.value = seriesId;
                     performSearch();
@@ -2299,9 +2578,22 @@ MAINTENANCE NOTES:
                         <span class="icon">&#128229;</span>
                         <span>Add To Queue</span>
                     </button>
-                    <div class="header-search" style="width:200px; margin-left:8px;">
-                        <span>&#128269;</span>
-                        <input type="text" id="history-search-input" placeholder="Filter history..." oninput="filterHistory(this.value)">
+                    <div style="position:relative; margin-left:8px;">
+                        <div class="header-search" style="width:220px;" onclick="openHistorySearchPopup()">
+                            <span>&#128269;</span>
+                            <input type="text" id="history-search-input" placeholder="Filter history..." 
+                                   value="${escapeHtml(historySearchQuery)}" 
+                                   oninput="onHistorySearchInput(this.value)" 
+                                   onfocus="openHistorySearchPopup()"
+                                   onkeydown="if(event.key==='Escape'){closeHistorySearchPopup();this.blur();}">
+                            ${historySearchQuery && !historySearchPopupOpen ? '<div class="search-active-dot"></div>' : ''}
+                        </div>
+                        <div class="search-popup" id="history-search-popup" style="display:none;"></div>
+                    </div>
+                    <div class="mode-selector" style="margin-left:8px;" title="Only download selected components for partial episodes">
+                        <button class="mode-btn ${onlyDownloadMode.video ? 'active' : ''}" onclick="toggleOnlyDownloadMode('video')">Video</button>
+                        <button class="mode-btn ${onlyDownloadMode.audio ? 'active' : ''}" onclick="toggleOnlyDownloadMode('audio')">Audio</button>
+                        <button class="mode-btn ${onlyDownloadMode.sub ? 'active' : ''}" onclick="toggleOnlyDownloadMode('sub')">Sub</button>
                     </div>
                     <button class="toolbar-btn" id="btn-sonarr-menu" onclick="openSonarrMenu(event)">
                         <span class="icon">&#127758;</span>
@@ -2370,7 +2662,7 @@ MAINTENANCE NOTES:
 
             if (historyViewMode === 'poster') {
                 content.innerHTML = '<div class="history-poster-grid">' + filteredData.map(item => `
-                    <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}">
+                    <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${item.seriesId}')" style="cursor:pointer;">
                         <div class="history-poster-img">
                             ${item.thumbnailUrl ? `<img src="${item.thumbnailUrl}" alt="">` : '📺'}
                             ${item.newEpisodes ? `<div class="history-poster-badge">${item.newEpisodes}</div>` : ''}
@@ -2378,6 +2670,9 @@ MAINTENANCE NOTES:
                         <div class="history-poster-info">
                             <div class="history-poster-title" title="${item.seriesTitle || ''}">${item.seriesTitle || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
                             <div class="history-poster-meta">${item.sonarrNextAirDate || ''}</div>
+                            <div class="history-poster-meta" style="font-size:0.7em; margin-top:4px;">
+                                ${(item.availableDubs || []).slice(0, 3).map(d => `<span class="lang-badge ${(config?.download?.dubLanguages || []).includes(d) ? 'selected' : ''}">${d}</span>`).join('')}
+                            </div>
                         </div>
                     </div>
                 `).join('') + '</div>';
@@ -2397,7 +2692,7 @@ MAINTENANCE NOTES:
                             </thead>
                             <tbody>
                                 ${filteredData.map(item => `
-                                    <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}">
+                                    <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${item.seriesId}')" style="cursor:pointer;">
                                         <td>
                                             <strong>${item.seriesTitle || 'Unknown'}</strong>
                                             ${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}
@@ -2405,12 +2700,13 @@ MAINTENANCE NOTES:
                                         </td>
                                         <td>${getStatusBadge(item.downloadStatus || 'done')}</td>
                                         <td>${item.sonarrSeriesId ? `✓ ${item.sonarrSlugTitle || 'Matched'}` : '—'}</td>
-                                        <td>${item.availableDubs ? item.availableDubs.join(', ') : '-'}</td>
-                                        <td>${item.availableSubs ? item.availableSubs.join(', ') : '-'}</td>
+                                        <td>${(item.availableDubs || []).map(d => `<span class="lang-badge ${(config?.download?.dubLanguages || []).includes(d) ? 'selected' : ''}">${d}</span>`).join(' ') || '-'}</td>
+                                        <td>${(item.availableSubs || []).map(s => `<span class="lang-badge ${(config?.download?.softSubs || []).includes(s) ? 'selected' : ''}">${s}</span>`).join(' ') || '-'}</td>
                                         <td>
-                                            <button class="btn-icon" onclick="refreshSeries('${item.seriesId}')">&#128260;</button>
-                                            <button class="btn-icon" onclick="downloadSeries('${item.seriesId}')">&#9660;</button>
-                                            ${item.sonarrSeriesId ? `<button class="btn-icon" onclick="matchEpisodesForSeries('${item.seriesId}')" title="Rematch episodes">&#128260;</button>` : ''}
+                                            <button class="btn-icon" onclick="event.stopPropagation(); refreshSeries('${item.seriesId}')">&#128260;</button>
+                                            <button class="btn-icon" onclick="event.stopPropagation(); downloadSeries('${item.seriesId}')">&#9660;</button>
+                                            ${item.sonarrSeriesId ? `<button class="btn-icon" onclick="event.stopPropagation(); matchEpisodesForSeries('${item.seriesId}')" title="Rematch episodes">&#128260;</button>` : ''}
+                                            <button class="btn-icon" onclick="event.stopPropagation(); showSeriesSettingsOverride('${item.seriesId}')" title="Settings">&#9881;</button>
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -2669,15 +2965,9 @@ MAINTENANCE NOTES:
             }
         }
 
-        function renderMultiSelect(id, selected, options) {
-            const sel = new Set(selected || []);
-            return `<div class="multi-select" id="${id}">` +
-                options.map(o => `<label class="multi-opt"><input type="checkbox" value="${o.value}" ${sel.has(o.value)?'checked':''}> ${o.label}</label>`).join('') +
-                `</div>`;
-        }
         function getMultiSelect(id) {
             const el = document.getElementById(id);
-            return el ? Array.from(el.querySelectorAll('input:checked')).map(i => i.value) : [];
+            return el ? Array.from(el.selectedOptions).map(o => o.value) : [];
         }
         function renderListInput(id, items, placeholder) {
             const vals = items || [];
@@ -2775,15 +3065,15 @@ MAINTENANCE NOTES:
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Use Beta API</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-beta-api" ${cr.useBetaApi?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Mark as Watched</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mark-watched" ${cr.markAsWatched?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Search: Include Featured Music</div></div><label class="toggle-switch"><input type="checkbox" id="setting-search-music" ${cr.searchFetchFeaturedMusic?'checked':''}><span class="toggle-slider"></span></label></div>
+
                             </div>
                         </div>
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Dub Languages</span><span class="settings-section-desc">Select languages to download</span></div>
                             <div class="settings-section-body">
-                                ${renderMultiSelect('setting-dub-langs', dl.dubLanguages||['ja-JP'], LANG_OPTIONS)}
+                                <select class="form-select" id="setting-dub-langs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.dubLanguages||['ja-JP']).includes(o.value)?'selected':''}>${o.label}</option>`).join('')}</select>
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Download AD for Selected Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-ad" ${dl.downloadDescriptionAudio?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Download First Available Dub</div></div><label class="toggle-switch"><input type="checkbox" id="setting-first-dub" ${dl.downloadFirstAvailableDub?'checked':''}><span class="toggle-slider"></span></label></div>
+
                                 <div class="setting-row"><div><div class="setting-label">Download Multiple Dubs</div><div class="setting-desc">Download all selected dubs per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-multi-dub" ${dl.downloadMultipleDubs?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
@@ -2798,13 +3088,12 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">Softsubs</span><span class="settings-section-desc">Subtitle download options</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Softsubs Languages</div></div></div>
-                                ${renderMultiSelect('setting-soft-subs', dl.softSubs||['en-US'], LANG_OPTIONS)}
-                                <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Fix CCC Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-fix-ccc" ${dl.fixCccSubtitles?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Download Duplicate</div></div><label class="toggle-switch"><input type="checkbox" id="setting-subs-dup" ${dl.subsDownloadDuplicate?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <select class="form-select" id="setting-soft-subs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.softSubs||['en-US']).includes(o.value)?'selected':''}>${o.label}</option>`).join('')}</select>
+
                                 <div class="setting-row"><div><div class="setting-label">Add ScaledBorderAndShadow</div></div><select class="form-select" id="setting-scaled-border" style="min-width:150px;"><option value="DontAdd" ${dl.subsAddScaledBorder==='DontAdd'?'selected':''}>Don't Add</option><option value="ScaledBorderAndShadowYes" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowYes'?'selected':''}>yes</option><option value="ScaledBorderAndShadowNo" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowNo'?'selected':''}>no</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Signs Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-signs-subs" ${dl.includeSignsSubs?'checked':''}><span class="toggle-slider"></span></label></div>
+
                                 <div class="setting-row"><div><div class="setting-label">Signs as forced in mkv</div></div><label class="toggle-switch"><input type="checkbox" id="setting-signs-forced" ${dl.signsSubsAsForced?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">CC Subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-subs" ${dl.includeCcSubs?'checked':''}><span class="toggle-slider"></span></label></div>
+
                                 <div class="setting-row"><div><div class="setting-label">CC as hearing impaired in mkv</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-hi" ${dl.ccSubsMuxingFlag?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Convert CC VTT to ASS</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-convert" ${dl.convertVttToAss?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">CC Font</div></div><input type="text" class="form-input" id="setting-cc-font" value="${dl.ccSubsFont||'Trebuchet MS'}" style="width:200px;"></div>
@@ -2831,6 +3120,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Playback Rate Limit Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-rate-limit-delay" value="${dl.playbackRateLimitRetryDelaySeconds||30}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Retry Max Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-max-delay" value="${dl.retryMaxDelaySeconds||3600}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use New Download Method</div></div><label class="toggle-switch"><input type="checkbox" id="setting-new-method" ${dl.downloadMethodeNew?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Replace Existing Files</div></div><label class="toggle-switch"><input type="checkbox" id="setting-replace-existing" ${dl.replaceExistingFiles?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                         <div class="settings-section">
@@ -2890,10 +3180,11 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">MP4 output</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-mp4" ${dl.muxMp4?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">MP3 output</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-mp3" ${dl.muxAudioOnlyToMp3?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Keep Subtitles separate</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-sub-mux" ${dl.skipSubMux?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Default Audio</div></div><select class="form-select" id="setting-mux-default-dub" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.muxDefaultDub===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Default Subtitle</div></div><select class="form-select" id="setting-mux-default-sub" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.muxDefaultSub===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Forced Display</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-forced" ${dl.muxDefaultSubForcedDisplay?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Default Subtitle Signs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-default-signs" ${dl.muxDefaultSubSigns?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Default Video</div></div><select class="form-select" id="setting-default-video" style="min-width:150px;"><option value="none" ${(dl.defaultVideo==='none'||!dl.defaultVideo)?'selected':''}>none</option>${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.defaultVideo===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Default Audio</div></div><select class="form-select" id="setting-default-audio" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.defaultAudio||dl.muxDefaultDub)===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Default Subtitle</div></div><select class="form-select" id="setting-default-sub" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.defaultSub||dl.muxDefaultSub)===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Default Subtitle Signs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-default-sub-signs" ${(dl.defaultSubSigns!==undefined?dl.defaultSubSigns:dl.muxDefaultSubSigns)?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Forced Display</div></div><label class="toggle-switch"><input type="checkbox" id="setting-default-sub-forced" ${(dl.defaultSubForcedDisplay!==undefined?dl.defaultSubForcedDisplay:dl.muxDefaultSubForcedDisplay)?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include Fonts</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-fonts" ${dl.muxFonts?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include Typesetting Fonts</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-ts-fonts" ${dl.muxTypesettingFonts?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include episode thumbnail</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-cover" ${dl.muxCover?'checked':''}><span class="toggle-slider"></span></label></div>
@@ -2939,16 +3230,12 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">History Settings</span><span class="settings-section-desc">History tracking options</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-enabled" ${h.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Count Missing</div></div><label class="toggle-switch"><input type="checkbox" id="setting-count-missing" ${h.countMissing?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include CR Artists</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cr-artists" ${h.includeCrArtists?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Remove Missing Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-missing" ${h.removeMissingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Add Specials</div></div><label class="toggle-switch"><input type="checkbox" id="setting-add-specials" ${h.addSpecials?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Skip Unmonitored</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-unmonitored" ${h.skipUnmonitored?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Count Sonarr</div></div><label class="toggle-switch"><input type="checkbox" id="setting-count-sonarr" ${h.countSonarr?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">History Language</div></div><select class="form-select" id="setting-history-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${h.lang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div></div><input type="number" class="form-input" id="setting-history-interval" value="${h.autoRefreshIntervalMinutes||0}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div></div><select class="form-select" id="setting-history-mode" style="min-width:150px;"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Add to Queue</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-queue" ${h.autoRefreshAddToQueue?'checked':''}><span class="toggle-slider"></span></label></div>
+
                             </div>
                         </div>
                     `;
@@ -2964,7 +3251,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">API Key</div></div><input type="text" class="form-input" id="setting-sonarr-apikey" value="${s.apiKey||''}" style="width:250px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-ssl" ${s.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input" id="setting-sonarr-urlbase" value="${s.urlBase||''}" style="width:200px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Use Sonarr Numbering</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-numbering" ${s.useSonarrNumbering?'checked':''}><span class="toggle-slider"></span></label></div>
+
                             </div>
                         </div>
                     `;
@@ -2972,23 +3259,29 @@ MAINTENANCE NOTES:
                 case 'notifications':
                     content.innerHTML = `
                         <div class="settings-section">
-                            <div class="settings-section-header"><span class="settings-section-title">Notifications</span><span class="settings-section-desc">Configure notifications</span></div>
+                            <div class="settings-section-header"><span class="settings-section-title">Webhook Configuration</span><span class="settings-section-desc">Configure webhook notifications</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Webhook URL</div></div><input type="text" class="form-input" id="setting-webhook-url" value="${n.webhookUrl||''}" style="width:300px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-webhook-enabled" ${n.webhookEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Method</div></div><select class="form-select" id="setting-webhook-method" style="min-width:100px;"><option value="POST" ${n.webhookMethod==='POST'?'selected':''}>POST</option><option value="GET" ${n.webhookMethod==='GET'?'selected':''}>GET</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Content-Type</div></div><input type="text" class="form-input" id="setting-webhook-ct" value="${n.webhookContentType||'application/json'}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Headers</div><div class="setting-desc">One header per line (Key: Value)</div></div></div>
+                                <textarea class="form-input" id="setting-webhook-headers" rows="3" style="width:300px;">${n.webhookHeaders?Object.entries(n.webhookHeaders).map(([k,v])=>k+': '+v).join('\n'):''}</textarea>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Body Template</div></div><textarea class="form-input" id="setting-webhook-body" rows="3" style="width:300px;">${n.webhookBodyTemplate||''}</textarea></div>
-                                <div class="setting-row"><div><div class="setting-label">Queue Finished</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-queue" ${n.notifyQueueFinished?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Download Finished</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-download" ${n.notifyDownloadFinished?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Download Failed</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-failed" ${n.notifyDownloadFailed?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Tracked Series Released</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-tracked" ${n.notifyTrackedSeriesReleased?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Login Expired</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-login" ${n.notifyLoginExpired?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Update Available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-update" ${n.notifyUpdateAvailable?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Play Sound on Finish</div></div><label class="toggle-switch"><input type="checkbox" id="setting-play-sound" ${n.downloadFinishedPlaySound?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Sound File Path</div></div><input type="text" class="form-input" id="setting-sound-path" value="${n.downloadFinishedSoundPath||''}" style="width:250px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Execute on Finish</div></div><label class="toggle-switch"><input type="checkbox" id="setting-exec-finish" ${n.downloadFinishedExecute?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Execute Path</div></div><input type="text" class="form-input" id="setting-exec-path" value="${n.downloadFinishedExecutePath||''}" style="width:250px;"></div>
+                                <div style="margin-top:10px;">
+                                    <button class="header-btn" onclick="testWebhook()">Test Webhook</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Notification Events</span><span class="settings-section-desc">Select events to trigger webhook</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Queue Finished</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-queue-finished" ${n.notifyQueueFinished?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Finished</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-download-finished" ${n.notifyDownloadFinished?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Failed</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-download-failed" ${n.notifyDownloadFailed?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Tracked Series Released</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-tracked-released" ${n.notifyTrackedSeriesReleased?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Login Expired</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-login-expired" ${n.notifyLoginExpired?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Update Available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-update-available" ${n.notifyUpdateAvailable?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -3032,10 +3325,7 @@ MAINTENANCE NOTES:
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Calendar Language</div></div><select class="form-select" id="setting-cal-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${cal.language===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Dub Filter</div></div><select class="form-select" id="setting-cal-dub-filter" style="min-width:150px;"><option value="none" ${cal.dubFilter==='none'?'selected':''}>None</option><option value="dubbed" ${cal.dubFilter==='dubbed'?'selected':''}>Dubbed Only</option><option value="subbed" ${cal.dubFilter==='subbed'?'selected':''}>Subbed Only</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Custom Calendar</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-custom" ${cal.custom?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Hide Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-hide-dubs" ${cal.hideDubs?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Show Upcoming Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-upcoming" ${cal.showUpcomingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Update History</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-update-history" ${cal.updateHistory?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -3107,7 +3397,6 @@ MAINTENANCE NOTES:
                     newConfig.crunchyroll = {
                         useBetaApi: document.getElementById('setting-use-beta-api')?.checked ?? true,
                         markAsWatched: document.getElementById('setting-mark-watched')?.checked || false,
-                        searchFetchFeaturedMusic: document.getElementById('setting-search-music')?.checked || false,
                         streamEndpoint: {
                             endpoint: document.getElementById('setting-stream-endpoint')?.value || 'tv/android_tv',
                             authorization: document.getElementById('setting-stream-auth')?.value || '',
@@ -3133,17 +3422,12 @@ MAINTENANCE NOTES:
                     newConfig.download = {
                         dubLanguages: getMultiSelect('setting-dub-langs'),
                         downloadDescriptionAudio: document.getElementById('setting-dl-ad')?.checked ?? false,
-                        downloadFirstAvailableDub: document.getElementById('setting-first-dub')?.checked || false,
                         downloadMultipleDubs: document.getElementById('setting-download-multi-dub')?.checked || false,
                         hardSubLang: document.getElementById('setting-hard-sub')?.value || 'none',
                         hardSubRawFallback: document.getElementById('setting-hard-fallback')?.checked || false,
                         softSubs: getMultiSelect('setting-soft-subs'),
-                        fixCccSubtitles: document.getElementById('setting-fix-ccc')?.checked ?? true,
-                        subsDownloadDuplicate: document.getElementById('setting-subs-dup')?.checked || false,
                         subsAddScaledBorder: document.getElementById('setting-scaled-border')?.value || 'DontAdd',
-                        includeSignsSubs: document.getElementById('setting-signs-subs')?.checked || false,
                         signsSubsAsForced: document.getElementById('setting-signs-forced')?.checked || false,
-                        includeCcSubs: document.getElementById('setting-cc-subs')?.checked || false,
                         ccSubsMuxingFlag: document.getElementById('setting-cc-hi')?.checked || false,
                         convertVttToAss: document.getElementById('setting-cc-convert')?.checked ?? true,
                         ccSubsFont: document.getElementById('setting-cc-font')?.value || 'Trebuchet MS'
@@ -3164,14 +3448,15 @@ MAINTENANCE NOTES:
                         leadingNumbers: parseInt(document.getElementById('setting-leading-zeros')?.value) || 2,
                         qualityVideo: document.getElementById('setting-quality-video')?.value || 'best',
                         qualityAudio: document.getElementById('setting-quality-audio')?.value || 'best',
-                        defaultAudio: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
+                        defaultAudio: document.getElementById('setting-default-audio')?.value || document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
                         dlVideoOnce: !(document.getElementById('setting-dl-video-every')?.checked ?? false),
                         keepDubsSeparate: document.getElementById('setting-keep-separate')?.checked || false,
                         dubDownloadDelaySeconds: parseInt(document.getElementById('setting-dub-delay')?.value) || 0,
-                        defaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
+                        defaultSub: document.getElementById('setting-default-sub')?.value || document.getElementById('setting-mux-default-sub')?.value || 'en-US',
                         simultaneousDownloads: parseInt(document.getElementById('setting-concurrent')?.value) || 2,
                         simultaneousProcessingJobs: parseInt(document.getElementById('setting-proc-jobs')?.value) || 2,
                         downloadMethodeNew: document.getElementById('setting-new-method')?.checked || false,
+                        replaceExistingFiles: document.getElementById('setting-replace-existing')?.checked || false,
                         downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
                         downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
                         downloadSpeedLimit: parseInt(document.getElementById('setting-speed-limit')?.value) || 0,
@@ -3191,10 +3476,10 @@ MAINTENANCE NOTES:
                         muxFonts: document.getElementById('setting-mux-fonts')?.checked || false,
                         muxTypesettingFonts: document.getElementById('setting-mux-ts-fonts')?.checked || false,
                         muxCover: document.getElementById('setting-mux-cover')?.checked || false,
-                        muxDefaultDub: document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
-                        muxDefaultSub: document.getElementById('setting-mux-default-sub')?.value || 'en-US',
-                        muxDefaultSubSigns: document.getElementById('setting-mux-default-signs')?.checked || false,
-                        muxDefaultSubForcedDisplay: document.getElementById('setting-mux-forced')?.checked || false,
+                        muxDefaultDub: document.getElementById('setting-default-audio')?.value || document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
+                        muxDefaultSub: document.getElementById('setting-default-sub')?.value || document.getElementById('setting-mux-default-sub')?.value || 'en-US',
+                        muxDefaultSubSigns: document.getElementById('setting-default-sub-signs')?.checked ?? document.getElementById('setting-mux-default-signs')?.checked ?? false,
+                        muxDefaultSubForcedDisplay: document.getElementById('setting-default-sub-forced')?.checked ?? document.getElementById('setting-mux-forced')?.checked ?? false,
                         syncTiming: document.getElementById('setting-sync-timing')?.checked || false,
                         syncTimingFullQualityFallback: document.getElementById('setting-sync-fallback')?.checked || false,
                         syncHwAccel: document.getElementById('setting-sync-hwaccel')?.value || null,
@@ -3218,26 +3503,18 @@ MAINTENANCE NOTES:
                     newConfig.calendar = {
                         language: document.getElementById('setting-cal-lang')?.value || 'en-us',
                         dubFilter: document.getElementById('setting-cal-dub-filter')?.value || 'none',
-                        custom: document.getElementById('setting-cal-custom')?.checked || false,
-                        hideDubs: document.getElementById('setting-cal-hide-dubs')?.checked || false,
-                        showUpcomingEpisodes: document.getElementById('setting-cal-upcoming')?.checked || false,
-                        updateHistory: document.getElementById('setting-cal-update-history')?.checked || false
+                        hideDubs: document.getElementById('setting-cal-hide-dubs')?.checked || false
                     };
                     break;
                     
                 case 'history':
                     newConfig.history = {
                         enabled: document.getElementById('setting-history-enabled')?.checked ?? true,
-                        countMissing: document.getElementById('setting-count-missing')?.checked || false,
                         includeCrArtists: document.getElementById('setting-cr-artists')?.checked || false,
                         removeMissingEpisodes: document.getElementById('setting-remove-missing')?.checked ?? true,
-                        addSpecials: document.getElementById('setting-add-specials')?.checked || false,
-                        skipUnmonitored: document.getElementById('setting-skip-unmonitored')?.checked || false,
-                        countSonarr: document.getElementById('setting-count-sonarr')?.checked || false,
                         lang: document.getElementById('setting-history-lang')?.value || 'en-US',
                         autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
-                        autoRefreshMode: parseInt(document.getElementById('setting-history-mode')?.value) || 50,
-                        autoRefreshAddToQueue: document.getElementById('setting-history-queue')?.checked ?? true
+                        autoRefreshMode: parseInt(document.getElementById('setting-history-mode')?.value) || 50
                     };
                     break;
                     
@@ -3248,29 +3525,32 @@ MAINTENANCE NOTES:
                         port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
                         apiKey: document.getElementById('setting-sonarr-apikey')?.value || null,
                         useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
-                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null,
-                        useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
+                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null
                     };
                     break;
                     
                 case 'notifications':
+                    const headersText = document.getElementById('setting-webhook-headers')?.value || '';
+                    const webhookHeaders = {};
+                    headersText.split('\n').forEach(line => {
+                        const colonIdx = line.indexOf(':');
+                        if (colonIdx > 0) {
+                            webhookHeaders[line.substring(0, colonIdx).trim()] = line.substring(colonIdx + 1).trim();
+                        }
+                    });
                     newConfig.notifications = {
                         webhookUrl: document.getElementById('setting-webhook-url')?.value || null,
                         webhookEnabled: document.getElementById('setting-webhook-enabled')?.checked || false,
                         webhookMethod: document.getElementById('setting-webhook-method')?.value || 'POST',
                         webhookContentType: document.getElementById('setting-webhook-ct')?.value || 'application/json',
-                        webhookHeaders: {},
+                        webhookHeaders: webhookHeaders,
                         webhookBodyTemplate: document.getElementById('setting-webhook-body')?.value || '',
-                        notifyQueueFinished: document.getElementById('setting-notify-queue')?.checked || false,
-                        notifyDownloadFinished: document.getElementById('setting-notify-download')?.checked || false,
-                        notifyDownloadFailed: document.getElementById('setting-notify-failed')?.checked || false,
-                        notifyTrackedSeriesReleased: document.getElementById('setting-notify-tracked')?.checked || false,
-                        notifyLoginExpired: document.getElementById('setting-notify-login')?.checked || false,
-                        notifyUpdateAvailable: document.getElementById('setting-notify-update')?.checked || false,
-                        downloadFinishedPlaySound: document.getElementById('setting-play-sound')?.checked || false,
-                        downloadFinishedSoundPath: document.getElementById('setting-sound-path')?.value || null,
-                        downloadFinishedExecute: document.getElementById('setting-exec-finish')?.checked || false,
-                        downloadFinishedExecutePath: document.getElementById('setting-exec-path')?.value || null
+                        notifyQueueFinished: document.getElementById('setting-notify-queue-finished')?.checked || false,
+                        notifyDownloadFinished: document.getElementById('setting-notify-download-finished')?.checked || false,
+                        notifyDownloadFailed: document.getElementById('setting-notify-download-failed')?.checked || false,
+                        notifyTrackedSeriesReleased: document.getElementById('setting-notify-tracked-released')?.checked || false,
+                        notifyLoginExpired: document.getElementById('setting-notify-login-expired')?.checked || false,
+                        notifyUpdateAvailable: document.getElementById('setting-notify-update-available')?.checked || false
                     };
                     break;
                     
@@ -3285,7 +3565,7 @@ MAINTENANCE NOTES:
                     };
                     break;
                     
-                case 'flare':
+                case 'flaresolverr':
                     newConfig.flareSolverr = {
                         enabled: document.getElementById('setting-flare-enabled')?.checked || false,
                         host: document.getElementById('setting-flare-host')?.value || 'localhost',
@@ -3327,6 +3607,25 @@ MAINTENANCE NOTES:
                 }
                 else showToast('Failed to save settings', 'error');
             } catch (e) { showToast('Error saving settings', 'error'); }
+        }
+
+        async function testWebhook() {
+            const url = document.getElementById('setting-webhook-url')?.value;
+            if (!url) {
+                showToast('Webhook URL is required', 'error');
+                return;
+            }
+            try {
+                const res = await fetch('/api/v1/webhook/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+                if (res.ok) showToast('Webhook test sent', 'success');
+                else showToast('Webhook test failed', 'error');
+            } catch (e) {
+                showToast('Webhook test error', 'error');
+            }
         }
 
         async function toggleSetting(key, value) {
@@ -3633,6 +3932,543 @@ MAINTENANCE NOTES:
             });
             renderHistoryContent();
             showToast(`Sorted by ${field}`, 'success');
+        }
+        
+        // ================== HISTORY DETAIL & PARTIAL DOWNLOAD ==================
+        
+        function isEpisodePartiallyDownloaded(episode) {
+            const downloadedDubs = episode.downloadedDubLang || [];
+            const downloadedSubs = episode.downloadedSoftSubs || [];
+            const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];
+            const requestedSubs = episode.requestedSoftSubs || config?.download?.softSubs || [];
+            
+            const hasSomeDownloads = downloadedDubs.length > 0 || downloadedSubs.length > 0;
+            if (!hasSomeDownloads) return false;
+            
+            const missingDubs = requestedDubs.filter(d => !downloadedDubs.includes(d));
+            const missingSubs = requestedSubs.filter(s => !downloadedSubs.includes(s));
+            
+            return missingDubs.length > 0 || missingSubs.length > 0;
+        }
+        
+        function getEpisodeDownloadStatus(episode) {
+            if (episode.isDownloaded) {
+                return { class: 'status-full', icon: '&#10004;' };
+            }
+            if (isEpisodePartiallyDownloaded(episode)) {
+                return { class: 'status-partial', icon: '&#10004;' };
+            }
+            return { class: 'status-none', icon: '' };
+        }
+        
+        function getEpisodeStatusTooltip(episode) {
+            const downloadedDubs = episode.downloadedDubLang || [];
+            const downloadedSubs = episode.downloadedSoftSubs || [];
+            const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];
+            const requestedSubs = episode.requestedSoftSubs || config?.download?.softSubs || [];
+            
+            let tooltip = '';
+            if (downloadedDubs.length > 0) {
+                tooltip += `Downloaded dubs: ${downloadedDubs.join(', ')}\n`;
+            }
+            if (downloadedSubs.length > 0) {
+                tooltip += `Downloaded subs: ${downloadedSubs.join(', ')}\n`;
+            }
+            
+            const missingDubs = requestedDubs.filter(d => !downloadedDubs.includes(d));
+            const missingSubs = requestedSubs.filter(s => !downloadedSubs.includes(s));
+            const missing = [...missingDubs, ...missingSubs];
+            
+            if (missing.length > 0) {
+                tooltip += `Available but missing: ${missing.join(', ')}`;
+            }
+            
+            return tooltip || 'Not downloaded';
+        }
+        
+        async function showHistorySeriesDetail(seriesId) {
+            const series = historyData.find(s => s.seriesId === seriesId);
+            if (!series) return;
+            
+            document.getElementById('modal-title').textContent = series.seriesTitle || 'Series Details';
+            document.getElementById('modal-body').innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
+            document.getElementById('modal-footer').innerHTML = `
+                <button class="header-btn" onclick="closeModal()">Close</button>
+                <button class="header-btn" onclick="showSeriesSettingsOverride('${seriesId}')">Settings</button>
+                ${series.sonarrSeriesId ? `<button class="header-btn" onclick="matchEpisodesForSeries('${seriesId}'); closeModal();">Match Episodes</button>` : ''}
+            `;
+            document.getElementById('modal').classList.add('active');
+            
+            // Fetch rich data if needed
+            let richSeries = null;
+            if (historyRichData && historyRichData.length > 0) {
+                richSeries = historyRichData.find(s => s.seriesId === seriesId || s.id === seriesId);
+            }
+            
+            if (!richSeries) {
+                try {
+                    const res = await fetch('/api/v1/history/rich');
+                    const data = await res.json();
+                    historyRichData = data || [];
+                    richSeries = historyRichData.find(s => s.seriesId === seriesId || s.id === seriesId);
+                } catch (e) {
+                    document.getElementById('modal-body').innerHTML = '<div class="empty-state"><div class="empty-state-title">Failed to load episodes</div></div>';
+                    return;
+                }
+            }
+            
+            if (!richSeries) {
+                document.getElementById('modal-body').innerHTML = '<div class="empty-state"><div class="empty-state-title">No episode data found</div></div>';
+                return;
+            }
+            
+            renderHistorySeriesDetailContent(richSeries);
+        }
+        
+        function renderHistorySeriesDetailContent(series) {
+            const body = document.getElementById('modal-body');
+            const requestedDubs = config?.download?.dubLanguages || ['ja-JP'];
+            const requestedSubs = config?.download?.softSubs || ['en-US'];
+            
+            // Build header with available dubs/subs
+            const availableDubs = series.availableDubs || [];
+            const availableSubs = series.availableSubs || [];
+            
+            const dubBadges = availableDubs.map(dub => {
+                const isSelected = requestedDubs.includes(dub);
+                return `<span class="lang-badge ${isSelected ? 'selected' : ''}">${dub}</span>`;
+            }).join('');
+            
+            const subBadges = availableSubs.map(sub => {
+                const isSelected = requestedSubs.includes(sub);
+                return `<span class="lang-badge ${isSelected ? 'selected' : ''}">${sub}</span>`;
+            }).join('');
+            
+            let html = `
+                <div class="history-detail-header">
+                    <div class="history-detail-poster">
+                        ${series.thumbnailUrl ? `<img src="${series.thumbnailUrl}" alt="">` : '📺'}
+                    </div>
+                    <div class="history-detail-info">
+                        <div class="history-detail-title">${escapeHtml(series.seriesTitle || series.title || 'Unknown')}</div>
+                        <div class="history-detail-meta">${escapeHtml(series.seriesDescription || '')}</div>
+                        <div style="margin-top:10px;">
+                            <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Available Dubs:</div>
+                            <div>${dubBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
+                        </div>
+                        <div style="margin-top:8px;">
+                            <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Available Subs:</div>
+                            <div>${subBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Render seasons
+            const seasons = series.seasons || [];
+            if (seasons.length === 0) {
+                html += '<div class="empty-state"><div class="empty-state-title">No seasons found</div></div>';
+                body.innerHTML = html;
+                return;
+            }
+            
+            html += seasons.map(season => {
+                const seasonDubs = season.availableDubs || [];
+                const seasonSubs = season.availableSubs || [];
+                const seasonDownloadedDubs = season.downloadedDubs || [];
+                const seasonDownloadedSubs = season.downloadedSubs || [];
+                
+                const seasonDubBadges = seasonDubs.map(dub => {
+                    const isSelected = requestedDubs.includes(dub);
+                    const isDownloaded = seasonDownloadedDubs.includes(dub);
+                    return `<span class="lang-badge ${isSelected ? 'selected' : ''} ${isDownloaded ? 'downloaded' : ''}">${dub}</span>`;
+                }).join('');
+                
+                const seasonSubBadges = seasonSubs.map(sub => {
+                    const isSelected = requestedSubs.includes(sub);
+                    const isDownloaded = seasonDownloadedSubs.includes(sub);
+                    return `<span class="lang-badge ${isSelected ? 'selected' : ''} ${isDownloaded ? 'downloaded' : ''}">${sub}</span>`;
+                }).join('');
+                
+                const episodesHtml = (season.episodes || []).map(ep => {
+                    const status = getEpisodeDownloadStatus(ep);
+                    const tooltip = getEpisodeStatusTooltip(ep);
+                    
+                    return `
+                        <div class="history-episode">
+                            <div class="history-episode-number">${ep.episodeNumber || '?'}</div>
+                            <div class="history-episode-title">${escapeHtml(ep.title || 'Unknown Episode')}</div>
+                            <div class="history-episode-langs">
+                                ${(ep.downloadedDubLang || []).map(d => `<span class="lang-badge downloaded">${d}</span>`).join('')}
+                            </div>
+                            <div class="history-episode-status">
+                                <div class="tooltip-container">
+                                    <div class="status-icon ${status.class}">${status.icon}</div>
+                                    <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
+                                </div>
+                            </div>
+                            ${!ep.isDownloaded ? `<button class="btn-icon" onclick="addHistoryEpisodeToQueue('${ep.episodeId}', '${escapeHtml(series.seriesTitle || '')}')" title="Add to queue">&#128229;</button>` : ''}
+                        </div>
+                    `;
+                }).join('');
+                
+                return `
+                    <div class="history-season">
+                        <div class="history-season-header" onclick="toggleSeasonCollapse(this)">
+                            <div>
+                                <span class="history-season-title">${escapeHtml(season.seasonTitle || `Season ${season.seasonNumber || 1}`)}</span>
+                                <span style="font-size:0.8em; color:var(--text-muted); margin-left:8px;">${season.episodes?.length || 0} episodes</span>
+                            </div>
+                            <div class="history-season-actions">
+                                <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${season.seasonId || season.id}')" title="Settings">&#9881;</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); downloadSeason('${series.seriesId}', '${season.seasonId || season.id}')" title="Download season">&#9660;</button>
+                            </div>
+                        </div>
+                        <div class="history-season-body">
+                            <div style="padding:8px 15px; border-bottom:1px solid var(--border-color);">
+                                <div style="font-size:0.75em; color:var(--text-muted); margin-bottom:4px;">Dubs:</div>
+                                <div>${seasonDubBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
+                            </div>
+                            <div style="padding:8px 15px; border-bottom:1px solid var(--border-color);">
+                                <div style="font-size:0.75em; color:var(--text-muted); margin-bottom:4px;">Subs:</div>
+                                <div>${seasonSubBadges || '<span style="color:var(--text-muted);">None</span>'}</div>
+                            </div>
+                            ${episodesHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            body.innerHTML = html;
+        }
+        
+        function toggleSeasonCollapse(header) {
+            const body = header.nextElementSibling;
+            if (body) {
+                body.style.display = body.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+        
+        async function addHistoryEpisodeToQueue(episodeId, seriesTitle) {
+            try {
+                await fetch('/api/v1/queue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        episodeId: episodeId,
+                        title: 'Unknown Episode',
+                        seriesTitle: seriesTitle || 'Unknown'
+                    })
+                });
+                showToast('Added to queue', 'success');
+            } catch (e) {
+                showToast('Failed to add to queue', 'error');
+            }
+        }
+        
+        async function downloadSeason(seriesId, seasonId) {
+            try {
+                const res = await fetch(`/api/v1/series/${seriesId}/episodes`);
+                const episodes = await res.json();
+                let added = 0;
+                
+                for (const ep of (episodes || [])) {
+                    if (ep.seasonId === seasonId || ep.seasonNumber === parseInt(seasonId)) {
+                        await fetch('/api/v1/queue', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                episodeId: ep.id,
+                                title: ep.title || 'Unknown',
+                                seriesTitle: ep.seriesTitle || 'Unknown',
+                                seasonNumber: ep.seasonNumber || 1,
+                                episodeNumber: ep.episodeNumber || 1,
+                                locale: ep.locale || 'ja-JP'
+                            })
+                        });
+                        added++;
+                    }
+                }
+                
+                showToast(`Added ${added} episode(s) to queue`, 'success');
+            } catch (e) {
+                showToast('Failed to queue season', 'error');
+            }
+        }
+        
+        // ================== HISTORY SEARCH POPUP ==================
+        
+        function openHistorySearchPopup() {
+            historySearchPopupOpen = true;
+            const popup = document.getElementById('history-search-popup');
+            const input = document.getElementById('history-search-input');
+            if (popup && input) {
+                popup.style.display = 'block';
+                input.focus();
+                updateHistorySearchPopup(input.value);
+            }
+            
+            // Close popup when clicking outside
+            setTimeout(() => {
+                document.addEventListener('click', closeHistorySearchOnClickOutside);
+            }, 0);
+        }
+        
+        function closeHistorySearchPopup() {
+            historySearchPopupOpen = false;
+            const popup = document.getElementById('history-search-popup');
+            if (popup) popup.style.display = 'none';
+            document.removeEventListener('click', closeHistorySearchOnClickOutside);
+            // Re-render to update orange dot indicator
+            if (currentPage === 'history') {
+                const dot = document.querySelector('.search-active-dot');
+                if (historySearchQuery && !dot) {
+                    renderHistory(document.getElementById('content'));
+                }
+            }
+        }
+        
+        function closeHistorySearchOnClickOutside(e) {
+            const popup = document.getElementById('history-search-popup');
+            const input = document.getElementById('history-search-input');
+            if (popup && !popup.contains(e.target) && !input?.contains(e.target) && !input?.parentElement?.contains(e.target)) {
+                closeHistorySearchPopup();
+            }
+        }
+        
+        function onHistorySearchInput(value) {
+            historySearchQuery = value;
+            filterHistory(value);
+            updateHistorySearchPopup(value);
+        }
+        
+        function updateHistorySearchPopup(query) {
+            const popup = document.getElementById('history-search-popup');
+            if (!popup) return;
+            
+            const filtered = query 
+                ? historyData.filter(item => 
+                    (item.seriesTitle || '').toLowerCase().includes(query.toLowerCase()) ||
+                    (item.seriesDescription || '').toLowerCase().includes(query.toLowerCase()) ||
+                    (item.sonarrSlugTitle || '').toLowerCase().includes(query.toLowerCase())
+                  )
+                : historyData;
+            
+            if (filtered.length === 0) {
+                popup.innerHTML = '<div style="padding:15px; color:var(--text-muted);">No matching series</div>';
+                return;
+            }
+            
+            popup.innerHTML = filtered.slice(0, 10).map(item => `
+                <div class="search-result-item" onclick="showHistorySeriesDetail('${item.seriesId}'); closeHistorySearchPopup();" style="padding:10px;">
+                    <div style="font-weight:500;">${escapeHtml(item.seriesTitle || 'Unknown')}</div>
+                    <div style="font-size:0.8em; color:var(--text-secondary);">${escapeHtml((item.seriesDescription || '').substring(0, 60))}${(item.seriesDescription || '').length > 60 ? '...' : ''}</div>
+                </div>
+            `).join('');
+        }
+        
+        function toggleOnlyDownloadMode(mode) {
+            onlyDownloadMode[mode] = !onlyDownloadMode[mode];
+            // Re-render to update button states
+            if (currentPage === 'history') {
+                renderHistory(document.getElementById('content'));
+            }
+        }
+        
+        // ================== SONARR MENU ==================
+        
+        function openSonarrMenu(event) {
+            event.stopPropagation();
+            const existing = document.getElementById('sonarr-dropdown');
+            if (existing) { existing.remove(); return; }
+            
+            const btn = event.target.closest('.toolbar-btn');
+            const dropdown = document.createElement('div');
+            dropdown.id = 'sonarr-dropdown';
+            dropdown.className = 'dropdown-menu active';
+            dropdown.style.position = 'absolute';
+            dropdown.style.top = (btn.offsetTop + btn.offsetHeight + 5) + 'px';
+            dropdown.style.left = btn.offsetLeft + 'px';
+            dropdown.innerHTML = `
+                <div class="dropdown-item" onclick="matchAllSeriesSonarr(); document.getElementById('sonarr-dropdown').remove();">
+                    <span>&#127758;</span> Match All Series
+                </div>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-item" onclick="fetchHistoryData(); document.getElementById('sonarr-dropdown').remove();">
+                    <span>&#128260;</span> Refresh History
+                </div>
+            `;
+            document.body.appendChild(dropdown);
+            
+            setTimeout(() => {
+                document.addEventListener('click', function closeSonarrDropdown(e) {
+                    if (!dropdown.contains(e.target)) {
+                        dropdown.remove();
+                        document.removeEventListener('click', closeSonarrDropdown);
+                    }
+                });
+            }, 0);
+        }
+        
+        async function matchAllSeriesSonarr() {
+            try {
+                showToast('Matching all series with Sonarr...', 'info');
+                const res = await fetch('/api/v1/history/sonarr/match-series', { method: 'POST' });
+                if (res.ok) {
+                    showToast('Sonarr match completed', 'success');
+                    fetchHistoryData();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.message || 'Sonarr match failed', 'error');
+                }
+            } catch (e) {
+                showToast('Sonarr match failed', 'error');
+            }
+        }
+        
+        async function matchEpisodesForSeries(seriesId) {
+            try {
+                showToast('Matching episodes with Sonarr...', 'info');
+                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${seriesId}`, { method: 'POST' });
+                if (res.ok) {
+                    showToast('Episodes matched successfully', 'success');
+                    fetchHistoryData();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.message || 'Episode match failed', 'error');
+                }
+            } catch (e) {
+                showToast('Episode match failed', 'error');
+            }
+        }
+        
+        // ================== SETTINGS OVERRIDE ==================
+        
+        function showSeriesSettingsOverride(seriesId) {
+            const series = historyData.find(s => s.seriesId === seriesId);
+            if (!series) return;
+            
+            document.getElementById('modal-title').textContent = 'Series Settings Override';
+            document.getElementById('modal-body').innerHTML = `
+                <div class="form-group">
+                    <label class="form-label">Video Quality</label>
+                    <select class="form-select" id="override-quality-video" style="min-width:150px;">
+                        <option value="best">Best Available</option>
+                        <option value="1080">1080</option>
+                        <option value="720">720</option>
+                        <option value="480">480</option>
+                        <option value="360">360</option>
+                        <option value="240">240</option>
+                        <option value="worst">Worst</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Dub Languages</label>
+                    <select class="form-select" id="override-dub-langs" multiple style="min-height:120px;">
+                        ${LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Softsubs Languages</label>
+                    <select class="form-select" id="override-soft-subs" multiple style="min-height:120px;">
+                        ${LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+            document.getElementById('modal-footer').innerHTML = `
+                <button class="header-btn" onclick="closeModal()">Cancel</button>
+                <button class="header-btn primary" onclick="saveSeriesSettingsOverride('${seriesId}')">Save</button>
+            `;
+            document.getElementById('modal').classList.add('active');
+        }
+        
+        async function saveSeriesSettingsOverride(seriesId) {
+            const videoQuality = document.getElementById('override-quality-video')?.value;
+            const dubLangs = getMultiSelect('override-dub-langs');
+            const softSubs = getMultiSelect('override-soft-subs');
+            
+            try {
+                const res = await fetch(`/api/v1/history/series/${seriesId}/settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        videoQuality,
+                        dubLanguages: dubLangs,
+                        softSubs: softSubs
+                    })
+                });
+                if (res.ok) {
+                    showToast('Series settings saved', 'success');
+                    closeModal();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.message || 'Failed to save settings', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to save settings', 'error');
+            }
+        }
+        
+        function showSeasonSettingsOverride(seasonId) {
+            document.getElementById('modal-title').textContent = 'Season Settings Override';
+            document.getElementById('modal-body').innerHTML = `
+                <div class="form-group">
+                    <label class="form-label">Video Quality</label>
+                    <select class="form-select" id="override-season-quality-video" style="min-width:150px;">
+                        <option value="best">Best Available</option>
+                        <option value="1080">1080</option>
+                        <option value="720">720</option>
+                        <option value="480">480</option>
+                        <option value="360">360</option>
+                        <option value="240">240</option>
+                        <option value="worst">Worst</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Dub Languages</label>
+                    <select class="form-select" id="override-season-dub-langs" multiple style="min-height:120px;">
+                        ${LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Softsubs Languages</label>
+                    <select class="form-select" id="override-season-soft-subs" multiple style="min-height:120px;">
+                        ${LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+            document.getElementById('modal-footer').innerHTML = `
+                <button class="header-btn" onclick="closeModal()">Cancel</button>
+                <button class="header-btn primary" onclick="saveSeasonSettingsOverride('${seasonId}')">Save</button>
+            `;
+            document.getElementById('modal').classList.add('active');
+        }
+        
+        async function saveSeasonSettingsOverride(seasonId) {
+            const videoQuality = document.getElementById('override-season-quality-video')?.value;
+            const dubLangs = getMultiSelect('override-season-dub-langs');
+            const softSubs = getMultiSelect('override-season-soft-subs');
+            
+            try {
+                const res = await fetch(`/api/v1/history/season/${seasonId}/settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        videoQuality,
+                        dubLanguages: dubLangs,
+                        softSubs: softSubs
+                    })
+                });
+                if (res.ok) {
+                    showToast('Season settings saved', 'success');
+                    closeModal();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.message || 'Failed to save settings', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to save settings', 'error');
+            }
         }
         
         async function downloadSeries(id) {

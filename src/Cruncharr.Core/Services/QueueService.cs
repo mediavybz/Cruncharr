@@ -32,6 +32,9 @@ public interface IQueueService{
     Task WaitForProcessingSlotAsync(CancellationToken cancellationToken = default);
     void ReleaseProcessingSlot();
     void SetProcessingLimit(int newLimit);
+    
+    // Init-completion gate (ported from upstream c123093)
+    void SetInitialized(bool initialized);
 }
 
 public class QueueService : IQueueService, IDisposable{
@@ -54,6 +57,9 @@ public class QueueService : IQueueService, IDisposable{
     // Ported from upstream: auto-download blocking
     private DateTimeOffset? _autoDownloadBlockedUntilUtc;
     private readonly object _autoDownloadBlockLock = new();
+    
+    // [PT] Ported from upstream c123093: init-completion gate
+    private bool _isInitialized;
 
     public int ActiveDownloads{
         get{
@@ -328,7 +334,10 @@ public class QueueService : IQueueService, IDisposable{
     }
 
     // Ported from upstream QueueManager.PumpQueue
+#pragma warning disable CS1998
     private async Task PumpQueueAsync(){
+#pragma warning restore CS1998
+        if (!_isInitialized) return;
         if (_config == null) return;
         if (!_config.Queue.AutoDownload) return;
 
@@ -559,6 +568,15 @@ public class QueueService : IQueueService, IDisposable{
 
     public void SetProcessingLimit(int newLimit){
         _processingSlots?.SetLimit(newLimit);
+    }
+
+    // [PT] Ported from upstream c123093: init-completion gate
+    public void SetInitialized(bool initialized){
+        _isInitialized = initialized;
+        _logger?.LogInformation("QueueService initialized: {Initialized}", initialized);
+        if (initialized){
+            RequestPump();
+        }
     }
 
     public void Dispose(){

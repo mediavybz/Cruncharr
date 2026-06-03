@@ -665,7 +665,7 @@ public class HistoryService : IHistoryService{
 
         SonarrSeries? closestMatch = null;
         double highestSimilarity = 0.0;
-        object lockObject = new object();
+        var lockObject = new object();
 
         Parallel.ForEach(sonarrSeries, series => {
             if (series.Title != null){

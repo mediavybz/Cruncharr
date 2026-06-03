@@ -289,8 +289,8 @@ public class ConfigController : ControllerBase{
         }
     }
     
-    private static string? ValidatePath(string? path, string fieldName){
-        if (string.IsNullOrWhiteSpace(path)) return path;
+    private static string ValidatePath(string? path, string fieldName){
+        if (string.IsNullOrWhiteSpace(path)) return path ?? "";
         // Reject paths with directory traversal
         if (path.Contains("..") || path.Contains("~")){
             throw new ArgumentException($"Path traversal not allowed in {fieldName}");

@@ -1087,7 +1087,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
     /// Builds episode data from EpisodeInfo.
     /// Ported from upstream CrEpisode.EpisodeData.
     /// </summary>
-    public async Task<CrunchyRollEpisodeData> EpisodeDataAsync(EpisodeInfo episode, bool updateHistory = false, CancellationToken cancellationToken = default){
+    public Task<CrunchyRollEpisodeData> EpisodeDataAsync(EpisodeInfo episode, bool updateHistory = false, CancellationToken cancellationToken = default){
         bool serieshasversions = true;
         var data = new CrunchyRollEpisodeData();
 
@@ -1118,7 +1118,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
         }
 
         if (data.EpisodeAndLanguages.Variants.Count == 0)
-            return data;
+            return Task.FromResult(data);
 
         var baseEp = data.EpisodeAndLanguages.Variants[0].Item;
 
@@ -1154,7 +1154,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
         if (!serieshasversions)
             _logger?.LogWarning("Couldn\'t find versions on episode, added languages with language array.");
 
-        return data;
+        return Task.FromResult(data);
     }
 
     /// <summary>

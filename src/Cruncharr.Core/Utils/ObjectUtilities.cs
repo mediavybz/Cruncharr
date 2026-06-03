@@ -1,4 +1,5 @@
 #nullable disable
+#pragma warning disable CS8632
 using System.Dynamic;
 
 #pragma warning disable IL2026

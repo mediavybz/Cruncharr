@@ -1,11 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Cruncharr.Core.Models;
 using Microsoft.Win32;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace Cruncharr.Core.Utils.Muxing;
 
@@ -98,6 +102,7 @@ public static class MuxingHelpers{
         return path;
     }
 
+    [SupportedOSPlatform("windows")]
     private static bool IsLongPathEnabled(){
         try{
             using (var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\FileSystem")){

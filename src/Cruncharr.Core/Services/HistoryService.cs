@@ -307,7 +307,7 @@ public class HistoryService : IHistoryService{
             ThumbnailImageUrl = episode.ThumbnailUrl,
             EpisodeType = EpisodeType.Episode,
             EpisodeSeriesType = SeriesType.Series,
-            HistoryEpisodeAvailableDubLang = episode.AudioLocale != null ? new List<string>{ episode.AudioLocale } : new List<string>(),
+            HistoryEpisodeAvailableDubLang = new List<string>{ episode.AudioLocale },
             HistoryEpisodeAvailableSoftSubs = episode.SubtitleLocales ?? new List<string>()
         };
     }
@@ -322,7 +322,7 @@ public class HistoryService : IHistoryService{
         historyEpisode.ThumbnailImageUrl = episode.ThumbnailUrl;
         historyEpisode.EpisodeSeriesType = SeriesType.Series;
         // Update available dub/sub metadata for existing episodes
-        if (episode.AudioLocale != null && !historyEpisode.HistoryEpisodeAvailableDubLang.Contains(episode.AudioLocale)){
+        if (!historyEpisode.HistoryEpisodeAvailableDubLang.Contains(episode.AudioLocale)){
             historyEpisode.HistoryEpisodeAvailableDubLang.Add(episode.AudioLocale);
         }
         if (episode.SubtitleLocales != null){

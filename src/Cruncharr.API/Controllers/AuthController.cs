@@ -107,7 +107,7 @@ public class AuthController : ControllerBase{
             return Ok(new { 
                 Success = success, 
                 Message = success ? "Login successful" : "Login failed",
-                Username = _auth.Profile.Username,
+                Username = _auth.Profile.Username ?? "",
                 HasPremium = _auth.Profile.HasPremium,
                 UseBetaApi = _config?.Crunchyroll?.UseBetaApi ?? true
             });

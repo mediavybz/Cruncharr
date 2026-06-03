@@ -206,7 +206,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 Description = ep.Description,
                 SeriesTitle = ep.SeriesTitle,
                 Locale = ep.AudioLocale ?? "ja-JP",
-                AudioLocale = ep.AudioLocale,
+                AudioLocale = ep.AudioLocale ?? "ja-JP",
                 IsPremium = ep.IsPremiumOnly,
                 Versions = ep.Versions?.Select(v => new EpisodeVersion{
                     AudioLocale = v.AudioLocale,
@@ -349,7 +349,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 Description = episode.Description,
                 SeriesTitle = episode.SeriesTitle,
                 Locale = episode.AudioLocale ?? "ja-JP",
-                AudioLocale = episode.AudioLocale,
+                AudioLocale = episode.AudioLocale ?? "ja-JP",
                 IsPremium = episode.IsPremiumOnly,
                 Versions = episode.Versions?.Select(v => new EpisodeVersion{
                     AudioLocale = v.AudioLocale,
@@ -472,7 +472,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                     Description = e.Description,
                     SeriesTitle = e.SeriesTitle,
                     Locale = e.AudioLocale ?? "ja-JP",
-                    AudioLocale = e.AudioLocale,
+                    AudioLocale = e.AudioLocale ?? "ja-JP",
                     IsPremium = e.IsPremiumOnly,
                     Images = ExtractImageUrls(e.Images),
                     ThumbnailUrl = ExtractBestImage(e.Images, "thumbnail") ?? ExtractBestImage(e.Images, "episode_thumbnail"),

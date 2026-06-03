@@ -88,7 +88,7 @@ public class EpisodeInfo{
     public bool IsSubbed { get; set; }
     public DateTime? ReleaseDate { get; set; }
     public List<EpisodeVersion>? Versions { get; set; }
-    public string? AudioLocale { get; set; }
+    public string AudioLocale { get; set; } = "ja-JP";
     public List<string> SubtitleLocales { get; set; } = new();
     public string? Identifier { get; set; }
     public string? Episode { get; set; }

@@ -78,7 +78,7 @@ public class DownloadService : IDownloadService{
             var fullEpisode = await _api.ParseEpisodeByIdAsync(episode.Id, null, false, cancellationToken);
             if (fullEpisode != null){
                 episode.Versions = fullEpisode.Versions;
-                episode.AudioLocale = fullEpisode.AudioLocale ?? episode.AudioLocale;
+                episode.AudioLocale = fullEpisode.AudioLocale;
                 episode.Guid = fullEpisode.Guid ?? episode.Guid;
                 _logger?.LogInformation("Fetched episode details: {EpisodeId}, Versions={VersionCount}, AudioLocale={AudioLocale}, Guid={Guid}", 
                     fullEpisode.Id, fullEpisode.Versions?.Count ?? 0, fullEpisode.AudioLocale, fullEpisode.Guid);
@@ -352,12 +352,12 @@ public class DownloadService : IDownloadService{
                         var hlsResult = await DownloadHlsStreamAsync(playbackData.VideoUrl, videoPath, true, false, config, progress, 30, 60, cancellationToken);
                         if (hlsResult.Ok){
                             downloadedFiles.Add(videoPath);
-                            videoLocales[videoPath] = episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP";
+                            videoLocales[videoPath] = episode.AudioLocale;
                         }
                     } else{
                         await DownloadStreamAsync(playbackData.VideoUrl, videoPath, progress, 30, 60, cancellationToken, playbackData.VideoToken);
                         downloadedFiles.Add(videoPath);
-                        videoLocales[videoPath] = episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP";
+                        videoLocales[videoPath] = episode.AudioLocale;
                     }
                 } else if (config.Download.NoVideo){
                     _logger?.LogInformation("NoVideo enabled, skipping video download");
@@ -365,19 +365,19 @@ public class DownloadService : IDownloadService{
                 
                 // Download primary audio (skip if NoAudio is enabled)
                 if (playbackData.AudioUrl != null && !config.Download.NoAudio){
-                    progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 60, Doing = $"Downloading audio ({episode.AudioLocale ?? config.Download.DefaultAudio})..." });
-                    var audioPath = Path.Combine(tempDir, $"audio_{(episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP").Replace("-", "").ToLower()}.m4a");
+                    progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 60, Doing = $"Downloading audio ({episode.AudioLocale})..." });
+                    var audioPath = Path.Combine(tempDir, $"audio_{episode.AudioLocale.Replace("-", "").ToLower()}.m4a");
                     
                     if (audioIsHls){
                         var hlsResult = await DownloadHlsStreamAsync(playbackData.AudioUrl, audioPath, false, true, config, progress, 60, 80, cancellationToken);
                         if (hlsResult.Ok){
                             downloadedFiles.Add(audioPath);
-                            audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP"));
+                            audioTrackLanguages.Add((audioPath, episode.AudioLocale));
                         }
                     } else{
                         await DownloadStreamAsync(playbackData.AudioUrl, audioPath, progress, 60, 80, cancellationToken, playbackData.VideoToken);
                         downloadedFiles.Add(audioPath);
-                            audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP"));
+                            audioTrackLanguages.Add((audioPath, episode.AudioLocale));
                     }
                 } else if (config.Download.NoAudio){
                     _logger?.LogInformation("NoAudio enabled, skipping audio download");
@@ -386,7 +386,7 @@ public class DownloadService : IDownloadService{
                 // [PT] Ported from upstream: Auto-generate AD track from primary audio if DownloadDescriptionAudio is enabled
                 // and no separate AD version exists in episode versions
                 if (!config.Download.NoAudio && config.Download.DownloadDescriptionAudio && 
-                    episode.Versions != null && !string.IsNullOrEmpty(episode.AudioLocale)){
+                    episode.Versions != null && episode.AudioLocale != ""){
                     var hasAdVersion = episode.Versions.Any(v => 
                         v.Roles?.Contains("description", StringComparer.OrdinalIgnoreCase) == true);
                     
@@ -395,7 +395,7 @@ public class DownloadService : IDownloadService{
                             a.Lang.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
                         
                         if (primaryAudio.Path != null && File.Exists(primaryAudio.Path)){
-                            var adLocale = episode.AudioLocale ?? config.Download.DefaultAudio ?? "ja-JP";
+                            var adLocale = episode.AudioLocale;
                             var adPath = Path.Combine(tempDir, $"audio_{adLocale.Replace("-", "").ToLower()}_ad.m4a");
                             
                             try{
@@ -413,7 +413,7 @@ public class DownloadService : IDownloadService{
                 // Download additional dubs if configured (skip if NoAudio is enabled)
                 // Note: Video is only downloaded once (DlVideoOnce optimization). Additional dubs reuse the same video stream.
                 if (!config.Download.NoAudio && config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1){
-                    var primaryLocale = episode.AudioLocale ?? config.Download.DefaultAudio;
+                    var primaryLocale = episode.AudioLocale;
                     // Use episode's SelectedDubs if set, otherwise fall back to config
                     var selectedDubs = (episode.SelectedDubs?.Count > 0 
                         ? episode.SelectedDubs 

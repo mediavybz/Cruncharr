@@ -1,6 +1,8 @@
 #nullable disable
 using System.Dynamic;
 
+#pragma warning disable IL2026
+
 namespace Cruncharr.Core.Utils;
 
 public static class ObjectUtilities{
@@ -92,3 +94,5 @@ public static class ObjectUtilities{
         return null;
     }
 }
+
+#pragma warning restore IL2026

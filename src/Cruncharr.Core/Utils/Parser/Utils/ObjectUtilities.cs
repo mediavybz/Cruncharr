@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Dynamic;
 
+#pragma warning disable IL2026
+
 namespace Cruncharr.Core.Utils.Parser.Utils;
 
 public class ObjectUtilities{
@@ -93,3 +95,5 @@ public class ObjectUtilities{
         return null;
     }
 }
+
+#pragma warning restore IL2026

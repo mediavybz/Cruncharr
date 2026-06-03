@@ -84,6 +84,13 @@ RUN chmod +x ./docker-entrypoint.sh
 # Copy web UI
 COPY --from=build /app/publish/wwwroot ./wwwroot
 
+# Create non-root user for security
+RUN adduser -D -u 1000 cruncharr && \
+    chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app
+
+# Switch to non-root user
+USER cruncharr
+
 # Set environment
 ENV ASPNETCORE_URLS=http://+:8585
 ENV CRUNCHYROLL_CONFIG_PATH=/config/cruncharr.yaml

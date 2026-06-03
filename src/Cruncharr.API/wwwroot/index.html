@@ -1372,6 +1372,15 @@ MAINTENANCE NOTES:
         document.addEventListener('DOMContentLoaded', async () => {
             // Load config first so toggles are initialized correctly
             await fetchConfig();
+            // Fetch version from backend
+            try {
+                const res = await fetch('/api/v1/health');
+                if (res.ok) {
+                    const data = await res.json();
+                    const el = document.getElementById('version-info');
+                    if (el && data.version) el.textContent = 'v' + data.version;
+                }
+            } catch (e) { /* ignore */ }
             // Restore last visited page or default to downloads
             const savedPage = localStorage.getItem('cruncharr_current_page') || 'downloads';
             loadPage(savedPage);
@@ -1973,7 +1982,7 @@ MAINTENANCE NOTES:
                 const markAsWatched = config?.crunchyroll?.markAsWatched || false;
                 for (const [key, item] of Object.entries(queueItems)) {
                     if (item && item.episodeId) {
-                        await fetch('/api/v1/queue', {
+                        const queueRes = await fetch('/api/v1/queue', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1998,15 +2007,19 @@ MAINTENANCE NOTES:
                                 })) || []
                             })
                         });
-                        // Mark as watched if enabled
-                        if (markAsWatched && item.data?.[0]?.mediaId) {
-                            try {
-                                await fetch(`/api/v1/series/episodes/${item.data[0].mediaId}/mark-watched`, { method: 'POST' });
-                            } catch (e) {
-                                console.warn('Failed to mark as watched:', e);
+                        if (queueRes.ok) {
+                            added++;
+                            // Mark as watched if enabled
+                            if (markAsWatched && item.data?.[0]?.mediaId) {
+                                try {
+                                    await fetch(`/api/v1/series/episodes/${item.data[0].mediaId}/mark-watched`, { method: 'POST' });
+                                } catch (e) {
+                                    console.warn('Failed to mark as watched:', e);
+                                }
                             }
+                        } else {
+                            console.warn('Failed to add episode to queue:', key, queueRes.status);
                         }
-                        added++;
                     }
                 }
                 
@@ -2493,7 +2506,9 @@ MAINTENANCE NOTES:
             if (!text) return '';
             const div = document.createElement('div');
             div.textContent = text;
-            return div.innerHTML;
+            return div.innerHTML
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         function formatDate(dateStr) {
@@ -2912,7 +2927,7 @@ MAINTENANCE NOTES:
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                if (res.ok && data.success) {
+                if (res.ok && data.Success) {
                     showToast('Logged in successfully', 'success');
                     closeModal();
                     fetchAuthStatus();
@@ -3496,14 +3511,6 @@ MAINTENANCE NOTES:
                         defaultVideo: document.getElementById('setting-default-video')?.value || 'none',
                         defaultSubSigns: document.getElementById('setting-default-sub-signs')?.checked || false,
                         defaultSubForcedDisplay: document.getElementById('setting-default-sub-forced')?.checked || false,
-                        muxFonts: document.getElementById('setting-mux-fonts')?.checked || false,
-                        muxTypesettingFonts: document.getElementById('setting-mux-ts-fonts')?.checked || false,
-                        muxCover: document.getElementById('setting-mux-cover')?.checked || false,
-                        syncTiming: document.getElementById('setting-sync-timing')?.checked || false,
-                        syncTimingFullQualityFallback: document.getElementById('setting-sync-fallback')?.checked || false,
-                        syncHwAccel: document.getElementById('setting-sync-hwaccel')?.value || '',
-                        mkvmergeOptions: getListInputValues('setting-mkvmerge'),
-                        ffmpegOptions: getListInputValues('setting-ffmpeg'),
                         downloadSpeedLimit: parseInt(document.getElementById('setting-speed-limit')?.value) || 0,
                         downloadSpeedInBits: document.getElementById('setting-speed-bits')?.checked || false,
                         retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 5,
@@ -4594,17 +4601,59 @@ MAINTENANCE NOTES:
                 if (currentPage === 'history') fetchHistoryData();
             }, 5000);
             
-            // Clear intervals on page unload
+            // Clear intervals and SSE on page unload
             window.addEventListener('beforeunload', () => {
                 if (authIntervalId) clearInterval(authIntervalId);
                 if (historyIntervalId) clearInterval(historyIntervalId);
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
             });
         }
         
+        let sseRetryCount = 0;
+        const MAX_SSE_RETRIES = 10;
+
         function startQueueSSE() {
             if (eventSource) {
                 eventSource.close();
             }
+            if (sseRetryCount >= MAX_SSE_RETRIES) {
+                console.error('SSE max retries exceeded. Falling back to polling.');
+                return;
+            }
+            
+            eventSource = new EventSource('/api/v1/queue/sse');
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.stats) queueStats = data.stats;
+                    if (data.items) queueItems = data.items;
+                    renderDownloads();
+                } catch (e) {
+                    console.error('Failed to parse SSE data:', e);
+                }
+            };
+            
+            eventSource.onerror = (error) => {
+                console.error('SSE connection error:', error);
+                eventSource.close();
+                sseRetryCount++;
+                const delay = Math.min(3000 * Math.pow(2, sseRetryCount), 60000);
+                setTimeout(() => {
+                    if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
+                        startQueueSSE();
+                    }
+                }, delay);
+            };
+            
+            eventSource.onopen = () => {
+                console.log('SSE connection established');
+                sseRetryCount = 0;
+            };
+        }
             
             eventSource = new EventSource('/api/v1/queue/sse');
             

@@ -10,6 +10,7 @@ namespace Cruncharr.API.Controllers;
 public class ConfigController : ControllerBase{
     private readonly CruncharrConfig _config;
     private readonly ILogger<ConfigController> _logger;
+    private static readonly object _configLock = new object();
 
     public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger){
         _config = config;
@@ -168,7 +169,7 @@ public class ConfigController : ControllerBase{
                 Enabled = _config.Sonarr.Enabled,
                 Host = _config.Sonarr.Host,
                 Port = _config.Sonarr.Port,
-                ApiKey = _config.Sonarr.ApiKey,
+                ApiKey = !string.IsNullOrEmpty(_config.Sonarr.ApiKey) ? "[configured]" : null,
                 UseSsl = _config.Sonarr.UseSsl,
                 UrlBase = _config.Sonarr.UrlBase,
                 UseSonarrNumbering = _config.Sonarr.UseSonarrNumbering
@@ -223,8 +224,32 @@ public class ConfigController : ControllerBase{
             return BadRequest(new { Success = false, Message = "Webhook URL is required" });
         }
         
+        // SSRF protection: validate URL scheme and block private IPs
+        if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var uri)){
+            return BadRequest(new { Success = false, Message = "Invalid URL format" });
+        }
+        
+        if (uri.Scheme != "http" && uri.Scheme != "https"){
+            return BadRequest(new { Success = false, Message = "Only HTTP and HTTPS URLs are allowed" });
+        }
+        
+        // Block localhost and private IP ranges
+        var host = uri.Host;
+        if (host == "localhost" || host == "127.0.0.1" || host == "::1"){
+            return BadRequest(new { Success = false, Message = "Localhost URLs are not allowed" });
+        }
+        
+        if (System.Net.IPAddress.TryParse(host, out var ip)){
+            if (ip.GetAddressBytes()[0] == 10 || // 10.0.0.0/8
+                (ip.GetAddressBytes()[0] == 172 && ip.GetAddressBytes()[1] >= 16 && ip.GetAddressBytes()[1] <= 31) || // 172.16.0.0/12
+                (ip.GetAddressBytes()[0] == 192 && ip.GetAddressBytes()[1] == 168) || // 192.168.0.0/16
+                (ip.GetAddressBytes()[0] == 169 && ip.GetAddressBytes()[1] == 254)){ // 169.254.0.0/16
+                return BadRequest(new { Success = false, Message = "Private IP addresses are not allowed" });
+            }
+        }
+        
         try{
-            using var client = new HttpClient();
+            using var client = new HttpClient{ Timeout = TimeSpan.FromSeconds(30) };
             var payload = new{
                 event_type = "test",
                 message = "This is a test webhook from Cruncharr",
@@ -248,11 +273,15 @@ public class ConfigController : ControllerBase{
     [HttpPost]
     public IActionResult UpdateConfig([FromBody] ConfigUpdateRequest request){
         try{
-            UpdateConfigFromRequest(request);
+            if (request == null) return BadRequest(new { Success = false, Message = "Request body is required" });
             
-            var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
-            _config.Save(configPath);
-            _logger.LogInformation("Configuration saved to {Path}", configPath);
+            lock (_configLock){
+                UpdateConfigFromRequest(request);
+                
+                var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+                _config.Save(configPath);
+                _logger.LogInformation("Configuration saved to {Path}", configPath);
+            }
             return Ok(new { Success = true, Message = "Configuration saved" });
         } catch (Exception ex){
             _logger.LogError(ex, "Failed to save configuration");
@@ -260,6 +289,16 @@ public class ConfigController : ControllerBase{
         }
     }
     
+    private static string? ValidatePath(string? path, string fieldName){
+        if (string.IsNullOrWhiteSpace(path)) return path;
+        // Reject paths with directory traversal
+        if (path.Contains("..") || path.Contains("~")){
+            throw new ArgumentException($"Path traversal not allowed in {fieldName}");
+        }
+        // Normalize path
+        return path;
+    }
+
     private void UpdateConfigFromRequest(ConfigUpdateRequest request){
         if (request.Crunchyroll != null){
             if (!string.IsNullOrEmpty(request.Crunchyroll.Email))
@@ -278,8 +317,8 @@ public class ConfigController : ControllerBase{
 
         if (request.Download != null){
             var dl = request.Download;
-            if (!string.IsNullOrEmpty(dl.OutputDirectory)) _config.Download.OutputDirectory = dl.OutputDirectory;
-            if (!string.IsNullOrEmpty(dl.TempDirectory)) _config.Download.TempDirectory = dl.TempDirectory;
+            if (!string.IsNullOrEmpty(dl.OutputDirectory)) _config.Download.OutputDirectory = ValidatePath(dl.OutputDirectory, nameof(dl.OutputDirectory));
+            if (!string.IsNullOrEmpty(dl.TempDirectory)) _config.Download.TempDirectory = ValidatePath(dl.TempDirectory, nameof(dl.TempDirectory));
             if (dl.UseTempFolder.HasValue) _config.Download.UseTempFolder = dl.UseTempFolder.Value;
             if (!string.IsNullOrEmpty(dl.Filename)) _config.Download.Filename = dl.Filename;
             if (!string.IsNullOrEmpty(dl.FilenameTemplate)) _config.Download.FilenameTemplate = dl.FilenameTemplate;

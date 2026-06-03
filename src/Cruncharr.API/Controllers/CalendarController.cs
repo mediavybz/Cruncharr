@@ -29,9 +29,12 @@ public class CalendarController : ControllerBase{
         [FromQuery] string language = "en-us",
         [FromQuery] bool forceUpdate = false){
         try{
-            var targetDate = string.IsNullOrEmpty(date) 
-                ? DateTime.Now 
-                : DateTime.Parse(date);
+            DateTime targetDate;
+            if (string.IsNullOrEmpty(date)){
+                targetDate = DateTime.Now;
+            } else if (!DateTime.TryParseExact(date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out targetDate)){
+                return BadRequest(new { Error = "Invalid date format. Use yyyy-MM-dd" });
+            }
             
             // Get Monday of the week
             var monday = targetDate.AddDays(-(int)targetDate.DayOfWeek + (int)DayOfWeek.Monday);

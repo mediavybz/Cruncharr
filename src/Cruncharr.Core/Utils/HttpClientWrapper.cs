@@ -116,15 +116,15 @@ public class HttpClientWrapper{
         return (result.IsOk, result.ResponseContent, result.Error);
     }
     
-    public async Task<(bool IsOk, string ResponseContent, string Error, Dictionary<string, string> Headers)> SendRequestWithHeadersAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true){
+    public async Task<(bool IsOk, string ResponseContent, string Error, Dictionary<string, string> Headers)> SendRequestWithHeadersAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true, CancellationToken cancellationToken = default){
         string content = string.Empty;
         var headers = new Dictionary<string, string>();
         try{
             if (attachCookies){
                 AttachCookies(request);
             }
-            var response = await _client.SendAsync(request);
-            content = await response.Content.ReadAsStringAsync();
+            var response = await _client.SendAsync(request, cancellationToken);
+            content = await response.Content.ReadAsStringAsync(cancellationToken);
             foreach (var header in response.Headers){
                 headers[header.Key.ToLower()] = string.Join(", ", header.Value);
             }

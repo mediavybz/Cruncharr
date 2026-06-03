@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,7 @@ public class NotificationService : INotificationService{
     }
     
     public async Task NotifyCompleteAsync(DownloadResult result, CruncharrConfig config){
+        if (!config.Notifications.WebhookEnabled) return;
         if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
         if (!config.Notifications.OnComplete) return;
         
@@ -38,6 +40,7 @@ public class NotificationService : INotificationService{
     }
     
     public async Task NotifyErrorAsync(DownloadResult result, CruncharrConfig config){
+        if (!config.Notifications.WebhookEnabled) return;
         if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
         if (!config.Notifications.OnError) return;
         
@@ -55,8 +58,9 @@ public class NotificationService : INotificationService{
     }
     
     public async Task NotifyQueueCompleteAsync(List<DownloadResult> results, CruncharrConfig config){
+        if (!config.Notifications.WebhookEnabled) return;
         if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
-        if (!config.Notifications.OnComplete) return;
+        if (!config.Notifications.NotifyQueueFinished) return;
         
         var successCount = results.Count(r => r.Success);
         var errorCount = results.Count - successCount;
@@ -82,9 +86,34 @@ public class NotificationService : INotificationService{
     private async Task SendWebhookAsync(CruncharrConfig config, object payload){
         try{
             var method = new HttpMethod(config.Notifications.WebhookMethod);
-            var request = new HttpRequestMessage(method, config.Notifications.WebhookUrl){
-                Content = JsonContent.Create(payload)
-            };
+            var request = new HttpRequestMessage(method, config.Notifications.WebhookUrl);
+            
+            // Add configured headers
+            if (config.Notifications.WebhookHeaders != null){
+                foreach (var header in config.Notifications.WebhookHeaders){
+                    if (!string.IsNullOrEmpty(header.Key) && !string.IsNullOrEmpty(header.Value)){
+                        request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                    }
+                }
+            }
+            
+            // Use configured content type and body template if available
+            var contentType = config.Notifications.WebhookContentType ?? "application/json";
+            var bodyTemplate = config.Notifications.WebhookBodyTemplate;
+            
+            if (!string.IsNullOrEmpty(bodyTemplate)){
+                // Simple template substitution
+                var json = System.Text.Json.JsonSerializer.Serialize(payload);
+                var substituted = bodyTemplate
+                    .Replace("{{payload}}", json)
+                    .Replace("{{timestamp}}", DateTime.UtcNow.ToString("O"));
+                request.Content = new StringContent(substituted, Encoding.UTF8, contentType);
+            } else {
+                request.Content = JsonContent.Create(payload);
+                if (contentType != "application/json"){
+                    request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+                }
+            }
             
             var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();

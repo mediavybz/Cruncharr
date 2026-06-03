@@ -76,6 +76,7 @@
 |------|---------|------|
 | PORTING_LOG.md | Updated API contract with /v1 prefix, added completion entries | 2026-06-02 |
 | Docker image | Multi-platform build (linux/amd64 + linux/arm64) pushed to ghcr.io/mediavybz/cruncharr:latest | 2026-06-03 |
+| src/Cruncharr.Core.Tests | Sonarr integration test suite (44 tests) | 2026-06-03 |
 
 ---
 
@@ -106,6 +107,7 @@
 - **ARM64 Docker support: Multi-platform build (linux/amd64 + linux/arm64) pushed to GHCR**
 - **Webhook dispatch: INotificationService wired in QueueService (complete/error notifications)**
 - **GitHub Actions: Removed .github/workflows (free plan runners disabled)**
+- **Sonarr integration tests: 44 tests covering service, history matching, similarity algorithms**
 - Blocked items: 0
 
 ---
@@ -378,7 +380,7 @@
 - [x] Remove remaining build warnings - FIXED: Suppressed IL2026/IL2104 at project level
 - [x] Add ARM64 Docker image support - FIXED: Multi-platform build pushed to GHCR
 - [x] Webhook notification dispatch - FIXED: INotificationService wired in QueueService
-- [ ] Test Sonarr integration end-to-end
+- [x] Test Sonarr integration end-to-end - FIXED: Created 44 unit/integration tests covering SonarrService, HistoryService matching, and StringSimilarity algorithms. Fixed BuildBaseUrl trailing slash bug.
 
 ### Completed (No Longer Remaining)
 - [x] src/Cruncharr.Core/Services/DownloadService.cs → upstream_src/CrunchyrollManager.cs (SyncTiming, NoVideo, NoAudio, MuxCover, MuxMp4, MuxAudioOnlyToMp3, ReplaceExistingFiles)

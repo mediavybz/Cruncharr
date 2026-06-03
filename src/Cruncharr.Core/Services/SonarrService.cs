@@ -27,12 +27,12 @@ public class SonarrService : ISonarrService{
         var scheme = config.UseSsl ? "https" : "http";
         var baseUrl = $"{scheme}://{config.Host}:{config.Port}";
         if (!string.IsNullOrEmpty(config.UrlBase)){
-            baseUrl = baseUrl.TrimEnd('/') + "/" + config.UrlBase.TrimStart('/');
+            baseUrl = baseUrl.TrimEnd('/') + "/" + config.UrlBase.Trim('/');
         }
         return baseUrl + "/api/v3";
     }
 
-    public async Task<bool> TestConnectionAsync(SonarrConfig config){
+    public virtual async Task<bool> TestConnectionAsync(SonarrConfig config){
         try{
             var url = $"{BuildBaseUrl(config)}/system/status";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -46,7 +46,7 @@ public class SonarrService : ISonarrService{
         }
     }
 
-    public async Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config){
+    public virtual async Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config){
         try{
             var url = $"{BuildBaseUrl(config)}/series";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -63,14 +63,14 @@ public class SonarrService : ISonarrService{
         }
     }
 
-    public async Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config){
+    public virtual async Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config){
         var series = await GetSeriesAsync(config);
         return series.FirstOrDefault(s => 
             s.Title?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
             s.CleanTitle?.Equals(title, StringComparison.OrdinalIgnoreCase) == true);
     }
 
-    public async Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config){
+    public virtual async Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config){
         try{
             var url = $"{BuildBaseUrl(config)}/episode?seriesId={seriesId}";
             var request = new HttpRequestMessage(HttpMethod.Get, url);

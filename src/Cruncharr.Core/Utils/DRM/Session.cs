@@ -13,6 +13,8 @@ using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.OpenSsl;
 using ProtoBuf;
 
+#pragma warning disable IL2026
+
 namespace Cruncharr.Core.Utils.DRM;
 
 public class ContentDecryptionModule{
@@ -270,3 +272,5 @@ public class Session{
         };
     }
 }
+
+#pragma warning restore IL2026

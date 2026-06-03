@@ -3,6 +3,8 @@ using System.Text.Json;
 using Cruncharr.Core.Configuration;
 using Microsoft.Extensions.Logging;
 
+#pragma warning disable IL2026
+
 namespace Cruncharr.Core.Services;
 
 public interface ISonarrService{
@@ -119,3 +121,5 @@ public class SonarrEpisode{
     public string? Overview { get; set; }
     public DateTimeOffset AirDateUtc { get; set; }
 }
+
+#pragma warning restore IL2026

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using Cruncharr.Core.Utils.Parser.Utils;
 
+#pragma warning disable IL2026
+
 namespace Cruncharr.Core.Utils.Parser.Segments;
 
 public class TimelineTimeParser{
@@ -61,3 +63,5 @@ public class TimelineTimeParser{
         return segments;
     }
 }
+
+#pragma warning restore IL2026

@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using Cruncharr.Core.Configuration;
 
+#pragma warning disable IL2026
+
 namespace Cruncharr.Core.Utils;
 
 public class HttpClientWrapper{
@@ -207,3 +209,5 @@ public class HttpClientWrapper{
         return null;
     }
 }
+
+#pragma warning restore IL2026

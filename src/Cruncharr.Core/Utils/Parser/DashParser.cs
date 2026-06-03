@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Xml;
 using Cruncharr.Core.Utils.Parser.Utils;
 
+#pragma warning disable IL2026
+
 namespace Cruncharr.Core.Utils.Parser;
 
 public class DashParser{
@@ -44,3 +46,5 @@ public class DashParser{
         return mpd;
     }
 }
+
+#pragma warning restore IL2026

@@ -215,6 +215,34 @@ public class ConfigController : ControllerBase{
     }
 
     /// <summary>
+    /// Test webhook by sending a test payload to the provided URL
+    /// </summary>
+    [HttpPost("webhook/test")]
+    public async Task<IActionResult> TestWebhook([FromBody] WebhookTestRequest request){
+        if (string.IsNullOrWhiteSpace(request.Url)){
+            return BadRequest(new { Success = false, Message = "Webhook URL is required" });
+        }
+        
+        try{
+            using var client = new HttpClient();
+            var payload = new{
+                event_type = "test",
+                message = "This is a test webhook from Cruncharr",
+                timestamp = DateTime.UtcNow
+            };
+            var content = System.Net.Http.Json.JsonContent.Create(payload);
+            var response = await client.PostAsync(request.Url, content);
+            if (response.IsSuccessStatusCode){
+                return Ok(new { Success = true, Message = "Webhook test sent successfully" });
+            }
+            return StatusCode((int)response.StatusCode, new { Success = false, Message = $"Webhook returned {(int)response.StatusCode}" });
+        } catch (Exception ex){
+            _logger.LogError(ex, "Webhook test failed");
+            return StatusCode(500, new { Success = false, Message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Update configuration
     /// </summary>
     [HttpPost]
@@ -628,4 +656,8 @@ public class GeneralUpdateConfig{
     public bool? LogMode { get; set; }
     public bool? RemoveFinishedDownload { get; set; }
     public string? TokenFilePath { get; set; }
+}
+
+public class WebhookTestRequest{
+    public string Url { get; set; } = "";
 }

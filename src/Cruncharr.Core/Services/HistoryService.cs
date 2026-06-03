@@ -9,7 +9,7 @@ namespace Cruncharr.Core.Services;
 
 public interface IHistoryService{
     Task AddAsync(DownloadHistory entry);
-    Task<List<DownloadHistory>> GetAllAsync();
+    Task<List<DownloadHistory>> GetAllAsync(int offset = 0, int limit = 100);
     Task<bool> IsDownloadedAsync(string episodeId, string audioLanguage);
     Task RemoveAsync(string episodeId);
     Task<List<DownloadHistory>> GetSeriesHistoryAsync(string seriesId);
@@ -46,6 +46,10 @@ public interface IHistoryService{
     
     // Thumbnail
     Task<string?> GetSeriesThumbnailAsync(string seriesId);
+    
+    // Settings overrides
+    Task SetSeriesSettingsOverrideAsync(string seriesId, string? videoQuality, List<string>? dubLanguages, List<string>? softSubs);
+    Task SetSeasonSettingsOverrideAsync(string seasonId, string? videoQuality, List<string>? dubLanguages, List<string>? softSubs);
 }
 
 public class HistoryService : IHistoryService{
@@ -88,10 +92,14 @@ public class HistoryService : IHistoryService{
         }
     }
     
-    public async Task<List<DownloadHistory>> GetAllAsync(){
+    public async Task<List<DownloadHistory>> GetAllAsync(int offset = 0, int limit = 100){
         await _lock.WaitAsync();
         try{
-            return await LoadHistoryAsync();
+            var history = await LoadHistoryAsync();
+            return history
+                .Skip(offset)
+                .Take(limit)
+                .ToList();
         } finally{
             _lock.Release();
         }
@@ -1355,6 +1363,52 @@ public class HistoryService : IHistoryService{
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to get series thumbnail for {SeriesId}", seriesId);
             return null;
+        }
+    }
+    
+    public async Task SetSeriesSettingsOverrideAsync(string seriesId, string? videoQuality, List<string>? dubLanguages, List<string>? softSubs){
+        await _lock.WaitAsync();
+        try{
+            await EnsureLoadedAsync();
+            var historySeries = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
+            if (historySeries == null) return;
+            
+            if (!string.IsNullOrEmpty(videoQuality))
+                historySeries.HistorySeriesVideoQualityOverride = videoQuality;
+            else
+                historySeries.HistorySeriesVideoQualityOverride = "";
+            
+            historySeries.HistorySeriesDubLangOverride = NormalizeLocales(dubLanguages);
+            historySeries.HistorySeriesSoftSubsOverride = NormalizeLocales(softSubs);
+            
+            await SaveRichHistoryAsync();
+        } finally{
+            _lock.Release();
+        }
+    }
+    
+    public async Task SetSeasonSettingsOverrideAsync(string seasonId, string? videoQuality, List<string>? dubLanguages, List<string>? softSubs){
+        await _lock.WaitAsync();
+        try{
+            await EnsureLoadedAsync();
+            // Find season across all series
+            foreach (var historySeries in _historyList){
+                var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
+                if (historySeason != null){
+                    if (!string.IsNullOrEmpty(videoQuality))
+                        historySeason.HistorySeasonVideoQualityOverride = videoQuality;
+                    else
+                        historySeason.HistorySeasonVideoQualityOverride = "";
+                    
+                    historySeason.HistorySeasonDubLangOverride = NormalizeLocales(dubLanguages);
+                    historySeason.HistorySeasonSoftSubsOverride = NormalizeLocales(softSubs);
+                    
+                    await SaveRichHistoryAsync();
+                    return;
+                }
+            }
+        } finally{
+            _lock.Release();
         }
     }
     

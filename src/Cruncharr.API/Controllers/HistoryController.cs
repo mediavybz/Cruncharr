@@ -22,13 +22,8 @@ public class HistoryController : ControllerBase{
     public async Task<ActionResult<List<DownloadHistory>>> GetHistory(
         [FromQuery] int limit = 100,
         [FromQuery] int offset = 0){
-        var history = await _historyService.GetAllAsync();
-        var paginated = history
-            .Skip(offset)
-            .Take(limit)
-            .ToList();
-        
-        return Ok(paginated);
+        var history = await _historyService.GetAllAsync(offset, limit);
+        return Ok(history);
     }
 
     /// <summary>
@@ -166,6 +161,24 @@ public class HistoryController : ControllerBase{
         return Ok(new { Message = "Episode matching completed" });
     }
 
+    /// <summary>
+    /// Update series settings override (quality, dubs, subs)
+    /// </summary>
+    [HttpPost("series/{seriesId}/settings")]
+    public async Task<IActionResult> SetSeriesSettingsOverride(string seriesId, [FromBody] HistorySettingsOverrideRequest request){
+        await _historyService.SetSeriesSettingsOverrideAsync(seriesId, request.VideoQuality, request.DubLanguages, request.SoftSubs);
+        return Ok(new { Message = "Series settings updated" });
+    }
+
+    /// <summary>
+    /// Update season settings override (quality, dubs, subs)
+    /// </summary>
+    [HttpPost("season/{seasonId}/settings")]
+    public async Task<IActionResult> SetSeasonSettingsOverride(string seasonId, [FromBody] HistorySettingsOverrideRequest request){
+        await _historyService.SetSeasonSettingsOverrideAsync(seasonId, request.VideoQuality, request.DubLanguages, request.SoftSubs);
+        return Ok(new { Message = "Season settings updated" });
+    }
+
     private static HistorySeriesResponse MapToResponse(HistorySeries series){
         return new HistorySeriesResponse{
             SeriesId = series.SeriesId,
@@ -263,4 +276,10 @@ public class HistoryEpisodeResponse{
     public string SonarrSeasonEpisodeText { get; set; } = "";
     public List<string> DownloadedDubLang { get; set; } = [];
     public List<string> DownloadedSoftSubs { get; set; } = [];
+}
+
+public class HistorySettingsOverrideRequest{
+    public string? VideoQuality { get; set; }
+    public List<string>? DubLanguages { get; set; }
+    public List<string>? SoftSubs { get; set; }
 }

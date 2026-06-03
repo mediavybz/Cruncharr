@@ -74,13 +74,31 @@
 | src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-007**: Fixed XSS vulnerabilities: added escapeHtml() to search results, episode lists, calendar, queue, history table | 2026-06-03 |
 | src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-008**: Fixed setSettingsTab global event usage - passes event param instead of relying on window.event | 2026-06-03 |
 | src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-009**: Added AbortController to search fetch to cancel previous requests on new input | 2026-06-03 |
+| src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-CRIT-010**: Fixed XSS in getDoingText() and showToast() - server text now escaped | 2026-06-03 |
+| src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-FEAT-001**: Added global queue pause/resume buttons with status display | 2026-06-03 |
+| src/Cruncharr.API/wwwroot/index.html | N/A (frontend fixes) | **F-FEAT-002**: Added Cooldown Between Downloads setting input | 2026-06-03 |
+
+### Backend (Mode A) - Security & Stability
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core/Models/AuthModels.cs | upstream | [PT] Removed hardcoded auth token default; server provides credentials | 2026-06-03 |
+| src/Cruncharr.Core/Services/CrunchyrollAuthService.cs | upstream | [PT] Removed sync-over-async .GetAwaiter().GetResult() in constructor; lazy auth update | 2026-06-03 |
+| src/Cruncharr.Core/Utils/DashDownloader.cs | upstream | [PT] Removed sync ParseManifest method; made async-only with ThrottledStream support | 2026-06-03 |
+| src/Cruncharr.Core/Utils/HLS/HLSDownloader.cs | upstream | [PT] Fixed sync-over-async in CloneHttpRequestMessage; added CloneAsync extension | 2026-06-03 |
+| src/Cruncharr.Core/Services/DownloadService.cs | upstream | [PT] Fixed null ref before .Contains(':'); use async ParseManifestAsync | 2026-06-03 |
+| src/Cruncharr.Core/Services/QueueService.cs | upstream | [PT] Replaced Environment.Exit(0) with ShutdownRequested flag; added global pause/resume | 2026-06-03 |
+| src/Cruncharr.Core/Services/NotificationService.cs | upstream | [PT] Inject IHttpClientFactory instead of new HttpClient() | 2026-06-03 |
+| src/Cruncharr.Core/Services/SonarrService.cs | upstream | [PT] Inject IHttpClientFactory instead of new HttpClient() | 2026-06-03 |
+| src/Cruncharr.API/Controllers/ConfigController.cs | N/A (API layer) | [PT] Hide Authorization tokens from GET /api/v1/config response | 2026-06-03 |
+| src/Cruncharr.API/Controllers/QueueController.cs | N/A (API layer) | [PT] Added POST /api/v1/queue/pause, /resume, /stats includes IsGloballyPaused | 2026-06-03 |
+| src/Cruncharr.Core/Configuration/CruncharrConfig.cs | upstream | [PT] Added CooldownDelaySeconds property | 2026-06-03 |
 
 ### Infrastructure
 | File | Purpose | Date |
 |------|---------|------|
 | PORTING_LOG.md | Updated API contract with /v1 prefix, added completion entries | 2026-06-02 |
 | Docker image | Multi-platform build (linux/amd64 + linux/arm64) pushed to ghcr.io/mediavybz/cruncharr:latest | 2026-06-03 |
-| Docker image | Rebuilt with frontend security fixes (XSS, credentials, events, AbortController) - digest: sha256:8a5bac0a559373a2374347705b474961457950733ac67c8afe1fd60a1c154c09 | 2026-06-03 |
+| Docker image | Rebuilt with comprehensive security fixes (XSS, credentials, sync-over-async, HttpClient disposal) - digest: sha256:266a43ff438910ed5c3b19d690f3349aac53136536f48576d8eb0018e97c353f | 2026-06-03 |
 | src/Cruncharr.Core.Tests | Sonarr integration test suite (44 tests) | 2026-06-03 |
 
 ---
@@ -96,7 +114,9 @@
 - Missing API methods: 2 / 2 (GetAllSeries, GetSeasonalSeries done)
 - Missing auth features: 1 / 1 (GetBase64EncodedTokenAsync done)
 - Missing history features: 3 / 3 (UpdateWithEpisode, GZip compression, backup rotation done)
-- Frontend audit gaps resolved: 13 / 13 (mark-as-watched, browse/seasonal multi-dub, history filter, encoding preset dropdown, webhook test, series settings override, season settings override, interval cleanup, res.ok checks, hardcoded credentials removed, XSS fixed, setSettingsTab event fixed, search AbortController)
+- Frontend audit gaps resolved: 15 / 15 (previous + global pause UI, cooldown setting, getDoingText/showToast XSS escaped)
+- Backend critical issues fixed: 8 / 8 (hardcoded tokens, sync-over-async x3, null ref, Environment.Exit, undisposed HttpClients x2)
+- Upstream feature gaps: 3 / 6 (global queue pause, download cooldown, speed limiting wired; missing: auto-download scheduler, font muxing, multi-episode parsing)
 - Settings sync fixes: 3 / 3 (dub/subs fallback defaults, stream endpoint defaults, config validation)
 - **UI Improvements: 4 / 4 (dead toggles removed, refresh persistence, loading spinner, multi-select dropdowns)**
 - **Build warnings: 306 → 35 (89% reduction)**

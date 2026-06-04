@@ -135,13 +135,16 @@ public class Program{
         }
 
         // Start queue processing AFTER auth is initialized
+        var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
         using (var scope = app.Services.CreateScope()){
             var queueService = scope.ServiceProvider.GetRequiredService<IQueueService>();
             var configService = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
             var queueLogger = scope.ServiceProvider.GetService<ILogger<Program>>();
             _ = Task.Run(async () =>{
                 try{
-                    await queueService.ProcessQueueAsync(configService, null, CancellationToken.None);
+                    await queueService.ProcessQueueAsync(configService, null, lifetime.ApplicationStopping);
+                } catch (OperationCanceledException){
+                    // Normal shutdown
                 } catch (Exception ex){
                     queueLogger?.LogError(ex, "Queue processor crashed");
                 }

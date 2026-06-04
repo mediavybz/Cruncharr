@@ -11,8 +11,9 @@ namespace Cruncharr.Core.Utils;
 
 using Microsoft.Extensions.Logging;
 
-public class HttpClientWrapper{
+public class HttpClientWrapper : IDisposable{
     private readonly HttpClient _client;
+    private readonly SocketsHttpHandler _handler;
     private readonly CookieContainer _cookieContainer;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CookieCollection> _cookieStore = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> _cookieLocks = new();
@@ -28,7 +29,7 @@ public class HttpClientWrapper{
         _logger = logger;
         _cookieContainer = new CookieContainer();
         
-        var handler = new SocketsHttpHandler{
+        _handler = new SocketsHttpHandler{
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
             CookieContainer = _cookieContainer,
             UseCookies = false,
@@ -48,10 +49,10 @@ public class HttpClientWrapper{
         
         // Configure proxy if enabled
         if (config?.Proxy?.Enabled == true){
-            ConfigureProxy(handler, config.Proxy);
+            ConfigureProxy(_handler, config.Proxy);
         }
         
-        _client = new HttpClient(handler);
+        _client = new HttpClient(_handler);
         _client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36");
         _client.DefaultRequestHeaders.Accept.ParseAdd("*/*");
         _client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip, deflate, br");
@@ -225,6 +226,11 @@ public class HttpClientWrapper{
         } catch{
             // Ignore invalid cookie domains
         }
+    }
+    
+    public void Dispose(){
+        _client?.Dispose();
+        _handler?.Dispose();
     }
     
     public string? GetCookieValue(string domain, string cookieName){

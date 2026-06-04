@@ -1366,6 +1366,7 @@ MAINTENANCE NOTES:
         let historySearchQuery = '';
         let historySearchPopupOpen = false;
         let onlyDownloadMode = { video: true, audio: true, sub: true };
+        let isQueueGloballyPaused = false;
         let authIntervalId, historyIntervalId;
 
         document.addEventListener('DOMContentLoaded', async () => {
@@ -1538,10 +1539,11 @@ MAINTENANCE NOTES:
                 if (statRetry) statRetry.textContent = data.waitingForRetry ?? 0;
                 
                 // Update global pause button
+                isQueueGloballyPaused = data.isGloballyPaused || false;
                 const pauseBtn = document.getElementById('btn-global-pause');
                 if (pauseBtn) {
                     pauseBtn.style.display = 'inline-flex';
-                    if (data.isGloballyPaused) {
+                    if (isQueueGloballyPaused) {
                         pauseBtn.innerHTML = '&#9654; Resume All';
                         pauseBtn.title = 'Resume Queue';
                     } else {
@@ -1802,6 +1804,7 @@ MAINTENANCE NOTES:
                 });
                 
                 const dropdown = document.getElementById('season-dropdown');
+                if (!dropdown) return;
                 dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
                 if (seasons.length > 0) {
                     dropdown.value = seasons[0].id;
@@ -2117,7 +2120,7 @@ MAINTENANCE NOTES:
         
         async function addMusicVideoToQueue(videoId, title, artist) {
             try {
-                await fetch('/api/v1/queue', {
+                const res = await fetch('/api/v1/queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -2129,6 +2132,7 @@ MAINTENANCE NOTES:
                         locale: 'ja-JP'
                     })
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added music video to queue', 'success');
             } catch (e) {
                 showToast('Failed to add to queue', 'error');
@@ -2209,7 +2213,7 @@ MAINTENANCE NOTES:
                         <div class="calendar-day">
                             <div class="calendar-day-header">
                                 <div class="calendar-day-date">${date.toLocaleDateString()}</div>
-                                <div class="calendar-day-name">${dayName}</div>
+                                <div class="calendar-day-name">${escapeHtml(dayName)}</div>
                             </div>
                             <div class="calendar-day-content">
                                 ${day.episodes && day.episodes.length > 0 ? day.episodes.map(ep => `
@@ -2217,7 +2221,7 @@ MAINTENANCE NOTES:
                                         <div class="calendar-episode-time">${ep.airDate ? new Date(ep.airDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
                                         <div class="calendar-episode-thumb">
                                             ${ep.thumbnailUrl ? `<img src="${escapeHtml(ep.thumbnailUrl)}" alt="">` : '📺'}
-                                            <div class="calendar-episode-number">${ep.episodeNumber || ''}</div>
+                                            <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
                                         </div>
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
@@ -2240,11 +2244,12 @@ MAINTENANCE NOTES:
 
         async function addEpisodeToQueue(episodeId) {
             try {
-                await fetch('/api/v1/queue', {
+                const res = await fetch('/api/v1/queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ episodeId })
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added to queue', 'success');
             } catch (e) {
                 showToast('Failed to add', 'error');
@@ -2568,7 +2573,12 @@ MAINTENANCE NOTES:
 
         function escapeJsString(text) {
             if (text == null) return '';
-            return String(text).replace(/[\\'"]/g, '\\$&');
+            return String(text)
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r');
         }
 
         function formatDate(dateStr) {
@@ -2588,20 +2598,19 @@ MAINTENANCE NOTES:
             const modalTitle = document.getElementById('modal-title');
             if (modalTitle) modalTitle.textContent = seriesTitle;
             
-            // Find episodes for this series from the last fetched data
-            const allEpisodes = [];
-            document.querySelectorAll('.history-poster').forEach(poster => {
-                // This is a simplified approach - in production you'd store the data
-            });
+            const modalBody = document.getElementById('modal-body');
+            const modalFooter = document.getElementById('modal-footer');
+            const modal = document.getElementById('modal');
+            if (!modalBody || !modalFooter || !modal) return;
             
-            document.getElementById('modal-body').innerHTML = `
+            modalBody.innerHTML = `
                 <div class="loading"><div class="spinner"></div>Loading episodes...</div>
             `;
-            document.getElementById('modal-footer').innerHTML = `
+            modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Close</button>
                 <button class="header-btn primary" onclick="searchSeriesById('${escapeJsString(seriesId)}')">Search Series</button>
             `;
-            document.getElementById('modal').classList.add('active');
+            modal.classList.add('active');
             
             // Fetch and show episodes
             fetch(`/api/v1/series/${seriesId}/episodes`).then(res => {
@@ -2613,8 +2622,8 @@ MAINTENANCE NOTES:
                         ${(episodes || []).slice(0, 10).map(ep => `
                             <div style="padding: 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
                                 <div>
-                                    <div style="font-weight: 500;">Episode ${ep.episodeNumber || '?'}</div>
-                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${ep.title || 'Unknown'}</div>
+                                    <div style="font-weight: 500;">Episode ${escapeHtml(ep.episodeNumber || '?')}</div>
+                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${escapeHtml(ep.title || 'Unknown')}</div>
                                 </div>
                                 <button class="header-btn" onclick="addEpisodeToQueueWithDetails('${escapeJsString(ep.id)}', '${escapeJsString(ep.title || '')}', '${escapeJsString(seriesTitle)}')">Add</button>
                             </div>
@@ -2985,8 +2994,11 @@ MAINTENANCE NOTES:
         }
 
         async function doLogin() {
-            const email = document.getElementById('login-email').value;
-            const password = document.getElementById('login-password').value;
+            const emailEl = document.getElementById('login-email');
+            const passwordEl = document.getElementById('login-password');
+            if (!emailEl || !passwordEl) { showToast('Login form not found', 'error'); return; }
+            const email = emailEl.value;
+            const password = passwordEl.value;
             if (!email || !password) { showToast('Email and password required', 'error'); return; }
             try {
                 const res = await fetch('/api/v1/auth/login', {
@@ -3008,7 +3020,8 @@ MAINTENANCE NOTES:
 
         async function logout() {
             try {
-                await fetch('/api/v1/auth/logout', { method: 'POST' });
+                const res = await fetch('/api/v1/auth/logout', { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Logged out', 'success');
                 fetchAuthStatus();
             } catch (e) { showToast('Logout failed', 'error'); }
@@ -3706,8 +3719,8 @@ MAINTENANCE NOTES:
                         theme: document.getElementById('setting-theme')?.value || 'System',
                         accentColor: document.getElementById('setting-accent')?.value || null,
                         backgroundImagePath: document.getElementById('setting-bg-path')?.value || null,
-                        backgroundImageOpacity: parseFloat(document.getElementById('setting-bg-opacity')?.value) ?? 0.5,
-                        backgroundImageBlurRadius: parseFloat(document.getElementById('setting-bg-blur')?.value) ?? 10
+                        backgroundImageOpacity: parseFloat(document.getElementById('setting-bg-opacity')?.value) || 0.5,
+                        backgroundImageBlurRadius: parseFloat(document.getElementById('setting-bg-blur')?.value) || 10
                     };
                     break;
                     
@@ -3793,11 +3806,12 @@ MAINTENANCE NOTES:
         }
 
         async function toggleGlobalPause() {
-            const btn = document.getElementById('btn-global-pause');
-            const isPaused = btn.textContent.includes('Resume');
             try {
-                await fetch(`/api/v1/queue/${isPaused ? 'resume' : 'pause'}`, { method: 'POST' });
-                showToast(isPaused ? 'Queue resumed' : 'Queue paused globally', 'success');
+                const action = isQueueGloballyPaused ? 'resume' : 'pause';
+                const res = await fetch(`/api/v1/queue/${action}`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                isQueueGloballyPaused = !isQueueGloballyPaused;
+                showToast(isQueueGloballyPaused ? 'Queue paused globally' : 'Queue resumed', 'success');
                 fetchDownloads();
                 fetchQueueStats();
             } catch (e) { showToast('Failed to toggle pause', 'error'); }
@@ -3805,7 +3819,8 @@ MAINTENANCE NOTES:
 
         async function retryFailed() {
             try {
-                await fetch('/api/v1/queue/retry-failed', { method: 'POST' });
+                const res = await fetch('/api/v1/queue/retry-failed', { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Retrying failed downloads', 'success');
                 fetchDownloads();
             } catch (e) { showToast('Retry failed', 'error'); }
@@ -3832,7 +3847,8 @@ MAINTENANCE NOTES:
         async function clearQueue() {
             if (!confirm('Clear all items from queue?')) return;
             try {
-                await fetch('/api/v1/queue', { method: 'DELETE' });
+                const res = await fetch('/api/v1/queue', { method: 'DELETE' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Queue cleared', 'success');
                 fetchDownloads();
             } catch (e) { showToast('Clear failed', 'error'); }
@@ -3840,7 +3856,8 @@ MAINTENANCE NOTES:
 
         async function retryDownload(id) {
             try {
-                await fetch(`/api/v1/queue/${id}/retry`, { method: 'POST' });
+                const res = await fetch(`/api/v1/queue/${id}/retry`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Retrying download', 'success');
                 fetchDownloads();
             } catch (e) { showToast('Retry failed', 'error'); }
@@ -3848,7 +3865,8 @@ MAINTENANCE NOTES:
 
         async function startDownload(id) {
             try {
-                await fetch(`/api/v1/queue/${id}/start`, { method: 'POST' });
+                const res = await fetch(`/api/v1/queue/${id}/start`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Starting download', 'success');
                 fetchDownloads();
             } catch (e) { showToast('Start failed', 'error'); }
@@ -3857,7 +3875,8 @@ MAINTENANCE NOTES:
         async function togglePauseResume(id, isDownloading) {
             try {
                 const endpoint = isDownloading ? 'pause' : 'resume';
-                await fetch(`/api/v1/queue/${id}/${endpoint}`, { method: 'POST' });
+                const res = await fetch(`/api/v1/queue/${id}/${endpoint}`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 fetchDownloads();
             } catch (e) { showToast('Action failed', 'error'); }
         }
@@ -3865,7 +3884,8 @@ MAINTENANCE NOTES:
         async function removeFromQueue(id) {
             if (!confirm('Remove this item from queue?')) return;
             try {
-                await fetch(`/api/v1/queue/${id}`, { method: 'DELETE' });
+                const res = await fetch(`/api/v1/queue/${id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Removed from queue', 'success');
                 if (currentPage === 'downloads') fetchDownloads();
             } catch (e) { showToast('Remove failed', 'error'); }
@@ -4249,7 +4269,7 @@ MAINTENANCE NOTES:
         
         async function addHistoryEpisodeToQueue(episodeId, seriesTitle) {
             try {
-                await fetch('/api/v1/queue', {
+                const res = await fetch('/api/v1/queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4258,6 +4278,7 @@ MAINTENANCE NOTES:
                         seriesTitle: seriesTitle || 'Unknown'
                     })
                 });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added to queue', 'success');
             } catch (e) {
                 showToast('Failed to add to queue', 'error');
@@ -4308,16 +4329,24 @@ MAINTENANCE NOTES:
             }
             
             // Close popup when clicking outside
+            const existingListener = document._historySearchClickListener;
+            if (existingListener) {
+                document.removeEventListener('click', existingListener);
+            }
+            document._historySearchClickListener = closeHistorySearchOnClickOutside;
             setTimeout(() => {
-                document.addEventListener('click', closeHistorySearchOnClickOutside);
+                document.addEventListener('click', document._historySearchClickListener);
             }, 0);
         }
         
         function closeHistorySearchPopup() {
-            historySearchPopupOpen = false;
             const popup = document.getElementById('history-search-popup');
             if (popup) popup.style.display = 'none';
-            document.removeEventListener('click', closeHistorySearchOnClickOutside);
+            historySearchPopupOpen = false;
+            if (document._historySearchClickListener) {
+                document.removeEventListener('click', document._historySearchClickListener);
+                document._historySearchClickListener = null;
+            }
             // Re-render to update orange dot indicator
             if (currentPage === 'history') {
                 const dot = document.querySelector('.search-active-dot');
@@ -4610,10 +4639,14 @@ MAINTENANCE NOTES:
             }
         }
 
-        function closeModal() { document.getElementById('modal').classList.remove('active'); }
+        function closeModal() {
+            const modal = document.getElementById('modal');
+            if (modal) modal.classList.remove('active');
+        }
 
         function showToast(message, type = 'success') {
             const container = document.getElementById('toast-container');
+            if (!container) return;
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
             toast.innerHTML = `<span>${type === 'success' ? '&#10004;' : type === 'error' ? '&#10060;' : '&#9888;'}</span><span>${escapeHtml(message)}</span>`;

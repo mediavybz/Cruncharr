@@ -133,7 +133,7 @@ public class HistoryService : IHistoryService, IDisposable{
     // Rich history methods
     public async Task<List<HistorySeries>> GetHistorySeriesAsync(){
         await EnsureLoadedAsync();
-        return GetHistorySnapshot();
+        return await GetHistorySnapshotAsync();
     }
 
     public async Task UpdateWithSeasonDataAsync(List<EpisodeInfo> episodes){
@@ -239,7 +239,7 @@ public class HistoryService : IHistoryService, IDisposable{
 
     public async Task<HistoryEpisode?> GetHistoryEpisodeAsync(string? seriesId, string? seasonId, string episodeId){
         await EnsureLoadedAsync();
-        var snapshot = GetHistorySnapshot();
+        var snapshot = await GetHistorySnapshotAsync();
         return snapshot
             .FirstOrDefault(s => s.SeriesId == seriesId)?
             .Seasons.FirstOrDefault(s => s.SeasonId == seasonId)?
@@ -304,8 +304,8 @@ public class HistoryService : IHistoryService, IDisposable{
         }
     }
 
-    private List<HistorySeries> GetHistorySnapshot(){
-        _lock.Wait();
+    private async Task<List<HistorySeries>> GetHistorySnapshotAsync(){
+        await _lock.WaitAsync();
         try{
             return _historyList.ToList();
         } finally{
@@ -515,15 +515,23 @@ public class HistoryService : IHistoryService, IDisposable{
             return;
         }
 
+        await EnsureLoadedAsync();
+
+        // Fetch Sonarr data OUTSIDE the lock
+        List<SonarrSeries> sonarrSeries;
+        try{
+            sonarrSeries = await _sonarrService.GetSeriesAsync(_config.Sonarr);
+        } catch (Exception ex){
+            _logger?.LogWarning(ex, "Failed to fetch Sonarr series data");
+            return;
+        }
+
+        var sonarrSeriesById = updateAll
+            ? sonarrSeries.ToDictionary(series => series.Id.ToString())
+            : [];
+
         await _lock.WaitAsync();
         try{
-            await EnsureLoadedAsync();
-            
-            var sonarrSeries = await _sonarrService.GetSeriesAsync(_config.Sonarr);
-            var sonarrSeriesById = updateAll
-                ? sonarrSeries.ToDictionary(series => series.Id.ToString())
-                : [];
-
             foreach (var historySeries in _historyList){
                 if (historySeries.SeriesType == SeriesType.Artist) continue;
                 
@@ -556,25 +564,45 @@ public class HistoryService : IHistoryService, IDisposable{
             return;
         }
 
+        await EnsureLoadedAsync();
+        
+        // Find series and parse Sonarr ID under lock
+        int sonarrSeriesId;
         await _lock.WaitAsync();
         try{
-            await EnsureLoadedAsync();
-            
             var historySeries = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
             if (historySeries == null) return;
             
-            if (!int.TryParse(historySeries.SonarrSeriesId, out var sonarrSeriesId)){
+            if (!int.TryParse(historySeries.SonarrSeriesId, out sonarrSeriesId)){
                 return;
             }
+        } finally{
+            _lock.Release();
+        }
 
-            var episodes = await _sonarrService.GetEpisodesAsync(sonarrSeriesId, _config.Sonarr);
-            historySeries.SonarrNextAirDate = GetNextAirDate(episodes);
+        // Fetch Sonarr episodes OUTSIDE the lock
+        List<SonarrEpisode> episodes;
+        try{
+            episodes = await _sonarrService.GetEpisodesAsync(sonarrSeriesId, _config.Sonarr);
+        } catch (Exception ex){
+            _logger?.LogWarning(ex, "Failed to fetch Sonarr episodes for series {SeriesId}", seriesId);
+            return;
+        }
+
+        var nextAirDate = GetNextAirDate(episodes);
+        var episodesById = episodes.ToDictionary(episode => episode.Id);
+
+        await _lock.WaitAsync();
+        try{
+            var historySeries = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
+            if (historySeries == null) return;
+
+            historySeries.SonarrNextAirDate = nextAirDate;
 
             var allHistoryEpisodes = historySeries.Seasons
                 .SelectMany(historySeriesSeason => historySeriesSeason.EpisodesList)
                 .ToList();
 
-            var episodesById = episodes.ToDictionary(episode => episode.Id);
             var usedSonarrEpisodeIds = new HashSet<int>();
             var episodesToMatch = new List<HistoryEpisode>();
 
@@ -765,29 +793,42 @@ public class HistoryService : IHistoryService, IDisposable{
             await _authService.AuthenticateAsync(true);
         }
 
+        await EnsureLoadedAsync();
+
+        // Mark episodes unavailable under lock
         await _lock.WaitAsync();
         try{
-        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+            var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
 
-        if (historySeries != null){
-            if (string.IsNullOrEmpty(seasonId)){
-                foreach (var historySeriesSeason in historySeries.Seasons){
-                    foreach (var historyEpisode in historySeriesSeason.EpisodesList){
-                        historyEpisode.IsEpisodeAvailableOnStreamingService = false;
+            if (historySeries != null){
+                if (string.IsNullOrEmpty(seasonId)){
+                    foreach (var historySeriesSeason in historySeries.Seasons){
+                        foreach (var historyEpisode in historySeriesSeason.EpisodesList){
+                            historyEpisode.IsEpisodeAvailableOnStreamingService = false;
+                        }
                     }
-                }
-            } else{
-                var matchingSeason = historySeries.Seasons.FirstOrDefault(historySeason => historySeason.SeasonId == seasonId);
+                } else{
+                    var matchingSeason = historySeries.Seasons.FirstOrDefault(historySeason => historySeason.SeasonId == seasonId);
 
-                if (matchingSeason != null){
-                    foreach (var historyEpisode in matchingSeason.EpisodesList){
-                        historyEpisode.IsEpisodeAvailableOnStreamingService = false;
+                    if (matchingSeason != null){
+                        foreach (var historyEpisode in matchingSeason.EpisodesList){
+                            historyEpisode.IsEpisodeAvailableOnStreamingService = false;
+                        }
                     }
                 }
             }
+        } finally{
+            _lock.Release();
         }
 
-        var seasons = await _apiService.ParseSeriesByIdAsync(seriesId, "ja-JP", true);
+        // Perform API calls OUTSIDE the lock
+        List<SeasonInfo>? seasons;
+        try{
+            seasons = await _apiService.ParseSeriesByIdAsync(seriesId, "ja-JP", true);
+        } catch (Exception ex){
+            _logger?.LogWarning(ex, "Failed to refresh series data for {SeriesId}", seriesId);
+            return false;
+        }
 
         if (seasons == null || seasons.Count == 0){
             _logger?.LogError("Parse Data Invalid - series is maybe only available with VPN or got deleted");
@@ -821,23 +862,29 @@ public class HistoryService : IHistoryService, IDisposable{
             }
         }
 
-        historySeries ??= _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+        // Final update under lock
+        await _lock.WaitAsync();
+        try{
+            var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
 
-        if (historySeries != null){
-            RemoveUnavailableEpisodesFromSeries(historySeries);
-            if (historySeries.Seasons.Count == 0){
-                _historyList.Remove(historySeries);
-                await SaveRichHistoryAsync();
-            } else {
-                await MatchHistorySeriesWithSonarrAsync(false);
-                await MatchHistoryEpisodesWithSonarrAsync(historySeries.SeriesId ?? "", false);
-                await SaveRichHistoryAsync();
+            if (historySeries != null){
+                RemoveUnavailableEpisodesFromSeries(historySeries);
+                if (historySeries.Seasons.Count == 0){
+                    _historyList.Remove(historySeries);
+                    await SaveRichHistoryAsync();
+                } else{
+                    await SaveRichHistoryAsync();
+                }
             }
-        }
         } finally{
             _lock.Release();
         }
-        return false;
+
+        // Sonarr matching outside lock
+        await MatchHistorySeriesWithSonarrAsync(false);
+        await MatchHistoryEpisodesWithSonarrAsync(seriesId, false);
+
+        return true;
     }
     
     public async Task UpdateWithEpisodeListAsync(List<EpisodeInfo> episodeList){
@@ -952,7 +999,7 @@ public class HistoryService : IHistoryService, IDisposable{
     public async Task<(HistoryEpisode? HistoryEpisode, string DownloadDirPath)> GetHistoryEpisodeWithDownloadDirAsync(string? seriesId, string? seasonId, string episodeId){
         await EnsureLoadedAsync();
         
-        var snapshot = GetHistorySnapshot();
+        var snapshot = await GetHistorySnapshotAsync();
         var historySeries = snapshot.FirstOrDefault(series => series.SeriesId == seriesId);
         var downloadDirPath = "";
 
@@ -980,7 +1027,7 @@ public class HistoryService : IHistoryService, IDisposable{
     public async Task<(HistoryEpisode? HistoryEpisode, List<string> DubList, List<string> SubList, string DownloadDirPath, string VideoQuality)> GetHistoryEpisodeWithDubListAndDownloadDirAsync(string? seriesId, string? seasonId, string episodeId){
         await EnsureLoadedAsync();
         
-        var snapshot = GetHistorySnapshot();
+        var snapshot = await GetHistorySnapshotAsync();
         var historySeries = snapshot.FirstOrDefault(series => series.SeriesId == seriesId);
 
         var downloadDirPath = "";
@@ -1036,7 +1083,7 @@ public class HistoryService : IHistoryService, IDisposable{
     public async Task<List<string>> GetDubListAsync(string? seriesId, string? seasonId){
         await EnsureLoadedAsync();
         
-        var snapshot = GetHistorySnapshot();
+        var snapshot = await GetHistorySnapshotAsync();
         var historySeries = snapshot.FirstOrDefault(series => series.SeriesId == seriesId);
 
         List<string> dublist = [];
@@ -1058,7 +1105,7 @@ public class HistoryService : IHistoryService, IDisposable{
     public async Task<(List<string> SubList, string VideoQuality)> GetSubListAsync(string? seriesId, string? seasonId){
         await EnsureLoadedAsync();
         
-        var snapshot = GetHistorySnapshot();
+        var snapshot = await GetHistorySnapshotAsync();
         var historySeries = snapshot.FirstOrDefault(series => series.SeriesId == seriesId);
 
         List<string> sublist = [];

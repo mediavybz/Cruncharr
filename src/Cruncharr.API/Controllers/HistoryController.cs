@@ -88,7 +88,7 @@ public class HistoryController : ControllerBase{
     public async Task<ActionResult<HistorySeriesResponse?>> GetSeriesHistory(string seriesId){
         try{
             var history = await _historyService.GetHistorySeriesAsync();
-            var series = history.FirstOrDefault(s => s.SeriesId == seriesId);
+            var series = history?.FirstOrDefault(s => s.SeriesId == seriesId);
             if (series == null) return NotFound();
             return Ok(MapToResponse(series));
         } catch (Exception ex){

@@ -2577,6 +2577,8 @@ MAINTENANCE NOTES:
                 .replace(/\\/g, '\\\\')
                 .replace(/'/g, "\\'")
                 .replace(/"/g, '\\"')
+                .replace(/`/g, '\\`')
+                .replace(/\$\{/g, '\\${')
                 .replace(/\n/g, '\\n')
                 .replace(/\r/g, '\\r');
         }
@@ -4230,7 +4232,7 @@ MAINTENANCE NOTES:
                             <div class="history-episode-number">${ep.episode || '?'}</div>
                             <div class="history-episode-title">${escapeHtml(ep.episodeTitle || 'Unknown Episode')}</div>
                             <div class="history-episode-langs">
-                                ${(ep.downloadedDubLang || []).map(d => `<span class="lang-badge downloaded">${d}</span>`).join('')}
+                                ${(ep.downloadedDubLang || []).map(d => `<span class="lang-badge downloaded">${escapeHtml(d)}</span>`).join('')}
                             </div>
                             <div class="history-episode-status">
                                 <div class="tooltip-container">

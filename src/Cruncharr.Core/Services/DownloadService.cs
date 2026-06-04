@@ -137,7 +137,7 @@ public class DownloadService : IDownloadService{
             // Ported from upstream: find version matching episode's language
             if (!string.IsNullOrEmpty(episode.AudioLocale)){
                 currentVersion = episode.Versions.FirstOrDefault(v => 
-                    v.AudioLocale.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(v.AudioLocale, episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
             }
             
             // Use episode's SelectedDubs if set (from queue item), otherwise fall back to config
@@ -151,7 +151,7 @@ public class DownloadService : IDownloadService{
                 // Try each DubLanguage in order
                 foreach (var dubLang in dubLangs){
                     var matchingVersion = episode.Versions.FirstOrDefault(v => 
-                        v.AudioLocale.Equals(dubLang, StringComparison.OrdinalIgnoreCase));
+                        string.Equals(v.AudioLocale, dubLang, StringComparison.OrdinalIgnoreCase));
                     if (matchingVersion != null){
                         currentVersion = matchingVersion;
                         _logger?.LogInformation("SelectedDubs override: selected {DubLang} version instead of {OriginalLocale}", 

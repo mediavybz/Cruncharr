@@ -18,7 +18,11 @@ public static class MuxingHelpers{
         try{
             using (var process = new Process()){
                 process.StartInfo.FileName = bin;
-                process.StartInfo.Arguments = command;
+                // Parse command string into argument list to prevent injection
+                var args = ParseCommandLineArgs(command);
+                foreach (var arg in args){
+                    process.StartInfo.ArgumentList.Add(arg);
+                }
                 process.StartInfo.RedirectStandardOutput = true;
                 process.StartInfo.RedirectStandardError = true;
                 process.StartInfo.UseShellExecute = false;
@@ -116,5 +120,36 @@ public static class MuxingHelpers{
         }
 
         return false;
+    }
+    
+    /// <summary>
+    /// Parse a command-line string into individual arguments, respecting double quotes.
+    /// This prevents command injection when paths contain special characters.
+    /// </summary>
+    private static List<string> ParseCommandLineArgs(string command){
+        var args = new List<string>();
+        var current = new System.Text.StringBuilder();
+        bool inQuotes = false;
+        
+        for (int i = 0; i < command.Length; i++){
+            char c = command[i];
+            
+            if (c == '"'){
+                inQuotes = !inQuotes;
+            } else if (char.IsWhiteSpace(c) && !inQuotes){
+                if (current.Length > 0){
+                    args.Add(current.ToString());
+                    current.Clear();
+                }
+            } else{
+                current.Append(c);
+            }
+        }
+        
+        if (current.Length > 0){
+            args.Add(current.ToString());
+        }
+        
+        return args;
     }
 }

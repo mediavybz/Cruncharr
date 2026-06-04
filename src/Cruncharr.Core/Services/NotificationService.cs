@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
+using Cruncharr.Core.Utils;
 using Microsoft.Extensions.Logging;
 
 namespace Cruncharr.Core.Services;
@@ -121,6 +122,12 @@ public class NotificationService : INotificationService{
     
     private async Task SendWebhookAsync(CruncharrConfig config, object payload){
         try{
+            // SSRF protection: validate webhook URL before sending
+            if (!WebhookUrlValidator.IsValidWebhookUrl(config.Notifications.WebhookUrl, out var validationError)){
+                _logger?.LogWarning("Webhook URL failed validation: {Error}", validationError);
+                return;
+            }
+            
             var method = new HttpMethod(config.Notifications.WebhookMethod);
             var request = new HttpRequestMessage(method, config.Notifications.WebhookUrl);
             

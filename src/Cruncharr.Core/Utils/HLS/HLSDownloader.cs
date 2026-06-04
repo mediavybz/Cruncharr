@@ -646,12 +646,11 @@ public class HlsDownloader{
     }
 
     private async Task<byte[]?> SendRequestWithRetry(HttpRequestMessage requestPara, int partIndex, int segOffset, bool isKey, int retryCount, CancellationToken cancellationToken){
-        HttpResponseMessage response;
         for (int attempt = 0; attempt < retryCount + 1; attempt++){
             cancellationToken.ThrowIfCancellationRequested();
             using (var request = await CloneHttpRequestMessageAsync(requestPara)){
                 try{
-                    response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                     response.EnsureSuccessStatusCode();
                     return await ReadContentAsByteArrayAsync(response.Content, cancellationToken);
                 } catch (Exception ex) when (ex is HttpRequestException or IOException){

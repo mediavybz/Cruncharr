@@ -126,6 +126,7 @@ public class CalendarController : ControllerBase
                 DayName = day.DayName ?? day.DateTime.ToString("dddd"),
                 Episodes = day.CalendarEpisodes
                     .Where(e => !hideDubs || !CrSimulcastCalendarFilter.IsDubOrAltLanguageSeason(e.SeasonName))
+                    .Where(e => CrSimulcastCalendarFilter.MatchesLanguage(e.SeasonName, language))
                     .Select(MapEpisodeToResponse)
                     .ToList()
             }).ToList() ?? new List<CalendarDayResponse>()

@@ -7,7 +7,7 @@ namespace Cruncharr.Core.Utils;
 public class CrSimulcastCalendarFilter
 {
     private static readonly Regex SeasonLangSuffix =
-        new Regex(@"\bSeason\s+\d+\s*\((?&lt;tag&gt;.*)\)\s*$",
+        new Regex(@"\bSeason\s+\d+\s*\((?<tag>.*)\)\s*$",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static readonly string[] NonLanguageTags ={
@@ -60,6 +60,50 @@ public class CrSimulcastCalendarFilter
         foreach (var hint in LanguageHints)
             if (tag.Contains(hint, StringComparison.OrdinalIgnoreCase))
                 return true;
+
+        return false;
+    }
+
+    private static readonly Dictionary<string, string[]> LanguageFilters = new()
+    {
+        { "en-us", new[] { "english" } },
+        { "es", new[] { "español", "espanol", "spanish", "américa latina", "america latina", "latin america" } },
+        { "es-es", new[] { "español", "espanol", "spanish" } },
+        { "pt-br", new[] { "português", "portugues", "portuguese", "brasil", "brazil" } },
+        { "pt-pt", new[] { "português", "portugues", "portuguese" } },
+        { "fr", new[] { "français", "francais", "french" } },
+        { "de", new[] { "deutsch", "german" } },
+        { "it", new[] { "italiano", "italian" } },
+        { "ru", new[] { "рус", "russian" } },
+        { "ar", new[] { "arabic", "العربية" } },
+        { "hi", new[] { "hindi", "हिन्दी" } }
+    };
+
+    /// <summary>
+    /// Checks if a season name matches the specified language filter.
+    /// Returns true if the episode should be included for the given language.
+    /// </summary>
+    public static bool MatchesLanguage(string? seasonName, string language)
+    {
+        if (string.IsNullOrWhiteSpace(seasonName))
+            return true; // Include episodes with no season name
+
+        var lang = (language ?? "en-us").ToLowerInvariant();
+
+        // If no filter defined for this language, include all
+        if (!LanguageFilters.TryGetValue(lang, out var hints))
+            return true;
+
+        // Check if season name contains any hint for this language
+        foreach (var hint in hints)
+        {
+            if (seasonName.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        // For English, also include non-dub seasons (subbed/original)
+        if (lang == "en-us" && !IsDubOrAltLanguageSeason(seasonName))
+            return true;
 
         return false;
     }

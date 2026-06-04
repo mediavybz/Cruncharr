@@ -1310,7 +1310,7 @@ MAINTENANCE NOTES:
                 </a>
             </div>
             <div class="sidebar-footer">
-                <div id="version-info">v0.2.0-beta.3</div>
+                <div id="version-info">v0.2.0-beta.5</div>
                 <div id="connection-status" style="color: var(--accent-green);">Connected</div>
             </div>
         </aside>
@@ -1343,7 +1343,6 @@ MAINTENANCE NOTES:
         let currentPage = 'downloads';
         let queueData = [];
         let historyData = [];
-        let stats = {};
         let config = {};
         let authStatus = {};
         let calendarWeekOffset = 0;
@@ -1362,6 +1361,21 @@ MAINTENANCE NOTES:
         let onlyDownloadMode = { video: true, audio: true, sub: true };
         let isQueueGloballyPaused = false;
         let authIntervalId, historyIntervalId;
+        let historyFilterText = '';
+
+        // Constants
+        const AUTH_NOTIFICATION_THROTTLE_MS = 30000;
+        const AUTH_WARNING_THROTTLE_MS = 60000;
+        const HISTORY_POLL_INTERVAL_MS = 5000;
+        const AUTH_STATUS_TIMEOUT_MS = 5000;
+        const CONFIG_LOAD_TIMEOUT_MS = 10000;
+        const SSE_MAX_RETRIES = 10;
+        const SSE_BASE_RETRY_DELAY_MS = 3000;
+        const SSE_MAX_RETRY_DELAY_MS = 60000;
+        const FETCH_CONFIG_RETRY_DELAY_MS = 3000;
+        const HISTORY_SEARCH_DEBOUNCE_MS = 200;
+        const TOAST_DISPLAY_DURATION_MS = 3000;
+        const ACTIVE_DROPDOWN_LISTENERS = new Map(); // id -> listener function
 
         document.addEventListener('DOMContentLoaded', async () => {
             // Load config first so toggles are initialized correctly
@@ -1590,7 +1604,7 @@ MAINTENANCE NOTES:
                 
                 if (authErrors.length > 0) {
                     const now = Date.now();
-                    if (now - lastAuthNotification > 30000) { // Show at most every 30 seconds
+                    if (now - lastAuthNotification > AUTH_NOTIFICATION_THROTTLE_MS) {
                         lastAuthNotification = now;
                         const error = authErrors[0];
                         const doing = error.downloadProgress?.doing || '';
@@ -2208,12 +2222,13 @@ MAINTENANCE NOTES:
         async function fetchCalendar() {
             try {
                 // Compute Monday of target week
+                // dayOfWeek: 0=Sun, 1=Mon, ..., 6=Sat
+                // Days since Monday: Mon=0, Tue=1, ..., Sun=6
                 const now = new Date();
                 const dayOfWeek = now.getDay();
+                const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
                 const monday = new Date(now);
-                monday.setDate(now.getDate() - dayOfWeek + 1);
-                if (dayOfWeek === 0) monday.setDate(monday.getDate() - 7);
-                monday.setDate(monday.getDate() + (calendarWeekOffset * 7));
+                monday.setDate(now.getDate() - daysSinceMonday + (calendarWeekOffset * 7));
                 const year = monday.getFullYear();
                 const month = String(monday.getMonth() + 1).padStart(2, '0');
                 const day = String(monday.getDate()).padStart(2, '0');
@@ -2602,9 +2617,7 @@ MAINTENANCE NOTES:
             if (text == null) return '';
             const div = document.createElement('div');
             div.textContent = text;
-            return div.innerHTML
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
+            return div.innerHTML;
         }
 
         function escapeHtmlAttribute(text) {
@@ -2662,30 +2675,34 @@ MAINTENANCE NOTES:
             modal.classList.add('active');
             
             // Fetch and show episodes
-            fetch(`/api/v1/series/${seriesId}/episodes`).then(res => {
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                return res.json();
-            }).then(episodes => {
-                document.getElementById('modal-body').innerHTML = `
-                    <div style="max-height: 400px; overflow-y: auto;">
-                        ${(episodes || []).slice(0, 10).map(ep => `
-                            <div style="padding: 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <div style="font-weight: 500;">Episode ${escapeHtml(ep.episodeNumber || '?')}</div>
-                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${escapeHtml(ep.title || 'Unknown')}</div>
+            (async () => {
+                try {
+                    const res = await fetch(`/api/v1/series/${seriesId}/episodes`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const episodes = await res.json();
+                    const modalBody = document.getElementById('modal-body');
+                    if (modalBody) modalBody.innerHTML = `
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${(episodes || []).slice(0, 10).map(ep => `
+                                <div style="padding: 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-weight: 500;">Episode ${escapeHtml(ep.episodeNumber || '?')}</div>
+                                        <div style="font-size: 0.85em; color: var(--text-secondary);">${escapeHtml(ep.title || 'Unknown')}</div>
+                                    </div>
+                                    <button class="header-btn" onclick="addEpisodeToQueueWithDetails('${escapeJsString(ep.id)}', '${escapeJsString(ep.title || '')}', '${escapeJsString(seriesTitle)}')">Add</button>
                                 </div>
-                                <button class="header-btn" onclick="addEpisodeToQueueWithDetails('${escapeJsString(ep.id)}', '${escapeJsString(ep.title || '')}', '${escapeJsString(seriesTitle)}')">Add</button>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-            }).catch(() => {
-                document.getElementById('modal-body').innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-title">Failed to load episodes</div>
-                    </div>
-                `;
-            });
+                            `).join('')}
+                        </div>
+                    `;
+                } catch (e) {
+                    const modalBody = document.getElementById('modal-body');
+                    if (modalBody) modalBody.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-title">Failed to load episodes</div>
+                        </div>
+                    `;
+                }
+            })();
         }
 
         function performSearch() {
@@ -2707,21 +2724,22 @@ MAINTENANCE NOTES:
             }, 100);
         }
 
-        function addEpisodeToQueueWithDetails(episodeId, title, seriesTitle) {
-            fetch('/api/v1/queue', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    episodeId: episodeId,
-                    title: title || 'Unknown',
-                    seriesTitle: seriesTitle || 'Unknown'
-                })
-            }).then(res => {
+        async function addEpisodeToQueueWithDetails(episodeId, title, seriesTitle) {
+            try {
+                const res = await fetch('/api/v1/queue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        episodeId: episodeId,
+                        title: title || 'Unknown',
+                        seriesTitle: seriesTitle || 'Unknown'
+                    })
+                });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added to queue', 'success');
-            }).catch(() => {
+            } catch (e) {
                 showToast('Failed to add to queue', 'error');
-            });
+            }
         }
 
         // ================== HISTORY ==================
@@ -2787,7 +2805,7 @@ MAINTENANCE NOTES:
             if (!historyIntervalId) {
                 historyIntervalId = setInterval(() => {
                     if (currentPage === 'history') fetchHistoryData();
-                }, 5000);
+                }, HISTORY_POLL_INTERVAL_MS);
             }
         }
 
@@ -3037,43 +3055,126 @@ MAINTENANCE NOTES:
             if (modalBody) modalBody.innerHTML = `
                 <div class="form-group">
                     <label class="form-label">Email</label>
-                    <input type="email" class="form-input" id="login-email" placeholder="your@email.com">
+                    <input type="email" class="form-input" id="login-email" placeholder="your@email.com" onkeydown="if(event.key==='Enter'){event.preventDefault();doLogin();}">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Password</label>
-                    <input type="password" class="form-input" id="login-password" placeholder="Password">
+                    <div style="display:flex;gap:8px;">
+                        <input type="password" class="form-input" id="login-password" placeholder="Password" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();doLogin();}">
+                        <button type="button" class="btn-icon" onclick="togglePasswordVisibility()" title="Show/Hide Password">
+                            <span id="password-toggle-icon">&#128065;</span>
+                        </button>
+                    </div>
                 </div>
+                <div id="login-error" style="color:var(--accent-red);font-size:0.9em;margin-top:10px;display:none;"></div>
             `;
             if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Cancel</button>
-                <button class="header-btn primary" onclick="doLogin()">Login</button>
+                <button class="header-btn primary" id="login-btn" onclick="doLogin()">Login</button>
             `;
             if (modalEl) modalEl.classList.add('active');
+            // Focus email field
+            setTimeout(() => document.getElementById('login-email')?.focus(), 100);
+        }
+
+        function togglePasswordVisibility() {
+            const pwInput = document.getElementById('login-password');
+            const icon = document.getElementById('password-toggle-icon');
+            if (!pwInput) return;
+            if (pwInput.type === 'password') {
+                pwInput.type = 'text';
+                if (icon) icon.textContent = '🙈';
+            } else {
+                pwInput.type = 'password';
+                if (icon) icon.textContent = '👁';
+            }
+        }
+
+        function validateEmail(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
         }
 
         async function doLogin() {
             const emailEl = document.getElementById('login-email');
             const passwordEl = document.getElementById('login-password');
+            const loginBtn = document.getElementById('login-btn');
+            const errorEl = document.getElementById('login-error');
+            
             if (!emailEl || !passwordEl) { showToast('Login form not found', 'error'); return; }
-            const email = emailEl.value;
+            
+            const email = emailEl.value.trim();
             const password = passwordEl.value;
-            if (!email || !password) { showToast('Email and password required', 'error'); return; }
+            
+            // Validation
+            if (!email || !password) {
+                if (errorEl) { errorEl.textContent = 'Email and password are required'; errorEl.style.display = 'block'; }
+                return;
+            }
+            if (!validateEmail(email)) {
+                if (errorEl) { errorEl.textContent = 'Please enter a valid email address'; errorEl.style.display = 'block'; }
+                return;
+            }
+            
+            // Loading state
+            if (loginBtn) {
+                loginBtn.disabled = true;
+                loginBtn.textContent = 'Logging in...';
+            }
+            if (errorEl) errorEl.style.display = 'none';
+            
             try {
                 const res = await fetch('/api/v1/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password })
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 if (res.ok && data.Success) {
                     showToast('Logged in successfully', 'success');
                     closeModal();
-                    fetchAuthStatus();
+                    // Fetch auth status and auto-select profile if needed
+                    await fetchAuthStatus();
+                    await autoSelectProfileIfNeeded();
                 } else {
-                    showToast(data.message || 'Login failed', 'error');
+                    const msg = data.message || data.Message || 'Login failed';
+                    if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+                    else showToast(msg, 'error');
                 }
-            } catch (e) { showToast('Login error: ' + e.message, 'error'); }
+            } catch (e) {
+                const msg = 'Login error: ' + e.message;
+                if (errorEl) { errorEl.textContent = msg; errorEl.style.display = 'block'; }
+                else showToast(msg, 'error');
+            } finally {
+                if (loginBtn) {
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = 'Login';
+                }
+            }
+        }
+
+        async function autoSelectProfileIfNeeded() {
+            try {
+                const res = await fetch('/api/v1/auth/status');
+                if (!res.ok) return;
+                const status = await res.json();
+                
+                if (status.isAuthenticated && status.multiProfile && status.multiProfile.length > 1) {
+                    // Find the currently selected profile
+                    const selectedProfile = status.multiProfile.find(p => p.isSelected);
+                    if (selectedProfile && selectedProfile.profileId) {
+                        showToast(`Active profile: ${selectedProfile.profileName || selectedProfile.username || 'Default'}`, 'success');
+                        return;
+                    }
+                    // If no profile is selected, auto-select the first available one
+                    const firstAvailable = status.multiProfile.find(p => p.canSwitch && p.profileId);
+                    if (firstAvailable) {
+                        showToast(`Auto-selecting profile: ${firstAvailable.profileName || firstAvailable.username || 'Default'}`, 'info');
+                        await switchProfile(firstAvailable.profileId);
+                    }
+                }
+            } catch (e) {
+                console.warn('Auto profile selection failed:', e);
+            }
         }
 
         async function logout() {
@@ -3548,7 +3649,12 @@ MAINTENANCE NOTES:
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 config = await res.json();
                 applyTheme();
-            } catch (e) { console.error('Failed to load config:', e); }
+            } catch (e) {
+                console.error('Failed to load config:', e);
+                showToast('Failed to load settings. Retrying...', 'error');
+                // Retry after 3 seconds
+                setTimeout(fetchConfig, FETCH_CONFIG_RETRY_DELAY_MS);
+            }
         }
 
         function applyTheme() {
@@ -3832,13 +3938,19 @@ MAINTENANCE NOTES:
         async function toggleSetting(key, value) {
             console.log('Toggle', key, value);
             
-            let updateData = {};
+            const settingMap = {
+                'removeFinished': { section: 'general', field: 'removeFinishedDownload', label: 'Remove Finished' },
+                'autoDownload': { section: 'queue', field: 'autoDownload', label: 'Auto Download' }
+            };
             
-            if (key === 'removeFinished') {
-                updateData = { general: { removeFinishedDownload: value } };
-            } else if (key === 'autoDownload') {
-                updateData = { queue: { autoDownload: value } };
+            const setting = settingMap[key];
+            if (!setting) {
+                console.warn('Unknown toggle key:', key);
+                return;
             }
+            
+            let updateData = {};
+            updateData[setting.section] = { [setting.field]: value };
             
             try {
                 const res = await fetch('/api/v1/config', {
@@ -3847,25 +3959,22 @@ MAINTENANCE NOTES:
                     body: JSON.stringify(updateData)
                 });
                 if (res.ok) {
-                    showToast(`${key === 'removeFinished' ? 'Remove Finished' : 'Auto Download'} ${value ? 'enabled' : 'disabled'}`, 'success');
+                    showToast(`${setting.label} ${value ? 'enabled' : 'disabled'}`, 'success');
                     // Update local config cache
-                    if (key === 'removeFinished') {
-                        config.general = config.general || {};
-                        config.general.removeFinishedDownload = value;
-                    } else if (key === 'autoDownload') {
-                        config.queue = config.queue || {};
-                        config.queue.autoDownload = value;
-                    }
+                    config[setting.section] = config[setting.section] || {};
+                    config[setting.section][setting.field] = value;
                 } else {
                     showToast('Failed to save setting', 'error');
                     // Revert checkbox on failure
-                    const checkbox = document.getElementById(key === 'removeFinished' ? 'toggle-remove-finished' : 'toggle-auto-download');
+                    const checkboxId = key === 'removeFinished' ? 'toggle-remove-finished' : 'toggle-auto-download';
+                    const checkbox = document.getElementById(checkboxId);
                     if (checkbox) checkbox.checked = !value;
                 }
             } catch (e) {
                 showToast('Error saving setting', 'error');
                 // Revert checkbox on failure
-                const checkbox = document.getElementById(key === 'removeFinished' ? 'toggle-remove-finished' : 'toggle-auto-download');
+                const checkboxId = key === 'removeFinished' ? 'toggle-remove-finished' : 'toggle-auto-download';
+                const checkbox = document.getElementById(checkboxId);
                 if (checkbox) checkbox.checked = !value;
             }
         }
@@ -3997,8 +4106,6 @@ MAINTENANCE NOTES:
             }
         }
         
-        let historyFilterText = '';
-        
         function filterHistory(query) {
             historyFilterText = query.toLowerCase();
             renderHistoryContent();
@@ -4019,9 +4126,41 @@ MAINTENANCE NOTES:
             }
         }
 
+        function attachDropdownListener(dropdownId, dropdownEl) {
+            // Remove any existing listener for this dropdown
+            const existingListener = ACTIVE_DROPDOWN_LISTENERS.get(dropdownId);
+            if (existingListener) {
+                document.removeEventListener('click', existingListener);
+                ACTIVE_DROPDOWN_LISTENERS.delete(dropdownId);
+            }
+            const listener = function closeDropdown(e) {
+                if (!dropdownEl.contains(e.target)) {
+                    dropdownEl.remove();
+                    document.removeEventListener('click', listener);
+                    ACTIVE_DROPDOWN_LISTENERS.delete(dropdownId);
+                }
+            };
+            ACTIVE_DROPDOWN_LISTENERS.set(dropdownId, listener);
+            setTimeout(() => {
+                document.addEventListener('click', listener);
+            }, 0);
+        }
+
+        function removeDropdown(dropdownId) {
+            const dropdown = document.getElementById(dropdownId);
+            if (dropdown) {
+                dropdown.remove();
+                const listener = ACTIVE_DROPDOWN_LISTENERS.get(dropdownId);
+                if (listener) {
+                    document.removeEventListener('click', listener);
+                    ACTIVE_DROPDOWN_LISTENERS.delete(dropdownId);
+                }
+            }
+        }
+
         function showHistoryMaintenanceMenu(e) {
             const existing = document.getElementById('maintenance-dropdown');
-            if (existing) { existing.remove(); return; }
+            if (existing) { removeDropdown('maintenance-dropdown'); return; }
 
             const btn = e?.target?.closest('.toolbar-btn');
             const dropdown = document.createElement('div');
@@ -4031,27 +4170,19 @@ MAINTENANCE NOTES:
             dropdown.style.top = (btn.offsetTop + btn.offsetHeight + 5) + 'px';
             dropdown.style.left = btn.offsetLeft + 'px';
             dropdown.innerHTML = `
-                <div class="dropdown-item" onclick="cleanupUnavailableEpisodes(); document.getElementById('maintenance-dropdown').remove();">
+                <div class="dropdown-item" onclick="cleanupUnavailableEpisodes(); removeDropdown('maintenance-dropdown');">
                     <span>&#128465;</span> Remove Unavailable Episodes
                 </div>
-                <div class="dropdown-item" onclick="sortHistory(); document.getElementById('maintenance-dropdown').remove();">
+                <div class="dropdown-item" onclick="sortHistory(); removeDropdown('maintenance-dropdown');">
                     <span>&#8645;</span> Sort History
                 </div>
                 <div class="dropdown-divider"></div>
-                <div class="dropdown-item" onclick="refreshAllSeries(); document.getElementById('maintenance-dropdown').remove();">
+                <div class="dropdown-item" onclick="refreshAllSeries(); removeDropdown('maintenance-dropdown');">
                     <span>&#128260;</span> Refresh All Series
                 </div>
             `;
             document.body.appendChild(dropdown);
-
-            setTimeout(() => {
-                document.addEventListener('click', function closeDropdown(e) {
-                    if (!dropdown.contains(e.target)) {
-                        dropdown.remove();
-                        document.removeEventListener('click', closeDropdown);
-                    }
-                });
-            }, 0);
+            attachDropdownListener('maintenance-dropdown', dropdown);
         }
 
         async function cleanupUnavailableEpisodes() {
@@ -4110,7 +4241,7 @@ MAINTENANCE NOTES:
 
         function toggleSortMenu(e) {
             const existing = document.getElementById('sort-dropdown');
-            if (existing) { existing.remove(); return; }
+            if (existing) { removeDropdown('sort-dropdown'); return; }
 
             const btn = e?.target?.closest('.toolbar-btn');
             const dropdown = document.createElement('div');
@@ -4120,24 +4251,16 @@ MAINTENANCE NOTES:
             dropdown.style.top = (btn.offsetTop + btn.offsetHeight + 5) + 'px';
             dropdown.style.left = btn.offsetLeft + 'px';
             dropdown.innerHTML = `
-                <div class="dropdown-item" onclick="sortHistoryBy('title'); document.getElementById('sort-dropdown').remove();">
+                <div class="dropdown-item" onclick="sortHistoryBy('title'); removeDropdown('sort-dropdown');">
                     <span>&#128199;</span> By Title
                 </div>
 
-                <div class="dropdown-item" onclick="sortHistoryBy('status'); document.getElementById('sort-dropdown').remove();">
+                <div class="dropdown-item" onclick="sortHistoryBy('status'); removeDropdown('sort-dropdown');">
                     <span>&#9989;</span> By Status
                 </div>
             `;
             document.body.appendChild(dropdown);
-
-            setTimeout(() => {
-                document.addEventListener('click', function closeDropdown(e) {
-                    if (!dropdown.contains(e.target)) {
-                        dropdown.remove();
-                        document.removeEventListener('click', closeDropdown);
-                    }
-                });
-            }, 0);
+            attachDropdownListener('sort-dropdown', dropdown);
         }
 
         function sortHistoryBy(field) {
@@ -4298,7 +4421,7 @@ MAINTENANCE NOTES:
                                     <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
                                 </div>
                             </div>
-                            ${!ep.wasDownloaded ? `<button class="btn-icon" onclick="addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}')" title="Add to queue">&#128229;</button>` : ''}
+                            ${!ep.wasDownloaded ? `<button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}')" title="Add to queue">&#128229;</button>` : ''}
                         </div>
                     `;
                 }).join('');
@@ -4332,14 +4455,14 @@ MAINTENANCE NOTES:
             }
         }
         
-        async function addHistoryEpisodeToQueue(episodeId, seriesTitle) {
+        async function addHistoryEpisodeToQueue(episodeId, seriesTitle, episodeTitle) {
             try {
                 const res = await fetch('/api/v1/queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         episodeId: episodeId,
-                        title: 'Unknown Episode',
+                        title: episodeTitle || 'Unknown Episode',
                         seriesTitle: seriesTitle || 'Unknown'
                     })
                 });
@@ -4429,10 +4552,14 @@ MAINTENANCE NOTES:
             }
         }
         
+        let historySearchDebounce;
         function onHistorySearchInput(value) {
             historySearchQuery = value;
-            filterHistory(value);
-            updateHistorySearchPopup(value);
+            clearTimeout(historySearchDebounce);
+            historySearchDebounce = setTimeout(() => {
+                filterHistory(value);
+                updateHistorySearchPopup(value);
+            }, HISTORY_SEARCH_DEBOUNCE_MS);
         }
         
         function updateHistorySearchPopup(query) {
@@ -4473,7 +4600,7 @@ MAINTENANCE NOTES:
         function openSonarrMenu(event) {
             event.stopPropagation();
             const existing = document.getElementById('sonarr-dropdown');
-            if (existing) { existing.remove(); return; }
+            if (existing) { removeDropdown('sonarr-dropdown'); return; }
             
             const btn = event.target.closest('.toolbar-btn');
             const dropdown = document.createElement('div');
@@ -4483,24 +4610,16 @@ MAINTENANCE NOTES:
             dropdown.style.top = (btn.offsetTop + btn.offsetHeight + 5) + 'px';
             dropdown.style.left = btn.offsetLeft + 'px';
             dropdown.innerHTML = `
-                <div class="dropdown-item" onclick="matchAllSeriesSonarr(); document.getElementById('sonarr-dropdown').remove();">
+                <div class="dropdown-item" onclick="matchAllSeriesSonarr(); removeDropdown('sonarr-dropdown');">
                     <span>&#127758;</span> Match All Series
                 </div>
                 <div class="dropdown-divider"></div>
-                <div class="dropdown-item" onclick="fetchHistoryData(); document.getElementById('sonarr-dropdown').remove();">
+                <div class="dropdown-item" onclick="fetchHistoryData(); removeDropdown('sonarr-dropdown');">
                     <span>&#128260;</span> Refresh History
                 </div>
             `;
             document.body.appendChild(dropdown);
-            
-            setTimeout(() => {
-                document.addEventListener('click', function closeSonarrDropdown(e) {
-                    if (!dropdown.contains(e.target)) {
-                        dropdown.remove();
-                        document.removeEventListener('click', closeSonarrDropdown);
-                    }
-                });
-            }, 0);
+            attachDropdownListener('sonarr-dropdown', dropdown);
         }
         
         async function matchAllSeriesSonarr() {
@@ -4709,6 +4828,20 @@ MAINTENANCE NOTES:
             if (modal) modal.classList.remove('active');
         }
 
+        // ESC key to close modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('modal');
+                if (modal && modal.classList.contains('active')) {
+                    closeModal();
+                }
+                // Also close any open dropdowns
+                document.querySelectorAll('.dropdown-menu.active').forEach(d => d.remove());
+                // Close history search popup
+                if (historySearchPopupOpen) closeHistorySearchPopup();
+            }
+        });
+
         function showToast(message, type = 'success') {
             const container = document.getElementById('toast-container');
             if (!container) return;
@@ -4716,7 +4849,7 @@ MAINTENANCE NOTES:
             toast.className = `toast ${type}`;
             toast.innerHTML = `<span>${type === 'success' ? '&#10004;' : type === 'error' ? '&#10060;' : '&#9888;'}</span><span>${escapeHtml(message)}</span>`;
             container.appendChild(toast);
-            setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; setTimeout(() => toast.remove(), 300); }, 3000);
+            setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; setTimeout(() => toast.remove(), 300); }, TOAST_DISPLAY_DURATION_MS);
         }
 
         function getStatusBadge(state) {
@@ -4775,7 +4908,7 @@ MAINTENANCE NOTES:
         function startPolling() {
             // Check auth status periodically
             checkAuthStatus();
-            authIntervalId = setInterval(checkAuthStatus, 30000);
+            authIntervalId = setInterval(checkAuthStatus, AUTH_NOTIFICATION_THROTTLE_MS);
             
             // Use SSE for real-time queue updates instead of polling
             startQueueSSE();
@@ -4784,7 +4917,7 @@ MAINTENANCE NOTES:
             if (!historyIntervalId) {
                 historyIntervalId = setInterval(() => {
                     if (currentPage === 'history') fetchHistoryData();
-                }, 5000);
+                }, HISTORY_POLL_INTERVAL_MS);
             }
             
             // Clear intervals and SSE on page unload
@@ -4799,16 +4932,24 @@ MAINTENANCE NOTES:
         }
         
         let sseRetryCount = 0;
-        const MAX_SSE_RETRIES = 10;
-
+        ;
         let sseReconnecting = false;
+        let sseReconnectTimeout = null;
+
         function startQueueSSE() {
             if (typeof EventSource === 'undefined') {
                 console.warn('EventSource not supported, falling back to polling');
                 return;
             }
+            // Clean up existing connection
             if (eventSource) {
                 eventSource.close();
+                eventSource = null;
+            }
+            // Clear any pending reconnect
+            if (sseReconnectTimeout) {
+                clearTimeout(sseReconnectTimeout);
+                sseReconnectTimeout = null;
             }
             if (sseRetryCount >= MAX_SSE_RETRIES) {
                 console.error('SSE max retries exceeded. Falling back to polling.');
@@ -4830,12 +4971,15 @@ MAINTENANCE NOTES:
                 if (sseReconnecting) return;
                 sseReconnecting = true;
                 console.error('SSE connection error:', error);
-                eventSource.close();
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
                 sseRetryCount++;
-                const delay = Math.min(3000 * Math.pow(2, sseRetryCount), 60000);
-                setTimeout(() => {
+                const delay = Math.min(SSE_BASE_RETRY_DELAY_MS * Math.pow(2, sseRetryCount), SSE_MAX_RETRY_DELAY_MS);
+                sseReconnectTimeout = setTimeout(() => {
                     sseReconnecting = false;
-                    if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
+                    if (!eventSource) {
                         startQueueSSE();
                     }
                 }, delay);
@@ -4850,27 +4994,34 @@ MAINTENANCE NOTES:
         let lastAuthWarning = 0;
         async function checkAuthStatus() {
             try {
-                const res = await fetch('/api/v1/auth/status');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), AUTH_STATUS_TIMEOUT_MS);
+                const res = await fetch('/api/v1/auth/status', { signal: controller.signal });
+                clearTimeout(timeoutId);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const status = await res.json();
                 authStatus = status;
                 
                 const now = Date.now();
                 if (!status.isAuthenticated) {
-                    if (now - lastAuthWarning > 60000) { // Warn every 60 seconds
+                    if (now - lastAuthWarning > AUTH_WARNING_THROTTLE_MS) {
                         lastAuthWarning = now;
                         showToast('You are not logged in. Please go to Account tab to log in.', 'warning');
                     }
                 } else if (!status.hasPremium) {
                     // Check if there are premium items in queue
                     const hasPremiumItems = queueData.some(i => i.episode?.isPremium);
-                    if (hasPremiumItems && now - lastAuthWarning > 60000) {
+                    if (hasPremiumItems && now - lastAuthWarning > AUTH_WARNING_THROTTLE_MS) {
                         lastAuthWarning = now;
                         showToast('No premium subscription detected. Premium content will fail to download.', 'warning');
                     }
                 }
             } catch (e) {
-                console.error('Failed to check auth status:', e);
+                // Only log once to avoid console spam
+                if (!window._authCheckFailed) {
+                    window._authCheckFailed = true;
+                    console.warn('Auth status check failed (will retry silently):', e.message);
+                }
             }
         }
 

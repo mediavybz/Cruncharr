@@ -2153,9 +2153,8 @@ MAINTENANCE NOTES:
                     <button class="header-btn" onclick="changeWeek(-1)">&#9664; Prev</button>
                     <div style="display:flex; gap:10px; align-items:center;">
                         <button class="header-btn" onclick="fetchCalendar()">&#128260; Refresh</button>
-                        <select class="form-select" id="calendar-lang" style="min-width:150px;" onchange="fetchCalendar()">
+                        <select class="form-select" id="calendar-lang" style="min-width:150px;" onchange="onCalendarLanguageChange(this.value)">
                             <option value="en-us">English</option>
-                            <option value="ja-jp">Japanese</option>
                             <option value="es">Spanish</option>
                             <option value="es-es">Spanish (Spain)</option>
                             <option value="pt-br">Portuguese (Brazil)</option>
@@ -2174,6 +2173,30 @@ MAINTENANCE NOTES:
                     <div class="loading"><div class="spinner"></div>Loading calendar...</div>
                 </div>
             `;
+            // Set initial language from config
+            const langSelect = document.getElementById('calendar-lang');
+            if (langSelect && config?.calendar?.language) {
+                const configLang = config.calendar.language.toLowerCase();
+                const option = langSelect.querySelector(`option[value="${configLang}"]`);
+                if (option) langSelect.value = configLang;
+            }
+            fetchCalendar();
+        }
+
+        async function onCalendarLanguageChange(language) {
+            // Save to config
+            try {
+                await fetch('/api/v1/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ calendar: { language: language } })
+                });
+                // Update local config
+                if (!config.calendar) config.calendar = {};
+                config.calendar.language = language;
+            } catch (e) {
+                console.warn('Failed to save calendar language:', e);
+            }
             fetchCalendar();
         }
 

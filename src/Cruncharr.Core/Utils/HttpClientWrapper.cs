@@ -116,7 +116,7 @@ public class HttpClientWrapper : IDisposable{
                 Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
             };
             
-            var flareResponse = await _flareSolverrClient!.SendAsync(flareRequest, cancellationToken);
+            using var flareResponse = await _flareSolverrClient!.SendAsync(flareRequest, cancellationToken);
             flareResponse.EnsureSuccessStatusCode();
             
             // Parse FlareSolverr response and extract actual HTML content

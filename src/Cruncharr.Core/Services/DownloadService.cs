@@ -366,7 +366,7 @@ public class DownloadService : IDownloadService{
                 // Download primary audio (skip if NoAudio is enabled)
                 if (playbackData.AudioUrl != null && !config.Download.NoAudio){
                     progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 60, Doing = $"Downloading audio ({episode.AudioLocale})..." });
-                    var audioPath = Path.Combine(tempDir, $"audio_{episode.AudioLocale.Replace("-", "").ToLower()}.m4a");
+                    var audioPath = Path.Combine(tempDir, $"audio_{(episode.AudioLocale ?? "unknown").Replace("-", "").ToLower()}.m4a");
                     
                     if (audioIsHls){
                         var hlsResult = await DownloadHlsStreamAsync(playbackData.AudioUrl, audioPath, false, true, config, progress, 60, 80, cancellationToken);
@@ -396,7 +396,7 @@ public class DownloadService : IDownloadService{
                         
                         if (primaryAudio.Path != null && File.Exists(primaryAudio.Path)){
                             var adLocale = episode.AudioLocale;
-                            var adPath = Path.Combine(tempDir, $"audio_{adLocale.Replace("-", "").ToLower()}_ad.m4a");
+                            var adPath = Path.Combine(tempDir, $"audio_{(adLocale ?? "unknown").Replace("-", "").ToLower()}_ad.m4a");
                             
                             try{
                                 File.Copy(primaryAudio.Path, adPath, true);
@@ -448,7 +448,7 @@ public class DownloadService : IDownloadService{
                             // Download sync video for timing comparison if SyncTiming is enabled
                             if (config.Download.SyncTiming && config.Download.DlVideoOnce && dubPlayback?.VideoUrl != null){
                                 progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 62, Doing = $"Downloading sync video ({dub})..." });
-                                var syncVideoPath = Path.Combine(tempDir, $"syncvideo_{dub.Replace("-", "").ToLower()}.mp4");
+                                var syncVideoPath = Path.Combine(tempDir, $"syncvideo_{(dub ?? "unknown").Replace("-", "").ToLower()}.mp4");
                                 var dubVideoIsHls = IsHlsUrl(dubPlayback.VideoUrl);
                                 
                                 if (dubVideoIsHls){
@@ -467,7 +467,7 @@ public class DownloadService : IDownloadService{
                             if (dubPlayback?.AudioUrl != null){
                                 progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 65, Doing = $"Downloading audio ({dub})..." });
                                 
-                                var dubAudioPath = Path.Combine(tempDir, $"audio_{dub.Replace("-", "").ToLower()}.m4a");
+                                var dubAudioPath = Path.Combine(tempDir, $"audio_{(dub ?? "unknown").Replace("-", "").ToLower()}.m4a");
                                 var dubAudioIsHls = IsHlsUrl(dubPlayback.AudioUrl);
                                 
                                 if (dubAudioIsHls){
@@ -522,7 +522,7 @@ public class DownloadService : IDownloadService{
                                     if (adPlayback?.AudioUrl != null){
                                         progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 67, Doing = $"Downloading audio description ({adLocale})..." });
                                         
-                                        var adAudioPath = Path.Combine(tempDir, $"audio_{adLocale.Replace("-", "").ToLower()}_ad.m4a");
+                                        var adAudioPath = Path.Combine(tempDir, $"audio_{(adLocale ?? "unknown").Replace("-", "").ToLower()}_ad.m4a");
                                         var adAudioIsHls = IsHlsUrl(adPlayback.AudioUrl);
                                         
                                         if (adAudioIsHls){
@@ -555,7 +555,7 @@ public class DownloadService : IDownloadService{
             if (!config.Download.SkipSubs && playbackData.Subtitles != null && playbackData.Subtitles.Count > 0){
                 progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 80, Doing = "Downloading subtitles..." });
                 foreach (var sub in playbackData.Subtitles){
-                    var langCode = sub.Lang.Replace("-", "").ToLower();
+                    var langCode = (sub.Lang ?? "unknown").Replace("-", "").ToLower();
                     var subLangs = config.Download.SoftSubs?.Count > 0 ? config.Download.SoftSubs : config.Download.SubtitleLanguages;
                     var shouldDownload = subLangs.Contains("all") || 
                                          subLangs.Contains(sub.Lang) ||
@@ -1517,7 +1517,7 @@ public class DownloadService : IDownloadService{
             
             for (int i = 0; i < chosenAudios.Count; i++){
                 var (audioItem, lang) = chosenAudios[i];
-                var langCode = lang.Replace("-", "").ToLower();
+                var langCode = (lang ?? "unknown").Replace("-", "").ToLower();
                 var audioFileName = chosenAudios.Count(a => a.Item2 == lang) > 1 
                     ? $"audio_{langCode}_{i}.m4s" 
                     : $"audio_{langCode}.m4s";
@@ -1994,10 +1994,16 @@ public class DownloadService : IDownloadService{
         }
     }
     
+    private static string EscapeProcessArgument(string arg){
+        if (string.IsNullOrEmpty(arg)) return "";
+        if (!arg.Contains(' ') && !arg.Contains('"') && !arg.Contains('\\')) return arg;
+        return "\"" + arg.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+    }
+    
     private async Task RunProcessAsync(string executable, List<string> args, CancellationToken cancellationToken){
         var startInfo = new ProcessStartInfo{
             FileName = executable,
-            Arguments = string.Join(" ", args.Select(a => a.Contains(" ") ? $"\"{a}\"" : a)),
+            Arguments = string.Join(" ", args.Select(EscapeProcessArgument)),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -2039,7 +2045,7 @@ public class DownloadService : IDownloadService{
     private async Task<string> RunProcessWithOutputAsync(string executable, List<string> args, CancellationToken cancellationToken){
         var startInfo = new ProcessStartInfo{
             FileName = executable,
-            Arguments = string.Join(" ", args.Select(a => a.Contains(" ") ? $"\"{a}\"" : a)),
+            Arguments = string.Join(" ", args.Select(EscapeProcessArgument)),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -2230,7 +2236,7 @@ public class DownloadService : IDownloadService{
             }
             
             // Download video at best quality (no audio, no subs)
-            var fallbackPath = Path.Combine(tempDir, $"video_fallback_{locale.Replace("-", "").ToLower()}.mp4");
+            var fallbackPath = Path.Combine(tempDir, $"video_fallback_{(locale ?? "unknown").Replace("-", "").ToLower()}.mp4");
             var videoIsHls = IsHlsUrl(playbackData.VideoUrl);
             
             progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 30, Doing = $"Downloading fallback video ({locale})..." });

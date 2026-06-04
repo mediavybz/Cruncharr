@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
@@ -62,9 +63,12 @@ public class CalendarController : ControllerBase{
         [FromQuery] string language = "en-us",
         [FromQuery] bool forceUpdate = false){
         try{
-            var targetDate = string.IsNullOrEmpty(date) 
-                ? DateTime.Now 
-                : DateTime.Parse(date);
+            DateTime targetDate;
+            if (string.IsNullOrEmpty(date)){
+                targetDate = DateTime.Now;
+            } else if (!DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out targetDate)){
+                return BadRequest(new { Error = "Invalid date format", Message = "Date must be in yyyy-MM-dd format" });
+            }
             
             var week = await _calendarService.GetCustomCalendarAsync(targetDate, language, forceUpdate);
             var response = MapToResponse(week, language);

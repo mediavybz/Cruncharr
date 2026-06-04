@@ -298,10 +298,10 @@ public class QueueService : IQueueService, IDisposable{
         if (_config?.Queue.ShutdownWhenQueueEmpty != true)
             return;
         
-        bool hasUnfinishedItems = _queue.Values.Any(q => !q.DownloadProgress.IsDone && !q.DownloadProgress.IsError);
         bool shouldShutdown = false;
         
         lock (_downloadStartLock){
+            bool hasUnfinishedItems = _queue.Values.Any(q => !q.DownloadProgress.IsDone && !q.DownloadProgress.IsError);
             if (!hasUnfinishedItems && _activeOrStarting.Count == 0){
                 _logger?.LogInformation("Queue is empty and ShutdownWhenQueueEmpty is enabled - shutting down");
                 _config.Queue.ShutdownWhenQueueEmpty = false;

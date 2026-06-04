@@ -14,6 +14,7 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable{
     private readonly string _queueFilePath;
     private readonly object _syncLock = new();
     private Timer? _saveTimer;
+    private List<QueueItem>? _latestQueue;
 
     public QueuePersistenceService(string queueFilePath){
         _queueFilePath = queueFilePath ?? throw new ArgumentNullException(nameof(queueFilePath));
@@ -30,8 +31,15 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable{
 
     public void ScheduleSave(List<QueueItem> queue){
         lock (_syncLock){
+            _latestQueue = queue;
             if (_saveTimer == null){
-                _saveTimer = new Timer(_ => PersistQueue(queue), null, TimeSpan.FromMilliseconds(750), Timeout.InfiniteTimeSpan);
+                _saveTimer = new Timer(_ => {
+                    List<QueueItem>? q;
+                    lock (_syncLock){
+                        q = _latestQueue;
+                    }
+                    if (q != null) PersistQueue(q);
+                }, null, TimeSpan.FromMilliseconds(750), Timeout.InfiniteTimeSpan);
                 return;
             }
 

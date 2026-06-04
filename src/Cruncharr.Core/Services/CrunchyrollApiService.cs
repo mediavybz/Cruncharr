@@ -38,7 +38,7 @@ public interface ICrunchyrollApiService{
     Task<CrunchySeriesList?> ListSeriesIdAsync(string id, string crLocale, CrunchyMultiDownload? data, bool forcedLocale = false, CancellationToken cancellationToken = default);
 }
 
-public class CrunchyrollApiService : ICrunchyrollApiService{
+public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable{
     private readonly ILogger<CrunchyrollApiService>? _logger;
     private readonly ICrunchyrollAuthService _authService;
     private readonly HttpClientWrapper _httpClient;
@@ -699,7 +699,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                     ?? string.Empty;
 
                 var seasonIdentifier = !string.IsNullOrEmpty(s.Identifier)
-                    ? s.Identifier.Split('|')[1]
+                    ? (s.Identifier.Split('|').Length > 1 ? s.Identifier.Split('|')[1] : $"S{episode.SeasonNumber}")
                     : $"S{episode.SeasonNumber}";
 
                 var episodeKey = $"{seasonIdentifier}E{episodeNum}";
@@ -1098,7 +1098,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
         // The conversion logic is ported from upstream CrEpisode.EpisodeData.
 
         var seasonIdentifier = !string.IsNullOrEmpty(episode.Identifier)
-            ? episode.Identifier.Split('|')[1]
+            ? (episode.Identifier.Split('|').Length > 1 ? episode.Identifier.Split('|')[1] : $"S{episode.SeasonNumber}")
             : $"S{episode.SeasonNumber}";
 
         data.Key = $"{seasonIdentifier}E{episode.Episode ?? episode.EpisodeNumber.ToString()}";
@@ -1281,6 +1281,10 @@ public class CrunchyrollApiService : ICrunchyrollApiService{
                 SeasonGuid = v.SeasonGuid
             }).ToList()
         };
+    }
+    
+    public void Dispose(){
+        _httpClient?.Dispose();
     }
 }
 

@@ -467,7 +467,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
                 if (updated){
                     _logger?.LogInformation("Auth credentials updated, retrying login...");
                     // Retry login with updated credentials
-                    crunchyAuthHeaders["Authorization"] = StreamEndpoint.Authorization;
+                    crunchyAuthHeaders["Authorization"] = StreamEndpoint.Authorization ?? string.Empty;
                     crunchyAuthHeaders["User-Agent"] = StreamEndpoint.UserAgent;
                     
                     request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth){

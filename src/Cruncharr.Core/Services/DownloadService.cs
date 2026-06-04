@@ -372,12 +372,12 @@ public class DownloadService : IDownloadService{
                         var hlsResult = await DownloadHlsStreamAsync(playbackData.AudioUrl, audioPath, false, true, config, progress, 60, 80, cancellationToken);
                         if (hlsResult.Ok){
                             downloadedFiles.Add(audioPath);
-                            audioTrackLanguages.Add((audioPath, episode.AudioLocale));
+                            audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? "unknown"));
                         }
                     } else{
                         await DownloadStreamAsync(playbackData.AudioUrl, audioPath, progress, 60, 80, cancellationToken, playbackData.VideoToken);
                         downloadedFiles.Add(audioPath);
-                            audioTrackLanguages.Add((audioPath, episode.AudioLocale));
+                            audioTrackLanguages.Add((audioPath, episode.AudioLocale ?? "unknown"));
                     }
                 } else if (config.Download.NoAudio){
                     _logger?.LogInformation("NoAudio enabled, skipping audio download");
@@ -401,7 +401,7 @@ public class DownloadService : IDownloadService{
                             try{
                                 File.Copy(primaryAudio.Path, adPath, true);
                                 downloadedFiles.Add(adPath);
-                                audioTrackLanguages.Add((adPath, adLocale));
+                                audioTrackLanguages.Add((adPath, adLocale ?? "unknown"));
                                 _logger?.LogInformation("Auto-generated AD track from primary audio: {Locale} -> {Path}", adLocale, adPath);
                             } catch (Exception ex){
                                 _logger?.LogWarning(ex, "Failed to auto-generate AD track from primary audio");
@@ -454,12 +454,12 @@ public class DownloadService : IDownloadService{
                                 if (dubVideoIsHls){
                                     var hlsResult = await DownloadHlsStreamAsync(dubPlayback.VideoUrl, syncVideoPath, true, false, config, progress, 60, 65, cancellationToken);
                                     if (hlsResult.Ok){
-                                        syncVideos[dub] = syncVideoPath;
+                                        syncVideos[dub ?? "unknown"] = syncVideoPath;
                                         _logger?.LogInformation("Downloaded sync video for dub: {Dub} -> {Path}", dub, syncVideoPath);
                                     }
                                 } else{
                                     await DownloadStreamAsync(dubPlayback.VideoUrl, syncVideoPath, progress, 60, 65, cancellationToken, dubPlayback.VideoToken);
-                                    syncVideos[dub] = syncVideoPath;
+                                    syncVideos[dub ?? "unknown"] = syncVideoPath;
                                     _logger?.LogInformation("Downloaded sync video for dub: {Dub} -> {Path}", dub, syncVideoPath);
                                 }
                             }
@@ -474,13 +474,13 @@ public class DownloadService : IDownloadService{
                                     var hlsResult = await DownloadHlsStreamAsync(dubPlayback.AudioUrl, dubAudioPath, false, true, config, progress, 65, 80, cancellationToken);
                                     if (hlsResult.Ok){
                                         downloadedFiles.Add(dubAudioPath);
-                                        audioTrackLanguages.Add((dubAudioPath, dub));
+                                        audioTrackLanguages.Add((dubAudioPath, dub ?? "unknown"));
                                         _logger?.LogInformation("Downloaded additional audio track: {Dub} -> {Path}", dub, dubAudioPath);
                                     }
                                 } else{
                                     await DownloadStreamAsync(dubPlayback.AudioUrl, dubAudioPath, progress, 65, 80, cancellationToken, dubPlayback.VideoToken);
                                     downloadedFiles.Add(dubAudioPath);
-                                    audioTrackLanguages.Add((dubAudioPath, dub));
+                                    audioTrackLanguages.Add((dubAudioPath, dub ?? "unknown"));
                                     _logger?.LogInformation("Downloaded additional audio track: {Dub} -> {Path}", dub, dubAudioPath);
                                 }
                             }
@@ -529,13 +529,13 @@ public class DownloadService : IDownloadService{
                                             var hlsResult = await DownloadHlsStreamAsync(adPlayback.AudioUrl, adAudioPath, false, true, config, progress, 60, 80, cancellationToken);
                                             if (hlsResult.Ok){
                                                 downloadedFiles.Add(adAudioPath);
-                                                audioTrackLanguages.Add((adAudioPath, adLocale));
+                                                audioTrackLanguages.Add((adAudioPath, adLocale ?? "unknown"));
                                                 _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
                                             }
                                         } else{
                                             await DownloadStreamAsync(adPlayback.AudioUrl, adAudioPath, progress, 60, 80, cancellationToken, adPlayback.VideoToken);
                                             downloadedFiles.Add(adAudioPath);
-                                            audioTrackLanguages.Add((adAudioPath, adLocale));
+                                            audioTrackLanguages.Add((adAudioPath, adLocale ?? "unknown"));
                                             _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
                                         }
                                     }
@@ -558,7 +558,7 @@ public class DownloadService : IDownloadService{
                     var langCode = (sub.Lang ?? "unknown").Replace("-", "").ToLower();
                     var subLangs = config.Download.SoftSubs?.Count > 0 ? config.Download.SoftSubs : config.Download.SubtitleLanguages;
                     var shouldDownload = subLangs.Contains("all") || 
-                                         subLangs.Contains(sub.Lang) ||
+                                         (sub.Lang != null && subLangs.Contains(sub.Lang)) ||
                                          subLangs.Contains(langCode);
                     
                     if (shouldDownload && !string.IsNullOrEmpty(sub.Url)){
@@ -572,12 +572,12 @@ public class DownloadService : IDownloadService{
                                 if (sub.Format?.ToLower() == "vtt" && config.Download.ConvertVttToAss){
                                     // Convert VTT to ASS
                                     subPath = Path.ChangeExtension(subPath, ".ass");
-                                    var assContent = ConvertVttToAss(subContent, sub.Lang);
+                                    var assContent = ConvertVttToAss(subContent, sub.Lang ?? "unknown");
                                     await File.WriteAllTextAsync(subPath, assContent, cancellationToken);
                                 } else{
                                     await File.WriteAllTextAsync(subPath, subContent, cancellationToken);
                                 }
-                                subtitleFiles.Add((subPath, sub.Lang));
+                                subtitleFiles.Add((subPath, sub.Lang ?? "unknown"));
                             }
                         } catch (Exception ex){
                             _logger?.LogWarning(ex, "Failed to download subtitle {Lang}", sub.Lang);
@@ -1572,7 +1572,7 @@ public class DownloadService : IDownloadService{
                         audioReturnPath = audioOutput; // Return encrypted file path since we can't decrypt
                     }
                     
-                    audioPaths.Add((audioReturnPath, lang));
+                    audioPaths.Add((audioReturnPath, lang ?? "unknown"));
                 } else{
                     _logger?.LogWarning("Audio track download failed for language {Lang}", lang);
                 }

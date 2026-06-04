@@ -123,7 +123,12 @@ public class NotificationService : INotificationService{
     private async Task SendWebhookAsync(CruncharrConfig config, object payload){
         try{
             // SSRF protection: validate webhook URL before sending
-            if (!WebhookUrlValidator.IsValidWebhookUrl(config.Notifications.WebhookUrl, out var validationError)){
+            var webhookUrl = config.Notifications.WebhookUrl;
+            if (string.IsNullOrEmpty(webhookUrl)){
+                _logger?.LogWarning("Webhook URL is empty, skipping webhook");
+                return;
+            }
+            if (!WebhookUrlValidator.IsValidWebhookUrl(webhookUrl, out var validationError)){
                 _logger?.LogWarning("Webhook URL failed validation: {Error}", validationError);
                 return;
             }

@@ -59,9 +59,13 @@ status.md
 *.resume
 
 # Local-only documentation (not for repo)
+# Exclude ALL markdown files except README.md
+*.md
+!README.md
 PORTING_LOG.md
 *.local.md
 AUDIT_REPORT*.md
+ALIGNMENT_REPORT*.md
 
 # Upstream source reference (fetched on demand)
 upstream_src/

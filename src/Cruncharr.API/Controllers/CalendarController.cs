@@ -95,7 +95,7 @@ public class CalendarController : ControllerBase{
     }
 
     private CalendarWeekResponse MapToResponse(CalendarWeek week, string language = "en-us"){
-        var hideDubs = _config.Calendar.HideDubs;
+        var hideDubs = _config.Calendar?.HideDubs ?? false;
         return new CalendarWeekResponse{
             StartDate = week.FirstDayOfWeek,
             Days = week.CalendarDays?.Select(day => new CalendarDayResponse{

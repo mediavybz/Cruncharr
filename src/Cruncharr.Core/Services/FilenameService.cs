@@ -95,7 +95,7 @@ public class FilenameService : IFilenameService{
             var key = m.Groups[1].Value;
             var format = m.Groups[2].Success ? m.Groups[2].Value : null;
             
-            var variable = variables.FirstOrDefault(v => v.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
+            var variable = variables.FirstOrDefault(v => string.Equals(v.Name, key, StringComparison.OrdinalIgnoreCase));
             if (variable == null) return m.Value;
             
             var value = variable.ReplaceWith?.ToString() ?? string.Empty;

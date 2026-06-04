@@ -463,6 +463,10 @@ public class QueueService : IQueueService, IDisposable{
                         await Task.Delay(TimeSpan.FromSeconds(_config.Download.CooldownDelaySeconds), _cancellationToken);
                     }
                     await RunDownloadAsync(item, _cancellationToken);
+                } catch (Exception ex){
+                    _logger?.LogError(ex, "Download task failed for {EpisodeId}", item.Episode?.Id ?? item.Id);
+                    item.DownloadProgress.State = DownloadState.Error;
+                    item.DownloadProgress.Doing = $"Error: {ex.Message}";
                 } finally{
                     ReleaseDownloadSlot(item);
                 }

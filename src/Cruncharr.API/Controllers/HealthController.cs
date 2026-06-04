@@ -23,14 +23,18 @@ public class HealthController : ControllerBase{
     /// </summary>
     [HttpGet]
     public ActionResult<HealthResponse> GetHealth(){
-        return Ok(new HealthResponse{
-            Status = "healthy",
-            Version = GetType().Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "0.2.0-beta.1",
-            Timestamp = DateTimeOffset.UtcNow,
-            ActiveDownloads = _queueService.ActiveDownloads,
-            HasActiveDownloads = _queueService.HasActiveDownloads,
-            AuthStatus = _auth.IsAuthenticated ? "authenticated" : "anonymous"
-        });
+        try{
+            return Ok(new HealthResponse{
+                Status = "healthy",
+                Version = GetType().Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "0.2.0-beta.1",
+                Timestamp = DateTimeOffset.UtcNow,
+                ActiveDownloads = _queueService.ActiveDownloads,
+                HasActiveDownloads = _queueService.HasActiveDownloads,
+                AuthStatus = _auth.IsAuthenticated ? "authenticated" : "anonymous"
+            });
+        } catch (Exception ex){
+            return StatusCode(500, new { Error = "Health check failed", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -38,28 +42,34 @@ public class HealthController : ControllerBase{
     /// </summary>
     [HttpGet("ready")]
     public IActionResult GetReady(){
-        return Ok(new { Status = "ready" });
+        try{
+            return Ok(new { Status = "ready" });
+        } catch (Exception ex){
+            return StatusCode(500, new { Error = "Readiness check failed", Message = ex.Message });
+        }
     }
 
-    /// <summary>
-    /// Liveness check for Docker/Kubernetes
-    /// </summary>
     [HttpGet("live")]
     public IActionResult GetLive(){
-        return Ok(new { Status = "alive" });
+        try{
+            return Ok(new { Status = "alive" });
+        } catch (Exception ex){
+            return StatusCode(500, new { Error = "Liveness check failed", Message = ex.Message });
+        }
     }
 
-    /// <summary>
-    /// Version and update check endpoint
-    /// </summary>
     [HttpGet("version")]
     public ActionResult GetVersion(){
-        var currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
-        return Ok(new{
-            CurrentVersion = currentVersion?.ToString(),
-            LatestVersion = _updateChecker?.LatestVersion,
-            UpdateAvailable = _updateChecker?.UpdateAvailable ?? false
-        });
+        try{
+            var currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
+            return Ok(new{
+                CurrentVersion = currentVersion?.ToString(),
+                LatestVersion = _updateChecker?.LatestVersion,
+                UpdateAvailable = _updateChecker?.UpdateAvailable ?? false
+            });
+        } catch (Exception ex){
+            return StatusCode(500, new { Error = "Version check failed", Message = ex.Message });
+        }
     }
 }
 

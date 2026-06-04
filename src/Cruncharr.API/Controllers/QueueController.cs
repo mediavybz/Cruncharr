@@ -236,34 +236,35 @@ public class QueueController : ControllerBase{
     /// </summary>
     [HttpGet("sse")]
     public async Task GetQueueUpdates([FromServices] QueueBroadcastService broadcastService, CancellationToken cancellationToken){
-        Response.Headers.Append("Content-Type", "text/event-stream");
-        Response.Headers.Append("Cache-Control", "no-cache");
-        Response.Headers.Append("Connection", "keep-alive");
+        try{
+            Response.Headers.Append("Content-Type", "text/event-stream");
+            Response.Headers.Append("Cache-Control", "no-cache");
+            Response.Headers.Append("Connection", "keep-alive");
 
-        var clientId = Guid.NewGuid();
-        var reader = broadcastService.Subscribe(clientId);
-        try
-        {
-            // Send initial state
-            var initialQueue = _queueService.GetQueue();
-            var initialResponse = new QueueResponse{
-                Items = initialQueue,
-                ActiveDownloads = _queueService.ActiveDownloads,
-                HasActiveDownloads = _queueService.HasActiveDownloads,
-                IsGloballyPaused = _queueService.IsGloballyPaused
-            };
-            await WriteSseEventAsync(JsonConvert.SerializeObject(initialResponse, _sseJsonSettings), cancellationToken);
+            var clientId = Guid.NewGuid();
+            var reader = broadcastService.Subscribe(clientId);
+            try{
+                // Send initial state
+                var initialQueue = _queueService.GetQueue();
+                var initialResponse = new QueueResponse{
+                    Items = initialQueue,
+                    ActiveDownloads = _queueService.ActiveDownloads,
+                    HasActiveDownloads = _queueService.HasActiveDownloads,
+                    IsGloballyPaused = _queueService.IsGloballyPaused
+                };
+                await WriteSseEventAsync(JsonConvert.SerializeObject(initialResponse, _sseJsonSettings), cancellationToken);
 
-            // Listen for updates
-            await foreach (var update in reader.ReadAllAsync(cancellationToken)){
-                if (cancellationToken.IsCancellationRequested) break;
-                await WriteSseEventAsync(update, cancellationToken);
-                await Response.Body.FlushAsync(cancellationToken);
+                // Listen for updates
+                await foreach (var update in reader.ReadAllAsync(cancellationToken)){
+                    if (cancellationToken.IsCancellationRequested) break;
+                    await WriteSseEventAsync(update, cancellationToken);
+                    await Response.Body.FlushAsync(cancellationToken);
+                }
+            } finally{
+                broadcastService.Unsubscribe(clientId);
             }
-        }
-        finally
-        {
-            broadcastService.Unsubscribe(clientId);
+        } catch (Exception ex){
+            _logger.LogError(ex, "SSE queue updates failed");
         }
     }
 

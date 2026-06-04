@@ -65,13 +65,8 @@ public class QueueBroadcastService : IDisposable
             };
             var json = JsonConvert.SerializeObject(response, _sseJsonSettings);
             
-            foreach (var client in _clients.Values)
-            {
-                try{
-                    client.TryWrite(json);
-                } catch (Exception ex){
-                    _logger.LogDebug(ex, "Failed to write to SSE client");
-                }
+            foreach (var client in _clients.Values){
+                client.TryWrite(json);
             }
         }
         catch (Exception ex)

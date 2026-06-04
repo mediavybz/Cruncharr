@@ -16,6 +16,7 @@ public class MoviesController : ControllerBase{
 
     [HttpGet("{id}")]
     public async Task<ActionResult> GetMovie(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest(new { Error = "Id is required" });
         try{
             var movie = await _movieService.GetMovieAsync(id, locale, forcedLang, cancellationToken);
             if (movie == null){
@@ -42,6 +43,7 @@ public class MusicController : ControllerBase{
 
     [HttpGet("videos/{id}")]
     public async Task<ActionResult> GetMusicVideo(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest(new { Error = "Id is required" });
         try{
             var video = await _musicService.GetMusicVideoAsync(id, locale, forcedLang, cancellationToken);
             if (video == null){
@@ -56,6 +58,7 @@ public class MusicController : ControllerBase{
 
     [HttpGet("concerts/{id}")]
     public async Task<ActionResult> GetConcert(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest(new { Error = "Id is required" });
         try{
             var concert = await _musicService.GetConcertAsync(id, locale, forcedLang, cancellationToken);
             if (concert == null){
@@ -70,6 +73,7 @@ public class MusicController : ControllerBase{
 
     [HttpGet("artists/{id}")]
     public async Task<ActionResult> GetArtist(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest(new { Error = "Id is required" });
         try{
             var artist = await _musicService.GetArtistAsync(id, locale, forcedLang, cancellationToken);
             if (artist == null){
@@ -84,6 +88,7 @@ public class MusicController : ControllerBase{
 
     [HttpGet("artists/{id}/videos")]
     public async Task<ActionResult> GetArtistVideos(string id, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest(new { Error = "Id is required" });
         try{
             var videos = await _musicService.GetArtistVideosAsync(id, locale, forcedLang, cancellationToken);
             return Ok(videos);
@@ -95,6 +100,7 @@ public class MusicController : ControllerBase{
 
     [HttpGet("featured/{seriesId}")]
     public async Task<ActionResult> GetFeaturedMusicVideos(string seriesId, [FromQuery] string locale = "en-US", [FromQuery] bool forcedLang = false, CancellationToken cancellationToken = default){
+        if (string.IsNullOrWhiteSpace(seriesId)) return BadRequest(new { Error = "SeriesId is required" });
         try{
             var videos = await _musicService.GetFeaturedMusicVideosAsync(seriesId, locale, forcedLang, cancellationToken);
             return Ok(videos);

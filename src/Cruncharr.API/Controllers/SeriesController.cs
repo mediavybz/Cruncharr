@@ -38,6 +38,7 @@ public class SeriesController : ControllerBase{
     /// </summary>
     [HttpGet("{seriesId}/episodes")]
     public async Task<ActionResult> GetEpisodes(string seriesId, [FromQuery] bool premium = false){
+        if (string.IsNullOrWhiteSpace(seriesId)) return BadRequest(new { Error = "SeriesId is required" });
         try{
             var episodes = await _api.GetEpisodesAsync(seriesId, premium);
             return Ok(episodes);
@@ -52,6 +53,7 @@ public class SeriesController : ControllerBase{
     /// </summary>
     [HttpPost("episodes/{episodeId}/mark-watched")]
     public async Task<ActionResult> MarkAsWatched(string episodeId){
+        if (string.IsNullOrWhiteSpace(episodeId)) return BadRequest(new { Error = "EpisodeId is required" });
         try{
             await _api.MarkAsWatchedAsync(episodeId);
             return Ok(new { Message = "Episode marked as watched" });
@@ -98,6 +100,7 @@ public class SeriesController : ControllerBase{
     /// </summary>
     [HttpGet("{seriesId}/list")]
     public async Task<ActionResult> ListSeriesId(string seriesId, [FromQuery] string? locale = null, [FromQuery] bool forcedLocale = false, [FromQuery] string? seasonId = null, [FromQuery] List<string>? dubLang = null, [FromQuery] bool? all = null, [FromQuery] List<string>? e = null){
+        if (string.IsNullOrWhiteSpace(seriesId)) return BadRequest(new { Error = "SeriesId is required" });
         try{
             var data = new CrunchyMultiDownload(dubLang ?? new List<string>(), all, e: e, s: seasonId);
             var result = await _api.ListSeriesIdAsync(seriesId, locale ?? "", data, forcedLocale);

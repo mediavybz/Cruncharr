@@ -1310,7 +1310,7 @@ MAINTENANCE NOTES:
                 </a>
             </div>
             <div class="sidebar-footer">
-                <div id="version-info">v0.2.0-beta.2</div>
+                <div id="version-info">v0.2.0-beta.3</div>
                 <div id="connection-status" style="color: var(--accent-green);">Connected</div>
             </div>
         </aside>
@@ -1376,11 +1376,18 @@ MAINTENANCE NOTES:
                 }
             } catch (e) { /* ignore */ }
             // Restore last visited page or default to downloads
-            const savedPage = localStorage.getItem('cruncharr_current_page') || 'downloads';
+            let savedPage = 'downloads';
+            try {
+                savedPage = localStorage.getItem('cruncharr_current_page') || 'downloads';
+            } catch (e) {
+                console.warn('localStorage unavailable:', e);
+            }
+            const validPages = ['downloads','add-download','calendar','seasons','history','browse','seasonal','account','settings'];
+            if (!validPages.includes(savedPage)) savedPage = 'downloads';
             loadPage(savedPage);
             // Mark nav item active for restored page
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-            const navItem = document.querySelector(`.nav-item[data-page="${savedPage}"]`);
+            const navItem = document.querySelector(`.nav-item[data-page="${CSS.escape(savedPage)}"]`);
             if (navItem) navItem.classList.add('active');
             startPolling();
             setupNavigation();
@@ -1439,6 +1446,10 @@ MAINTENANCE NOTES:
                 case 'seasonal': renderSeasonal(content); break;
                 case 'account': renderAccount(content); break;
                 case 'settings': renderSettings(content); break;
+                default:
+                    console.warn('Unknown page:', page);
+                    loadPage('downloads');
+                    break;
             }
         }
 
@@ -2281,7 +2292,8 @@ MAINTENANCE NOTES:
                 const episodes = await res.json();
                 renderUpcomingSeasonsContent(episodes || []);
             } catch (e) {
-                document.getElementById('seasons-content').innerHTML = `
+                const el = document.getElementById('seasons-content');
+                if (el) el.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load upcoming episodes</div>
@@ -2564,7 +2576,7 @@ MAINTENANCE NOTES:
         }
 
         function escapeHtml(text) {
-            if (!text) return '';
+            if (text == null) return '';
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML
@@ -2582,7 +2594,7 @@ MAINTENANCE NOTES:
             return String(text)
                 .replace(/\\/g, '\\\\')
                 .replace(/'/g, "\\'")
-                .replace(/"/g, '\\"')
+                .replace(/"/g, '&quot;')
                 .replace(/`/g, '\\`')
                 .replace(/\$\{/g, '\\${')
                 .replace(/\n/g, '\\n')
@@ -2681,7 +2693,8 @@ MAINTENANCE NOTES:
                     title: title || 'Unknown',
                     seriesTitle: seriesTitle || 'Unknown'
                 })
-            }).then(() => {
+            }).then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added to queue', 'success');
             }).catch(() => {
                 showToast('Failed to add to queue', 'error');
@@ -2763,7 +2776,8 @@ MAINTENANCE NOTES:
                 historyData = data || [];
                 renderHistoryContent();
             } catch (e) {
-                document.getElementById('history-content').innerHTML = `
+                const el = document.getElementById('history-content');
+                if (el) el.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load history</div>
@@ -3504,7 +3518,10 @@ MAINTENANCE NOTES:
         // ================== API / ACTIONS ==================
         async function fetchConfig() {
             try {
-                const res = await fetch('/api/v1/config');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                const res = await fetch('/api/v1/config', { signal: controller.signal });
+                clearTimeout(timeoutId);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 config = await res.json();
                 applyTheme();
@@ -4761,7 +4778,12 @@ MAINTENANCE NOTES:
         let sseRetryCount = 0;
         const MAX_SSE_RETRIES = 10;
 
+        let sseReconnecting = false;
         function startQueueSSE() {
+            if (typeof EventSource === 'undefined') {
+                console.warn('EventSource not supported, falling back to polling');
+                return;
+            }
             if (eventSource) {
                 eventSource.close();
             }
@@ -4782,11 +4804,14 @@ MAINTENANCE NOTES:
             };
             
             eventSource.onerror = (error) => {
+                if (sseReconnecting) return;
+                sseReconnecting = true;
                 console.error('SSE connection error:', error);
                 eventSource.close();
                 sseRetryCount++;
                 const delay = Math.min(3000 * Math.pow(2, sseRetryCount), 60000);
                 setTimeout(() => {
+                    sseReconnecting = false;
                     if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
                         startQueueSSE();
                     }

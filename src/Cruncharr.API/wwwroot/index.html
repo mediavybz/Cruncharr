@@ -2811,7 +2811,7 @@ MAINTENANCE NOTES:
 
         async function fetchHistoryData() {
             try {
-                const res = await fetch('/api/v1/history');
+                const res = await fetch('/api/v1/history/rich');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 historyData = data || [];
@@ -3445,7 +3445,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Video Quality</div></div><select class="form-select" id="setting-quality-video" style="min-width:150px;"><option value="best" ${dl.qualityVideo==='best'?'selected':''}>Best Available</option><option value="1080" ${dl.qualityVideo==='1080'?'selected':''}>1080</option><option value="720" ${dl.qualityVideo==='720'?'selected':''}>720</option><option value="480" ${dl.qualityVideo==='480'?'selected':''}>480</option><option value="360" ${dl.qualityVideo==='360'?'selected':''}>360</option><option value="240" ${dl.qualityVideo==='240'?'selected':''}>240</option><option value="worst" ${dl.qualityVideo==='worst'?'selected':''}>Worst</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-audio" ${!dl.noAudio?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Audio Quality</div></div><select class="form-select" id="setting-quality-audio" style="min-width:150px;"><option value="best" ${dl.qualityAudio==='best'?'selected':''}>Best Available</option><option value="192kB/s" ${dl.qualityAudio==='192kB/s'?'selected':''}>192kB/s</option><option value="128kB/s" ${dl.qualityAudio==='128kB/s'?'selected':''}>128kB/s</option><option value="96kB/s" ${dl.qualityAudio==='96kB/s'?'selected':''}>96kB/s</option><option value="64kB/s" ${dl.qualityAudio==='64kB/s'?'selected':''}>64kB/s</option><option value="worst" ${dl.qualityAudio==='worst'?'selected':''}>Worst</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Chapters</div></div><label class="toggle-switch"><input type="checkbox" id="setting-chapters" ${dl.chapters?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Chapters</div></div><label class="toggle-switch"><input type="checkbox" id="setting-chapters" ${dl.includeChapters?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -3475,8 +3475,8 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Default Video</div></div><select class="form-select" id="setting-default-video" style="min-width:150px;"><option value="none" ${(dl.defaultVideo==='none'||!dl.defaultVideo)?'selected':''}>none</option>${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.defaultVideo===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Default Audio</div></div><select class="form-select" id="setting-default-audio" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.defaultAudio||dl.muxDefaultDub)===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Default Subtitle</div></div><select class="form-select" id="setting-default-sub" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.defaultSub||dl.muxDefaultSub)===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Default Subtitle Signs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-default-sub-signs" ${(dl.defaultSubSigns!==undefined?dl.defaultSubSigns:dl.muxDefaultSubSigns)?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Forced Display</div></div><label class="toggle-switch"><input type="checkbox" id="setting-default-sub-forced" ${(dl.defaultSubForcedDisplay!==undefined?dl.defaultSubForcedDisplay:dl.muxDefaultSubForcedDisplay)?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Default Subtitle Signs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-default-sub-signs" ${dl.muxDefaultSubSigns?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Forced Display</div></div><label class="toggle-switch"><input type="checkbox" id="setting-default-sub-forced" ${dl.muxDefaultSubForcedDisplay?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include Fonts</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-fonts" ${dl.muxFonts?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include Typesetting Fonts</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-ts-fonts" ${dl.muxTypesettingFonts?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include episode thumbnail</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-cover" ${dl.muxCover?'checked':''}><span class="toggle-slider"></span></label></div>
@@ -3640,6 +3640,9 @@ MAINTENANCE NOTES:
         }
 
         // ================== API / ACTIONS ==================
+        let fetchConfigRetryCount = 0;
+        const MAX_FETCH_CONFIG_RETRIES = 5;
+        
         async function fetchConfig() {
             try {
                 const controller = new AbortController();
@@ -3649,11 +3652,18 @@ MAINTENANCE NOTES:
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 config = await res.json();
                 applyTheme();
+                updateConnectionStatus(true);
+                fetchConfigRetryCount = 0;
             } catch (e) {
                 console.error('Failed to load config:', e);
-                showToast('Failed to load settings. Retrying...', 'error');
-                // Retry after 3 seconds
-                setTimeout(fetchConfig, FETCH_CONFIG_RETRY_DELAY_MS);
+                updateConnectionStatus(false);
+                fetchConfigRetryCount++;
+                if (fetchConfigRetryCount <= MAX_FETCH_CONFIG_RETRIES) {
+                    showToast('Failed to load settings. Retrying...', 'error');
+                }
+                if (fetchConfigRetryCount < MAX_FETCH_CONFIG_RETRIES) {
+                    setTimeout(fetchConfig, FETCH_CONFIG_RETRY_DELAY_MS);
+                }
             }
         }
 
@@ -3764,8 +3774,8 @@ MAINTENANCE NOTES:
                         downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
                         downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
                         defaultVideo: document.getElementById('setting-default-video')?.value || 'none',
-                        defaultSubSigns: document.getElementById('setting-default-sub-signs')?.checked || false,
-                        defaultSubForcedDisplay: document.getElementById('setting-default-sub-forced')?.checked || false,
+                        muxDefaultSubSigns: document.getElementById('setting-default-sub-signs')?.checked ?? false,
+                        muxDefaultSubForcedDisplay: document.getElementById('setting-default-sub-forced')?.checked ?? false,
                         downloadSpeedLimit: parseInt(document.getElementById('setting-speed-limit')?.value) || 0,
                         downloadSpeedInBits: document.getElementById('setting-speed-bits')?.checked || false,
                         retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 5,
@@ -4067,6 +4077,7 @@ MAINTENANCE NOTES:
 
         function refreshHistory() { fetchHistoryData(); }
         async function addMissingToQueue() {
+            if (!confirm('This will add all missing episodes across all series to the queue. Continue?')) return;
             try {
                 // Fetch rich history to find series with missing episodes
                 const res = await fetch('/api/v1/history/rich');
@@ -4474,6 +4485,7 @@ MAINTENANCE NOTES:
         }
         
         async function downloadSeason(seriesId, seasonId) {
+            if (!confirm('This will add all episodes in this season to the queue. Continue?')) return;
             try {
                 const res = await fetch(`/api/v1/series/${seriesId}/episodes`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -4792,6 +4804,7 @@ MAINTENANCE NOTES:
         }
         
         async function downloadSeries(id) {
+            if (!confirm('This will add all episodes in this series to the queue. Continue?')) return;
             try {
                 // Get episodes and add all to queue
                 const res = await fetch(`/api/v1/series/${id}/episodes`);
@@ -4951,8 +4964,9 @@ MAINTENANCE NOTES:
                 clearTimeout(sseReconnectTimeout);
                 sseReconnectTimeout = null;
             }
-            if (sseRetryCount >= MAX_SSE_RETRIES) {
+            if (sseRetryCount >= SSE_MAX_RETRIES) {
                 console.error('SSE max retries exceeded. Falling back to polling.');
+                startQueuePollingFallback();
                 return;
             }
             
@@ -4962,6 +4976,8 @@ MAINTENANCE NOTES:
                 try {
                     const data = JSON.parse(event.data);
                     updateQueueData(data.items || []);
+                    // Also refresh stats on SSE update so stat cards stay current
+                    fetchQueueStats();
                 } catch (e) {
                     console.error('Failed to parse SSE data:', e);
                 }
@@ -5024,7 +5040,25 @@ MAINTENANCE NOTES:
                 }
             }
         }
-
+        
+        function updateConnectionStatus(isConnected) {
+            const el = document.getElementById('connection-status');
+            if (el) {
+                el.textContent = isConnected ? 'Connected' : 'Disconnected';
+                el.style.color = isConnected ? 'var(--accent-green)' : 'var(--accent-red)';
+            }
+        }
+        
+        function startQueuePollingFallback() {
+            if (window._queuePollInterval) clearInterval(window._queuePollInterval);
+            window._queuePollInterval = setInterval(() => {
+                if (currentPage === 'downloads') {
+                    fetchDownloads();
+                    fetchQueueStats();
+                }
+            }, 5000);
+            console.log('Queue polling fallback started');
+        }
 
     </script>
 </body>

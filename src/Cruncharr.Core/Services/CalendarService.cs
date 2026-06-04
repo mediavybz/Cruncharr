@@ -75,11 +75,12 @@ public class CalendarService : ICalendarService
 
         if (!isOk)
         {
-            if (content.Contains("<title>Just a moment...</title>") ||
+            if (content != null &&
+                (content.Contains("<title>Just a moment...</title>") ||
                 content.Contains("<title>Access denied</title>") ||
                 content.Contains("<title>Attention Required! | Cloudflare</title>") ||
                 content.Trim().Equals("error code: 1020") ||
-                content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1)
+                content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1))
             {
                 _logger?.LogError("Blocked by Cloudflare. Use the custom calendar.");
             }

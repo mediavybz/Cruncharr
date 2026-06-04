@@ -99,7 +99,7 @@ public class CruncharrConfig
         return new CruncharrConfig();
     }
 
-    public void Save(string configPath)
+    public bool Save(string configPath)
     {
         try
         {
@@ -116,10 +116,11 @@ public class CruncharrConfig
                 var json = Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
                 File.WriteAllText(configPath, json);
             }
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore save failures - config will be re-saved on next change
+            throw new InvalidOperationException($"Failed to save configuration to {configPath}: {ex.Message}", ex);
         }
     }
 

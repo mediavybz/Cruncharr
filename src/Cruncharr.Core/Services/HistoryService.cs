@@ -1230,7 +1230,7 @@ public class HistoryService : IHistoryService, IDisposable
             EpisodeNumber = metadata?.EpisodeCount ?? 0,
             SeasonNumber = (int)(metadata?.SeasonNumber ?? 0),
             SeasonId = originalVersion?.SeasonGuid ?? "",
-            SeriesId = "", // Will be populated by caller if available
+            SeriesId = metadata?.SeriesId ?? "", // Use SeriesId from metadata if available
             AudioLocale = metadata?.AudioLocale ?? "ja-JP",
             Locale = metadata?.AudioLocale ?? "ja-JP",
             IsPremium = metadata?.IsPremiumOnly ?? false,

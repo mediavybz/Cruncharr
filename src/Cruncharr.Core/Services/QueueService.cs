@@ -63,13 +63,13 @@ public class QueueService : IQueueService, IDisposable{
     private readonly object _autoDownloadBlockLock = new();
     
     // [PT] Ported from upstream c123093: init-completion gate
-    private bool _isInitialized;
+    private volatile bool _isInitialized;
     
     // Shutdown flag replaces Environment.Exit for Docker compatibility
     private bool _shutdownRequested;
     
     // Global pause flag
-    private bool _isGloballyPaused;
+    private volatile bool _isGloballyPaused;
     
     public bool ShutdownRequested => _shutdownRequested;
     public bool IsGloballyPaused => _isGloballyPaused;
@@ -229,7 +229,7 @@ public class QueueService : IQueueService, IDisposable{
         if (_queue.TryGetValue(queueItemId, out var item)){
             if (!TryStartDownload(item)){
                 _logger?.LogWarning("Cannot start {QueueItemId} - already active or no slots", queueItemId);
-                return true; // Item exists but couldn't start
+                return false;
             }
             
             _ = Task.Run(async () =>{
@@ -306,6 +306,9 @@ public class QueueService : IQueueService, IDisposable{
                 _logger?.LogInformation("Queue is empty and ShutdownWhenQueueEmpty is enabled - shutting down");
                 _config.Queue.ShutdownWhenQueueEmpty = false;
                 shouldShutdown = true;
+                
+                // Execute on complete (ported from upstream NotificationDispatcher)
+                _notificationService?.NotifyQueueCompleteAsync(_config).GetAwaiter().GetResult();
             }
         }
         
@@ -318,6 +321,7 @@ public class QueueService : IQueueService, IDisposable{
     public async Task ProcessQueueAsync(CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default){
         _config = config;
         _cancellationToken = cancellationToken;
+        _processingSlots?.Dispose();
         _processingSlots = new ProcessingSlotManager(config.Queue.SimultaneousProcessingJobs);
 
         _logger?.LogInformation("Queue processor started with {Downloads} concurrent downloads, {Processing} processing jobs", 
@@ -332,13 +336,17 @@ public class QueueService : IQueueService, IDisposable{
     }
 
     // Ported from upstream QueueManager.RunPump + PumpQueue
+    private readonly object _pumpLock = new();
+    
     private void RequestPump(){
         if (_config?.Queue.AutoDownload != true) return;
         
         Interlocked.Exchange(ref _pumpDirty, 1);
 
-        if (Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) != 0)
-            return;
+        lock (_pumpLock){
+            if (Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) != 0)
+                return;
+        }
 
         _ = Task.Run(async () =>{
             try{
@@ -346,21 +354,32 @@ public class QueueService : IQueueService, IDisposable{
                     await PumpQueueAsync();
                     await Task.Delay(100, _cancellationToken);
                 }
+            } catch (OperationCanceledException){
+                // Normal shutdown, don't log as error
             } catch (Exception ex){
                 _logger?.LogError(ex, "Unhandled exception in queue pump");
             } finally{
-                Interlocked.Exchange(ref _pumpScheduled, 0);
+                lock (_pumpLock){
+                    Interlocked.Exchange(ref _pumpScheduled, 0);
 
-                if (Volatile.Read(ref _pumpDirty) == 1 &&
-                    Interlocked.CompareExchange(ref _pumpScheduled, 1, 0) == 0){
-                    _ = Task.Run(async () =>{
-                        try{
-                            await Task.Delay(100, _cancellationToken);
-                            RequestPump();
-                        } catch (Exception ex){
-                            _logger?.LogError(ex, "Unhandled exception in queue pump reschedule");
-                        }
-                    });
+                    if (Volatile.Read(ref _pumpDirty) == 1){
+                        // Dirty was set during pump - reschedule synchronously
+                        Interlocked.Exchange(ref _pumpScheduled, 1);
+                        _ = Task.Run(async () =>{
+                            try{
+                                await Task.Delay(100, _cancellationToken);
+                                await PumpQueueAsync();
+                                Interlocked.Exchange(ref _pumpScheduled, 0);
+                                RequestPump(); // Re-check for more work
+                            } catch (OperationCanceledException){
+                                // Normal shutdown, don't log as error
+                                Interlocked.Exchange(ref _pumpScheduled, 0);
+                            } catch (Exception ex){
+                                _logger?.LogError(ex, "Unhandled exception in queue pump reschedule");
+                                Interlocked.Exchange(ref _pumpScheduled, 0);
+                            }
+                        });
+                    }
                 }
             }
         });
@@ -541,7 +560,7 @@ public class QueueService : IQueueService, IDisposable{
             
             _ = Task.Run(async () =>{
                 try{
-                    await Task.Delay(delay, CancellationToken.None);
+                    await Task.Delay(delay, _cancellationToken);
                     item.DownloadProgress.RetryAtUtc = null;
                     OnQueueStateChanged();
                     RequestPump();
@@ -569,7 +588,7 @@ public class QueueService : IQueueService, IDisposable{
             try{
                 var remaining = unblockAt - DateTimeOffset.UtcNow;
                 if (remaining > TimeSpan.Zero){
-                    await Task.Delay(remaining, CancellationToken.None);
+                    await Task.Delay(remaining, _cancellationToken);
                 }
 
                 lock (_autoDownloadBlockLock){

@@ -432,6 +432,11 @@ public class DownloadService : IDownloadService{
                         var dubMediaGuid = dubVersion.Guid;
                         var dubMediaId = dubVersion.MediaGuid ?? dubVersion.Guid;
                         
+                        if (string.IsNullOrEmpty(dubMediaId)){
+                            _logger?.LogWarning("Dub version missing media ID");
+                            continue;
+                        }
+                        
                         if (dubMediaId.Contains(':')) dubMediaId = dubMediaId.Split(':')[1];
                         if (dubMediaGuid.Contains(':')) dubMediaGuid = dubMediaGuid.Split(':')[1];
                         
@@ -506,35 +511,39 @@ public class DownloadService : IDownloadService{
                             var adMediaGuid = adVersion.Guid;
                             var adMediaId = adVersion.MediaGuid ?? adVersion.Guid;
                             
-                            if (adMediaId.Contains(':')) adMediaId = adMediaId.Split(':')[1];
-                            if (adMediaGuid.Contains(':')) adMediaGuid = adMediaGuid.Split(':')[1];
-                            
-                            _logger?.LogInformation("Fetching playback data for Audio Description: {Locale} (Guid={Guid})", adLocale, adMediaGuid);
-                            
-                            try{
-                                var adPlayback = await GetPlaybackDataAsync(adMediaGuid, true, cancellationToken);
-                                if (adPlayback?.AudioUrl != null){
-                                    progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 67, Doing = $"Downloading audio description ({adLocale})..." });
-                                    
-                                    var adAudioPath = Path.Combine(tempDir, $"audio_{adLocale.Replace("-", "").ToLower()}_ad.m4a");
-                                    var adAudioIsHls = IsHlsUrl(adPlayback.AudioUrl);
-                                    
-                                    if (adAudioIsHls){
-                                        var hlsResult = await DownloadHlsStreamAsync(adPlayback.AudioUrl, adAudioPath, false, true, config, progress, 60, 80, cancellationToken);
-                                        if (hlsResult.Ok){
+                            if (!string.IsNullOrEmpty(adMediaId)){
+                                if (adMediaId.Contains(':')) adMediaId = adMediaId.Split(':')[1];
+                                if (adMediaGuid.Contains(':')) adMediaGuid = adMediaGuid.Split(':')[1];
+                                
+                                _logger?.LogInformation("Fetching playback data for Audio Description: {Locale} (Guid={Guid})", adLocale, adMediaGuid);
+                                
+                                try{
+                                    var adPlayback = await GetPlaybackDataAsync(adMediaGuid, true, cancellationToken);
+                                    if (adPlayback?.AudioUrl != null){
+                                        progress?.Report(new DownloadProgress{ State = DownloadState.Downloading, Percent = 67, Doing = $"Downloading audio description ({adLocale})..." });
+                                        
+                                        var adAudioPath = Path.Combine(tempDir, $"audio_{adLocale.Replace("-", "").ToLower()}_ad.m4a");
+                                        var adAudioIsHls = IsHlsUrl(adPlayback.AudioUrl);
+                                        
+                                        if (adAudioIsHls){
+                                            var hlsResult = await DownloadHlsStreamAsync(adPlayback.AudioUrl, adAudioPath, false, true, config, progress, 60, 80, cancellationToken);
+                                            if (hlsResult.Ok){
+                                                downloadedFiles.Add(adAudioPath);
+                                                audioTrackLanguages.Add((adAudioPath, adLocale));
+                                                _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
+                                            }
+                                        } else{
+                                            await DownloadStreamAsync(adPlayback.AudioUrl, adAudioPath, progress, 60, 80, cancellationToken, adPlayback.VideoToken);
                                             downloadedFiles.Add(adAudioPath);
                                             audioTrackLanguages.Add((adAudioPath, adLocale));
                                             _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
                                         }
-                                    } else{
-                                        await DownloadStreamAsync(adPlayback.AudioUrl, adAudioPath, progress, 60, 80, cancellationToken, adPlayback.VideoToken);
-                                        downloadedFiles.Add(adAudioPath);
-                                        audioTrackLanguages.Add((adAudioPath, adLocale));
-                                        _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
                                     }
+                                } catch (Exception ex){
+                                    _logger?.LogWarning(ex, "Failed to download audio description for {Locale}", adLocale);
                                 }
-                            } catch (Exception ex){
-                                _logger?.LogWarning(ex, "Failed to download audio description for {Locale}", adLocale);
+                            } else {
+                                _logger?.LogWarning("Audio Description version missing media ID");
                             }
                         }
                     }
@@ -955,12 +964,19 @@ public class DownloadService : IDownloadService{
     }
     
     private async Task<PlaybackData?> GetPlaybackDataAsync(string episodeId, bool useBetaApi, CancellationToken cancellationToken, int retryAttempt = 0){
-        if (_auth.Token?.access_token == null){
+        var token = _auth.Token;
+        if (token?.access_token == null){
             throw new DownloadException("You are not logged in. Please log in to your Crunchyroll account.", DownloadErrorType.NotAuthenticated);
         }
         
         // Refresh token before playback API call (matches source behavior)
         await _auth.RefreshTokenAsync(useBetaApi, cancellationToken);
+        
+        // Re-read token after refresh
+        token = _auth.Token;
+        if (token?.access_token == null){
+            throw new DownloadException("You are not logged in. Please log in to your Crunchyroll account.", DownloadErrorType.NotAuthenticated);
+        }
         
         const int maxRetries = 3;
         
@@ -995,12 +1011,12 @@ public class DownloadService : IDownloadService{
         int retryDelaySeconds = GetRetryDelaySeconds(retryAttempt);
         
         foreach (var (endpoint, userAgent, settings) in endpoints){
-            var request = HttpClientWrapper.CreateRequest(endpoint, HttpMethod.Get, true, _auth.Token.access_token);
+            var request = HttpClientWrapper.CreateRequest(endpoint, HttpMethod.Get, true, token.access_token);
             request.Headers.Add("User-Agent", userAgent);
             
             _logger?.LogInformation("[PLAYBACK REQUEST] Endpoint={Endpoint}, TokenPrefix={TokenPrefix}, UserAgent={UserAgent}", 
                 endpoint, 
-                _auth.Token.access_token?[..Math.Min(20, _auth.Token.access_token.Length)] + "...",
+                token.access_token?[..Math.Min(20, token.access_token.Length)] + "...",
                 userAgent);
             
             var (isOk, content, error, headers) = await _httpClient.SendRequestWithHeadersAsync(request);
@@ -1430,7 +1446,7 @@ public class DownloadService : IDownloadService{
         _logger?.LogInformation("Manifest has {VideoCount} video tracks and {AudioCount} audio tracks", videoItems.Count, audioItems.Count);
         
         // Select video/audio tracks using ported upstream logic
-        var chosenVideo = SelectVideoTrackQma(videoItems, config.Download.QualityVideo);
+        var chosenVideo = SelectVideoTrackQma(videoItems, config.Download.QualityVideo, config);
         var chosenAudios = SelectAudioTracksUpstream(audioItems, selectedDubs?.Count > 0 
             ? selectedDubs 
             : config.Download.DubLanguages);
@@ -1590,10 +1606,18 @@ public class DownloadService : IDownloadService{
         return Math.Abs(width - expected) <= tol ? expected : width;
     }
     
-    private Cruncharr.Core.Utils.Parser.VideoItem? SelectVideoTrackQma(List<Cruncharr.Core.Utils.Parser.VideoItem> videos, string qualityPreference){
+    private Cruncharr.Core.Utils.Parser.VideoItem? SelectVideoTrackQma(List<Cruncharr.Core.Utils.Parser.VideoItem> videos, string qualityPreference, CruncharrConfig config){
         if (videos.Count == 0) return null;
         
         var deduped = DeduplicateVideoTracks(videos);
+        
+        // [PT] Ported from upstream: Kstream selects specific stream by 1-based index
+        if (config.Download.Kstream > 0 && config.Download.Kstream <= deduped.Count){
+            var selected = deduped[config.Download.Kstream - 1];
+            _logger?.LogInformation("Using Kstream selection: index {Index}, height {Height}, resolution {Resolution}", 
+                config.Download.Kstream, selected.quality?.height, selected.resolutionText);
+            return selected;
+        }
         
         if (string.IsNullOrWhiteSpace(qualityPreference)){
             qualityPreference = "best";
@@ -1988,10 +2012,14 @@ public class DownloadService : IDownloadService{
             return;
         }
         
+        // Read stdout/stderr concurrently to avoid deadlocks on full buffers
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        
         await process.WaitForExitAsync(cancellationToken);
         
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
+        var output = await outputTask;
+        var error = await errorTask;
         
         if (process.ExitCode != 0){
             _logger?.LogError("Process failed with exit code {ExitCode}: {Error}", process.ExitCode, error);
@@ -2026,10 +2054,13 @@ public class DownloadService : IDownloadService{
             return "";
         }
         
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        
         await process.WaitForExitAsync(cancellationToken);
         
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
+        var output = await outputTask;
+        var error = await errorTask;
         
         if (process.ExitCode != 0){
             _logger?.LogError("Process failed with exit code {ExitCode}: {Error}", process.ExitCode, error);

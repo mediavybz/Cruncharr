@@ -1,3 +1,5 @@
+using System.Reflection;
+using Cruncharr.API.Services;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,10 +10,12 @@ namespace Cruncharr.API.Controllers;
 public class HealthController : ControllerBase{
     private readonly IQueueService _queueService;
     private readonly ICrunchyrollAuthService _auth;
+    private readonly UpdateCheckerService? _updateChecker;
 
-    public HealthController(IQueueService queueService, ICrunchyrollAuthService auth){
+    public HealthController(IQueueService queueService, ICrunchyrollAuthService auth, UpdateCheckerService? updateChecker = null){
         _queueService = queueService;
         _auth = auth;
+        _updateChecker = updateChecker;
     }
 
     /// <summary>
@@ -43,6 +47,19 @@ public class HealthController : ControllerBase{
     [HttpGet("live")]
     public IActionResult GetLive(){
         return Ok(new { Status = "alive" });
+    }
+
+    /// <summary>
+    /// Version and update check endpoint
+    /// </summary>
+    [HttpGet("version")]
+    public ActionResult GetVersion(){
+        var currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
+        return Ok(new{
+            CurrentVersion = currentVersion?.ToString(),
+            LatestVersion = _updateChecker?.LatestVersion,
+            UpdateAvailable = _updateChecker?.UpdateAvailable ?? false
+        });
     }
 }
 

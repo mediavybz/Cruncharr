@@ -292,13 +292,13 @@ public class HistoryController : ControllerBase{
             SonarrTvDbId = series.SonarrTvDbId,
             SonarrSlugTitle = series.SonarrSlugTitle,
             SonarrNextAirDate = series.SonarrNextAirDate,
-            Seasons = series.Seasons.Select(s => new HistorySeasonResponse{
+            Seasons = series.Seasons?.Select(s => new HistorySeasonResponse{
                 SeasonId = s.SeasonId,
                 SeasonTitle = s.SeasonTitle,
                 SeasonNum = s.SeasonNum,
                 SpecialSeason = s.SpecialSeason,
                 DownloadedEpisodes = s.DownloadedEpisodes,
-                Episodes = s.EpisodesList.Select(e => new HistoryEpisodeResponse{
+                Episodes = s.EpisodesList?.Select(e => new HistoryEpisodeResponse{
                     EpisodeId = e.EpisodeId,
                     EpisodeTitle = e.EpisodeTitle,
                     EpisodeDescription = e.EpisodeDescription,
@@ -316,10 +316,10 @@ public class HistoryController : ControllerBase{
                     SonarrAbsolutNumber = e.SonarrAbsolutNumber,
                     SonarrSeasonNumber = e.SonarrSeasonNumber,
                     SonarrSeasonEpisodeText = e.SonarrSeasonEpisodeText,
-                    DownloadedDubLang = e.DownloadedDubLang,
-                    DownloadedSoftSubs = e.DownloadedSoftSubs
-                }).ToList()
-            }).ToList()
+                    DownloadedDubLang = e.DownloadedDubLang ?? new List<string>(),
+                    DownloadedSoftSubs = e.DownloadedSoftSubs ?? new List<string>()
+                }).ToList() ?? new List<HistoryEpisodeResponse>()
+            }).ToList() ?? new List<HistorySeasonResponse>()
         };
     }
 }

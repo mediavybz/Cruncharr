@@ -1,4 +1,3 @@
-using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;

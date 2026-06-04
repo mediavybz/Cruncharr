@@ -16,10 +16,15 @@ public class SchedulerController : ControllerBase{
 
     [HttpGet("status")]
     public IActionResult GetStatus(){
-        return Ok(new{
-            IsRunning = _scheduler.IsRunning,
-            LastRun = _scheduler.LastRun?.ToString("O")
-        });
+        try{
+            return Ok(new{
+                IsRunning = _scheduler.IsRunning,
+                LastRun = _scheduler.LastRun?.ToString("O")
+            });
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get scheduler status");
+            return StatusCode(500, new { Error = "Failed to get scheduler status", Message = ex.Message });
+        }
     }
 
     [HttpPost("trigger")]

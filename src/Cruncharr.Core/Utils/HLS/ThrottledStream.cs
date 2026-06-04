@@ -48,9 +48,51 @@ public class GlobalThrottler{
             if (_totalBytesRead >= ((limit * 1024) / 10)){
                 var timeElapsed = DateTime.Now - _lastReadTime;
                 if (timeElapsed.TotalMilliseconds < 100){
-                    Thread.Sleep(100 - (int)timeElapsed.TotalMilliseconds);
+                    // Use SpinWait for short delays to avoid thread pool starvation in async paths
+                    var delayMs = 100 - (int)timeElapsed.TotalMilliseconds;
+                    if (delayMs > 30){
+                        // For longer delays, use Thread.Sleep but release the lock first
+                        Monitor.Exit(_lock);
+                        try{
+                            Thread.Sleep(delayMs);
+                        } finally{
+                            Monitor.Enter(_lock);
+                        }
+                    } else{
+                        Thread.SpinWait(100 * delayMs);
+                    }
                 }
 
+                _totalBytesRead = 0;
+                _lastReadTime = DateTime.Now;
+            }
+        }
+    }
+
+    public async Task ThrottleAsync(int bytesRead, CancellationToken cancellationToken = default){
+        int limit;
+        lock (_lock){
+            limit = _downloadSpeedLimit;
+        }
+        
+        if (limit == 0) return;
+        
+        long totalBytes;
+        DateTime lastRead;
+        lock (_lock){
+            _totalBytesRead += bytesRead;
+            totalBytes = _totalBytesRead;
+            lastRead = _lastReadTime;
+        }
+        
+        if (totalBytes >= ((limit * 1024) / 10)){
+            var timeElapsed = DateTime.Now - lastRead;
+            if (timeElapsed.TotalMilliseconds < 100){
+                var delayMs = 100 - (int)timeElapsed.TotalMilliseconds;
+                await Task.Delay(delayMs, cancellationToken);
+            }
+            
+            lock (_lock){
                 _totalBytesRead = 0;
                 _lastReadTime = DateTime.Now;
             }
@@ -104,7 +146,7 @@ public class ThrottledStream : Stream{
         if (_downloadSpeedLimit != 0){
             int bytesToRead = Math.Min(buffer.Length, (_downloadSpeedLimit * 1024) / 10);
             bytesRead = await _baseStream.ReadAsync(buffer.Slice(0, bytesToRead), cancellationToken);
-            _throttler.Throttle(bytesRead);
+            await _throttler.ThrottleAsync(bytesRead, cancellationToken);
         } else{
             bytesRead = await _baseStream.ReadAsync(buffer, cancellationToken);
         }

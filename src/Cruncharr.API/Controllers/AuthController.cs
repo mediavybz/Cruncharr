@@ -48,14 +48,14 @@ public class AuthController : ControllerBase{
             PreferredAudioLanguage = _auth.Profile.PreferredContentAudioLanguage ?? "",
             PreferredSubtitleLanguage = _auth.Profile.PreferredContentSubtitleLanguage ?? "",
             Avatar = _auth.Profile.Avatar,
-            MultiProfile = _auth.MultiProfile.Profiles.Select(p => new ProfileDto{
+            MultiProfile = _auth.MultiProfile?.Profiles?.Select(p => new ProfileDto{
                 ProfileId = p.ProfileId,
                 ProfileName = p.ProfileName,
                 Username = p.Username,
                 IsSelected = p.IsSelected,
                 CanSwitch = p.CanSwitch,
                 IsPinProtected = p.IsPinProtected
-            }).ToList()
+            }).ToList() ?? new List<ProfileDto>()
         });
     }
 
@@ -64,17 +64,22 @@ public class AuthController : ControllerBase{
     /// </summary>
     [HttpGet("profiles")]
     public async Task<ActionResult> GetProfiles(){
-        await _auth.GetMultiProfileAsync(false);
-        return Ok(new{
-            Profiles = _auth.MultiProfile.Profiles.Select(p => new ProfileDto{
-                ProfileId = p.ProfileId,
-                ProfileName = p.ProfileName,
-                Username = p.Username,
-                IsSelected = p.IsSelected,
-                CanSwitch = p.CanSwitch,
-                IsPinProtected = p.IsPinProtected
-            }).ToList()
-        });
+        try{
+            await _auth.GetMultiProfileAsync(false);
+            return Ok(new{
+                Profiles = _auth.MultiProfile?.Profiles?.Select(p => new ProfileDto{
+                    ProfileId = p.ProfileId,
+                    ProfileName = p.ProfileName,
+                    Username = p.Username,
+                    IsSelected = p.IsSelected,
+                    CanSwitch = p.CanSwitch,
+                    IsPinProtected = p.IsPinProtected
+                }).ToList() ?? new List<ProfileDto>()
+            });
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to get profiles");
+            return StatusCode(500, new { Error = "Failed to get profiles", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -82,15 +87,20 @@ public class AuthController : ControllerBase{
     /// </summary>
     [HttpPost("profiles/switch")]
     public async Task<ActionResult> SwitchProfile([FromBody] SwitchProfileRequest request){
-        if (string.IsNullOrEmpty(request.ProfileId)){
-            return BadRequest(new { Success = false, Message = "Profile ID is required" });
-        }
+        try{
+            if (string.IsNullOrEmpty(request.ProfileId)){
+                return BadRequest(new { Success = false, Message = "Profile ID is required" });
+            }
 
-        var success = await _auth.ChangeProfileAsync(request.ProfileId, false);
-        if (success){
-            return Ok(new { Success = true, Message = "Profile switched successfully" });
+            var success = await _auth.ChangeProfileAsync(request.ProfileId, false);
+            if (success){
+                return Ok(new { Success = true, Message = "Profile switched successfully" });
+            }
+            return BadRequest(new { Success = false, Message = "Failed to switch profile" });
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to switch profile");
+            return StatusCode(500, new { Success = false, Message = ex.Message });
         }
-        return BadRequest(new { Success = false, Message = "Failed to switch profile" });
     }
 
     /// <summary>
@@ -164,11 +174,19 @@ public class AuthController : ControllerBase{
     /// </summary>
     [HttpPost("logout")]
     public async Task<ActionResult<LogoutResponse>> Logout(){
-        await _auth.LogoutAsync();
-        return Ok(new LogoutResponse{
-            Success = true,
-            Message = "Logged out successfully"
-        });
+        try{
+            await _auth.LogoutAsync();
+            return Ok(new LogoutResponse{
+                Success = true,
+                Message = "Logged out successfully"
+            });
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to logout");
+            return StatusCode(500, new LogoutResponse{
+                Success = false,
+                Message = ex.Message
+            });
+        }
     }
     
     /// <summary>

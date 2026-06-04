@@ -9,18 +9,23 @@ using Cruncharr.Core.Configuration;
 
 namespace Cruncharr.Core.Utils;
 
+using Microsoft.Extensions.Logging;
+
 public class HttpClientWrapper{
     private readonly HttpClient _client;
     private readonly CookieContainer _cookieContainer;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CookieCollection> _cookieStore = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> _cookieLocks = new();
     private readonly CruncharrConfig? _config;
     private readonly HttpClient? _flareSolverrClient;
+    private readonly ILogger<HttpClientWrapper>? _logger;
     
     public HttpClient Client => _client;
     public CookieContainer CookieContainer => _cookieContainer;
     
-    public HttpClientWrapper(CruncharrConfig? config = null){
+    public HttpClientWrapper(CruncharrConfig? config = null, ILogger<HttpClientWrapper>? logger = null){
         _config = config;
+        _logger = logger;
         _cookieContainer = new CookieContainer();
         
         var handler = new SocketsHttpHandler{
@@ -70,21 +75,25 @@ public class HttpClientWrapper{
             
             handler.Proxy = webProxy;
             handler.UseProxy = true;
-            Console.WriteLine($"Proxy configured: {proxyUri}");
+            _logger?.LogInformation("Proxy configured: {ProxyUri}", proxyUri);
         } catch (Exception ex){
-            Console.Error.WriteLine($"Failed to configure proxy: {ex.Message}");
+            _logger?.LogError(ex, "Failed to configure proxy");
         }
     }
     
     public async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken = default){
+        if (request.RequestUri == null){
+            throw new ArgumentException("Request URI cannot be null", nameof(request));
+        }
+        
         // Use FlareSolverr if enabled and request is for Crunchyroll
-        if (_flareSolverrClient != null && request.RequestUri?.Host.Contains("crunchyroll") == true){
+        if (_flareSolverrClient != null && request.RequestUri.Host.Contains("crunchyroll")){
             return await SendViaFlareSolverrAsync(request, cancellationToken);
         }
         
         AttachCookies(request);
         var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        CaptureResponseCookies(response, request.RequestUri!);
+        CaptureResponseCookies(response, request.RequestUri);
         return response;
     }
     
@@ -123,7 +132,7 @@ public class HttpClientWrapper{
             if (attachCookies){
                 AttachCookies(request);
             }
-            var response = await _client.SendAsync(request, cancellationToken);
+            using var response = await _client.SendAsync(request, cancellationToken);
             content = await response.Content.ReadAsStringAsync(cancellationToken);
             foreach (var header in response.Headers){
                 headers[header.Key.ToLower()] = string.Join(", ", header.Value);
@@ -133,16 +142,17 @@ public class HttpClientWrapper{
             return (true, content, "", headers);
         } catch (Exception e){
             if (!suppressError){
-                Console.Error.WriteLine($"Error: {e.Message}");
+                _logger?.LogError(e, "HTTP request failed");
             }
             return (false, content, e.Message, headers);
+        } finally{
+            request.Dispose();
         }
     }
     
     public static HttpRequestMessage CreateRequest(string uri, HttpMethod method, bool authHeader, string? accessToken = ""){
         if (string.IsNullOrEmpty(uri)){
-            Console.Error.WriteLine("Request URI is empty");
-            return new HttpRequestMessage(HttpMethod.Get, "about:blank");
+            throw new ArgumentException("Request URI cannot be null or empty", nameof(uri));
         }
         
         var request = new HttpRequestMessage(method, uri);
@@ -157,11 +167,24 @@ public class HttpClientWrapper{
         if (request.Headers.TryGetValues("Cookie", out var existingCookies)){
             cookieHeader.Append(string.Join("; ", existingCookies));
         }
-        foreach (var cookie in _cookieStore.SelectMany(kvp => kvp.Value)){
-            string cookieString = $"{cookie.Name}={cookie.Value}";
-            if (!cookieHeader.ToString().Contains(cookieString)){
-                if (cookieHeader.Length > 0) cookieHeader.Append("; ");
-                cookieHeader.Append(cookieString);
+        // Build a HashSet for O(1) lookup instead of O(n²) string scanning
+        var existingCookieSet = new HashSet<string>();
+        if (cookieHeader.Length > 0){
+            foreach (var part in cookieHeader.ToString().Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)){
+                existingCookieSet.Add(part);
+            }
+        }
+        foreach (var kvp in _cookieStore){
+            var domainLock = _cookieLocks.GetOrAdd(kvp.Key, _ => new object());
+            lock (domainLock){
+                foreach (Cookie cookie in kvp.Value){
+                    string cookieString = $"{cookie.Name}={cookie.Value}";
+                    if (!existingCookieSet.Contains(cookieString)){
+                        if (cookieHeader.Length > 0) cookieHeader.Append("; ");
+                        cookieHeader.Append(cookieString);
+                        existingCookieSet.Add(cookieString);
+                    }
+                }
             }
         }
         if (cookieHeader.Length > 0){
@@ -187,12 +210,15 @@ public class HttpClientWrapper{
     }
     
     public void AddCookie(string domain, Cookie cookie){
-        if (!_cookieStore.ContainsKey(domain)){
-            _cookieStore[domain] = new CookieCollection();
+        var domainLock = _cookieLocks.GetOrAdd(domain, _ => new object());
+        lock (domainLock){
+            if (!_cookieStore.ContainsKey(domain)){
+                _cookieStore[domain] = new CookieCollection();
+            }
+            var existing = _cookieStore[domain].FirstOrDefault(c => c.Name == cookie.Name);
+            if (existing != null) _cookieStore[domain].Remove(existing);
+            _cookieStore[domain].Add(cookie);
         }
-        var existing = _cookieStore[domain].FirstOrDefault(c => c.Name == cookie.Name);
-        if (existing != null) _cookieStore[domain].Remove(existing);
-        _cookieStore[domain].Add(cookie);
         
         try{
             _cookieContainer.Add(new Uri($"https://{domain}"), cookie);
@@ -203,8 +229,11 @@ public class HttpClientWrapper{
     
     public string? GetCookieValue(string domain, string cookieName){
         if (_cookieStore.TryGetValue(domain, out var cookies)){
-            var cookie = cookies.FirstOrDefault(c => c.Name == cookieName);
-            return cookie?.Value;
+            var domainLock = _cookieLocks.GetOrAdd(domain, _ => new object());
+            lock (domainLock){
+                var cookie = cookies.FirstOrDefault(c => c.Name == cookieName);
+                return cookie?.Value;
+            }
         }
         return null;
     }

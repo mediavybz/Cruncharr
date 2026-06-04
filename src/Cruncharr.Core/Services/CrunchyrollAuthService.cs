@@ -566,11 +566,12 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         
         var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
         
-        if (content.Contains("<title>Just a moment...</title>") ||
+        if (!string.IsNullOrEmpty(content) && (
+            content.Contains("<title>Just a moment...</title>") ||
             content.Contains("<title>Access denied</title>") ||
             content.Contains("<title>Attention Required! | Cloudflare</title>") ||
             content.Trim().Equals("error code: 1020") ||
-            content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1){
+            content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1)){
             _logger?.LogError("Cloudflare error during token login");
         }
         
@@ -895,22 +896,6 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
     
     // Ported from upstream CrunchyrollManager.GetBase64EncodedTokenAsync
     // Fetches and extracts the client token from Crunchyroll's JS bundle
-    // Simple model for GitHub release API response
-    private class GitHubRelease{
-        [JsonProperty("tag_name")]
-        public string? TagName { get; set; }
-        
-        [JsonProperty("assets")]
-        public List<GitHubAsset>? Assets { get; set; }
-    }
-    
-    private class GitHubAsset{
-        [JsonProperty("name")]
-        public string? Name { get; set; }
-        
-        [JsonProperty("browser_download_url")]
-        public string? BrowserDownloadUrl { get; set; }
-    }
     
     private class GhAuthEntry{
         [JsonProperty("type")]

@@ -1349,7 +1349,6 @@ MAINTENANCE NOTES:
         let currentPage = 'downloads';
         let queueData = [];
         let historyData = [];
-        let seriesData = [];
         let stats = {};
         let config = {};
         let authStatus = {};
@@ -1525,12 +1524,18 @@ MAINTENANCE NOTES:
                 const res = await fetch('/api/v1/queue/stats');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                document.getElementById('stat-total').textContent = data.total ?? 0;
-                document.getElementById('stat-active').textContent = data.active ?? 0;
-                document.getElementById('stat-queued').textContent = data.queued ?? 0;
-                document.getElementById('stat-completed').textContent = data.completed ?? 0;
-                document.getElementById('stat-failed').textContent = data.failed ?? 0;
-                document.getElementById('stat-retry').textContent = data.waitingForRetry ?? 0;
+                const statTotal = document.getElementById('stat-total');
+                const statActive = document.getElementById('stat-active');
+                const statQueued = document.getElementById('stat-queued');
+                const statCompleted = document.getElementById('stat-completed');
+                const statFailed = document.getElementById('stat-failed');
+                const statRetry = document.getElementById('stat-retry');
+                if (statTotal) statTotal.textContent = data.total ?? 0;
+                if (statActive) statActive.textContent = data.active ?? 0;
+                if (statQueued) statQueued.textContent = data.queued ?? 0;
+                if (statCompleted) statCompleted.textContent = data.completed ?? 0;
+                if (statFailed) statFailed.textContent = data.failed ?? 0;
+                if (statRetry) statRetry.textContent = data.waitingForRetry ?? 0;
                 
                 // Update global pause button
                 const pauseBtn = document.getElementById('btn-global-pause');
@@ -1627,12 +1632,12 @@ MAINTENANCE NOTES:
                                     </div>
                                     <div class="download-actions">
                                         ${state === 'queued' || state === 'waitingforretry'
-                                            ? `<button class="btn-icon primary" onclick="startDownload('${item.id}')" title="Start">&#9654;</button>`
+                                            ? `<button class="btn-icon primary" onclick="startDownload('${escapeJsString(item.id)}')" title="Start">&#9654;</button>`
                                             : isError
-                                                ? `<button class="btn-icon" onclick="retryDownload('${item.id}')" title="Retry">&#8635;</button>`
-                                                : `<button class="btn-icon" onclick="togglePauseResume('${item.id}', ${isDownloading})" title="${isDownloading ? 'Pause' : 'Resume'}">${isDownloading ? '&#10074;&#10074;' : '&#9654;'}</button>`
+                                                ? `<button class="btn-icon" onclick="retryDownload('${escapeJsString(item.id)}')" title="Retry">&#8635;</button>`
+                                                : `<button class="btn-icon" onclick="togglePauseResume('${escapeJsString(item.id)}', ${isDownloading})" title="${isDownloading ? 'Pause' : 'Resume'}">${isDownloading ? '&#10074;&#10074;' : '&#9654;'}</button>`
                                         }
-                                        <button class="btn-icon danger" onclick="removeFromQueue('${item.id}')" title="Remove">&#128465;</button>
+                                        <button class="btn-icon danger" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="Remove">&#128465;</button>
                                     </div>
                                 </div>
                                 <div class="progress-container">
@@ -1697,6 +1702,7 @@ MAINTENANCE NOTES:
 
         async function doAddSearch(query) {
             const popup = document.getElementById('search-popup');
+            if (!popup) return;
             if (searchAbortController) {
                 searchAbortController.abort();
             }
@@ -1714,7 +1720,7 @@ MAINTENANCE NOTES:
                     return;
                 }
                 popup.innerHTML = addDownloadSearchResults.map(s => `
-                    <div class="search-result-item" onclick="selectSearchResult('${s.id}')">
+                    <div class="search-result-item" onclick="selectSearchResult('${escapeJsString(s.id)}')">
                         <div class="search-result-poster">
                             ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" alt="">` : '📺'}
                         </div>
@@ -1727,6 +1733,7 @@ MAINTENANCE NOTES:
                 popup.style.display = 'block';
             } catch (e) {
                 if (e.name === 'AbortError') return;
+                if (!popup) return;
                 popup.innerHTML = '<div style="padding:15px; color:var(--accent-red);">Search failed</div>';
                 popup.style.display = 'block';
             } finally {
@@ -1735,12 +1742,15 @@ MAINTENANCE NOTES:
         }
 
         async function selectSearchResult(seriesId) {
-            document.getElementById('search-popup').style.display = 'none';
+            const searchPopup = document.getElementById('search-popup');
+            if (searchPopup) searchPopup.style.display = 'none';
             const series = addDownloadSearchResults.find(s => s.id === seriesId);
             addDownloadSelectedSeries = series;
             if (!series) return;
-            document.getElementById('add-search-input').value = series.title;
-            document.getElementById('music-btn').style.display = 'inline-flex';
+            const searchInput = document.getElementById('add-search-input');
+            if (searchInput) searchInput.value = series.title;
+            const musicBtn = document.getElementById('music-btn');
+            if (musicBtn) musicBtn.style.display = 'inline-flex';
             // Show loading spinner while fetching episodes
             const listContainer = document.getElementById('add-episodes-list');
             if (listContainer) {
@@ -1792,7 +1802,7 @@ MAINTENANCE NOTES:
                 });
                 
                 const dropdown = document.getElementById('season-dropdown');
-                dropdown.innerHTML = seasons.map(season => `<option value="${season.id}">${season.title}</option>`).join('');
+                dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
                 if (seasons.length > 0) {
                     dropdown.value = seasons[0].id;
                     onSeasonChange(seasons[0].id);
@@ -1827,10 +1837,13 @@ MAINTENANCE NOTES:
 
         function renderAddEpisodesMultiDub(episodesToRender) {
             const list = document.getElementById('add-episodes-list');
+            const allCheckbox = document.getElementById('add-all-checkbox');
+            const addBtn = document.getElementById('add-btn');
+            if (!list) return;
             const episodes = episodesToRender || addDownloadEpisodeList;
             const allChecked = selectedEpisodes.size === episodes.length && episodes.length > 0;
-            document.getElementById('add-all-checkbox').checked = allChecked;
-            document.getElementById('add-btn').disabled = selectedEpisodes.size === 0;
+            if (allCheckbox) allCheckbox.checked = allChecked;
+            if (addBtn) addBtn.disabled = selectedEpisodes.size === 0;
 
             if (episodes.length === 0) {
                 list.innerHTML = `
@@ -1864,18 +1877,18 @@ MAINTENANCE NOTES:
                         const isSelected = selectedDubs.has(locale);
                         const premiumClass = info.isPremium ? 'premium' : '';
                         return `
-                            <label class="dub-option ${isSelected ? 'selected' : ''} ${premiumClass}" onclick="event.stopPropagation(); toggleDubSelection('${epKey}', '${locale}')">
+                            <label class="dub-option ${isSelected ? 'selected' : ''} ${premiumClass}" onclick="event.stopPropagation(); toggleDubSelection('${escapeJsString(epKey)}', '${escapeJsString(locale)}')">
                                 <input type="checkbox" ${isSelected ? 'checked' : ''}>
-                                ${info.name}
+                                ${escapeHtml(info.name)}
                             </label>
                         `;
                     }).join('');
                 }
                 
                 return `
-                    <div class="episode-multi-dub ${isSelected ? 'selected' : ''}" onclick="toggleEpisodeSelectionMultiDub('${epKey}')">
+                    <div class="episode-multi-dub ${isSelected ? 'selected' : ''}" onclick="toggleEpisodeSelectionMultiDub('${escapeJsString(epKey)}')">
                         <div class="episode-thumb">
-                            ${ep.img ? `<img src="${ep.img}" alt="">` : '📺'}
+                            ${ep.img ? `<img src="${escapeHtml(ep.img)}" alt="">` : '📺'}
                         </div>
                         <div class="episode-info">
                             <div class="episode-title">${escapeHtml(ep.name) || 'Unknown Episode'}</div>
@@ -1887,7 +1900,7 @@ MAINTENANCE NOTES:
                             </div>
                         </div>
                         <div style="display:flex; align-items:flex-start; padding-top:4px;">
-                            <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleEpisodeSelectionMultiDub('${epKey}')">
+                            <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleEpisodeSelectionMultiDub('${escapeJsString(epKey)}')">
                         </div>
                     </div>
                 `;
@@ -2072,27 +2085,31 @@ MAINTENANCE NOTES:
                     return;
                 }
                 
-                document.getElementById('modal-title').textContent = 'Featured Music Videos';
-                document.getElementById('modal-body').innerHTML = `
+                const modalTitle = document.getElementById('modal-title');
+                const modalBody = document.getElementById('modal-body');
+                const modalFooter = document.getElementById('modal-footer');
+                const modalEl = document.getElementById('modal');
+                if (modalTitle) modalTitle.textContent = 'Featured Music Videos';
+                if (modalBody) modalBody.innerHTML = `
                     <div style="max-height: 400px; overflow-y: auto;">
                         ${videos.map(video => `
                             <div style="padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px;">
                                 <div style="width: 80px; height: 45px; background: var(--bg-tertiary); border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                                    ${video.thumbnailUrl ? `<img src="${video.thumbnailUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="">` : '🎵'}
+                                    ${video.thumbnailUrl ? `<img src="${escapeHtml(video.thumbnailUrl)}" style="width: 100%; height: 100%; object-fit: cover;" alt="">` : '🎵'}
                                 </div>
                                 <div style="flex: 1;">
-                                    <div style="font-weight: 500;">${video.title || 'Unknown'}</div>
-                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${video.artist || ''}</div>
+                                    <div style="font-weight: 500;">${escapeHtml(video.title || 'Unknown')}</div>
+                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${escapeHtml(video.artist || '')}</div>
                                 </div>
-                                <button class="header-btn" onclick="addMusicVideoToQueue('${video.id}', '${escapeHtml(video.title || '')}', '${escapeHtml(video.artist || '')}')">Add</button>
+                                <button class="header-btn" onclick="addMusicVideoToQueue('${escapeJsString(video.id)}', '${escapeJsString(video.title || '')}', '${escapeJsString(video.artist || '')}')">Add</button>
                             </div>
                         `).join('')}
                     </div>
                 `;
-                document.getElementById('modal-footer').innerHTML = `
+                if (modalFooter) modalFooter.innerHTML = `
                     <button class="header-btn" onclick="closeModal()">Close</button>
                 `;
-                document.getElementById('modal').classList.add('active');
+                if (modalEl) modalEl.classList.add('active');
             } catch (e) {
                 showToast('Failed to load featured music videos', 'error');
             }
@@ -2174,6 +2191,7 @@ MAINTENANCE NOTES:
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const grid = document.getElementById('calendar-grid');
+                if (!grid) return;
                 if (!data.days || data.days.length === 0) {
                     grid.innerHTML = `
                         <div class="empty-state" style="grid-column:1/-1;">
@@ -2198,12 +2216,12 @@ MAINTENANCE NOTES:
                                     <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''}">
                                         <div class="calendar-episode-time">${ep.airDate ? new Date(ep.airDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
                                         <div class="calendar-episode-thumb">
-                                            ${ep.thumbnailUrl ? `<img src="${ep.thumbnailUrl}" alt="">` : '📺'}
+                                            ${ep.thumbnailUrl ? `<img src="${escapeHtml(ep.thumbnailUrl)}" alt="">` : '📺'}
                                             <div class="calendar-episode-number">${ep.episodeNumber || ''}</div>
                                         </div>
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
-                                        ${ep.hasPassed ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${ep.id}')">Download</button>` : ''}
+                                        ${ep.hasPassed ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}')">Download</button>` : ''}
                                     </div>
                                 `).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
                             </div>
@@ -2211,7 +2229,8 @@ MAINTENANCE NOTES:
                     `;
                 }).join('') + '</div>';
             } catch (e) {
-                document.getElementById('calendar-grid').innerHTML = `
+                const grid = document.getElementById('calendar-grid');
+                if (grid) grid.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load calendar</div>
@@ -2290,9 +2309,9 @@ MAINTENANCE NOTES:
             content.innerHTML = `
                 <div class="history-poster-grid">
                     ${seriesList.map(series => `
-                        <div class="history-poster" onclick="showSeriesEpisodesModal('${series.seriesId}', '${escapeHtml(series.seriesTitle)}')" style="cursor: pointer;">
+                        <div class="history-poster" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')" style="cursor: pointer;">
                             <div class="history-poster-img">
-                                ${series.thumbnailUrl ? `<img src="${series.thumbnailUrl}" alt="">` : '📺'}
+                                ${series.thumbnailUrl ? `<img src="${escapeHtml(series.thumbnailUrl)}" alt="">` : '📺'}
                                 ${series.episodes.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
                             </div>
                             <div class="history-poster-info">
@@ -2326,7 +2345,8 @@ MAINTENANCE NOTES:
                 const data = await res.json();
                 renderBrowseContent(data || []);
             } catch (e) {
-                document.getElementById('browse-content').innerHTML = `
+                const content = document.getElementById('browse-content');
+                if (content) content.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load series</div>
@@ -2336,6 +2356,7 @@ MAINTENANCE NOTES:
 
         function renderBrowseContent(series) {
             const content = document.getElementById('browse-content');
+            if (!content) return;
             if (series.length === 0) {
                 content.innerHTML = `
                     <div class="empty-state">
@@ -2348,9 +2369,9 @@ MAINTENANCE NOTES:
             content.innerHTML = `
                 <div class="history-poster-grid">
                     ${series.map(s => `
-                        <div class="history-poster" onclick="selectBrowseResult('${s.id}')" style="cursor: pointer;">
+                        <div class="history-poster" onclick="selectBrowseResult('${escapeJsString(s.id)}')" style="cursor: pointer;">
                             <div class="history-poster-img">
-                                ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${s.coverArtUrl || s.thumbnailUrl}" alt="">` : '📺'}
+                                ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" alt="">` : '📺'}
                             </div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</div>
@@ -2424,7 +2445,7 @@ MAINTENANCE NOTES:
                     
                     const dropdown = document.getElementById('season-dropdown');
                     if (dropdown) {
-                        dropdown.innerHTML = seasons.map(season => `<option value="${season.id}">${season.title}</option>`).join('');
+                        dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
                         if (seasons.length > 0) {
                             dropdown.value = seasons[0].id;
                             onSeasonChange(seasons[0].id);
@@ -2486,6 +2507,7 @@ MAINTENANCE NOTES:
             if (!season || !year) return;
 
             const content = document.getElementById('seasonal-content');
+            if (!content) return;
             content.innerHTML = '<div class="loading"><div class="spinner"></div>Loading seasonal anime...</div>';
 
             try {
@@ -2504,6 +2526,7 @@ MAINTENANCE NOTES:
 
         function renderSeasonalContent(series) {
             const content = document.getElementById('seasonal-content');
+            if (!content) return;
             if (series.length === 0) {
                 content.innerHTML = `
                     <div class="empty-state">
@@ -2516,9 +2539,9 @@ MAINTENANCE NOTES:
             content.innerHTML = `
                 <div class="history-poster-grid">
                     ${series.map(s => `
-                        <div class="history-poster" onclick="selectBrowseResult('${s.id}')" style="cursor: pointer;">
+                        <div class="history-poster" onclick="selectBrowseResult('${escapeJsString(s.id)}')" style="cursor: pointer;">
                             <div class="history-poster-img">
-                                ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${s.coverArtUrl || s.thumbnailUrl}" alt="">` : '📺'}
+                                ${s.coverArtUrl || s.thumbnailUrl ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" alt="">` : '📺'}
                             </div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</div>
@@ -2538,6 +2561,16 @@ MAINTENANCE NOTES:
                 .replace(/'/g, '&#39;');
         }
 
+        function escapeHtmlAttribute(text) {
+            if (text == null) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function escapeJsString(text) {
+            if (text == null) return '';
+            return String(text).replace(/[\\'"]/g, '\\$&');
+        }
+
         function formatDate(dateStr) {
             if (!dateStr) return 'Unknown';
             const date = new Date(dateStr);
@@ -2552,7 +2585,8 @@ MAINTENANCE NOTES:
         }
 
         function showSeriesEpisodesModal(seriesId, seriesTitle) {
-            document.getElementById('modal-title').textContent = decodeURIComponent(seriesTitle);
+            const modalTitle = document.getElementById('modal-title');
+            if (modalTitle) modalTitle.textContent = seriesTitle;
             
             // Find episodes for this series from the last fetched data
             const allEpisodes = [];
@@ -2565,7 +2599,7 @@ MAINTENANCE NOTES:
             `;
             document.getElementById('modal-footer').innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Close</button>
-                <button class="header-btn primary" onclick="searchSeriesById('${seriesId}')">Search Series</button>
+                <button class="header-btn primary" onclick="searchSeriesById('${escapeJsString(seriesId)}')">Search Series</button>
             `;
             document.getElementById('modal').classList.add('active');
             
@@ -2582,7 +2616,7 @@ MAINTENANCE NOTES:
                                     <div style="font-weight: 500;">Episode ${ep.episodeNumber || '?'}</div>
                                     <div style="font-size: 0.85em; color: var(--text-secondary);">${ep.title || 'Unknown'}</div>
                                 </div>
-                                <button class="header-btn" onclick="addEpisodeToQueue('${ep.id}', '${escapeHtml(ep.title || '')}', '${escapeHtml(seriesTitle)}')">Add</button>
+                                <button class="header-btn" onclick="addEpisodeToQueueWithDetails('${escapeJsString(ep.id)}', '${escapeJsString(ep.title || '')}', '${escapeJsString(seriesTitle)}')">Add</button>
                             </div>
                         `).join('')}
                     </div>
@@ -2615,7 +2649,7 @@ MAINTENANCE NOTES:
             }, 100);
         }
 
-        function addEpisodeToQueue(episodeId, title, seriesTitle) {
+        function addEpisodeToQueueWithDetails(episodeId, title, seriesTitle) {
             fetch('/api/v1/queue', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2649,7 +2683,7 @@ MAINTENANCE NOTES:
                         <div class="header-search" style="width:220px;" onclick="openHistorySearchPopup()">
                             <span>&#128269;</span>
                             <input type="text" id="history-search-input" placeholder="Filter history..." 
-                                   value="${escapeHtml(historySearchQuery)}" 
+                                   value="${escapeHtmlAttribute(historySearchQuery)}" 
                                    oninput="onHistorySearchInput(this.value)" 
                                    onfocus="openHistorySearchPopup()"
                                    onkeydown="if(event.key==='Escape'){closeHistorySearchPopup();this.blur();}">
@@ -2730,7 +2764,7 @@ MAINTENANCE NOTES:
 
             if (historyViewMode === 'poster') {
                 content.innerHTML = '<div class="history-poster-grid">' + filteredData.map(item => `
-                    <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${item.seriesId}')" style="cursor:pointer;">
+                    <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')" style="cursor:pointer;">
                         <div class="history-poster-img">
                             ${item.thumbnailImageUrl ? `<img src="${escapeHtml(item.thumbnailImageUrl)}" alt="">` : '📺'}
                             ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
@@ -2760,7 +2794,7 @@ MAINTENANCE NOTES:
                             </thead>
                             <tbody>
                                 ${filteredData.map(item => `
-                                    <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${item.seriesId}')" style="cursor:pointer;">
+                                    <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')" style="cursor:pointer;">
                                         <td>
                                             <strong>${escapeHtml(item.seriesTitle) || 'Unknown'}</strong>
                                             ${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}
@@ -2771,10 +2805,10 @@ MAINTENANCE NOTES:
                                         <td>${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0}</td>
                                         <td>${item.hasNewEpisodes ? '✓' : '—'}</td>
                                         <td>
-                                            <button class="btn-icon" onclick="event.stopPropagation(); refreshSeries('${item.seriesId}')">&#128260;</button>
-                                            <button class="btn-icon" onclick="event.stopPropagation(); downloadSeries('${item.seriesId}')">&#9660;</button>
-                                            ${item.sonarrSeriesId ? `<button class="btn-icon" onclick="event.stopPropagation(); matchEpisodesForSeries('${item.seriesId}')" title="Rematch episodes">&#128260;</button>` : ''}
-                                            <button class="btn-icon" onclick="event.stopPropagation(); showSeriesSettingsOverride('${item.seriesId}')" title="Settings">&#9881;</button>
+                                            <button class="btn-icon" onclick="event.stopPropagation(); refreshSeries('${escapeJsString(item.seriesId)}')">&#128260;</button>
+                                            <button class="btn-icon" onclick="event.stopPropagation(); downloadSeries('${escapeJsString(item.seriesId)}')">&#9660;</button>
+                                            ${item.sonarrSeriesId ? `<button class="btn-icon" onclick="event.stopPropagation(); matchEpisodesForSeries('${escapeJsString(item.seriesId)}')" title="Rematch episodes">&#128260;</button>` : ''}
+                                            <button class="btn-icon" onclick="event.stopPropagation(); showSeriesSettingsOverride('${escapeJsString(item.seriesId)}')" title="Settings">&#9881;</button>
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -2836,7 +2870,7 @@ MAINTENANCE NOTES:
                 if (authStatus.isAuthenticated) {
                     if (nameEl) nameEl.textContent = authStatus.username || 'User';
                     if (subEl) subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free';
-                    if (avatarEl) avatarEl.innerHTML = authStatus.avatar ? `<img src="${authStatus.avatar}" alt="">` : '<span>&#128100;</span>';
+                    if (avatarEl) avatarEl.innerHTML = authStatus.avatar ? `<img src="${escapeHtml(authStatus.avatar)}" alt="">` : '<span>&#128100;</span>';
                     if (loginBtn) loginBtn.style.display = 'none';
                     if (logoutBtn) logoutBtn.style.display = 'inline-block';
                     
@@ -2848,16 +2882,16 @@ MAINTENANCE NOTES:
                             <div style="display:flex; align-items:center; justify-content:space-between; padding:10px; border-bottom:1px solid var(--border-color); ${p.isSelected ? 'background:rgba(244,117,33,0.1);' : ''}">
                                 <div style="display:flex; align-items:center; gap:10px;">
                                     <div style="width:32px; height:32px; border-radius:50%; background:var(--bg-tertiary); display:flex; align-items:center; justify-content:center; font-size:0.8em;">
-                                        ${p.profileName ? p.profileName.charAt(0).toUpperCase() : '?'}
+                                        ${p.profileName ? escapeHtml(p.profileName).charAt(0).toUpperCase() : '?'}
                                     </div>
                                     <div>
-                                        <div style="font-weight:500;">${p.profileName || 'Unknown'}</div>
-                                        <div style="font-size:0.8em; color:var(--text-secondary);">${p.username || ''}</div>
+                                        <div style="font-weight:500;">${escapeHtml(p.profileName) || 'Unknown'}</div>
+                                        <div style="font-size:0.8em; color:var(--text-secondary);">${escapeHtml(p.username || '')}</div>
                                     </div>
                                 </div>
                                 ${p.isSelected 
                                     ? '<span style="color:var(--accent-orange); font-size:0.85em; font-weight:600;">Active</span>'
-                                    : `<button class="btn-icon" onclick="switchProfile('${p.profileId || ''}')" ${(!p.canSwitch || !p.profileId) ? 'disabled' : ''}>Switch</button>`
+                                    : `<button class="btn-icon" onclick="switchProfile('${escapeJsString(p.profileId || '')}')" ${(!p.canSwitch || !p.profileId) ? 'disabled' : ''}>Switch</button>`
                                 }
                             </div>
                         `).join('');
@@ -2902,19 +2936,23 @@ MAINTENANCE NOTES:
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 if (res.ok && data.token) {
-                    document.getElementById('modal-title').textContent = 'Client Token';
-                    document.getElementById('modal-body').innerHTML = `
+                    const modalTitle = document.getElementById('modal-title');
+                    const modalBody = document.getElementById('modal-body');
+                    const modalFooter = document.getElementById('modal-footer');
+                    const modalEl = document.getElementById('modal');
+                    if (modalTitle) modalTitle.textContent = 'Client Token';
+                    if (modalBody) modalBody.innerHTML = `
                         <div style="background:var(--bg-tertiary); padding:15px; border-radius:6px; font-family:monospace; font-size:0.85em; word-break:break-all; border:1px solid var(--border-color);">
-                            ${data.token}
+                            ${escapeHtml(data.token)}
                         </div>
                         <div style="margin-top:10px; font-size:0.85em; color:var(--text-secondary);">
                             This token is used for anonymous authentication requests.
                         </div>
                     `;
-                    document.getElementById('modal-footer').innerHTML = `
+                    if (modalFooter) modalFooter.innerHTML = `
                         <button class="header-btn" onclick="closeModal()">Close</button>
                     `;
-                    document.getElementById('modal').classList.add('active');
+                    if (modalEl) modalEl.classList.add('active');
                 } else {
                     showToast('Failed to fetch client token', 'error');
                 }
@@ -2924,8 +2962,12 @@ MAINTENANCE NOTES:
         }
 
         function showLoginModal() {
-            document.getElementById('modal-title').textContent = 'Login to Crunchyroll';
-            document.getElementById('modal-body').innerHTML = `
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const modalFooter = document.getElementById('modal-footer');
+            const modalEl = document.getElementById('modal');
+            if (modalTitle) modalTitle.textContent = 'Login to Crunchyroll';
+            if (modalBody) modalBody.innerHTML = `
                 <div class="form-group">
                     <label class="form-label">Email</label>
                     <input type="email" class="form-input" id="login-email" placeholder="your@email.com">
@@ -2935,11 +2977,11 @@ MAINTENANCE NOTES:
                     <input type="password" class="form-input" id="login-password" placeholder="Password">
                 </div>
             `;
-            document.getElementById('modal-footer').innerHTML = `
+            if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Cancel</button>
                 <button class="header-btn primary" onclick="doLogin()">Login</button>
             `;
-            document.getElementById('modal').classList.add('active');
+            if (modalEl) modalEl.classList.add('active');
         }
 
         async function doLogin() {
@@ -3044,8 +3086,8 @@ MAINTENANCE NOTES:
         function renderListInput(id, items, placeholder) {
             const vals = items || [];
             return `<div class="list-input" id="${id}">` +
-                vals.map((v,i) => `<div class="list-row"><input type="text" class="form-input list-item" value="${v||''}" placeholder="${placeholder||''}"><button class="header-btn" onclick="this.parentElement.remove()">Remove</button></div>`).join('') +
-                `<button class="header-btn" onclick="const d=document.getElementById('${id}');const r=document.createElement('div');r.className='list-row';r.innerHTML='<input type=\\'text\\' class=\\'form-input list-item\\' placeholder=\\'${placeholder||''}\\'><button class=\\'header-btn\\' onclick=\\'this.parentElement.remove()\\'>Remove</button>';d.insertBefore(r,d.lastElementChild)">Add</button></div>`;
+                vals.map((v,i) => `<div class="list-row"><input type="text" class="form-input list-item" value="${escapeHtmlAttribute(v||'')}" placeholder="${escapeHtmlAttribute(placeholder||'')}"><button class="header-btn" onclick="this.parentElement.remove()">Remove</button></div>`).join('') +
+                `<button class="header-btn" onclick="const d=document.getElementById('${escapeJsString(id)}');const r=document.createElement('div');r.className='list-row';r.innerHTML='<input type=\\'text\\' class=\\'form-input list-item\\' placeholder=\\'${escapeHtmlAttribute(placeholder||'') || ''}\\'><button class=\\'header-btn\\' onclick=\\'this.parentElement.remove()\\'>Remove</button>';d.insertBefore(r,d.lastElementChild)">Add</button></div>`;
         }
         function getListInput(id) {
             const el = document.getElementById(id);
@@ -3090,7 +3132,7 @@ MAINTENANCE NOTES:
                 const presets = await res.json();
                 const currentValue = select.value;
                 select.innerHTML = '<option value="">None</option>' + 
-                    (presets || []).map(p => `<option value="${p}" ${p === currentValue ? 'selected' : ''}>${p}</option>`).join('');
+                    (presets || []).map(p => `<option value="${escapeHtmlAttribute(p)}" ${p === currentValue ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('');
                 select.dataset.loaded = 'true';
             } catch (e) {
                 console.error('Failed to load encoding presets:', e);
@@ -3126,7 +3168,7 @@ MAINTENANCE NOTES:
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Log Mode</div><div class="setting-desc">Enable verbose logging</div></div><label class="toggle-switch"><input type="checkbox" id="setting-log-mode" ${g.logMode?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Remove Finished Downloads</div><div class="setting-desc">Auto-remove completed items from queue</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-finished" ${g.removeFinishedDownload?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Token File Path</div></div><input type="text" class="form-input" id="setting-token-path" value="${g.tokenFilePath||''}" style="width:300px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Token File Path</div></div><input type="text" class="form-input" id="setting-token-path" value="${escapeHtmlAttribute(g.tokenFilePath||'')}" style="width:300px;"></div>
                             </div>
                         </div>
                     `;
@@ -3169,7 +3211,7 @@ MAINTENANCE NOTES:
 
                                 <div class="setting-row"><div><div class="setting-label">CC as hearing impaired in mkv</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-hi" ${dl.ccSubsMuxingFlag?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Convert CC VTT to ASS</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-convert" ${dl.convertVttToAss?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">CC Font</div></div><input type="text" class="form-input" id="setting-cc-font" value="${dl.ccSubsFont||'Trebuchet MS'}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">CC Font</div></div><input type="text" class="form-input" id="setting-cc-font" value="${escapeHtmlAttribute(dl.ccSubsFont||'Trebuchet MS')}" style="width:200px;"></div>
                             </div>
                         </div>
                     `;
@@ -3179,20 +3221,20 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Download Settings</span><span class="settings-section-desc">Adjust download behavior</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Output Directory</div><div class="setting-desc">Where downloads are saved</div></div><input type="text" class="form-input" id="setting-output-dir" value="${dl.outputDirectory||'/downloads'}" style="width:250px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Temp Directory</div></div><input type="text" class="form-input" id="setting-temp-dir" value="${dl.tempDirectory||'/tmp/cruncharr'}" style="width:250px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Output Directory</div><div class="setting-desc">Where downloads are saved</div></div><input type="text" class="form-input" id="setting-output-dir" value="${escapeHtmlAttribute(dl.outputDirectory||'/downloads')}" style="width:250px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Temp Directory</div></div><input type="text" class="form-input" id="setting-temp-dir" value="${escapeHtmlAttribute(dl.tempDirectory||'/tmp/cruncharr')}" style="width:250px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use Temp Folder</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-temp" ${dl.useTempFolder?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Part Size</div></div><input type="number" class="form-input" id="setting-part-size" value="${dl.partSize||10}" min="1" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Dub Download Delay (seconds)</div></div><input type="number" class="form-input" id="setting-dub-delay" value="${dl.dubDownloadDelaySeconds||0}" min="0" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Cooldown Between Downloads (seconds)</div><div class="setting-desc">Delay before starting next download</div></div><input type="number" class="form-input" id="setting-cooldown" value="${dl.cooldownDelaySeconds||0}" min="0" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Simultaneous Downloads</div></div><input type="number" class="form-input" id="setting-concurrent" value="${dl.simultaneousDownloads||2}" min="1" max="10" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-proc-jobs" value="${dl.simultaneousProcessingJobs||2}" min="1" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Download Speed Limit (KB/s)</div><div class="setting-desc">0 = unlimited</div></div><input type="number" class="form-input" id="setting-speed-limit" value="${dl.downloadSpeedLimit||0}" min="0" style="width:120px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Part Size</div></div><input type="number" class="form-input" id="setting-part-size" value="${escapeHtmlAttribute(dl.partSize||10)}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Dub Download Delay (seconds)</div></div><input type="number" class="form-input" id="setting-dub-delay" value="${escapeHtmlAttribute(dl.dubDownloadDelaySeconds||0)}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Cooldown Between Downloads (seconds)</div><div class="setting-desc">Delay before starting next download</div></div><input type="number" class="form-input" id="setting-cooldown" value="${escapeHtmlAttribute(dl.cooldownDelaySeconds||0)}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Downloads</div></div><input type="number" class="form-input" id="setting-concurrent" value="${escapeHtmlAttribute(dl.simultaneousDownloads||2)}" min="1" max="10" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-proc-jobs" value="${escapeHtmlAttribute(dl.simultaneousProcessingJobs||2)}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Speed Limit (KB/s)</div><div class="setting-desc">0 = unlimited</div></div><input type="number" class="form-input" id="setting-speed-limit" value="${escapeHtmlAttribute(dl.downloadSpeedLimit||0)}" min="0" style="width:120px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Speed in Bits</div></div><label class="toggle-switch"><input type="checkbox" id="setting-speed-bits" ${dl.downloadSpeedInBits?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Retry Attempts</div></div><input type="number" class="form-input" id="setting-retry" value="${dl.retryAttempts||5}" min="1" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-delay" value="${dl.retryDelay||5}" min="0" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Playback Rate Limit Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-rate-limit-delay" value="${dl.playbackRateLimitRetryDelaySeconds||30}" min="0" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Retry Max Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-max-delay" value="${dl.retryMaxDelaySeconds||3600}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Retry Attempts</div></div><input type="number" class="form-input" id="setting-retry" value="${escapeHtmlAttribute(dl.retryAttempts||5)}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-delay" value="${escapeHtmlAttribute(dl.retryDelay||5)}" min="0" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Playback Rate Limit Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-rate-limit-delay" value="${escapeHtmlAttribute(dl.playbackRateLimitRetryDelaySeconds||30)}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Retry Max Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-max-delay" value="${escapeHtmlAttribute(dl.retryMaxDelaySeconds||3600)}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use New Download Method</div></div><label class="toggle-switch"><input type="checkbox" id="setting-new-method" ${dl.downloadMethodeNew?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Replace Existing Files</div></div><label class="toggle-switch"><input type="checkbox" id="setting-replace-existing" ${dl.replaceExistingFiles?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
@@ -3202,18 +3244,18 @@ MAINTENANCE NOTES:
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Primary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint" style="min-width:150px;" onchange="updateStreamDefaults(1)">${STREAM_ENDPOINT_OPTIONS.map(o=>`<option value="${o.value}" ${(cr.streamEndpoint?.endpoint||'tv/android_tv')===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Primary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default" ${cr.streamEndpoint?.useDefault!==false?'checked':''} onchange="updateStreamDefaults(1)"><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth" value="${cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.authorization||''):(cr.streamEndpoint?.authorization||'')}" style="width:200px;" placeholder="${cr.defaultStreamEndpoint?.authorization||'Authorization'}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua" value="${cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.userAgent||''):(cr.streamEndpoint?.userAgent||'')}" style="width:250px;" placeholder="${cr.defaultStreamEndpoint?.userAgent||'User-Agent'}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type" value="${cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.deviceType||''):(cr.streamEndpoint?.deviceType||'')}" style="width:200px;" placeholder="${cr.defaultStreamEndpoint?.deviceType||'Device Type'}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name" value="${cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.deviceName||''):(cr.streamEndpoint?.deviceName||'')}" style="width:200px;" placeholder="${cr.defaultStreamEndpoint?.deviceName||'Device Name'}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth" value="${escapeHtmlAttribute(cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.authorization||''):(cr.streamEndpoint?.authorization||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpoint?.authorization||'Authorization')}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua" value="${escapeHtmlAttribute(cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.userAgent||''):(cr.streamEndpoint?.userAgent||''))}" style="width:250px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpoint?.userAgent||'User-Agent')}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type" value="${escapeHtmlAttribute(cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.deviceType||''):(cr.streamEndpoint?.deviceType||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpoint?.deviceType||'Device Type')}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name" value="${escapeHtmlAttribute(cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.deviceName||''):(cr.streamEndpoint?.deviceName||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpoint?.deviceName||'Device Name')}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
                                 <div class="setting-row"><div><div class="setting-label">Primary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video" ${cr.streamEndpoint?.video!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Primary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio" ${cr.streamEndpoint?.audio!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Secondary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint-2" style="min-width:150px;" onchange="updateStreamDefaults(2)"><option value="" ${!cr.streamEndpointSecondary?.endpoint?'selected':''}>None</option>${STREAM_ENDPOINT_OPTIONS.map(o=>`<option value="${o.value}" ${(cr.streamEndpointSecondary?.endpoint||'')===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Secondary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default-2" ${cr.streamEndpointSecondary?.useDefault!==false?'checked':''} onchange="updateStreamDefaults(2)"><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth-2" value="${cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.authorization||''):(cr.streamEndpointSecondary?.authorization||'')}" style="width:200px;" placeholder="${cr.defaultStreamEndpointSecondary?.authorization||'Authorization'}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua-2" value="${cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.userAgent||''):(cr.streamEndpointSecondary?.userAgent||'')}" style="width:250px;" placeholder="${cr.defaultStreamEndpointSecondary?.userAgent||'User-Agent'}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type-2" value="${cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.deviceType||''):(cr.streamEndpointSecondary?.deviceType||'')}" style="width:200px;" placeholder="${cr.defaultStreamEndpointSecondary?.deviceType||'Device Type'}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name-2" value="${cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.deviceName||''):(cr.streamEndpointSecondary?.deviceName||'')}" style="width:200px;" placeholder="${cr.defaultStreamEndpointSecondary?.deviceName||'Device Name'}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth-2" value="${escapeHtmlAttribute(cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.authorization||''):(cr.streamEndpointSecondary?.authorization||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpointSecondary?.authorization||'Authorization')}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua-2" value="${escapeHtmlAttribute(cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.userAgent||''):(cr.streamEndpointSecondary?.userAgent||''))}" style="width:250px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpointSecondary?.userAgent||'User-Agent')}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type-2" value="${escapeHtmlAttribute(cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.deviceType||''):(cr.streamEndpointSecondary?.deviceType||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpointSecondary?.deviceType||'Device Type')}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name-2" value="${escapeHtmlAttribute(cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.deviceName||''):(cr.streamEndpointSecondary?.deviceName||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpointSecondary?.deviceName||'Device Name')}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
                                 <div class="setting-row"><div><div class="setting-label">Secondary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video-2" ${cr.streamEndpointSecondary?.video!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Secondary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio-2" ${cr.streamEndpointSecondary?.audio!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
@@ -3237,10 +3279,10 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Filename Settings</span><span class="settings-section-desc">Configure output filenames</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Leading zeros for seasons/episodes</div></div><input type="number" class="form-input" id="setting-leading-zeros" value="${dl.leadingNumbers||2}" min="1" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Filename Whitespace Substitute</div></div><input type="text" class="form-input" id="setting-whitespace-sub" value="${dl.filenameWhitespaceSubstitute||''}" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Filename Template (\${var} syntax)</div><div class="setting-desc">Variables: \${seriesTitle}, \${season}, \${episode}, \${height}, \${width}, \${videoBitrate}, \${audioBitrate}, \${episodeTitle}, \${seasonTitle}, \${seriesId}, \${episodeId}</div></div><input type="text" class="form-input" id="setting-filename" value="${dl.filename||'\\${seriesTitle} - S\\${season}E\\${episode} [\\${height}p]'}" style="width:400px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Filename Template ({var:00} syntax)</div><div class="setting-desc">Advanced: {seriesTitle}, {season:00}, {episode:00}, {height}, {width}, {episodeTitle}, {seasonTitle}</div></div><input type="text" class="form-input" id="setting-filename-template" value="${dl.filenameTemplate||''}" style="width:400px;" placeholder="Leave empty to use default above"></div>
+                                <div class="setting-row"><div><div class="setting-label">Leading zeros for seasons/episodes</div></div><input type="number" class="form-input" id="setting-leading-zeros" value="${escapeHtmlAttribute(dl.leadingNumbers||2)}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Filename Whitespace Substitute</div></div><input type="text" class="form-input" id="setting-whitespace-sub" value="${escapeHtmlAttribute(dl.filenameWhitespaceSubstitute||'')}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Filename Template (\${var} syntax)</div><div class="setting-desc">Variables: \${seriesTitle}, \${season}, \${episode}, \${height}, \${width}, \${videoBitrate}, \${audioBitrate}, \${episodeTitle}, \${seasonTitle}, \${seriesId}, \${episodeId}</div></div><input type="text" class="form-input" id="setting-filename" value="${escapeHtmlAttribute(dl.filename||'\\${seriesTitle} - S\\${season}E\\${episode} [\\${height}p]')}" style="width:400px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Filename Template ({var:00} syntax)</div><div class="setting-desc">Advanced: {seriesTitle}, {season:00}, {episode:00}, {height}, {width}, {episodeTitle}, {seasonTitle}</div></div><input type="text" class="form-input" id="setting-filename-template" value="${escapeHtmlAttribute(dl.filenameTemplate||'')}" style="width:400px;" placeholder="Leave empty to use default above"></div>
                             </div>
                         </div>
                     `;
@@ -3262,12 +3304,12 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Include Fonts</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-fonts" ${dl.muxFonts?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include Typesetting Fonts</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-ts-fonts" ${dl.muxTypesettingFonts?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include episode thumbnail</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-cover" ${dl.muxCover?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">File title</div></div><input type="text" class="form-input" id="setting-video-title" value="${dl.videoTitle||''}" style="width:300px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">File title</div></div><input type="text" class="form-input" id="setting-video-title" value="${escapeHtmlAttribute(dl.videoTitle||'')}" style="width:300px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Include Episode description</div></div><label class="toggle-switch"><input type="checkbox" id="setting-include-desc" ${dl.includeVideoDescription?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Episode description Language</div></div><select class="form-select" id="setting-desc-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.descriptionLang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Sync Timings</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sync-timing" ${dl.syncTiming?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Sync Full Quality Fallback</div><div class="setting-desc">Use full quality if sync fails</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sync-fallback" ${dl.syncTimingFullQualityFallback?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Sync HW Accel</div><div class="setting-desc">Hardware acceleration for sync</div></div><input type="text" class="form-input" id="setting-sync-hwaccel" value="${dl.syncHwAccel||''}" style="width:150px;" placeholder="none"></div>
+                                <div class="setting-row"><div><div class="setting-label">Sync HW Accel</div><div class="setting-desc">Hardware acceleration for sync</div></div><input type="text" class="form-input" id="setting-sync-hwaccel" value="${escapeHtmlAttribute(dl.syncHwAccel||'')}" style="width:150px;" placeholder="none"></div>
                             </div>
                         </div>
                         <div class="settings-section">
@@ -3292,8 +3334,8 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-queue-proc-jobs" value="${q.simultaneousProcessingJobs||2}" min="1" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Queue File Path</div></div><input type="text" class="form-input" id="setting-queue-path" value="${q.queueFilePath||'Cruncharr/queue.json'}" style="width:250px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-queue-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs||2)}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Queue File Path</div></div><input type="text" class="form-input" id="setting-queue-path" value="${escapeHtmlAttribute(q.queueFilePath||'Cruncharr/queue.json')}" style="width:250px;"></div>
                             </div>
                         </div>
                     `;
@@ -3307,7 +3349,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Include CR Artists</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cr-artists" ${h.includeCrArtists?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Remove Missing Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-missing" ${h.removeMissingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">History Language</div></div><select class="form-select" id="setting-history-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${h.lang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div></div><input type="number" class="form-input" id="setting-history-interval" value="${h.autoRefreshIntervalMinutes||0}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div></div><input type="number" class="form-input" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div></div><select class="form-select" id="setting-history-mode" style="min-width:150px;"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
 
                             </div>
@@ -3320,11 +3362,11 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">Sonarr Settings</span><span class="settings-section-desc">Sonarr integration</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-enabled" ${s.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-sonarr-host" value="${s.host||''}" style="width:200px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-sonarr-port" value="${s.port||0}" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">API Key</div></div><input type="text" class="form-input" id="setting-sonarr-apikey" value="${s.apiKey||''}" style="width:250px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-sonarr-host" value="${escapeHtmlAttribute(s.host||'')}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-sonarr-port" value="${escapeHtmlAttribute(s.port||0)}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">API Key</div></div><input type="text" class="form-input" id="setting-sonarr-apikey" value="${escapeHtmlAttribute(s.apiKey||'')}" style="width:250px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-ssl" ${s.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input" id="setting-sonarr-urlbase" value="${s.urlBase||''}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input" id="setting-sonarr-urlbase" value="${escapeHtmlAttribute(s.urlBase||'')}" style="width:200px;"></div>
 
                             </div>
                         </div>
@@ -3335,13 +3377,13 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Webhook Configuration</span><span class="settings-section-desc">Configure webhook notifications</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Webhook URL</div></div><input type="text" class="form-input" id="setting-webhook-url" value="${n.webhookUrl||''}" style="width:300px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Webhook URL</div></div><input type="text" class="form-input" id="setting-webhook-url" value="${escapeHtmlAttribute(n.webhookUrl||'')}" style="width:300px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-webhook-enabled" ${n.webhookEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Method</div></div><select class="form-select" id="setting-webhook-method" style="min-width:100px;"><option value="POST" ${n.webhookMethod==='POST'?'selected':''}>POST</option><option value="GET" ${n.webhookMethod==='GET'?'selected':''}>GET</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Webhook Content-Type</div></div><input type="text" class="form-input" id="setting-webhook-ct" value="${n.webhookContentType||'application/json'}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Content-Type</div></div><input type="text" class="form-input" id="setting-webhook-ct" value="${escapeHtmlAttribute(n.webhookContentType||'application/json')}" style="width:200px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Headers</div><div class="setting-desc">One header per line (Key: Value)</div></div></div>
-                                <textarea class="form-input" id="setting-webhook-headers" rows="3" style="width:300px;">${n.webhookHeaders?Object.entries(n.webhookHeaders).map(([k,v])=>k+': '+v).join('\n'):''}</textarea>
-                                <div class="setting-row"><div><div class="setting-label">Webhook Body Template</div></div><textarea class="form-input" id="setting-webhook-body" rows="3" style="width:300px;">${n.webhookBodyTemplate||''}</textarea></div>
+                                <textarea class="form-input" id="setting-webhook-headers" rows="3" style="width:300px;">${escapeHtml(n.webhookHeaders?Object.entries(n.webhookHeaders).map(([k,v])=>k+': '+v).join('\n'):'')}</textarea>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Body Template</div></div><textarea class="form-input" id="setting-webhook-body" rows="3" style="width:300px;">${escapeHtml(n.webhookBodyTemplate||'')}</textarea></div>
                                 <div style="margin-top:10px;">
                                     <button class="header-btn" onclick="testWebhook()">Test Webhook</button>
                                 </div>
@@ -3367,10 +3409,10 @@ MAINTENANCE NOTES:
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-proxy-enabled" ${p.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">SOCKS Proxy</div></div><label class="toggle-switch"><input type="checkbox" id="setting-proxy-socks" ${p.socks?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-proxy-host" value="${p.host||''}" style="width:200px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-proxy-port" value="${p.port||0}" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Username</div></div><input type="text" class="form-input" id="setting-proxy-user" value="${p.username||''}" style="width:200px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Password</div></div><input type="password" class="form-input" id="setting-proxy-pass" value="${p.password||''}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-proxy-host" value="${escapeHtmlAttribute(p.host||'')}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-proxy-port" value="${escapeHtmlAttribute(p.port||0)}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Username</div></div><input type="text" class="form-input" id="setting-proxy-user" value="${escapeHtmlAttribute(p.username||'')}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Password</div></div><input type="password" class="form-input" id="setting-proxy-pass" value="${escapeHtmlAttribute(p.password||'')}" style="width:200px;"></div>
                             </div>
                         </div>
                     `;
@@ -3381,12 +3423,12 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">FlareSolverr Settings</span><span class="settings-section-desc">Cloudflare bypass configuration</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-enabled" ${f.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-flare-host" value="${f.host||'localhost'}" style="width:200px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-flare-port" value="${f.port||0}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-flare-host" value="${escapeHtmlAttribute(f.host||'localhost')}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-flare-port" value="${escapeHtmlAttribute(f.port||0)}" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-ssl" ${f.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">MITM Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-mitm" ${f.mitmEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Host</div></div><input type="text" class="form-input" id="setting-flare-mitm-host" value="${f.mitmHost||'localhost'}" style="width:200px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Port</div></div><input type="number" class="form-input" id="setting-flare-mitm-port" value="${f.mitmPort||8080}" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">MITM Host</div></div><input type="text" class="form-input" id="setting-flare-mitm-host" value="${escapeHtmlAttribute(f.mitmHost||'localhost')}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">MITM Port</div></div><input type="number" class="form-input" id="setting-flare-mitm-port" value="${escapeHtmlAttribute(f.mitmPort||8080)}" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">MITM Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-mitm-ssl" ${f.mitmUseSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
@@ -3410,10 +3452,10 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">Appearance Settings</span><span class="settings-section-desc">Customize the UI</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input" id="setting-accent" value="${a.accentColor||'#F47521'}" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input" id="setting-bg-path" value="${a.backgroundImagePath||''}" style="width:300px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${a.backgroundImageOpacity||0.5}" min="0" max="1" step="0.1" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input" id="setting-bg-blur" value="${a.backgroundImageBlurRadius||10}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}" style="width:300px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity||0.5)}" min="0" max="1" step="0.1" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input" id="setting-bg-blur" value="${escapeHtmlAttribute(a.backgroundImageBlurRadius||10)}" min="0" style="width:100px;"></div>
                             </div>
                         </div>
                     `;
@@ -3757,6 +3799,7 @@ MAINTENANCE NOTES:
                 await fetch(`/api/v1/queue/${isPaused ? 'resume' : 'pause'}`, { method: 'POST' });
                 showToast(isPaused ? 'Queue resumed' : 'Queue paused globally', 'success');
                 fetchDownloads();
+                fetchQueueStats();
             } catch (e) { showToast('Failed to toggle pause', 'error'); }
         }
 
@@ -3833,6 +3876,7 @@ MAINTENANCE NOTES:
             try {
                 // Fetch rich history to find series with missing episodes
                 const res = await fetch('/api/v1/history/rich');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 let added = 0;
                 
@@ -3841,7 +3885,7 @@ MAINTENANCE NOTES:
                     for (const season of (series.seasons || [])) {
                         for (const episode of (season.episodes || [])) {
                             if (!episode.wasDownloaded && episode.episodeId) {
-                                await fetch('/api/v1/queue', {
+                                const queueRes = await fetch('/api/v1/queue', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
@@ -3852,7 +3896,7 @@ MAINTENANCE NOTES:
                                         episodeNumber: episode.episode || 1
                                     })
                                 });
-                                added++;
+                                if (queueRes.ok) added++;
                             }
                         }
                     }
@@ -3894,7 +3938,7 @@ MAINTENANCE NOTES:
             const existing = document.getElementById('maintenance-dropdown');
             if (existing) { existing.remove(); return; }
 
-            const btn = e?.target?.closest('.toolbar-btn') || event?.target?.closest('.toolbar-btn');
+            const btn = e?.target?.closest('.toolbar-btn');
             const dropdown = document.createElement('div');
             dropdown.id = 'maintenance-dropdown';
             dropdown.className = 'dropdown-menu active';
@@ -3983,7 +4027,7 @@ MAINTENANCE NOTES:
             const existing = document.getElementById('sort-dropdown');
             if (existing) { existing.remove(); return; }
 
-            const btn = e?.target?.closest('.toolbar-btn') || event?.target?.closest('.toolbar-btn');
+            const btn = e?.target?.closest('.toolbar-btn');
             const dropdown = document.createElement('div');
             dropdown.id = 'sort-dropdown';
             dropdown.className = 'dropdown-menu active';
@@ -4079,14 +4123,18 @@ MAINTENANCE NOTES:
             const series = historyData.find(s => s.seriesId === seriesId);
             if (!series) return;
             
-            document.getElementById('modal-title').textContent = series.seriesTitle || 'Series Details';
-            document.getElementById('modal-body').innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
-            document.getElementById('modal-footer').innerHTML = `
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const modalFooter = document.getElementById('modal-footer');
+            const modalEl = document.getElementById('modal');
+            if (modalTitle) modalTitle.textContent = series.seriesTitle || 'Series Details';
+            if (modalBody) modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
+            if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Close</button>
-                <button class="header-btn" onclick="showSeriesSettingsOverride('${seriesId}')">Settings</button>
-                ${series.sonarrSeriesId ? `<button class="header-btn" onclick="matchEpisodesForSeries('${seriesId}'); closeModal();">Match Episodes</button>` : ''}
+                <button class="header-btn" onclick="showSeriesSettingsOverride('${escapeJsString(seriesId)}')">Settings</button>
+                ${series.sonarrSeriesId ? `<button class="header-btn" onclick="matchEpisodesForSeries('${escapeJsString(seriesId)}'); closeModal();">Match Episodes</button>` : ''}
             `;
-            document.getElementById('modal').classList.add('active');
+            if (modalEl) modalEl.classList.add('active');
             
             // Fetch rich data if needed
             let richSeries = null;
@@ -4102,13 +4150,15 @@ MAINTENANCE NOTES:
                     historyRichData = data || [];
                     richSeries = historyRichData.find(s => s.seriesId === seriesId);
                 } catch (e) {
-                    document.getElementById('modal-body').innerHTML = '<div class="empty-state"><div class="empty-state-title">Failed to load episodes</div></div>';
+                    const modalBody = document.getElementById('modal-body');
+                    if (modalBody) modalBody.innerHTML = '<div class="empty-state"><div class="empty-state-title">Failed to load episodes</div></div>';
                     return;
                 }
             }
             
             if (!richSeries) {
-                document.getElementById('modal-body').innerHTML = '<div class="empty-state"><div class="empty-state-title">No episode data found</div></div>';
+                const modalBody = document.getElementById('modal-body');
+                if (modalBody) modalBody.innerHTML = '<div class="empty-state"><div class="empty-state-title">No episode data found</div></div>';
                 return;
             }
             
@@ -4117,13 +4167,14 @@ MAINTENANCE NOTES:
         
         function renderHistorySeriesDetailContent(series) {
             const body = document.getElementById('modal-body');
+            if (!body) return;
             const requestedDubs = config?.download?.dubLanguages || ['ja-JP'];
             const requestedSubs = config?.download?.softSubs || ['en-US'];
             
             let html = `
                 <div class="history-detail-header">
                     <div class="history-detail-poster">
-                        ${series.thumbnailImageUrl ? `<img src="${series.thumbnailImageUrl}" alt="">` : '📺'}
+                        ${series.thumbnailImageUrl ? `<img src="${escapeHtml(series.thumbnailImageUrl)}" alt="">` : '📺'}
                     </div>
                     <div class="history-detail-info">
                         <div class="history-detail-title">${escapeHtml(series.seriesTitle || 'Unknown')}</div>
@@ -4162,7 +4213,7 @@ MAINTENANCE NOTES:
                                     <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
                                 </div>
                             </div>
-                            ${!ep.wasDownloaded ? `<button class="btn-icon" onclick="addHistoryEpisodeToQueue('${ep.episodeId}', '${escapeHtml(series.seriesTitle || '')}')" title="Add to queue">&#128229;</button>` : ''}
+                            ${!ep.wasDownloaded ? `<button class="btn-icon" onclick="addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}')" title="Add to queue">&#128229;</button>` : ''}
                         </div>
                     `;
                 }).join('');
@@ -4175,8 +4226,8 @@ MAINTENANCE NOTES:
                                 <span style="font-size:0.8em; color:var(--text-muted); margin-left:8px;">${season.episodes?.length || 0} episodes</span>
                             </div>
                             <div class="history-season-actions">
-                                <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${season.seasonId}')" title="Settings">&#9881;</button>
-                                <button class="btn-icon" onclick="event.stopPropagation(); downloadSeason('${series.seriesId}', '${season.seasonId}')" title="Download season">&#9660;</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${escapeJsString(season.seasonId)}')" title="Settings">&#9881;</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); downloadSeason('${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}')" title="Download season">&#9660;</button>
                             </div>
                         </div>
                         <div class="history-season-body">
@@ -4222,7 +4273,7 @@ MAINTENANCE NOTES:
                 
                 for (const ep of (episodes || [])) {
                     if (ep.seasonId === seasonId || ep.seasonNumber === parseInt(seasonId)) {
-                        await fetch('/api/v1/queue', {
+                        const queueRes = await fetch('/api/v1/queue', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -4234,7 +4285,7 @@ MAINTENANCE NOTES:
                                 locale: ep.locale || 'ja-JP'
                             })
                         });
-                        added++;
+                        if (queueRes.ok) added++;
                     }
                 }
                 
@@ -4308,7 +4359,7 @@ MAINTENANCE NOTES:
             }
             
             popup.innerHTML = filtered.slice(0, 10).map(item => `
-                <div class="search-result-item" onclick="showHistorySeriesDetail('${item.seriesId}'); closeHistorySearchPopup();" style="padding:10px;">
+                <div class="search-result-item" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}'); closeHistorySearchPopup();" style="padding:10px;">
                     <div style="font-weight:500;">${escapeHtml(item.seriesTitle || 'Unknown')}</div>
                     <div style="font-size:0.8em; color:var(--text-secondary);">${escapeHtml((item.seriesDescription || '').substring(0, 60))}${(item.seriesDescription || '').length > 60 ? '...' : ''}</div>
                 </div>
@@ -4396,8 +4447,12 @@ MAINTENANCE NOTES:
             const series = historyData.find(s => s.seriesId === seriesId);
             if (!series) return;
             
-            document.getElementById('modal-title').textContent = 'Series Settings Override';
-            document.getElementById('modal-body').innerHTML = `
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const modalFooter = document.getElementById('modal-footer');
+            const modalEl = document.getElementById('modal');
+            if (modalTitle) modalTitle.textContent = 'Series Settings Override';
+            if (modalBody) modalBody.innerHTML = `
                 <div class="form-group">
                     <label class="form-label">Video Quality</label>
                     <select class="form-select" id="override-quality-video" style="min-width:150px;">
@@ -4413,21 +4468,21 @@ MAINTENANCE NOTES:
                 <div class="form-group">
                     <label class="form-label">Dub Languages</label>
                     <select class="form-select" id="override-dub-langs" multiple style="min-height:120px;">
-                        ${LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Softsubs Languages</label>
                     <select class="form-select" id="override-soft-subs" multiple style="min-height:120px;">
-                        ${LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                 </div>
             `;
-            document.getElementById('modal-footer').innerHTML = `
+            if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Cancel</button>
-                <button class="header-btn primary" onclick="saveSeriesSettingsOverride('${seriesId}')">Save</button>
+                <button class="header-btn primary" onclick="saveSeriesSettingsOverride('${escapeJsString(seriesId)}')">Save</button>
             `;
-            document.getElementById('modal').classList.add('active');
+            if (modalEl) modalEl.classList.add('active');
         }
         
         async function saveSeriesSettingsOverride(seriesId) {
@@ -4458,8 +4513,12 @@ MAINTENANCE NOTES:
         }
         
         function showSeasonSettingsOverride(seasonId) {
-            document.getElementById('modal-title').textContent = 'Season Settings Override';
-            document.getElementById('modal-body').innerHTML = `
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const modalFooter = document.getElementById('modal-footer');
+            const modalEl = document.getElementById('modal');
+            if (modalTitle) modalTitle.textContent = 'Season Settings Override';
+            if (modalBody) modalBody.innerHTML = `
                 <div class="form-group">
                     <label class="form-label">Video Quality</label>
                     <select class="form-select" id="override-season-quality-video" style="min-width:150px;">
@@ -4475,21 +4534,21 @@ MAINTENANCE NOTES:
                 <div class="form-group">
                     <label class="form-label">Dub Languages</label>
                     <select class="form-select" id="override-season-dub-langs" multiple style="min-height:120px;">
-                        ${LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Softsubs Languages</label>
                     <select class="form-select" id="override-season-soft-subs" multiple style="min-height:120px;">
-                        ${LANG_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                 </div>
             `;
-            document.getElementById('modal-footer').innerHTML = `
+            if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Cancel</button>
-                <button class="header-btn primary" onclick="saveSeasonSettingsOverride('${seasonId}')">Save</button>
+                <button class="header-btn primary" onclick="saveSeasonSettingsOverride('${escapeJsString(seasonId)}')">Save</button>
             `;
-            document.getElementById('modal').classList.add('active');
+            if (modalEl) modalEl.classList.add('active');
         }
         
         async function saveSeasonSettingsOverride(seasonId) {
@@ -4529,7 +4588,7 @@ MAINTENANCE NOTES:
                 
                 for (const ep of (episodes || [])) {
                     if (ep.id) {
-                        await fetch('/api/v1/queue', {
+                        const queueRes = await fetch('/api/v1/queue', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -4541,7 +4600,7 @@ MAINTENANCE NOTES:
                                 locale: ep.locale || 'ja-JP'
                             })
                         });
-                        added++;
+                        if (queueRes.ok) added++;
                     }
                 }
                 
@@ -4549,13 +4608,6 @@ MAINTENANCE NOTES:
             } catch (e) {
                 showToast('Failed to queue series', 'error');
             }
-        }
-
-        function refreshData() {
-            showToast('Refreshing...', 'success');
-            if (currentPage === 'downloads') fetchDownloads();
-            if (currentPage === 'history') fetchHistoryData();
-            if (currentPage === 'calendar') fetchCalendar();
         }
 
         function closeModal() { document.getElementById('modal').classList.remove('active'); }
@@ -4579,14 +4631,6 @@ MAINTENANCE NOTES:
                 'paused': '<span class="badge badge-retry">Paused</span>'
             };
             return badges[state?.toLowerCase()] || `<span class="badge badge-queued">${state}</span>`;
-        }
-
-        function formatBytes(bytes) {
-            if (!bytes || bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
         function formatDownloadSpeed(bytesPerSec) {

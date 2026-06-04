@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text;
 using Cruncharr.Core.Configuration;
@@ -10,6 +11,7 @@ public interface INotificationService{
     Task NotifyCompleteAsync(DownloadResult result, CruncharrConfig config);
     Task NotifyErrorAsync(DownloadResult result, CruncharrConfig config);
     Task NotifyQueueCompleteAsync(List<DownloadResult> results, CruncharrConfig config);
+    Task NotifyQueueCompleteAsync(CruncharrConfig config);
 }
 
 public class NotificationService : INotificationService{
@@ -81,6 +83,37 @@ public class NotificationService : INotificationService{
         };
         
         await SendWebhookAsync(config, payload);
+    }
+    
+    public async Task NotifyQueueCompleteAsync(CruncharrConfig config){
+        // Execute configured program on queue complete (ported from upstream NotificationDispatcher)
+        if (config.Notifications?.DownloadFinishedExecute == true && 
+            !string.IsNullOrWhiteSpace(config.Notifications.DownloadFinishedExecutePath)){
+            try{
+                var psi = new ProcessStartInfo{
+                    FileName = config.Notifications.DownloadFinishedExecutePath,
+                    UseShellExecute = true,
+                    CreateNoWindow = true
+                };
+                Process.Start(psi);
+                _logger?.LogInformation("Executed DownloadFinishedExecutePath: {Path}", config.Notifications.DownloadFinishedExecutePath);
+            } catch (Exception ex){
+                _logger?.LogError(ex, "Failed to execute DownloadFinishedExecutePath: {Path}", 
+                    config.Notifications.DownloadFinishedExecutePath);
+            }
+        }
+        
+        // Also dispatch webhook if configured
+        if (config.Notifications?.WebhookEnabled == true &&
+            !string.IsNullOrEmpty(config.Notifications.WebhookUrl) &&
+            config.Notifications.NotifyQueueFinished){
+            var payload = new{
+                event_type = "queue_complete",
+                message = "All downloads completed",
+                timestamp = DateTime.UtcNow
+            };
+            await SendWebhookAsync(config, payload);
+        }
     }
     
     private async Task SendWebhookAsync(CruncharrConfig config, object payload){

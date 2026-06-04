@@ -52,7 +52,7 @@ public interface IHistoryService{
     Task SetSeasonSettingsOverrideAsync(string seasonId, string? videoQuality, List<string>? dubLanguages, List<string>? softSubs);
 }
 
-public class HistoryService : IHistoryService{
+public class HistoryService : IHistoryService, IDisposable{
     private readonly string _historyPath;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly ILogger<HistoryService>? _logger;
@@ -63,7 +63,6 @@ public class HistoryService : IHistoryService{
     private readonly CruncharrConfig _config;
     private List<HistorySeries> _historyList = [];
     private bool _loaded = false;
-    private SeriesDataCache? _cachedSeries;
     
     public HistoryService(string? historyPath = null, ILogger<HistoryService>? logger = null, ISonarrService? sonarrService = null, ICrunchyrollApiService? apiService = null, IMusicService? musicService = null, ICrunchyrollAuthService? authService = null, CruncharrConfig? config = null){
         _historyPath = historyPath ?? Path.Combine(
@@ -134,7 +133,7 @@ public class HistoryService : IHistoryService{
     // Rich history methods
     public async Task<List<HistorySeries>> GetHistorySeriesAsync(){
         await EnsureLoadedAsync();
-        return _historyList;
+        return GetHistorySnapshot();
     }
 
     public async Task UpdateWithSeasonDataAsync(List<EpisodeInfo> episodes){
@@ -240,7 +239,8 @@ public class HistoryService : IHistoryService{
 
     public async Task<HistoryEpisode?> GetHistoryEpisodeAsync(string? seriesId, string? seasonId, string episodeId){
         await EnsureLoadedAsync();
-        return _historyList
+        var snapshot = GetHistorySnapshot();
+        return snapshot
             .FirstOrDefault(s => s.SeriesId == seriesId)?
             .Seasons.FirstOrDefault(s => s.SeasonId == seasonId)?
             .EpisodesList.Find(e => e.EpisodeId == episodeId);
@@ -288,10 +288,28 @@ public class HistoryService : IHistoryService{
         }
     }
 
+    private readonly SemaphoreSlim _loadSemaphore = new(1, 1);
+    
     private async Task EnsureLoadedAsync(){
-        if (!_loaded){
-            await LoadRichHistoryAsync();
-            _loaded = true;
+        if (_loaded) return;
+        
+        await _loadSemaphore.WaitAsync();
+        try{
+            if (!_loaded){
+                await LoadRichHistoryAsync();
+                _loaded = true;
+            }
+        } finally{
+            _loadSemaphore.Release();
+        }
+    }
+
+    private List<HistorySeries> GetHistorySnapshot(){
+        _lock.Wait();
+        try{
+            return _historyList.ToList();
+        } finally{
+            _lock.Release();
         }
     }
 
@@ -797,8 +815,8 @@ public class HistoryService : IHistoryService{
                         await UpdateWithSeasonDataAsync(seasonEpisodes);
                         break;
                     }
-                } catch{
-                    // optional: log candidateId
+                } catch (Exception ex){
+                    _logger?.LogWarning(ex, "Failed to refresh series data for candidate {CandidateId}", candidateId);
                 }
             }
         }
@@ -934,7 +952,8 @@ public class HistoryService : IHistoryService{
     public async Task<(HistoryEpisode? HistoryEpisode, string DownloadDirPath)> GetHistoryEpisodeWithDownloadDirAsync(string? seriesId, string? seasonId, string episodeId){
         await EnsureLoadedAsync();
         
-        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+        var snapshot = GetHistorySnapshot();
+        var historySeries = snapshot.FirstOrDefault(series => series.SeriesId == seriesId);
         var downloadDirPath = "";
 
         if (historySeries != null){
@@ -961,7 +980,8 @@ public class HistoryService : IHistoryService{
     public async Task<(HistoryEpisode? HistoryEpisode, List<string> DubList, List<string> SubList, string DownloadDirPath, string VideoQuality)> GetHistoryEpisodeWithDubListAndDownloadDirAsync(string? seriesId, string? seasonId, string episodeId){
         await EnsureLoadedAsync();
         
-        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+        var snapshot = GetHistorySnapshot();
+        var historySeries = snapshot.FirstOrDefault(series => series.SeriesId == seriesId);
 
         var downloadDirPath = "";
         var videoQuality = "";
@@ -1016,7 +1036,8 @@ public class HistoryService : IHistoryService{
     public async Task<List<string>> GetDubListAsync(string? seriesId, string? seasonId){
         await EnsureLoadedAsync();
         
-        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+        var snapshot = GetHistorySnapshot();
+        var historySeries = snapshot.FirstOrDefault(series => series.SeriesId == seriesId);
 
         List<string> dublist = [];
 
@@ -1037,7 +1058,8 @@ public class HistoryService : IHistoryService{
     public async Task<(List<string> SubList, string VideoQuality)> GetSubListAsync(string? seriesId, string? seasonId){
         await EnsureLoadedAsync();
         
-        var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+        var snapshot = GetHistorySnapshot();
+        var historySeries = snapshot.FirstOrDefault(series => series.SeriesId == seriesId);
 
         List<string> sublist = [];
         var videoQuality = "";
@@ -1142,83 +1164,7 @@ public class HistoryService : IHistoryService{
         }
     }
     
-    private static SeriesType InferSeriesType(HistorySeries? historySeries){
-        var seriesTypes = new List<SeriesType>();
 
-        if (historySeries != null){
-            seriesTypes.AddRange(historySeries.Seasons
-                .SelectMany(season => season.EpisodesList)
-                .Select(episode => episode.EpisodeSeriesType)
-                .Where(type => type != SeriesType.Unknown));
-        }
-
-        if (seriesTypes.Count == 0){
-            return historySeries?.SeriesType ?? SeriesType.Unknown;
-        }
-
-        if (seriesTypes.All(type => type == SeriesType.Artist)){
-            return SeriesType.Artist;
-        }
-
-        if (seriesTypes.All(type => type == SeriesType.Movie)){
-            return SeriesType.Movie;
-        }
-
-        return SeriesType.Series;
-    }
-    
-    private async Task RefreshSeriesDataAsync(string seriesId, HistorySeries historySeries){
-        if (_apiService == null) return;
-        if (_cachedSeries == null || (!string.IsNullOrEmpty(_cachedSeries.SeriesId) && _cachedSeries.SeriesId != seriesId)){
-            if (historySeries.SeriesType is SeriesType.Series or SeriesType.Movie){
-                var lang = _config.History.Lang ?? "en-US";
-                var seriesData = await _apiService.SeriesByIdAsync(seriesId, lang, true);
-                if (seriesData != null){
-                    _cachedSeries = new SeriesDataCache{
-                        SeriesDescription = seriesData.Description ?? "",
-                        SeriesId = seriesId,
-                        SeriesTitle = seriesData.Title ?? "",
-                        ThumbnailImageUrl = seriesData.CoverArtUrl ?? "",
-                        HistorySeriesAvailableDubLang = [],
-                        HistorySeriesAvailableSoftSubs = []
-                    };
-
-                    historySeries.SeriesDescription = _cachedSeries.SeriesDescription;
-                    historySeries.ThumbnailImageUrl = _cachedSeries.ThumbnailImageUrl;
-                    historySeries.SeriesTitle = _cachedSeries.SeriesTitle;
-                    historySeries.HistorySeriesAvailableDubLang = _cachedSeries.HistorySeriesAvailableDubLang;
-                    historySeries.HistorySeriesAvailableSoftSubs = _cachedSeries.HistorySeriesAvailableSoftSubs;
-                }
-            } else if (historySeries.SeriesType == SeriesType.Artist && _musicService != null){
-                var artisteData = await _musicService.GetArtistAsync(seriesId, 
-                    string.IsNullOrEmpty(_config.History.Lang) ? "en-US" : _config.History.Lang, true);
-                if (artisteData != null && !string.IsNullOrEmpty(artisteData.Id)){
-                    _cachedSeries = new SeriesDataCache{
-                        SeriesDescription = artisteData.Description ?? "",
-                        SeriesId = artisteData.Id,
-                        SeriesTitle = artisteData.Name ?? "",
-                        ThumbnailImageUrl = artisteData.Images?.PosterTall?.SelectMany(list => list).FirstOrDefault(e => e.Height == 360)?.Source ?? "",
-                        HistorySeriesAvailableDubLang = [],
-                        HistorySeriesAvailableSoftSubs = []
-                    };
-
-                    historySeries.SeriesDescription = _cachedSeries.SeriesDescription;
-                    historySeries.ThumbnailImageUrl = _cachedSeries.ThumbnailImageUrl;
-                    historySeries.SeriesTitle = _cachedSeries.SeriesTitle;
-                    historySeries.HistorySeriesAvailableDubLang = _cachedSeries.HistorySeriesAvailableDubLang;
-                    historySeries.HistorySeriesAvailableSoftSubs = _cachedSeries.HistorySeriesAvailableSoftSubs;
-                }
-            }
-        } else{
-            if (_cachedSeries != null){
-                historySeries.SeriesDescription = _cachedSeries.SeriesDescription;
-                historySeries.ThumbnailImageUrl = _cachedSeries.ThumbnailImageUrl;
-                historySeries.SeriesTitle = _cachedSeries.SeriesTitle;
-                historySeries.HistorySeriesAvailableDubLang = _cachedSeries.HistorySeriesAvailableDubLang;
-                historySeries.HistorySeriesAvailableSoftSubs = _cachedSeries.HistorySeriesAvailableSoftSubs;
-            }
-        }
-    }
     
     private void RemoveUnavailableEpisodesFromSeries(HistorySeries historySeries){
         if (!_config.History.RemoveMissingEpisodes){
@@ -1429,6 +1375,11 @@ public class HistoryService : IHistoryService{
             .Select(locale => locale!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    public void Dispose(){
+        _lock?.Dispose();
+        _loadSemaphore?.Dispose();
     }
 }
 

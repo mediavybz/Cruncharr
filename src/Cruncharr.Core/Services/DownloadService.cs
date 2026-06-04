@@ -2115,15 +2115,15 @@ public class DownloadService : IDownloadService{
         var tempOutput = inputPath + ".encoding.mkv";
         var args = new List<string>{
             "-y",
-            "-i", $"\"{inputPath}\"",
+            "-i", inputPath,
             "-c:v", preset.Codec ?? "libx264",
             "-crf", preset.Crf.ToString(),
-            "-vf", $"\"scale={preset.Resolution}\"",
+            "-vf", $"scale={preset.Resolution}",
             "-r", preset.FrameRate ?? "24000/1001"
         };
         
         args.AddRange(preset.AdditionalParameters);
-        args.Add($"\"{tempOutput}\"");
+        args.Add(tempOutput);;
         
         await RunProcessAsync(ffmpegPath, args, cancellationToken);
         

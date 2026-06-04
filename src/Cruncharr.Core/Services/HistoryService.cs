@@ -54,6 +54,7 @@ public interface IHistoryService{
 
 public class HistoryService : IHistoryService, IDisposable{
     private readonly string _historyPath;
+    private readonly string _flatHistoryPath;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly ILogger<HistoryService>? _logger;
     private readonly ISonarrService? _sonarrService;
@@ -69,6 +70,10 @@ public class HistoryService : IHistoryService, IDisposable{
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "cruncharr",
             "history.json"
+        );
+        _flatHistoryPath = Path.Combine(
+            Path.GetDirectoryName(_historyPath)!,
+            "history-flat.json"
         );
         _logger = logger;
         _sonarrService = sonarrService;
@@ -396,13 +401,13 @@ public class HistoryService : IHistoryService, IDisposable{
     }
 
     private async Task<List<DownloadHistory>> LoadHistoryAsync(){
-        if (!File.Exists(_historyPath)) return new List<DownloadHistory>();
+        if (!File.Exists(_flatHistoryPath)) return new List<DownloadHistory>();
         
         try{
-            var content = await DecompressJsonFileAsync(_historyPath);
+            var content = await DecompressJsonFileAsync(_flatHistoryPath);
             if (string.IsNullOrEmpty(content)){
                 // Fallback to uncompressed
-                content = await File.ReadAllTextAsync(_historyPath);
+                content = await File.ReadAllTextAsync(_flatHistoryPath);
             }
             return JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListDownloadHistory) ?? new List<DownloadHistory>();
         } catch{
@@ -411,7 +416,7 @@ public class HistoryService : IHistoryService, IDisposable{
     }
 
     private async Task SaveHistoryAsync(List<DownloadHistory> history){
-        await WriteJsonToFileCompressedAsync(_historyPath, history, keepBackups: 5);
+        await WriteJsonToFileCompressedAsync(_flatHistoryPath, history, keepBackups: 5);
     }
     
     // Ported from upstream CfgManager.WriteJsonToFileCompressed

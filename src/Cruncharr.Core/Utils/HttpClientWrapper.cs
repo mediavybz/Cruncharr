@@ -100,25 +100,40 @@ public class HttpClientWrapper : IDisposable{
     
     private async Task<HttpResponseMessage> SendViaFlareSolverrAsync(HttpRequestMessage request, CancellationToken cancellationToken){
         if (_config?.FlareSolverr == null) throw new InvalidOperationException("FlareSolverr not configured");
+        if (request.RequestUri == null) throw new ArgumentException("Request URI cannot be null", nameof(request));
         
-        var scheme = _config.FlareSolverr.UseSsl ? "https" : "http";
-        var flareSolverrUrl = $"{scheme}://{_config.FlareSolverr.Host}:{_config.FlareSolverr.Port}/v1";
-        
-        var payload = new{
-            cmd = "request.get",
-            url = request.RequestUri!.ToString(),
-            maxTimeout = 60000
-        };
-        
-        var flareRequest = new HttpRequestMessage(HttpMethod.Post, flareSolverrUrl){
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-        };
-        
-        var flareResponse = await _flareSolverrClient!.SendAsync(flareRequest, cancellationToken);
-        flareResponse.EnsureSuccessStatusCode();
-        
-        // Return a synthetic response
-        return flareResponse;
+        try{
+            var scheme = _config.FlareSolverr.UseSsl ? "https" : "http";
+            var flareSolverrUrl = $"{scheme}://{_config.FlareSolverr.Host}:{_config.FlareSolverr.Port}/v1";
+            
+            var payload = new{
+                cmd = "request.get",
+                url = request.RequestUri.ToString(),
+                maxTimeout = 60000
+            };
+            
+            var flareRequest = new HttpRequestMessage(HttpMethod.Post, flareSolverrUrl){
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
+            
+            var flareResponse = await _flareSolverrClient!.SendAsync(flareRequest, cancellationToken);
+            flareResponse.EnsureSuccessStatusCode();
+            
+            // Parse FlareSolverr response and extract actual HTML content
+            var flareContent = await flareResponse.Content.ReadAsStringAsync(cancellationToken);
+            var flareJson = JsonSerializer.Deserialize<JsonElement>(flareContent);
+            var actualHtml = flareJson.GetProperty("solution").GetProperty("response").GetString() ?? flareContent;
+            
+            // Create a synthetic response with the actual content
+            var syntheticResponse = new HttpResponseMessage(HttpStatusCode.OK){
+                Content = new StringContent(actualHtml, Encoding.UTF8, "text/html"),
+                RequestMessage = request
+            };
+            return syntheticResponse;
+        } catch (Exception ex){
+            _logger?.LogError(ex, "FlareSolverr request failed for {Uri}", request.RequestUri);
+            throw;
+        }
     }
     
     public async Task<(bool IsOk, string ResponseContent, string Error)> SendRequestAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true){
@@ -139,7 +154,9 @@ public class HttpClientWrapper : IDisposable{
                 headers[header.Key.ToLower()] = string.Join(", ", header.Value);
             }
             response.EnsureSuccessStatusCode();
-            CaptureResponseCookies(response, request.RequestUri!);
+            if (request.RequestUri != null){
+                CaptureResponseCookies(response, request.RequestUri);
+            }
             return (true, content, "", headers);
         } catch (Exception e){
             if (!suppressError){
@@ -231,6 +248,7 @@ public class HttpClientWrapper : IDisposable{
     public void Dispose(){
         _client?.Dispose();
         _handler?.Dispose();
+        _flareSolverrClient?.Dispose();
     }
     
     public string? GetCookieValue(string domain, string cookieName){

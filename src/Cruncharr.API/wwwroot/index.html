@@ -4663,7 +4663,7 @@ MAINTENANCE NOTES:
                 'error': '<span class="badge badge-error">Error</span>',
                 'paused': '<span class="badge badge-retry">Paused</span>'
             };
-            return badges[state?.toLowerCase()] || `<span class="badge badge-queued">${state}</span>`;
+            return badges[state?.toLowerCase()] || `<span class="badge badge-queued">${escapeHtml(state)}</span>`;
         }
 
         function formatDownloadSpeed(bytesPerSec) {

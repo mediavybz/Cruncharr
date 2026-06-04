@@ -74,30 +74,38 @@ public class CruncharrConfig{
     
     public static CruncharrConfig Load(string configPath){
         if (File.Exists(configPath)){
-            var content = File.ReadAllText(configPath);
-            
-            if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml")){
-                var deserializer = new DeserializerBuilder()
-                    .IgnoreUnmatchedProperties()
-                    .Build();
-                return deserializer.Deserialize<CruncharrConfig>(content) ?? new CruncharrConfig();
+            try{
+                var content = File.ReadAllText(configPath);
+                
+                if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml")){
+                    var deserializer = new DeserializerBuilder()
+                        .IgnoreUnmatchedProperties()
+                        .Build();
+                    return deserializer.Deserialize<CruncharrConfig>(content) ?? new CruncharrConfig();
+                }
+                
+                return Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(content) ?? new CruncharrConfig();
+            } catch{
+                return new CruncharrConfig();
             }
-            
-            return Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(content) ?? new CruncharrConfig();
         }
         return new CruncharrConfig();
     }
     
     public void Save(string configPath){
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        
-        if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml")){
-            var serializer = new SerializerBuilder()
-                .Build();
-            File.WriteAllText(configPath, serializer.Serialize(this));
-        } else{
-            var json = Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
-            File.WriteAllText(configPath, json);
+        try{
+            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+            
+            if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml")){
+                var serializer = new SerializerBuilder()
+                    .Build();
+                File.WriteAllText(configPath, serializer.Serialize(this));
+            } else{
+                var json = Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
+                File.WriteAllText(configPath, json);
+            }
+        } catch{
+            // Ignore save failures - config will be re-saved on next change
         }
     }
     

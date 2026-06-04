@@ -43,11 +43,11 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable{
         if (!File.Exists(_queueFilePath))
             return null;
 
-        var json = File.ReadAllText(_queueFilePath);
-        if (string.IsNullOrWhiteSpace(json))
-            return null;
-
         try{
+            var json = File.ReadAllText(_queueFilePath);
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
             var queue = JsonSerializer.Deserialize<List<QueueItem>>(json, new JsonSerializerOptions{
                 PropertyNameCaseInsensitive = true
             });
@@ -91,7 +91,11 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable{
             WriteIndented = true
         });
 
-        File.WriteAllText(_queueFilePath, json);
+        try{
+            File.WriteAllText(_queueFilePath, json);
+        } catch{
+            // Ignore write failures - queue will be re-persisted on next change
+        }
     }
 
     private static void PrepareRestoredItem(QueueItem item){

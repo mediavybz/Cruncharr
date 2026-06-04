@@ -60,9 +60,9 @@ public class Program{
         builder.Services.AddSingleton<IEncodingService, EncodingService>();
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<AutoDownloadSchedulerService>();
-        builder.Services.AddHostedService<AutoDownloadSchedulerService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<AutoDownloadSchedulerService>());
         builder.Services.AddSingleton<UpdateCheckerService>();
-        builder.Services.AddHostedService<UpdateCheckerService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<UpdateCheckerService>());
 
         // Add CORS - configurable via environment variable
         var corsOrigins = Environment.GetEnvironmentVariable("CORS_ORIGINS")?.Split(',') ?? new[] { "http://localhost:8585" };

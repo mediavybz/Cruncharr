@@ -703,19 +703,6 @@ public class HlsDownloader{
 }
 
 public static class HttpContentExtensions{
-    public static HttpContent? Clone(this HttpContent? content){
-        if (content == null) return null;
-        var memStream = new MemoryStream();
-        content.CopyToAsync(memStream).Wait();
-        memStream.Position = 0;
-        var newContent = new StreamContent(memStream);
-        foreach (var header in content.Headers){
-            newContent.Headers.Add(header.Key, header.Value);
-        }
-
-        return newContent;
-    }
-    
     public static async Task<HttpContent?> CloneAsync(this HttpContent? content){
         if (content == null) return null;
         var memStream = new MemoryStream();

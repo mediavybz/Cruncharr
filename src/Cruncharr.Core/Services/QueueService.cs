@@ -66,7 +66,7 @@ public class QueueService : IQueueService, IDisposable{
     private volatile bool _isInitialized;
     
     // Shutdown flag replaces Environment.Exit for Docker compatibility
-    private bool _shutdownRequested;
+    private volatile bool _shutdownRequested;
     
     // Global pause flag
     private volatile bool _isGloballyPaused;
@@ -306,13 +306,20 @@ public class QueueService : IQueueService, IDisposable{
                 _logger?.LogInformation("Queue is empty and ShutdownWhenQueueEmpty is enabled - shutting down");
                 _config.Queue.ShutdownWhenQueueEmpty = false;
                 shouldShutdown = true;
-                
-                // Execute on complete (ported from upstream NotificationDispatcher)
-                _notificationService?.NotifyQueueCompleteAsync(_config).GetAwaiter().GetResult();
             }
         }
         
         if (shouldShutdown){
+            // Execute on complete outside the lock to avoid deadlock
+            if (_notificationService != null){
+                _ = Task.Run(async () => {
+                    try{
+                        await _notificationService.NotifyQueueCompleteAsync(_config);
+                    } catch (Exception ex){
+                        _logger?.LogError(ex, "Failed to notify queue complete");
+                    }
+                });
+            }
             _logger?.LogInformation("Queue empty, requesting shutdown...");
             _shutdownRequested = true;
         }

@@ -95,7 +95,10 @@ public class NotificationService : INotificationService{
                     UseShellExecute = true,
                     CreateNoWindow = true
                 };
-                Process.Start(psi);
+                using var process = Process.Start(psi);
+                if (process != null){
+                    await process.WaitForExitAsync();
+                }
                 _logger?.LogInformation("Executed DownloadFinishedExecutePath: {Path}", config.Notifications.DownloadFinishedExecutePath);
             } catch (Exception ex){
                 _logger?.LogError(ex, "Failed to execute DownloadFinishedExecutePath: {Path}", 

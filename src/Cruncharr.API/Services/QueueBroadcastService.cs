@@ -7,7 +7,7 @@ using Newtonsoft.Json;
 
 namespace Cruncharr.API.Services;
 
-public class QueueBroadcastService
+public class QueueBroadcastService : IDisposable
 {
     private readonly ConcurrentDictionary<Guid, ChannelWriter<string>> _clients = new();
     private readonly IQueueService _queueService;
@@ -26,6 +26,11 @@ public class QueueBroadcastService
         };
 
         _queueService.QueueStateChanged += OnQueueStateChanged;
+    }
+
+    public void Dispose()
+    {
+        _queueService.QueueStateChanged -= OnQueueStateChanged;
     }
 
     public ChannelReader<string> Subscribe(Guid clientId)

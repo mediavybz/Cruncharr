@@ -62,6 +62,17 @@ public class UpdateCheckerService : BackgroundService{
     }
     
     private static Version ParseVersion(string version){
+        if (string.IsNullOrWhiteSpace(version)) return new Version(0, 0, 0, 0);
+        
+        // Remove 'v' prefix if present
+        version = version.TrimStart('v', 'V');
+        
+        // Strip prerelease suffix (-beta.1, -rc.2, etc.)
+        var prereleaseIndex = version.IndexOf('-');
+        if (prereleaseIndex > 0){
+            version = version.Substring(0, prereleaseIndex);
+        }
+        
         if (Version.TryParse(version, out var v)) return v;
         return new Version(0, 0, 0, 0);
     }

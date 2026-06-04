@@ -23,40 +23,48 @@ public class AuthController : ControllerBase{
     /// </summary>
     [HttpGet("status")]
     public async Task<ActionResult<AuthStatusResponse>> GetStatus(){
-        // Try to refresh token if needed before returning status
-        if (_auth.IsAuthenticated){
-            try{
-                await _auth.RefreshTokenAsync(_config?.Crunchyroll?.UseBetaApi ?? true);
-            } catch (Exception ex){
-                _logger?.LogWarning(ex, "Token refresh failed during status check");
+        try{
+            // Try to refresh token if needed before returning status
+            if (_auth.IsAuthenticated){
+                try{
+                    await _auth.RefreshTokenAsync(_config?.Crunchyroll?.UseBetaApi ?? true);
+                } catch (Exception ex){
+                    _logger?.LogWarning(ex, "Token refresh failed during status check");
+                }
             }
-        }
-        
-        // If we have a token but profile is not loaded, fetch it
-        if (_auth.Token?.access_token != null && _auth.Profile.Username == "???"){
-            try{
-                await _auth.GetMultiProfileAsync(_config?.Crunchyroll?.UseBetaApi ?? true);
-            } catch (Exception ex){
-                _logger?.LogWarning(ex, "Failed to fetch profile during status check");
+            
+            // If we have a token but profile is not loaded, fetch it
+            if (_auth.Token?.access_token != null && _auth.Profile?.Username == "???"){
+                try{
+                    await _auth.GetMultiProfileAsync(_config?.Crunchyroll?.UseBetaApi ?? true);
+                } catch (Exception ex){
+                    _logger?.LogWarning(ex, "Failed to fetch profile during status check");
+                }
             }
+            
+            var profile = _auth.Profile;
+            var multiProfile = _auth.MultiProfile;
+            
+            return Ok(new AuthStatusResponse{
+                IsAuthenticated = _auth.IsAuthenticated,
+                Username = profile?.Username ?? "",
+                HasPremium = profile?.HasPremium ?? false,
+                PreferredAudioLanguage = profile?.PreferredContentAudioLanguage ?? "",
+                PreferredSubtitleLanguage = profile?.PreferredContentSubtitleLanguage ?? "",
+                Avatar = profile?.Avatar,
+                MultiProfile = multiProfile?.Profiles?.Select(p => new ProfileDto{
+                    ProfileId = p.ProfileId,
+                    ProfileName = p.ProfileName,
+                    Username = p.Username,
+                    IsSelected = p.IsSelected,
+                    CanSwitch = p.CanSwitch,
+                    IsPinProtected = p.IsPinProtected
+                }).ToList() ?? new List<ProfileDto>()
+            });
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to get auth status");
+            return StatusCode(500, new { Error = "Failed to get auth status", Message = ex.Message });
         }
-        
-        return Ok(new AuthStatusResponse{
-            IsAuthenticated = _auth.IsAuthenticated,
-            Username = _auth.Profile.Username ?? "",
-            HasPremium = _auth.Profile.HasPremium,
-            PreferredAudioLanguage = _auth.Profile.PreferredContentAudioLanguage ?? "",
-            PreferredSubtitleLanguage = _auth.Profile.PreferredContentSubtitleLanguage ?? "",
-            Avatar = _auth.Profile.Avatar,
-            MultiProfile = _auth.MultiProfile?.Profiles?.Select(p => new ProfileDto{
-                ProfileId = p.ProfileId,
-                ProfileName = p.ProfileName,
-                Username = p.Username,
-                IsSelected = p.IsSelected,
-                CanSwitch = p.CanSwitch,
-                IsPinProtected = p.IsPinProtected
-            }).ToList() ?? new List<ProfileDto>()
-        });
     }
 
     /// <summary>

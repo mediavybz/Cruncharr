@@ -182,7 +182,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         _logger?.LogInformation("Authenticating with Crunchyroll...");
         
         if (File.Exists(GetTokenFilePath())){
-            var content = File.ReadAllText(GetTokenFilePath());
+            var content = await File.ReadAllTextAsync(GetTokenFilePath());
             Token = JsonConvert.DeserializeObject<CrToken>(content);
             if (Token?.refresh_token != null){
                 await LoginWithTokenAsync(useBetaApi, cancellationToken);

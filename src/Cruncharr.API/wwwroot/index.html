@@ -3105,11 +3105,15 @@ MAINTENANCE NOTES:
             if (useDefault){
                 const endpoint = document.getElementById('setting-stream-endpoint' + (endpointNum===2?'-2':''))?.value || 'tv/android_tv';
                 const label = STREAM_DEVICE_LABELS[endpoint] || endpoint;
-                document.getElementById('setting-stream-device-type' + (endpointNum===2?'-2':''))?.value = label;
-                document.getElementById('setting-stream-device-name' + (endpointNum===2?'-2':''))?.value = label;
+                const deviceTypeEl = document.getElementById('setting-stream-device-type' + (endpointNum===2?'-2':''));
+                if (deviceTypeEl) deviceTypeEl.value = label;
+                const deviceNameEl = document.getElementById('setting-stream-device-name' + (endpointNum===2?'-2':''));
+                if (deviceNameEl) deviceNameEl.value = label;
                 // Auth/User-Agent cleared - server handles defaults when useDefault=true
-                document.getElementById('setting-stream-auth' + (endpointNum===2?'-2':''))?.value = '';
-                document.getElementById('setting-stream-ua' + (endpointNum===2?'-2':''))?.value = '';
+                const authEl = document.getElementById('setting-stream-auth' + (endpointNum===2?'-2':''));
+                if (authEl) authEl.value = '';
+                const uaEl = document.getElementById('setting-stream-ua' + (endpointNum===2?'-2':''));
+                if (uaEl) uaEl.value = '';
             }
         }
 

@@ -1191,7 +1191,7 @@ public class DownloadService : IDownloadService{
         }
         
         // Try language code match (e.g., "en" for "en-US")
-        var langPrefix = hsLang.Split('-')[0].ToLowerInvariant();
+        var langPrefix = hsLang?.Split('-')[0].ToLowerInvariant() ?? "";
         var prefixMatch = playback.HardSubs.FirstOrDefault(kvp =>
             kvp.Value.Hlang?.Split('-')[0].ToLowerInvariant() == langPrefix);
         

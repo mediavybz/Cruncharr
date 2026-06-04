@@ -126,6 +126,11 @@ public class HlsDownloader{
         if (_data.M3U8Json != null){
             List<dynamic> segments = _data.M3U8Json.Segments;
 
+            if (segments == null || segments.Count == 0){
+                Console.Error.WriteLine("Playlist contains no segments");
+                return (false, this._data.Parts);
+            }
+
             // map has init uri outside is none init uri
             // Download init part
             if (segments[0].map != null && _data.Offset == 0 && !_data.SkipInit){
@@ -259,8 +264,12 @@ public class HlsDownloader{
                 _data.BytesDownloaded = 0;
 
                 // Save resume data to file
-                string resumeDataJson = JsonConvert.SerializeObject(new{ _data.Parts.Completed, Total = totalSeg });
-                File.WriteAllText($"{fn}.resume", resumeDataJson);
+                try{
+                    string resumeDataJson = JsonConvert.SerializeObject(new{ _data.Parts.Completed, Total = totalSeg });
+                    File.WriteAllText($"{fn}.resume", resumeDataJson);
+                } catch (Exception ex){
+                    Console.Error.WriteLine($"Failed to write resume file: {ex.Message}");
+                }
 
                 var downloadSpeed = _config?.Download.DownloadSpeedInBits == true
                     ? $"{dataLog.DownloadSpeedBytes * 8 / 1000000.0:F2} Mb/s"
@@ -302,11 +311,15 @@ public class HlsDownloader{
 
             int currentDownloaded = Directory.GetFiles(tempDir, "part_*.tmp").Length;
             lock (_resumeLock){
-                File.WriteAllText(resumeFile, JsonConvert.SerializeObject(new{
-                    DownloadedParts = currentDownloaded,
-                    MergedParts = mergedParts,
-                    Total = totalSeg
-                }));
+                try{
+                    File.WriteAllText(resumeFile, JsonConvert.SerializeObject(new{
+                        DownloadedParts = currentDownloaded,
+                        MergedParts = mergedParts,
+                        Total = totalSeg
+                    }));
+                } catch (Exception ex){
+                    Console.Error.WriteLine($"Failed to write resume file: {ex.Message}");
+                }
             }
 
             long lastUiUpdate = getLastUiUpdate();
@@ -438,11 +451,15 @@ public class HlsDownloader{
 
                 mergedParts++;
 
-                File.WriteAllText(resumeFile, JsonConvert.SerializeObject(new{
-                    DownloadedParts = totalSeg,
-                    MergedParts = mergedParts,
-                    Total = totalSeg
-                }));
+                try{
+                    File.WriteAllText(resumeFile, JsonConvert.SerializeObject(new{
+                        DownloadedParts = totalSeg,
+                        MergedParts = mergedParts,
+                        Total = totalSeg
+                    }));
+                } catch (Exception ex){
+                    Console.Error.WriteLine($"Failed to write resume file: {ex.Message}");
+                }
 
                 var dataLog = GetDownloadInfo(_data.DateStart, mergedParts, totalSeg, _data.BytesDownloaded, _data.TotalBytes);
                 Console.WriteLine($"{mergedParts}/{totalSeg} parts merged [{dataLog.Percent}%]");

@@ -446,7 +446,8 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             request.Headers.Add(header.Key, header.Value);
         }
         
-        _logger?.LogDebug("Login request to {Url} with auth: {Auth}", ApiUrls.Auth, StreamEndpoint.Authorization.Substring(0, 20) + "...");
+        var authPreview = StreamEndpoint.Authorization?.Length >= 20 ? StreamEndpoint.Authorization.Substring(0, 20) + "..." : StreamEndpoint.Authorization ?? "(null)";
+        _logger?.LogDebug("Login request to {Url} with auth: {Auth}", ApiUrls.Auth, authPreview);
         
         var (isOk, content, error) = await _httpClient.SendRequestAsync(request, suppressError: false, attachCookies: false);
         

@@ -67,7 +67,11 @@ public class QueueBroadcastService : IDisposable
             
             foreach (var client in _clients.Values)
             {
-                client.TryWrite(json);
+                try{
+                    client.TryWrite(json);
+                } catch (Exception ex){
+                    _logger.LogDebug(ex, "Failed to write to SSE client");
+                }
             }
         }
         catch (Exception ex)

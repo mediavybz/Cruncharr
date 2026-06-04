@@ -1,6 +1,7 @@
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
+using Cruncharr.Core.Utils;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Cruncharr.API.Controllers;
@@ -233,63 +234,8 @@ public class ConfigController : ControllerBase{
         }
         
         // SSRF protection: validate URL scheme and block private IPs
-        if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var uri)){
-            return BadRequest(new { Success = false, Message = "Invalid URL format" });
-        }
-        
-        if (uri.Scheme != "http" && uri.Scheme != "https"){
-            return BadRequest(new { Success = false, Message = "Only HTTP and HTTPS URLs are allowed" });
-        }
-        
-        // Block localhost and private IP ranges
-        var host = uri.Host;
-        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || 
-            host == "127.0.0.1" || 
-            host == "::1" ||
-            host == "0.0.0.0"){
-            return BadRequest(new { Success = false, Message = "Localhost URLs are not allowed" });
-        }
-        
-        // Block 127.x.x.x loopback
-        if (host.StartsWith("127.")){
-            return BadRequest(new { Success = false, Message = "Loopback addresses are not allowed" });
-        }
-        
-        // Resolve DNS to check for rebinding attacks
-        try{
-            var hostEntry = System.Net.Dns.GetHostEntry(host);
-            foreach (var resolvedIp in hostEntry.AddressList){
-                var bytes = resolvedIp.GetAddressBytes();
-                // IPv4 private ranges
-                if (bytes.Length == 4){
-                    if (bytes[0] == 10 || // 10.0.0.0/8
-                        (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) || // 172.16.0.0/12
-                        (bytes[0] == 192 && bytes[1] == 168) || // 192.168.0.0/16
-                        (bytes[0] == 169 && bytes[1] == 254) || // 169.254.0.0/16
-                        bytes[0] == 127 || // 127.0.0.0/8
-                        bytes[0] == 0){    // 0.0.0.0/8
-                        return BadRequest(new { Success = false, Message = "Private IP addresses are not allowed" });
-                    }
-                }
-                // IPv6 loopback
-                if (resolvedIp.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 &&
-                    resolvedIp.Equals(System.Net.IPAddress.IPv6Loopback)){
-                    return BadRequest(new { Success = false, Message = "Loopback addresses are not allowed" });
-                }
-            }
-        } catch{
-            // DNS resolution failed - block to be safe
-            return BadRequest(new { Success = false, Message = "Unable to resolve hostname" });
-        }
-        
-        if (System.Net.IPAddress.TryParse(host, out var ip)){
-            var bytes = ip.GetAddressBytes();
-            if (bytes[0] == 10 || // 10.0.0.0/8
-                (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) || // 172.16.0.0/12
-                (bytes[0] == 192 && bytes[1] == 168) || // 192.168.0.0/16
-                (bytes[0] == 169 && bytes[1] == 254)){ // 169.254.0.0/16
-                return BadRequest(new { Success = false, Message = "Private IP addresses are not allowed" });
-            }
+        if (!WebhookUrlValidator.IsValidWebhookUrl(request.Url, out var validationError)){
+            return BadRequest(new { Success = false, Message = validationError });
         }
         
         try{

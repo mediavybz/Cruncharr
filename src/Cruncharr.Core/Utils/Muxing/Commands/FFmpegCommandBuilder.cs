@@ -178,7 +178,7 @@ public class FFmpegCommandBuilder : CommandBuilder{
         if (!string.IsNullOrEmpty(Options.VideoTitle))
             Add($"-metadata title=\"{Options.VideoTitle}\"");
 
-        if (Options.Description is{ Count: > 0 }){
+        if (Options.Description is{ Count: > 0 } && !string.IsNullOrEmpty(Options.Description[0].Path)){
             XmlDocument doc = new();
             doc.Load(Options.Description[0].Path);
 

@@ -229,6 +229,9 @@ public class ConfigController : ControllerBase{
     /// </summary>
     [HttpPost("webhook/test")]
     public async Task<IActionResult> TestWebhook([FromBody] WebhookTestRequest request){
+        if (request == null){
+            return BadRequest(new { Success = false, Message = "Request body is required" });
+        }
         if (string.IsNullOrWhiteSpace(request.Url)){
             return BadRequest(new { Success = false, Message = "Webhook URL is required" });
         }
@@ -239,15 +242,15 @@ public class ConfigController : ControllerBase{
         }
         
         try{
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             using var client = _httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(30);
             var payload = new{
                 event_type = "test",
                 message = "This is a test webhook from Cruncharr",
                 timestamp = DateTime.UtcNow
             };
             var content = System.Net.Http.Json.JsonContent.Create(payload);
-            var response = await client.PostAsync(request.Url, content);
+            using var response = await client.PostAsync(request.Url, content, cts.Token);
             if (response.IsSuccessStatusCode){
                 return Ok(new { Success = true, Message = "Webhook test sent successfully" });
             }

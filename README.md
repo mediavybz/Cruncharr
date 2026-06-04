@@ -234,7 +234,3 @@ Create a folder named `widevine` in the root directory of Crunchy-Downloader and
 > ⚠️ **Note:** Due to legal reasons, these CDM files are not provided with the application. You must source them independently.
 
 For more information, refer to the [Widevine FAQ](https://github.com/Crunchy-DL/Crunchy-Downloader/discussions/36)
-
-
-
->>>>>>> c123093 (- Added general setting to **replace existing output files** instead of creating numbered copies)

@@ -6,9 +6,3 @@ _builds
 CRD/*
 !CRD/Assets/
 !CRD/Assets/**
-
-docker/*
-!docker/crd.desktop
-!docker/50-crd-shortcuts
-!docker/crd-linux-x64/
-!docker/crd-linux-x64/**

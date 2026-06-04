@@ -911,6 +911,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable{
     private static string ExtractIdFromUrl(string input){
         if (input.StartsWith("http")){
             var parts = input.Split('/');
+            if (parts.Length == 0) return input;
             return parts.Last().Split('?')[0];
         }
         return input;

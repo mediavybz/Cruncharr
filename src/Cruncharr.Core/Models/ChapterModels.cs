@@ -2,13 +2,15 @@ using Newtonsoft.Json;
 
 namespace Cruncharr.Core.Models;
 
-public class CrunchyChapters{
+public class CrunchyChapters
+{
     public List<CrunchyChapter> Chapters { get; set; } = [];
     public DateTime lastUpdate { get; set; }
     public string? mediaId { get; set; }
 }
 
-public class CrunchyChapter{
+public class CrunchyChapter
+{
     public string approverId { get; set; } = "";
     public string distributionNumber { get; set; } = "";
     public double? end { get; set; }

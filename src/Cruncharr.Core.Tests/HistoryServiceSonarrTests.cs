@@ -7,7 +7,8 @@ using Moq;
 
 namespace Cruncharr.Core.Tests;
 
-public class HistoryServiceSonarrTests : IDisposable{
+public class HistoryServiceSonarrTests : IDisposable
+{
     private readonly string _testHistoryPath;
     private readonly Mock<ILogger<HistoryService>> _loggerMock;
     private readonly Mock<ISonarrService> _sonarrServiceMock;
@@ -15,13 +16,16 @@ public class HistoryServiceSonarrTests : IDisposable{
     private readonly CruncharrConfig _config;
     private readonly HistoryService _historyService;
 
-    public HistoryServiceSonarrTests(){
+    public HistoryServiceSonarrTests()
+    {
         _testHistoryPath = Path.Combine(Path.GetTempPath(), $"test_history_{Guid.NewGuid()}.json");
         _loggerMock = new Mock<ILogger<HistoryService>>();
         _sonarrServiceMock = new Mock<ISonarrService>();
         _apiServiceMock = new Mock<ICrunchyrollApiService>();
-        _config = new CruncharrConfig{
-            Sonarr = new SonarrConfig{
+        _config = new CruncharrConfig
+        {
+            Sonarr = new SonarrConfig
+            {
                 Enabled = true,
                 Host = "localhost",
                 Port = 8989,
@@ -39,16 +43,19 @@ public class HistoryServiceSonarrTests : IDisposable{
         );
     }
 
-    public void Dispose(){
-        if (File.Exists(_testHistoryPath)){
+    public void Dispose()
+    {
+        if (File.Exists(_testHistoryPath))
+        {
             File.Delete(_testHistoryPath);
         }
     }
 
     [Fact]
-    public async Task MatchHistorySeriesWithSonarrAsync_DisabledConfig_DoesNothing(){
+    public async Task MatchHistorySeriesWithSonarrAsync_DisabledConfig_DoesNothing()
+    {
         _config.Sonarr.Enabled = false;
-        
+
         var history = CreateTestHistory();
         await SaveTestHistory(history);
 
@@ -58,7 +65,8 @@ public class HistoryServiceSonarrTests : IDisposable{
     }
 
     [Fact]
-    public async Task MatchHistorySeriesWithSonarrAsync_NoSonarrService_DoesNothing(){
+    public async Task MatchHistorySeriesWithSonarrAsync_NoSonarrService_DoesNothing()
+    {
         var serviceWithoutSonarr = new HistoryService(
             _testHistoryPath,
             _loggerMock.Object,
@@ -79,7 +87,8 @@ public class HistoryServiceSonarrTests : IDisposable{
     }
 
     [Fact]
-    public async Task MatchHistorySeriesWithSonarrAsync_UnmatchedSeries_MatchesByTitle(){
+    public async Task MatchHistorySeriesWithSonarrAsync_UnmatchedSeries_MatchesByTitle()
+    {
         var history = CreateTestHistory();
         await SaveTestHistory(history);
 
@@ -101,14 +110,15 @@ public class HistoryServiceSonarrTests : IDisposable{
 
         var result = await _historyService.GetHistorySeriesAsync();
         var matchedSeries = result.First(s => s.SeriesTitle == "Attack on Titan");
-        
+
         Assert.Equal("100", matchedSeries.SonarrSeriesId);
         Assert.Equal("267440", matchedSeries.SonarrTvDbId);
         Assert.Equal("attack-on-titan", matchedSeries.SonarrSlugTitle);
     }
 
     [Fact]
-    public async Task MatchHistorySeriesWithSonarrAsync_AlreadyMatched_DoesNotRematch(){
+    public async Task MatchHistorySeriesWithSonarrAsync_AlreadyMatched_DoesNotRematch()
+    {
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
         await SaveTestHistory(history);
@@ -129,13 +139,14 @@ public class HistoryServiceSonarrTests : IDisposable{
 
         var result = await _historyService.GetHistorySeriesAsync();
         var series = result.First(s => s.SeriesTitle == "Attack on Titan");
-        
+
         // Should keep original match
         Assert.Equal("100", series.SonarrSeriesId);
     }
 
     [Fact]
-    public async Task MatchHistorySeriesWithSonarrAsync_UpdateAll_UpdatesExistingMatches(){
+    public async Task MatchHistorySeriesWithSonarrAsync_UpdateAll_UpdatesExistingMatches()
+    {
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
         history[0].SonarrTvDbId = "267440";
@@ -159,13 +170,14 @@ public class HistoryServiceSonarrTests : IDisposable{
 
         var result = await _historyService.GetHistorySeriesAsync();
         var series = result.First(s => s.SeriesTitle == "Attack on Titan");
-        
+
         Assert.Equal("267441", series.SonarrTvDbId);
         Assert.Equal("attack-on-titan-final", series.SonarrSlugTitle);
     }
 
     [Fact]
-    public async Task MatchHistorySeriesWithSonarrAsync_ArtistSeries_SkipsMatching(){
+    public async Task MatchHistorySeriesWithSonarrAsync_ArtistSeries_SkipsMatching()
+    {
         var history = CreateTestHistory();
         history[0].SeriesType = SeriesType.Artist;
         await SaveTestHistory(history);
@@ -186,12 +198,13 @@ public class HistoryServiceSonarrTests : IDisposable{
 
         var result = await _historyService.GetHistorySeriesAsync();
         var series = result.First(s => s.SeriesTitle == "Attack on Titan");
-        
+
         Assert.Null(series.SonarrSeriesId);
     }
 
     [Fact]
-    public async Task MatchHistoryEpisodesWithSonarrAsync_Success_MatchesEpisodes(){
+    public async Task MatchHistoryEpisodesWithSonarrAsync_Success_MatchesEpisodes()
+    {
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
         await SaveTestHistory(history);
@@ -218,14 +231,15 @@ public class HistoryServiceSonarrTests : IDisposable{
 
         var result = await _historyService.GetHistorySeriesAsync();
         var episode = result[0].Seasons[0].EpisodesList[0];
-        
+
         Assert.Equal("1001", episode.SonarrEpisodeId);
         Assert.Equal("1", episode.SonarrEpisodeNumber);
         Assert.True(episode.SonarrHasFile);
     }
 
     [Fact]
-    public async Task MatchHistoryEpisodesWithSonarrAsync_NoSeriesId_DoesNothing(){
+    public async Task MatchHistoryEpisodesWithSonarrAsync_NoSeriesId_DoesNothing()
+    {
         var history = CreateTestHistory();
         await SaveTestHistory(history);
 
@@ -235,7 +249,8 @@ public class HistoryServiceSonarrTests : IDisposable{
     }
 
     [Fact]
-    public async Task MatchHistoryEpisodesWithSonarrAsync_InvalidSeriesId_DoesNothing(){
+    public async Task MatchHistoryEpisodesWithSonarrAsync_InvalidSeriesId_DoesNothing()
+    {
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "invalid";
         await SaveTestHistory(history);
@@ -246,7 +261,8 @@ public class HistoryServiceSonarrTests : IDisposable{
     }
 
     [Fact]
-    public async Task MatchHistoryEpisodesWithSonarrAsync_RematchAll_ClearsAndRematches(){
+    public async Task MatchHistoryEpisodesWithSonarrAsync_RematchAll_ClearsAndRematches()
+    {
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
         history[0].Seasons[0].EpisodesList[0].SonarrEpisodeId = "1001";
@@ -274,12 +290,13 @@ public class HistoryServiceSonarrTests : IDisposable{
 
         var result = await _historyService.GetHistorySeriesAsync();
         var episode = result[0].Seasons[0].EpisodesList[0];
-        
+
         Assert.Equal("2001", episode.SonarrEpisodeId);
     }
 
     [Fact]
-    public async Task MatchHistoryEpisodesWithSonarrAsync_MatchByEpisodeNumber_FallsBackToNumber(){
+    public async Task MatchHistoryEpisodesWithSonarrAsync_MatchByEpisodeNumber_FallsBackToNumber()
+    {
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
         history[0].Seasons[0].EpisodesList[0].EpisodeTitle = "Completely Different Title";
@@ -307,11 +324,12 @@ public class HistoryServiceSonarrTests : IDisposable{
 
         var result = await _historyService.GetHistorySeriesAsync();
         var episode = result[0].Seasons[0].EpisodesList[0];
-        
+
         Assert.Equal("1001", episode.SonarrEpisodeId);
     }
 
-    private List<HistorySeries> CreateTestHistory(){
+    private List<HistorySeries> CreateTestHistory()
+    {
         return new List<HistorySeries>{
             new(){
                 SeriesId = "series-1",
@@ -336,7 +354,8 @@ public class HistoryServiceSonarrTests : IDisposable{
         };
     }
 
-    private async Task SaveTestHistory(List<HistorySeries> history){
+    private async Task SaveTestHistory(List<HistorySeries> history)
+    {
         var json = JsonSerializer.Serialize(history);
         await File.WriteAllTextAsync(_testHistoryPath, json);
     }

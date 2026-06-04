@@ -8,22 +8,30 @@ using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser;
 
-public class ToPlaylistsClass{
-    public static List<dynamic> ToPlaylists(IEnumerable<dynamic> representations){
+public class ToPlaylistsClass
+{
+    public static List<dynamic> ToPlaylists(IEnumerable<dynamic> representations)
+    {
         return representations.Select(GenerateSegments).ToList();
     }
 
-    public static dynamic GenerateSegments(dynamic input){
+    public static dynamic GenerateSegments(dynamic input)
+    {
         dynamic segmentAttributes = new ExpandoObject();
         Func<dynamic, List<dynamic>, List<dynamic>>? segmentsFn = null;
 
-        if (ObjectUtilities.GetMemberValue(input.segmentInfo,"template") != null){
+        if (ObjectUtilities.GetMemberValue(input.segmentInfo, "template") != null)
+        {
             segmentsFn = SegmentTemplate.SegmentsFromTemplate;
             segmentAttributes = ObjectUtilities.MergeExpandoObjects(input.attributes, input.segmentInfo.template);
-        } else if (ObjectUtilities.GetMemberValue(input.segmentInfo,"base") != null){
+        }
+        else if (ObjectUtilities.GetMemberValue(input.segmentInfo, "base") != null)
+        {
             segmentsFn = SegmentBase.SegmentsFromBase;
             segmentAttributes = ObjectUtilities.MergeExpandoObjects(input.attributes, input.segmentInfo.@base);
-        } else if (ObjectUtilities.GetMemberValue(input.segmentInfo,"list") != null){
+        }
+        else if (ObjectUtilities.GetMemberValue(input.segmentInfo, "list") != null)
+        {
             Console.Error.WriteLine("UNTESTED PARSING");
             segmentsFn = SegmentList.SegmentsFromList;
             segmentAttributes = ObjectUtilities.MergeExpandoObjects(input.attributes, input.segmentInfo.list);
@@ -32,25 +40,32 @@ public class ToPlaylistsClass{
         dynamic segmentsInfo = new ExpandoObject();
         segmentsInfo.attributes = input.attributes;
 
-        if (segmentsFn == null){
+        if (segmentsFn == null)
+        {
             return segmentsInfo;
         }
 
         List<dynamic> segments = segmentsFn(segmentAttributes, ObjectUtilities.GetMemberValue(input.segmentInfo, "segmentTimeline"));
 
-        if (ObjectUtilities.GetMemberValue(segmentAttributes,"duration") != null){
-            int timescale = ObjectUtilities.GetMemberValue(segmentAttributes,"timescale") ?? 1;
-            segmentAttributes.duration = ObjectUtilities.GetMemberValue(segmentAttributes,"duration") / timescale;
-        } else if (segments.Any()){
-            segmentAttributes.duration = segments.Max(segment => Math.Ceiling(ObjectUtilities.GetMemberValue(segment,"duration")));
-        } else{
+        if (ObjectUtilities.GetMemberValue(segmentAttributes, "duration") != null)
+        {
+            int timescale = ObjectUtilities.GetMemberValue(segmentAttributes, "timescale") ?? 1;
+            segmentAttributes.duration = ObjectUtilities.GetMemberValue(segmentAttributes, "duration") / timescale;
+        }
+        else if (segments.Any())
+        {
+            segmentAttributes.duration = segments.Max(segment => Math.Ceiling(ObjectUtilities.GetMemberValue(segment, "duration")));
+        }
+        else
+        {
             segmentAttributes.duration = 0;
         }
 
         segmentsInfo.attributes = segmentAttributes;
         segmentsInfo.segments = segments;
 
-        if (ObjectUtilities.GetMemberValue(input.segmentInfo,"base") != null && ObjectUtilities.GetMemberValue(segmentAttributes,"indexRange") != null){
+        if (ObjectUtilities.GetMemberValue(input.segmentInfo, "base") != null && ObjectUtilities.GetMemberValue(segmentAttributes, "indexRange") != null)
+        {
             segmentsInfo.sidx = segments.FirstOrDefault();
             segmentsInfo.segments = new List<dynamic>();
         }

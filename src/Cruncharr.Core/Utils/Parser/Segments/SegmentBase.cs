@@ -7,8 +7,10 @@ using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser.Segments;
 
-public class SegmentBase{
-    public static List<dynamic> SegmentsFromBase(dynamic attributes, List<dynamic>? segmentTimeline = null){
+public class SegmentBase
+{
+    public static List<dynamic> SegmentsFromBase(dynamic attributes, List<dynamic>? segmentTimeline = null)
+    {
         var baseUrl = ObjectUtilities.GetMemberValue(attributes, "baseUrl");
         var initialization = ObjectUtilities.GetMemberValue(attributes, "initialization") ?? new ExpandoObject();
         var sourceDuration = ObjectUtilities.GetMemberValue(attributes, "sourceDuration");
@@ -18,17 +20,20 @@ public class SegmentBase{
         var number = ObjectUtilities.GetMemberValue(attributes, "number") ?? 0;
         var duration = ObjectUtilities.GetMemberValue(attributes, "duration");
 
-        if (baseUrl == null){
+        if (baseUrl == null)
+        {
             throw new Exception("NO_BASE_URL");
         }
 
-        dynamic initSegment = UrlType.UrlTypeToSegment(new{
+        dynamic initSegment = UrlType.UrlTypeToSegment(new
+        {
             baseUrl = baseUrl,
             source = ObjectUtilities.GetMemberValue(initialization, "sourceURL"),
             range = ObjectUtilities.GetMemberValue(initialization, "range")
         });
 
-        dynamic segment = UrlType.UrlTypeToSegment(new{
+        dynamic segment = UrlType.UrlTypeToSegment(new
+        {
             baseUrl = baseUrl,
             source = baseUrl,
             indexRange = indexRange
@@ -36,14 +41,18 @@ public class SegmentBase{
 
         segment.map = initSegment;
 
-        if (duration != null){
+        if (duration != null)
+        {
             var segmentTimeInfo = DurationTimeParser.ParseByDuration(attributes);
 
-            if (segmentTimeInfo.Count > 0){
+            if (segmentTimeInfo.Count > 0)
+            {
                 segment.duration = segmentTimeInfo[0].duration;
                 segment.timeline = segmentTimeInfo[0].timeline;
             }
-        } else if (sourceDuration != null){
+        }
+        else if (sourceDuration != null)
+        {
             segment.duration = sourceDuration;
             segment.timeline = periodStart;
         }
@@ -51,10 +60,11 @@ public class SegmentBase{
         segment.presentationTime = presentationTime ?? periodStart;
         segment.number = number;
 
-        return new List<dynamic>{ segment };
+        return new List<dynamic> { segment };
     }
 
-    public static dynamic AddSidxSegmentsToPlaylist(dynamic playlist, dynamic sidx, string baseUrl){
+    public static dynamic AddSidxSegmentsToPlaylist(dynamic playlist, dynamic sidx, string baseUrl)
+    {
         var initSegment = playlist.sidx.ContainsKey("map") ? playlist.sidx.map : null;
         var sourceDuration = playlist.sidx.duration;
         var timeline = playlist.timeline ?? 0;
@@ -69,13 +79,17 @@ public class SegmentBase{
         var number = playlist.mediaSequence ?? 0;
 
         BigInteger startIndex;
-        if (sidx.firstOffset is BigInteger){
+        if (sidx.firstOffset is BigInteger)
+        {
             startIndex = sidxEnd + (BigInteger)sidx.firstOffset;
-        } else{
+        }
+        else
+        {
             startIndex = sidxEnd + new BigInteger((long)sidx.firstOffset);
         }
 
-        foreach (var reference in mediaReferences){
+        foreach (var reference in mediaReferences)
+        {
             var size = (long)reference.referencedSize;
             var duration = (long)reference.subsegmentDuration;
             BigInteger endIndex = startIndex + new BigInteger(size) - BigInteger.One;
@@ -95,7 +109,8 @@ public class SegmentBase{
 
             var segment = SegmentsFromBase(attributes, new List<dynamic>())[0];
 
-            if (initSegment != null){
+            if (initSegment != null)
+            {
                 segment.map = initSegment;
             }
 

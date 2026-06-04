@@ -9,7 +9,8 @@ using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser;
 
-public class InheritAttributes{
+public class InheritAttributes
+{
     public static Dictionary<string, string> KeySystemsMap = new Dictionary<string, string>{
         { "urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b", "org.w3.clearkey" },
         { "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed", "com.widevine.alpha" },
@@ -18,10 +19,12 @@ public class InheritAttributes{
         { "urn:mpeg:dash:mp4protection:2011", "mp4protection" }
     };
 
-    public static dynamic GenerateKeySystemInformation(List<XmlElement> contentProtectionNodes){
+    public static dynamic GenerateKeySystemInformation(List<XmlElement> contentProtectionNodes)
+    {
         var keySystemInfo = new ExpandoObject() as IDictionary<string, object>;
 
-        foreach (var node in contentProtectionNodes){
+        foreach (var node in contentProtectionNodes)
+        {
             dynamic attributes = ParseAttribute.ParseAttributes(node);
             var attributesDict = attributes as IDictionary<string, object>;
 
@@ -46,7 +49,8 @@ public class InheritAttributes{
 
             var psshNode = XMLUtils.FindChildren(node, "cenc:pssh").FirstOrDefault();
 
-            if (psshNode != null){
+            if (psshNode != null)
+            {
                 string pssh = psshNode.InnerText;
 
                 if (!string.IsNullOrEmpty(pssh))
@@ -59,19 +63,23 @@ public class InheritAttributes{
         return keySystemInfo;
     }
 
-    private static byte[] DecodeB64ToUint8Array(string base64String){
+    private static byte[] DecodeB64ToUint8Array(string base64String)
+    {
         return Convert.FromBase64String(base64String);
     }
 
     public static string GetContent(XmlElement element) => element.InnerText.Trim();
 
-    public static List<dynamic> BuildBaseUrls(List<dynamic> references, List<XmlElement> baseUrlElements){
-        if (!baseUrlElements.Any()){
+    public static List<dynamic> BuildBaseUrls(List<dynamic> references, List<XmlElement> baseUrlElements)
+    {
+        if (!baseUrlElements.Any())
+        {
             return references;
         }
 
         return references.SelectMany(reference =>
-            baseUrlElements.Select(baseUrlElement => {
+            baseUrlElements.Select(baseUrlElement =>
+            {
                 var initialBaseUrl = GetContent(baseUrlElement);
                 string resolvedBaseUrl = UrlUtils.ResolveUrl(reference.baseUrl, initialBaseUrl);
 
@@ -80,7 +88,8 @@ public class InheritAttributes{
 
                 ObjectUtilities.MergeExpandoObjects(finalBaseUrl, ParseAttribute.ParseAttributes(baseUrlElement));
 
-                if (resolvedBaseUrl != initialBaseUrl && finalBaseUrl.serviceLocation == null && reference.serviceLocation != null){
+                if (resolvedBaseUrl != initialBaseUrl && finalBaseUrl.serviceLocation == null && reference.serviceLocation != null)
+                {
                     finalBaseUrl.ServiceLocation = reference.ServiceLocation;
                 }
 
@@ -89,42 +98,51 @@ public class InheritAttributes{
         ).ToList();
     }
 
-    public static double? GetPeriodStart(dynamic attributes, dynamic? priorPeriodAttributes, string mpdType){
+    public static double? GetPeriodStart(dynamic attributes, dynamic? priorPeriodAttributes, string mpdType)
+    {
         var attributesL = attributes as IDictionary<string, object>;
-        if (attributesL != null && attributesL.ContainsKey("start") && (attributesL["start"] is double || attributesL["start"] is long || attributesL["start"] is float || attributesL["start"] is int)){
+        if (attributesL != null && attributesL.ContainsKey("start") && (attributesL["start"] is double || attributesL["start"] is long || attributesL["start"] is float || attributesL["start"] is int))
+        {
             return (double)attributes.start;
         }
 
         var priorPeriodAttributesL = priorPeriodAttributes as IDictionary<string, object>;
         if (priorPeriodAttributesL != null && priorPeriodAttributesL.ContainsKey("start") && priorPeriodAttributesL.ContainsKey("duration") &&
             (priorPeriodAttributesL["start"] is double || priorPeriodAttributesL["start"] is long || priorPeriodAttributesL["start"] is float || priorPeriodAttributesL["start"] is int) &&
-            (priorPeriodAttributesL["duration"] is double || priorPeriodAttributesL["duration"] is long || priorPeriodAttributesL["duration"] is float || priorPeriodAttributesL["duration"] is int)){
+            (priorPeriodAttributesL["duration"] is double || priorPeriodAttributesL["duration"] is long || priorPeriodAttributesL["duration"] is float || priorPeriodAttributesL["duration"] is int))
+        {
             return (double)priorPeriodAttributes.start + (double)priorPeriodAttributes.duration;
         }
 
-        if (priorPeriodAttributesL == null && string.Equals(mpdType, "static", StringComparison.OrdinalIgnoreCase)){
+        if (priorPeriodAttributesL == null && string.Equals(mpdType, "static", StringComparison.OrdinalIgnoreCase))
+        {
             return 0;
         }
 
         return null;
     }
 
-    public class ContentSteeringInfo{
-        public string ServerURL{ get; set; } = "";
-        public bool QueryBeforeStart{ get; set; }
+    public class ContentSteeringInfo
+    {
+        public string ServerURL { get; set; } = "";
+        public bool QueryBeforeStart { get; set; }
     }
 
-    public static ContentSteeringInfo? GenerateContentSteeringInformation(List<XmlElement> contentSteeringNodes){
-        if (contentSteeringNodes.Count > 1){
+    public static ContentSteeringInfo? GenerateContentSteeringInformation(List<XmlElement> contentSteeringNodes)
+    {
+        if (contentSteeringNodes.Count > 1)
+        {
             Console.WriteLine("The MPD manifest should contain no more than one ContentSteering tag");
         }
 
-        if (contentSteeringNodes.Count == 0){
+        if (contentSteeringNodes.Count == 0)
+        {
             return null;
         }
 
         XmlElement firstContentSteeringNode = contentSteeringNodes[0];
-        ContentSteeringInfo infoFromContentSteeringTag = new ContentSteeringInfo{
+        ContentSteeringInfo infoFromContentSteeringTag = new ContentSteeringInfo
+        {
             ServerURL = XMLUtils.GetContent(firstContentSteeringNode),
             QueryBeforeStart = Convert.ToBoolean(firstContentSteeringNode.GetAttribute("queryBeforeStart"))
         };
@@ -132,13 +150,15 @@ public class InheritAttributes{
         return infoFromContentSteeringTag;
     }
 
-    private static dynamic CreateExpandoWithTag(string tag){
+    private static dynamic CreateExpandoWithTag(string tag)
+    {
         dynamic expando = new ExpandoObject();
         expando.tag = tag;
         return expando;
     }
 
-    public static dynamic GetSegmentInformation(XmlElement adaptationSet){
+    public static dynamic GetSegmentInformation(XmlElement adaptationSet)
+    {
         dynamic segmentInfo = new ExpandoObject();
 
         var segmentTemplate = XMLUtils.FindChildren(adaptationSet, "SegmentTemplate").FirstOrDefault();
@@ -154,9 +174,12 @@ public class InheritAttributes{
 
         dynamic? template = segmentTemplate != null ? ParseAttribute.ParseAttributes(segmentTemplate) : null;
 
-        if (template != null && segmentInitialization != null){
+        if (template != null && segmentInitialization != null)
+        {
             template.initialization = ParseAttribute.ParseAttributes(segmentInitialization);
-        } else if (template != null && template.initialization != null){
+        }
+        else if (template != null && template.initialization != null)
+        {
             dynamic init = new ExpandoObject();
             init.sourceURL = template.initialization;
             template.initialization = init;
@@ -165,17 +188,19 @@ public class InheritAttributes{
         segmentInfo.template = template;
         segmentInfo.segmentTimeline = segmentTimeline != null ? XMLUtils.FindChildren(segmentTimeline, "S").Select(s => ParseAttribute.ParseAttributes(s)).ToList() : null;
         segmentInfo.list = segmentList != null
-            ? ObjectUtilities.MergeExpandoObjects(ParseAttribute.ParseAttributes(segmentList), new{ segmentUrls, initialization = ParseAttribute.ParseAttributes(segmentInitialization) })
+            ? ObjectUtilities.MergeExpandoObjects(ParseAttribute.ParseAttributes(segmentList), new { segmentUrls, initialization = ParseAttribute.ParseAttributes(segmentInitialization) })
             : null;
 
         dynamic initBas = new ExpandoObject();
         initBas.initialization = ParseAttribute.ParseAttributes(segmentInitialization);
-        segmentInfo.@base = segmentBase != null ? ObjectUtilities.MergeExpandoObjects(ParseAttribute.ParseAttributes(segmentBase),initBas ) : null;
+        segmentInfo.@base = segmentBase != null ? ObjectUtilities.MergeExpandoObjects(ParseAttribute.ParseAttributes(segmentBase), initBas) : null;
 
         var dict = (IDictionary<string, object?>)segmentInfo;
         var keys = dict.Keys.ToList();
-        foreach (var key in keys){
-            if (dict[key] == null){
+        foreach (var key in keys)
+        {
+            if (dict[key] == null)
+            {
                 dict.Remove(key);
             }
         }
@@ -183,28 +208,35 @@ public class InheritAttributes{
         return segmentInfo;
     }
 
-    public static List<dynamic> ParseCaptionServiceMetadata(dynamic service){
+    public static List<dynamic> ParseCaptionServiceMetadata(dynamic service)
+    {
         List<dynamic> parsedMetadata = new List<dynamic>();
 
         var tempTestService = service as IDictionary<string, Object>;
 
-        if (tempTestService == null || !tempTestService.ContainsKey("schemeIdUri")){
+        if (tempTestService == null || !tempTestService.ContainsKey("schemeIdUri"))
+        {
             return parsedMetadata;
         }
 
-        if (service.schemeIdUri == "urn:scte:dash:cc:cea-608:2015"){
+        if (service.schemeIdUri == "urn:scte:dash:cc:cea-608:2015")
+        {
             var values = service.value is string ? service.value.Split(';') : new string[0];
 
-            foreach (var value in values){
+            foreach (var value in values)
+            {
                 dynamic metadata = new ExpandoObject();
                 string? channel = null;
                 string language = value;
 
-                if (System.Text.RegularExpressions.Regex.IsMatch(value, @"^CC\d=")){
+                if (System.Text.RegularExpressions.Regex.IsMatch(value, @"^CC\d="))
+                {
                     var parts = value.Split('=');
                     channel = parts[0];
                     language = parts[1];
-                } else if (System.Text.RegularExpressions.Regex.IsMatch(value, @"^CC\d$")){
+                }
+                else if (System.Text.RegularExpressions.Regex.IsMatch(value, @"^CC\d$"))
+                {
                     channel = value;
                 }
 
@@ -213,10 +245,13 @@ public class InheritAttributes{
 
                 parsedMetadata.Add(metadata);
             }
-        } else if (service.schemeIdUri == "urn:scte:dash:cc:cea-708:2015"){
+        }
+        else if (service.schemeIdUri == "urn:scte:dash:cc:cea-708:2015")
+        {
             var values = service.value is string ? service.value.Split(';') : new string[0];
 
-            foreach (var value in values){
+            foreach (var value in values)
+            {
                 dynamic metadata = new ExpandoObject();
                 metadata.channel = default(string);
                 metadata.language = default(string);
@@ -224,7 +259,8 @@ public class InheritAttributes{
                 metadata.easyReader = 0;
                 metadata._3D = 0;
 
-                if (value.Contains("=")){
+                if (value.Contains("="))
+                {
                     var parts = value.Split('=');
                     var channel = parts[0];
                     var opts = parts.Length > 1 ? parts[1] : "";
@@ -233,12 +269,14 @@ public class InheritAttributes{
                     metadata.language = value;
 
                     var options = opts.Split(',');
-                    foreach (var opt in options){
+                    foreach (var opt in options)
+                    {
                         var optionParts = opt.Split(':');
                         var name = optionParts[0];
                         var val = optionParts.Length > 1 ? optionParts[1] : "";
 
-                        switch (name){
+                        switch (name)
+                        {
                             case "lang":
                                 metadata.language = val;
                                 break;
@@ -253,7 +291,9 @@ public class InheritAttributes{
                                 break;
                         }
                     }
-                } else{
+                }
+                else
+                {
                     metadata.language = value;
                 }
 
@@ -264,7 +304,8 @@ public class InheritAttributes{
         return parsedMetadata;
     }
 
-    public static List<ExpandoObject> ToRepresentations(dynamic periodAttributes, dynamic periodBaseUrls, dynamic periodSegmentInfo, XmlElement adaptationSet){
+    public static List<ExpandoObject> ToRepresentations(dynamic periodAttributes, dynamic periodBaseUrls, dynamic periodSegmentInfo, XmlElement adaptationSet)
+    {
         dynamic adaptationSetAttributes = ParseAttribute.ParseAttributes(adaptationSet);
         var adaptationSetBaseUrls = BuildBaseUrls(periodBaseUrls, XMLUtils.FindChildren(adaptationSet, "BaseURL"));
         var role = XMLUtils.FindChildren(adaptationSet, "Role").FirstOrDefault();
@@ -277,20 +318,23 @@ public class InheritAttributes{
         var accessibility = XMLUtils.FindChildren(adaptationSet, "Accessibility").FirstOrDefault();
         var captionServices = ParseCaptionServiceMetadata(accessibility != null ? ParseAttribute.ParseAttributes(accessibility) : null);
 
-        if (captionServices != null){
-            attrs = ObjectUtilities.MergeExpandoObjects(attrs, new{ captionServices });
+        if (captionServices != null)
+        {
+            attrs = ObjectUtilities.MergeExpandoObjects(attrs, new { captionServices });
         }
 
         XmlElement? label = XMLUtils.FindChildren(adaptationSet, "Label").FirstOrDefault();
-        if (label is{ ChildNodes.Count: > 0 }){
+        if (label is { ChildNodes.Count: > 0 })
+        {
             var labelVal = label.ChildNodes[0]?.Value?.Trim();
-            attrs = ObjectUtilities.MergeExpandoObjects(attrs, new{ label = labelVal });
+            attrs = ObjectUtilities.MergeExpandoObjects(attrs, new { label = labelVal });
         }
 
         var nodes = XMLUtils.FindChildren(adaptationSet, "ContentProtection");
         var contentProtection = GenerateKeySystemInformation(nodes);
         var tempTestContentProtection = contentProtection as IDictionary<string, Object>;
-        if (tempTestContentProtection is{ Count: > 0 }){
+        if (tempTestContentProtection is { Count: > 0 })
+        {
             dynamic contentProt = new ExpandoObject();
             contentProt.contentProtection = contentProtection;
             attrs = ObjectUtilities.MergeExpandoObjects(attrs, contentProt);
@@ -301,9 +345,11 @@ public class InheritAttributes{
         var adaptationSetSegmentInfo = ObjectUtilities.MergeExpandoObjects(periodSegmentInfo, segmentInfo);
 
         List<ExpandoObject> list = new List<ExpandoObject>();
-        for (int i = 0; i < representations.Count; i++){
+        for (int i = 0; i < representations.Count; i++)
+        {
             List<dynamic> res = InheritBaseUrls(attrs, adaptationSetBaseUrls, adaptationSetSegmentInfo, representations[i]);
-            foreach (dynamic re in res){
+            foreach (dynamic re in res)
+            {
                 list.Add(re);
             }
         }
@@ -311,7 +357,8 @@ public class InheritAttributes{
         return list;
     }
 
-    public static List<dynamic> InheritBaseUrls(dynamic adaptationSetAttributes, dynamic adaptationSetBaseUrls, dynamic adaptationSetSegmentInfo, XmlElement representation){
+    public static List<dynamic> InheritBaseUrls(dynamic adaptationSetAttributes, dynamic adaptationSetBaseUrls, dynamic adaptationSetSegmentInfo, XmlElement representation)
+    {
         var repBaseUrlElements = XMLUtils.FindChildren(representation, "BaseURL");
         List<dynamic> repBaseUrls = BuildBaseUrls(adaptationSetBaseUrls, repBaseUrlElements);
         var attributes = ObjectUtilities.MergeExpandoObjects(adaptationSetAttributes, ParseAttribute.ParseAttributes(representation));
@@ -319,7 +366,8 @@ public class InheritAttributes{
         var repProtectionNodes = XMLUtils.FindChildren(representation, "ContentProtection");
         var repContentProtection = GenerateKeySystemInformation(repProtectionNodes);
 
-        if ((repContentProtection as IDictionary<string, object>)?.Count > 0){
+        if ((repContentProtection as IDictionary<string, object>)?.Count > 0)
+        {
             dynamic contentProt = new ExpandoObject();
             contentProt.contentProtection = repContentProtection;
             attributes = ObjectUtilities.MergeExpandoObjects(attributes, contentProt);
@@ -327,7 +375,8 @@ public class InheritAttributes{
 
         var representationSegmentInfo = GetSegmentInformation(representation);
 
-        return repBaseUrls.Select(baseUrl => {
+        return repBaseUrls.Select(baseUrl =>
+        {
             dynamic result = new ExpandoObject();
             result.segmentInfo = ObjectUtilities.MergeExpandoObjects(adaptationSetSegmentInfo, representationSegmentInfo);
             result.attributes = ObjectUtilities.MergeExpandoObjects(attributes, baseUrl);
@@ -335,7 +384,8 @@ public class InheritAttributes{
         }).ToList();
     }
 
-    private static List<ExpandoObject> ToAdaptationSets(ExpandoObject mpdAttributes, dynamic mpdBaseUrls, dynamic period, int index){
+    private static List<ExpandoObject> ToAdaptationSets(ExpandoObject mpdAttributes, dynamic mpdBaseUrls, dynamic period, int index)
+    {
         dynamic periodBaseUrls = BuildBaseUrls(mpdBaseUrls, XMLUtils.FindChildren(period.node, "BaseURL"));
         dynamic start = new ExpandoObject();
         start.periodStart = period.attributes.start;
@@ -343,7 +393,8 @@ public class InheritAttributes{
 
         var tempTestAttributes = period.attributes as IDictionary<string, Object>;
         if (tempTestAttributes != null && tempTestAttributes.ContainsKey("duration") &&
-            (tempTestAttributes["duration"] is double || tempTestAttributes["duration"] is long || tempTestAttributes["duration"] is float || tempTestAttributes["duration"] is int)){
+            (tempTestAttributes["duration"] is double || tempTestAttributes["duration"] is long || tempTestAttributes["duration"] is float || tempTestAttributes["duration"] is int))
+        {
             periodAttributes.periodDuration = period.attributes.duration;
         }
 
@@ -352,9 +403,11 @@ public class InheritAttributes{
 
         List<ExpandoObject> list = new List<ExpandoObject>();
 
-        for (int i = 0; i < adaptationSets.Count; i++){
+        for (int i = 0; i < adaptationSets.Count; i++)
+        {
             List<ExpandoObject> res = ToRepresentations(periodAttributes, periodBaseUrls, periodSegmentInfo, adaptationSets[i]);
-            foreach (dynamic re in res){
+            foreach (dynamic re in res)
+            {
                 list.Add(re);
             }
         }
@@ -362,7 +415,8 @@ public class InheritAttributes{
         return list;
     }
 
-    public static ManifestInfo InheritAttributesFun(XmlElement mpd, Dictionary<string, object>? options = null){
+    public static ManifestInfo InheritAttributesFun(XmlElement mpd, Dictionary<string, object>? options = null)
+    {
         if (options == null)
             options = new Dictionary<string, object>();
 
@@ -373,7 +427,8 @@ public class InheritAttributes{
 
         List<XmlElement> periodNodes = XMLUtils.FindChildren(mpd, "Period");
 
-        if (periodNodes.Count == 0){
+        if (periodNodes.Count == 0)
+        {
             throw new Exception(Errors.INVALID_NUMBER_OF_PERIOD);
         }
 
@@ -381,7 +436,7 @@ public class InheritAttributes{
         dynamic mpdAttributes = ParseAttribute.ParseAttributes(mpd);
         dynamic baseUrl = new ExpandoObject();
         baseUrl.baseUrl = manifestUri;
-        dynamic mpdBaseUrls = BuildBaseUrls(new List<dynamic>{ baseUrl }, XMLUtils.FindChildren(mpd, "BaseUrl"));
+        dynamic mpdBaseUrls = BuildBaseUrls(new List<dynamic> { baseUrl }, XMLUtils.FindChildren(mpd, "BaseUrl"));
         List<XmlElement> contentSteeringNodes = XMLUtils.FindChildren(mpd, "ContentSteering");
 
         ObjectUtilities.SetAttributeWithDefault(mpdAttributes, "type", "static");
@@ -389,20 +444,23 @@ public class InheritAttributes{
         mpdAttributes.NOW = NOW;
         mpdAttributes.clientOffset = clientOffset;
 
-        if (locations.Count > 0){
+        if (locations.Count > 0)
+        {
             mpdAttributes.locations = locations.Cast<XmlElement>().Select(location => location.InnerText).ToList();
         }
 
         List<ExpandoObject> periods = new List<ExpandoObject>();
 
-        for (int i = 0; i < periodNodes.Count; i++){
+        for (int i = 0; i < periodNodes.Count; i++)
+        {
             XmlElement periodNode = periodNodes[i];
             dynamic attributes = ParseAttribute.ParseAttributes(periodNode);
 
             int getIndex = i - 1;
 
             dynamic? priorPeriod = null;
-            if (getIndex >= 0 && getIndex < periods.Count){
+            if (getIndex >= 0 && getIndex < periods.Count)
+            {
                 priorPeriod = periods[getIndex];
             }
 
@@ -417,14 +475,17 @@ public class InheritAttributes{
 
         List<ExpandoObject> representationInfo = new List<ExpandoObject>();
 
-        for (int i = 0; i < periods.Count; i++){
+        for (int i = 0; i < periods.Count; i++)
+        {
             List<ExpandoObject> result = ToAdaptationSets(mpdAttributes, mpdBaseUrls, periods[i], i);
-            foreach (dynamic re in result){
+            foreach (dynamic re in result)
+            {
                 representationInfo.Add(re);
             }
         }
 
-        return new ManifestInfo{
+        return new ManifestInfo
+        {
             locations = ObjectUtilities.GetAttributeWithDefault(mpdAttributes, "locations", null),
             contentSteeringInfo = GenerateContentSteeringInformation(contentSteeringNodes.Cast<XmlElement>().ToList()),
             representationInfo = representationInfo,

@@ -6,10 +6,11 @@ namespace Cruncharr.Core.Utils;
 
 [DataContract]
 [JsonConverter(typeof(LocaleConverter))]
-public enum Locale{
+public enum Locale
+{
     [EnumMember(Value = "")]
     DefaulT,
-    
+
     [EnumMember(Value = "un")]
     Unknown,
 

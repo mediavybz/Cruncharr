@@ -9,8 +9,10 @@ using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser;
 
-public class ToM3u8Class{
-    public static dynamic ToM3u8(dynamic parsedPlaylists){
+public class ToM3u8Class
+{
+    public static dynamic ToM3u8(dynamic parsedPlaylists)
+    {
         List<dynamic> dashPlaylist = ObjectUtilities.GetMemberValue(parsedPlaylists, "dashPlaylist");
         dynamic locations = ObjectUtilities.GetMemberValue(parsedPlaylists, "locations");
         dynamic contentSteering = ObjectUtilities.GetMemberValue(parsedPlaylists, "contentSteering");
@@ -18,8 +20,9 @@ public class ToM3u8Class{
         dynamic previousManifest = ObjectUtilities.GetMemberValue(parsedPlaylists, "previousManifest");
         dynamic eventStream = ObjectUtilities.GetMemberValue(parsedPlaylists, "eventStream");
 
-        if (dashPlaylist == null || dashPlaylist.Count == 0){
-            return new{ };
+        if (dashPlaylist == null || dashPlaylist.Count == 0)
+        {
+            return new { };
         }
 
         dynamic attributes = dashPlaylist[0].attributes;
@@ -53,23 +56,28 @@ public class ToM3u8Class{
         var mediaGroupsDict = (IDictionary<string, object>)manifest.mediaGroups;
         mediaGroupsDict["CLOSED-CAPTIONS"] = new ExpandoObject();
 
-        if (minimumUpdatePeriod != null && minimumUpdatePeriod >= 0){
+        if (minimumUpdatePeriod != null && minimumUpdatePeriod >= 0)
+        {
             manifest.minimumUpdatePeriod = minimumUpdatePeriod * 1000;
         }
 
-        if (locations != null){
+        if (locations != null)
+        {
             manifest.locations = locations;
         }
 
-        if (contentSteering != null){
+        if (contentSteering != null)
+        {
             manifest.contentSteering = contentSteering;
         }
 
-        if (type != null && type == "dynamic"){
+        if (type != null && type == "dynamic")
+        {
             manifest.suggestedPresentationDelay = suggestedPresentationDelay;
         }
 
-        if (eventStream != null && eventStream.Count > 0){
+        if (eventStream != null && eventStream.Count > 0)
+        {
             manifest.eventStream = eventStream;
         }
 
@@ -85,8 +93,10 @@ public class ToM3u8Class{
         dynamic playlistTimelineStarts = formattedPlaylists.Select(playlist => playlist.timelineStarts).ToList();
 
         List<List<dynamic>> convertedToList = new List<List<dynamic>>();
-        foreach (var item in playlistTimelineStarts){
-            if (item is List<dynamic>){
+        foreach (var item in playlistTimelineStarts)
+        {
+            if (item is List<dynamic>)
+            {
                 convertedToList.Add(item);
             }
         }
@@ -95,44 +105,52 @@ public class ToM3u8Class{
 
         AddMediaSequenceValues(formattedPlaylists, manifest.timelineStarts);
 
-        if (organizedAudioGroup != null){
+        if (organizedAudioGroup != null)
+        {
             manifest.mediaGroups.AUDIO.audio = organizedAudioGroup;
         }
 
-        if (organizedVttGroup != null){
+        if (organizedVttGroup != null)
+        {
             manifest.mediaGroups.SUBTITLES.subs = organizedVttGroup;
         }
 
-        if (captions.Count > 0){
+        if (captions.Count > 0)
+        {
             dynamic closedCaptions = mediaGroupsDict["CLOSED-CAPTIONS"];
             closedCaptions.cc = OrganizeCaptionServices(captions);
         }
 
-        if (previousManifest != null){
+        if (previousManifest != null)
+        {
             return PlaylistMerge.PositionManifestOnTimeline(previousManifest, manifest);
         }
 
         return manifest;
     }
 
-    public static bool VideoOnly(dynamic item){
+    public static bool VideoOnly(dynamic item)
+    {
         var attributes = item.attributes;
         return ObjectUtilities.GetMemberValue(attributes, "mimeType") == "video/mp4" || ObjectUtilities.GetMemberValue(attributes, "mimeType") == "video/webm" ||
                ObjectUtilities.GetMemberValue(attributes, "contentType") == "video";
     }
 
-    public static bool AudioOnly(dynamic item){
+    public static bool AudioOnly(dynamic item)
+    {
         var attributes = item.attributes;
         return ObjectUtilities.GetMemberValue(attributes, "mimeType") == "audio/mp4" || ObjectUtilities.GetMemberValue(attributes, "mimeType") == "audio/webm" ||
                ObjectUtilities.GetMemberValue(attributes, "contentType") == "audio";
     }
 
-    public static bool VttOnly(dynamic item){
+    public static bool VttOnly(dynamic item)
+    {
         var attributes = item.attributes;
         return ObjectUtilities.GetMemberValue(attributes, "mimeType") == "text/vtt" || ObjectUtilities.GetMemberValue(attributes, "contentType") == "text";
     }
 
-    public static dynamic FormatVideoPlaylist(dynamic item){
+    public static dynamic FormatVideoPlaylist(dynamic item)
+    {
         dynamic playlist = new ExpandoObject();
         playlist.attributes = new ExpandoObject();
         playlist.attributes.NAME = item.attributes.id;
@@ -155,26 +173,31 @@ public class ToM3u8Class{
         var attributesDict = (IDictionary<string, object>)playlist.attributes;
         attributesDict["PROGRAM-ID"] = 1;
 
-        if (ObjectUtilities.GetMemberValue(item.attributes, "frameRate") != null){
+        if (ObjectUtilities.GetMemberValue(item.attributes, "frameRate") != null)
+        {
             attributesDict["FRAME-RATE"] = item.attributes.frameRate;
         }
 
-        if (ObjectUtilities.GetMemberValue(item.attributes, "contentProtection") != null){
+        if (ObjectUtilities.GetMemberValue(item.attributes, "contentProtection") != null)
+        {
             playlist.contentProtection = item.attributes.contentProtection;
         }
 
-        if (ObjectUtilities.GetMemberValue(item.attributes, "serviceLocation") != null){
+        if (ObjectUtilities.GetMemberValue(item.attributes, "serviceLocation") != null)
+        {
             playlist.attributes.serviceLocation = item.attributes.serviceLocation;
         }
 
-        if (ObjectUtilities.GetMemberValue(item, "sidx") != null){
+        if (ObjectUtilities.GetMemberValue(item, "sidx") != null)
+        {
             playlist.sidx = item.sidx;
         }
 
         return playlist;
     }
 
-    public static dynamic FormatAudioPlaylist(dynamic item, bool isAudioOnly){
+    public static dynamic FormatAudioPlaylist(dynamic item, bool isAudioOnly)
+    {
         dynamic playlist = new ExpandoObject();
         playlist.attributes = new ExpandoObject();
         playlist.attributes.NAME = item.attributes.id;
@@ -195,19 +218,23 @@ public class ToM3u8Class{
         var attributesDict = (IDictionary<string, object>)playlist.attributes;
         attributesDict["PROGRAM-ID"] = 1;
 
-        if (ObjectUtilities.GetMemberValue(item.attributes, "contentProtection") != null){
+        if (ObjectUtilities.GetMemberValue(item.attributes, "contentProtection") != null)
+        {
             playlist.contentProtection = item.attributes.contentProtection;
         }
 
-        if (ObjectUtilities.GetMemberValue(item.attributes, "serviceLocation") != null){
+        if (ObjectUtilities.GetMemberValue(item.attributes, "serviceLocation") != null)
+        {
             playlist.attributes.serviceLocation = item.attributes.serviceLocation;
         }
 
-        if (ObjectUtilities.GetMemberValue(item, "sidx") != null){
+        if (ObjectUtilities.GetMemberValue(item, "sidx") != null)
+        {
             playlist.sidx = item.sidx;
         }
 
-        if (isAudioOnly){
+        if (isAudioOnly)
+        {
             playlist.attributes.AUDIO = "audio";
             playlist.attributes.SUBTITLES = "subs";
         }
@@ -215,8 +242,10 @@ public class ToM3u8Class{
         return playlist;
     }
 
-    public static dynamic FormatVttPlaylist(dynamic item){
-        if (ObjectUtilities.GetMemberValue(item, "segments") == null){
+    public static dynamic FormatVttPlaylist(dynamic item)
+    {
+        if (ObjectUtilities.GetMemberValue(item, "segments") == null)
+        {
             var segment = new ExpandoObject() as IDictionary<string, object>;
             segment["uri"] = item.attributes.baseUrl;
             segment["timeline"] = item.attributes.periodStart;
@@ -224,7 +253,7 @@ public class ToM3u8Class{
             segment["duration"] = item.attributes.sourceDuration;
             segment["number"] = 0;
 
-            item.segments = new List<dynamic>{ segment };
+            item.segments = new List<dynamic> { segment };
             item.attributes.duration = item.attributes.sourceDuration;
         }
 
@@ -233,7 +262,8 @@ public class ToM3u8Class{
         m3u8Attributes["BANDWIDTH"] = item.attributes.bandwidth;
         m3u8Attributes["PROGRAM-ID"] = 1;
 
-        if (ObjectUtilities.GetMemberValue(item.attributes, "codecs") != null){
+        if (ObjectUtilities.GetMemberValue(item.attributes, "codecs") != null)
+        {
             m3u8Attributes["CODECS"] = item.attributes.codecs;
         }
 
@@ -250,20 +280,24 @@ public class ToM3u8Class{
         vttPlaylist.mediaSequence = ObjectUtilities.GetMemberValue(item, "mediaSequence");
         vttPlaylist.segments = item.segments;
 
-        if (ObjectUtilities.GetMemberValue(item.attributes, "serviceLocation") != null){
+        if (ObjectUtilities.GetMemberValue(item.attributes, "serviceLocation") != null)
+        {
             vttPlaylist.attributes.serviceLocation = item.attributes.serviceLocation;
         }
 
         return vttPlaylist;
     }
 
-    public static dynamic OrganizeCaptionServices(List<dynamic> captionServices){
+    public static dynamic OrganizeCaptionServices(List<dynamic> captionServices)
+    {
         var svcObj = new ExpandoObject() as IDictionary<string, object>;
 
-        foreach (var svc in captionServices){
+        foreach (var svc in captionServices)
+        {
             if (svc == null) continue;
 
-            foreach (var service in svc){
+            foreach (var service in svc)
+            {
                 string channel = service.channel;
                 string language = service.language;
 
@@ -273,15 +307,18 @@ public class ToM3u8Class{
                 serviceDetails["instreamId"] = channel;
                 serviceDetails["language"] = language;
 
-                if (((IDictionary<string, object>)service).ContainsKey("aspectRatio")){
+                if (((IDictionary<string, object>)service).ContainsKey("aspectRatio"))
+                {
                     serviceDetails["aspectRatio"] = service.aspectRatio;
                 }
 
-                if (((IDictionary<string, object>)service).ContainsKey("easyReader")){
+                if (((IDictionary<string, object>)service).ContainsKey("easyReader"))
+                {
                     serviceDetails["easyReader"] = service.easyReader;
                 }
 
-                if (((IDictionary<string, object>)service).ContainsKey("3D")){
+                if (((IDictionary<string, object>)service).ContainsKey("3D"))
+                {
                     serviceDetails["3D"] = service["3D"];
                 }
 
@@ -292,13 +329,16 @@ public class ToM3u8Class{
         return svcObj;
     }
 
-    public static List<dynamic> FlattenMediaGroupPlaylists(dynamic mediaGroupObject){
+    public static List<dynamic> FlattenMediaGroupPlaylists(dynamic mediaGroupObject)
+    {
         if (mediaGroupObject == null) return new List<dynamic>();
 
         var result = new List<dynamic>();
-        foreach (var key in ((IDictionary<string, dynamic>)mediaGroupObject).Keys){
+        foreach (var key in ((IDictionary<string, dynamic>)mediaGroupObject).Keys)
+        {
             var labelContents = mediaGroupObject[key];
-            if (labelContents.playlists != null && labelContents.playlists is List<dynamic>){
+            if (labelContents.playlists != null && labelContents.playlists is List<dynamic>)
+            {
                 result.AddRange(labelContents.playlists);
             }
         }
@@ -306,44 +346,55 @@ public class ToM3u8Class{
         return result;
     }
 
-    public static List<dynamic> MergeDiscontiguousPlaylists(List<dynamic> playlists){
+    public static List<dynamic> MergeDiscontiguousPlaylists(List<dynamic> playlists)
+    {
         var playlistsByBaseUrl = playlists.GroupBy(
                 p => p.attributes.baseUrl,
                 p => p,
-                (key, g) => new{ BaseUrl = key, Playlists = g.ToList() })
+                (key, g) => new { BaseUrl = key, Playlists = g.ToList() })
             .ToDictionary(g => g.BaseUrl, g => g.Playlists);
 
         var allPlaylists = new List<dynamic>();
 
-        foreach (var playlistGroup in playlistsByBaseUrl.Values){
+        foreach (var playlistGroup in playlistsByBaseUrl.Values)
+        {
             var mergedPlaylists = playlistGroup
                 .GroupBy(
                     p => p.attributes.id + (ObjectUtilities.GetMemberValue(p.attributes, "lang") ?? ""),
                     p => p,
-                    (key, g) => new{ Name = key, Playlists = g.ToList() })
-                .Select(g => {
+                    (key, g) => new { Name = key, Playlists = g.ToList() })
+                .Select(g =>
+                {
                     dynamic mergedPlaylist = new ExpandoObject();
                     mergedPlaylist.attributes = new ExpandoObject();
                     mergedPlaylist.attributes.timelineStarts = new List<dynamic>();
 
-                    foreach (var playlist in g.Playlists){
-                        if (ObjectUtilities.GetMemberValue(mergedPlaylist, "segments") == null){
+                    foreach (var playlist in g.Playlists)
+                    {
+                        if (ObjectUtilities.GetMemberValue(mergedPlaylist, "segments") == null)
+                        {
                             mergedPlaylist = playlist;
                             mergedPlaylist.attributes.timelineStarts = new List<dynamic>();
-                        } else{
-                            if (playlist.segments != null && playlist.segments.Count > 0){
+                        }
+                        else
+                        {
+                            if (playlist.segments != null && playlist.segments.Count > 0)
+                            {
                                 playlist.segments[0].discontinuity = true;
-                                foreach (var segment in playlist.segments){
+                                foreach (var segment in playlist.segments)
+                                {
                                     mergedPlaylist.segments.Add(segment);
                                 }
                             }
 
-                            if (playlist.attributes.contentProtection != null){
+                            if (playlist.attributes.contentProtection != null)
+                            {
                                 mergedPlaylist.attributes.contentProtection = playlist.attributes.contentProtection;
                             }
                         }
 
-                        mergedPlaylist.attributes.timelineStarts.Add(new{
+                        mergedPlaylist.attributes.timelineStarts.Add(new
+                        {
                             start = playlist.attributes.periodStart,
                             timeline = playlist.attributes.periodStart
                         });
@@ -356,27 +407,32 @@ public class ToM3u8Class{
             allPlaylists.AddRange(mergedPlaylists);
         }
 
-        return allPlaylists.Select(playlist => {
+        return allPlaylists.Select(playlist =>
+        {
             playlist.discontinuityStarts = FindIndexes((List<dynamic>)ObjectUtilities.GetMemberValue(playlists, "segments") ?? new List<dynamic>(), "discontinuity");
             return playlist;
         }).ToList();
     }
 
-    public static IDictionary<string, dynamic> OrganizeAudioPlaylists(List<dynamic> playlists, IDictionary<string, dynamic>? sidxMapping = null, bool isAudioOnly = false){
+    public static IDictionary<string, dynamic> OrganizeAudioPlaylists(List<dynamic> playlists, IDictionary<string, dynamic>? sidxMapping = null, bool isAudioOnly = false)
+    {
         sidxMapping ??= new Dictionary<string, dynamic>();
         dynamic mainPlaylist = null;
 
-        var formattedPlaylists = playlists.Aggregate(new Dictionary<string, dynamic>(), (acc, playlist) => {
+        var formattedPlaylists = playlists.Aggregate(new Dictionary<string, dynamic>(), (acc, playlist) =>
+        {
             var role = ObjectUtilities.GetMemberValue(playlist.attributes, "role") != null && ObjectUtilities.GetMemberValue(playlist.attributes.role, "value") != null ? playlist.attributes.role.value : string.Empty;
             var language = ObjectUtilities.GetMemberValue(playlist.attributes, "lang") ?? string.Empty;
 
             var label = ObjectUtilities.GetMemberValue(playlist.attributes, "label") ?? "main";
-            if (!string.IsNullOrEmpty(language) && string.IsNullOrEmpty(label)){
+            if (!string.IsNullOrEmpty(language) && string.IsNullOrEmpty(label))
+            {
                 var roleLabel = !string.IsNullOrEmpty(role) ? $" ({role})" : string.Empty;
                 label = $"{language}{roleLabel}";
             }
 
-            if (!acc.ContainsKey(label)){
+            if (!acc.ContainsKey(label))
+            {
                 acc[label] = new ExpandoObject();
                 acc[label].language = language;
                 acc[label].autoselect = true;
@@ -388,7 +444,8 @@ public class ToM3u8Class{
             var formatted = AddSidxSegmentsToPlaylist(FormatAudioPlaylist(playlist, isAudioOnly), sidxMapping);
             acc[label].playlists.Add(formatted);
 
-            if (mainPlaylist == null && role == "main"){
+            if (mainPlaylist == null && role == "main")
+            {
                 mainPlaylist = playlist;
                 mainPlaylist.@default = true;
             }
@@ -396,7 +453,8 @@ public class ToM3u8Class{
             return acc;
         });
 
-        if (mainPlaylist == null && formattedPlaylists.Count > 0){
+        if (mainPlaylist == null && formattedPlaylists.Count > 0)
+        {
             var firstLabel = formattedPlaylists.Keys.First();
             formattedPlaylists[firstLabel].@default = true;
         }
@@ -404,13 +462,16 @@ public class ToM3u8Class{
         return formattedPlaylists;
     }
 
-    public static IDictionary<string, dynamic> OrganizeVttPlaylists(List<dynamic> playlists, IDictionary<string, dynamic>? sidxMapping = null){
+    public static IDictionary<string, dynamic> OrganizeVttPlaylists(List<dynamic> playlists, IDictionary<string, dynamic>? sidxMapping = null)
+    {
         sidxMapping ??= new Dictionary<string, dynamic>();
 
-        var organizedPlaylists = playlists.Aggregate(new Dictionary<string, dynamic>(), (acc, playlist) => {
+        var organizedPlaylists = playlists.Aggregate(new Dictionary<string, dynamic>(), (acc, playlist) =>
+        {
             var label = playlist.attributes.label ?? playlist.attributes.lang ?? "text";
 
-            if (!acc.ContainsKey(label)){
+            if (!acc.ContainsKey(label))
+            {
                 dynamic playlistGroup = new ExpandoObject();
                 playlistGroup.language = label;
                 playlistGroup.@default = false;
@@ -429,8 +490,10 @@ public class ToM3u8Class{
         return organizedPlaylists;
     }
 
-    public static void AddMediaSequenceValues(List<dynamic> playlists, List<dynamic> timelineStarts){
-        foreach (var playlist in playlists){
+    public static void AddMediaSequenceValues(List<dynamic> playlists, List<dynamic> timelineStarts)
+    {
+        foreach (var playlist in playlists)
+        {
             playlist.mediaSequence = 0;
 
             playlist.discontinuitySequence =
@@ -439,19 +502,23 @@ public class ToM3u8Class{
             var segments = playlist.segments as List<dynamic>;
             if (segments == null) continue;
 
-            for (int i = 0; i < segments.Count; i++){
+            for (int i = 0; i < segments.Count; i++)
+            {
                 segments[i].number = i;
             }
         }
     }
 
-    public static List<int> FindIndexes(List<dynamic> list, string key){
+    public static List<int> FindIndexes(List<dynamic> list, string key)
+    {
         var indexes = new List<int>(list.Count);
 
-        for (int i = 0; i < list.Count; i++){
+        for (int i = 0; i < list.Count; i++)
+        {
             if (list[i] is IDictionary<string, object?> dict &&
                 dict.TryGetValue(key, out var value) &&
-                value != null){
+                value != null)
+            {
                 indexes.Add(i);
             }
         }
@@ -461,7 +528,8 @@ public class ToM3u8Class{
 
     public static dynamic AddSidxSegmentsToPlaylist(
         dynamic playlist,
-        IDictionary<string, dynamic> sidxMapping){
+        IDictionary<string, dynamic> sidxMapping)
+    {
         string? sidxKey = GenerateSidxKey(ObjectUtilities.GetMemberValue(playlist, "sidx"));
 
         if (string.IsNullOrEmpty(sidxKey))
@@ -480,20 +548,23 @@ public class ToM3u8Class{
 
     public static List<dynamic> AddSidxSegmentsToPlaylists(
         List<dynamic> playlists,
-        IDictionary<string, dynamic>? sidxMapping = null){
+        IDictionary<string, dynamic>? sidxMapping = null)
+    {
         sidxMapping ??= new Dictionary<string, dynamic>();
 
         if (sidxMapping.Count == 0)
             return playlists;
 
-        foreach (var playlist in playlists){
+        foreach (var playlist in playlists)
+        {
             AddSidxSegmentsToPlaylist(playlist, sidxMapping);
         }
 
         return playlists;
     }
 
-    public static string? GenerateSidxKey(dynamic sidx){
+    public static string? GenerateSidxKey(dynamic sidx)
+    {
         if (sidx == null)
             return null;
 

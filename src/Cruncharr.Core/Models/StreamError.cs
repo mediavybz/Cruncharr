@@ -2,106 +2,116 @@ using Newtonsoft.Json;
 
 namespace Cruncharr.Core.Models;
 
-public class StreamError{
+public class StreamError
+{
     [JsonProperty("error")]
-    public string? Error{ get; set; }
+    public string? Error { get; set; }
 
     [JsonProperty("activeStreams")]
-    public List<ActiveStream> ActiveStreams{ get; set; } = new();
+    public List<ActiveStream> ActiveStreams { get; set; } = new();
 
     [JsonIgnore]
-    public string? RawJson{ get; set; }
+    public string? RawJson { get; set; }
 
-    public static StreamError? FromJson(string json){
-        try{
+    public static StreamError? FromJson(string json)
+    {
+        try
+        {
             var error = JsonConvert.DeserializeObject<StreamError>(json);
-            if (error != null){
+            if (error != null)
+            {
                 error.RawJson = json;
             }
             return error;
-        } catch{
+        }
+        catch
+        {
             return null;
         }
     }
 
-    public bool IsTooManyActiveStreamsError(){
+    public bool IsTooManyActiveStreamsError()
+    {
         return Error is "TOO_MANY_ACTIVE_STREAMS" or "TOO_MANY_CONCURRENT_STREAMS";
     }
 
-    public bool IsPlaybackRateLimitError(){
+    public bool IsPlaybackRateLimitError()
+    {
         return Error?.Contains("4294") == true || RawJson?.Contains("4294") == true;
     }
 
-    public bool IsMaturityRatingError(){
+    public bool IsMaturityRatingError()
+    {
         return Error?.Contains("Account maturity rating is lower than video rating") == true ||
                RawJson?.Contains("Account maturity rating is lower than video rating") == true;
     }
 }
 
-public class ActiveStream{
+public class ActiveStream
+{
     [JsonProperty("deviceSubtype")]
-    public string DeviceSubtype{ get; set; } = "";
+    public string DeviceSubtype { get; set; } = "";
 
     [JsonProperty("accountId")]
-    public string AccountId{ get; set; } = "";
+    public string AccountId { get; set; } = "";
 
     [JsonProperty("deviceType")]
-    public string DeviceType{ get; set; } = "";
+    public string DeviceType { get; set; } = "";
 
     [JsonProperty("subscription")]
-    public string Subscription{ get; set; } = "";
+    public string Subscription { get; set; } = "";
 
     [JsonProperty("maxKeepAliveSeconds")]
-    public int MaxKeepAliveSeconds{ get; set; }
+    public int MaxKeepAliveSeconds { get; set; }
 
     [JsonProperty("ttl")]
-    public int Ttl{ get; set; }
+    public int Ttl { get; set; }
 
     [JsonProperty("episodeIdentity")]
-    public string EpisodeIdentity{ get; set; } = "";
+    public string EpisodeIdentity { get; set; } = "";
 
     [JsonProperty("tabId")]
-    public string TabId{ get; set; } = "";
+    public string TabId { get; set; } = "";
 
     [JsonProperty("country")]
-    public string Country{ get; set; } = "";
+    public string Country { get; set; } = "";
 
     [JsonProperty("clientId")]
-    public string ClientId{ get; set; } = "";
+    public string ClientId { get; set; } = "";
 
     [JsonProperty("active")]
-    public bool Active{ get; set; }
+    public bool Active { get; set; }
 
     [JsonProperty("deviceId")]
-    public string DeviceId{ get; set; } = "";
+    public string DeviceId { get; set; } = "";
 
     [JsonProperty("token")]
-    public string Token{ get; set; } = "";
+    public string Token { get; set; } = "";
 
     [JsonProperty("assetId")]
-    public string AssetId{ get; set; } = "";
+    public string AssetId { get; set; } = "";
 
     [JsonProperty("sessionType")]
-    public string SessionType{ get; set; } = "";
+    public string SessionType { get; set; } = "";
 
     [JsonProperty("contentId")]
-    public string ContentId{ get; set; } = "";
+    public string ContentId { get; set; } = "";
 
     [JsonProperty("usesStreamLimits")]
-    public bool UsesStreamLimits{ get; set; }
+    public bool UsesStreamLimits { get; set; }
 
     [JsonProperty("playbackType")]
-    public string PlaybackType{ get; set; } = "";
+    public string PlaybackType { get; set; } = "";
 
     [JsonProperty("pk")]
-    public string Pk{ get; set; } = "";
+    public string Pk { get; set; } = "";
 
     [JsonProperty("id")]
-    public string Id{ get; set; } = "";
+    public string Id { get; set; } = "";
 
     [JsonProperty("createdTimestamp")]
-    public long CreatedTimestamp{ get; set; }
+    public long CreatedTimestamp { get; set; }
 
     [JsonProperty("lastKeepAliveTimestamp")]
-    public long LastKeepAliveTimestamp{ get; set; }
+    public long LastKeepAliveTimestamp { get; set; }
 }

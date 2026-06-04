@@ -8,21 +8,26 @@ using Newtonsoft.Json.Serialization;
 
 namespace Cruncharr.API;
 
-public class Program{
-    public static async Task Main(string[] args){
+public class Program
+{
+    public static async Task Main(string[] args)
+    {
         var builder = WebApplication.CreateBuilder(args);
 
         // Add services to the container
         builder.Services.AddControllers()
-            .AddNewtonsoftJson(options =>{
+            .AddNewtonsoftJson(options =>
+            {
                 options.SerializerSettings.Converters.Add(new StringEnumConverter());
                 options.SerializerSettings.ContractResolver = new PreserveDictionaryKeysContractResolver();
                 options.SerializerSettings.NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore;
             });
 
         builder.Services.AddEndpointsApiExplorer();
-        builder.Services.AddSwaggerGen(c =>{
-            c.SwaggerDoc("v1", new(){
+        builder.Services.AddSwaggerGen(c =>
+        {
+            c.SwaggerDoc("v1", new()
+            {
                 Title = "Cruncharr API",
                 Version = "v1",
                 Description = "Crunchyroll Downloader API for *arr stack integration"
@@ -34,9 +39,10 @@ public class Program{
         var config = File.Exists(configPath) ? CruncharrConfig.Load(configPath) : new CruncharrConfig();
         config.ApplyEnvironmentVariables();
         builder.Services.AddSingleton(config);
-        
+
         // Initialize log mode if enabled
-        if (config.LogMode){
+        if (config.LogMode)
+        {
             LogManager.EnableLogMode("/config/logfile.txt");
         }
 
@@ -66,8 +72,10 @@ public class Program{
 
         // Add CORS - configurable via environment variable
         var corsOrigins = Environment.GetEnvironmentVariable("CORS_ORIGINS")?.Split(',') ?? new[] { "http://localhost:8585" };
-        builder.Services.AddCors(options =>{
-            options.AddPolicy("AllowSpecific", policy =>{
+        builder.Services.AddCors(options =>
+        {
+            options.AddPolicy("AllowSpecific", policy =>
+            {
                 policy.WithOrigins(corsOrigins)
                       .AllowAnyMethod()
                       .AllowAnyHeader();
@@ -77,13 +85,15 @@ public class Program{
         var app = builder.Build();
 
         // Configure the HTTP request pipeline
-        if (app.Environment.IsDevelopment()){
+        if (app.Environment.IsDevelopment())
+        {
             app.UseSwagger();
             app.UseSwaggerUI();
         }
 
         // Only use HTTPS redirection if HTTPS is configured
-        if (Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?.Contains("https:") == true){
+        if (Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?.Contains("https:") == true)
+        {
             app.UseHttpsRedirection();
         }
         app.UseCors("AllowSpecific");
@@ -96,56 +106,79 @@ public class Program{
 
         // Ensure config directory exists
         var configDir = Path.GetDirectoryName(configPath);
-        if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir)){
+        if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
+        {
             Directory.CreateDirectory(configDir);
         }
 
         // Ensure directories exist with validation
         var appLogger = app.Services.GetService<ILogger<Program>>();
-        if (!string.IsNullOrWhiteSpace(config.Download.OutputDirectory)){
-            try{
+        if (!string.IsNullOrWhiteSpace(config.Download.OutputDirectory))
+        {
+            try
+            {
                 Directory.CreateDirectory(config.Download.OutputDirectory);
-            } catch (Exception ex){
+            }
+            catch (Exception ex)
+            {
                 appLogger?.LogError(ex, "Failed to create output directory: {Path}", config.Download.OutputDirectory);
             }
         }
-        if (!string.IsNullOrWhiteSpace(config.Download.TempDirectory)){
-            try{
+        if (!string.IsNullOrWhiteSpace(config.Download.TempDirectory))
+        {
+            try
+            {
                 Directory.CreateDirectory(config.Download.TempDirectory);
-            } catch (Exception ex){
+            }
+            catch (Exception ex)
+            {
                 appLogger?.LogError(ex, "Failed to create temp directory: {Path}", config.Download.TempDirectory);
             }
         }
 
         // Initialize auth FIRST - queue auto-download must wait for auth to be ready
-        using (var scope = app.Services.CreateScope()){
+        using (var scope = app.Services.CreateScope())
+        {
             var authService = scope.ServiceProvider.GetRequiredService<ICrunchyrollAuthService>();
             var logger = scope.ServiceProvider.GetService<ILogger<Program>>();
-            try{
+            try
+            {
                 logger?.LogInformation("Initializing authentication...");
                 var authResult = await authService.AuthenticateAsync(config.Crunchyroll?.UseBetaApi ?? true);
-                if (authResult){
+                if (authResult)
+                {
                     logger?.LogInformation("Authentication successful - logged in as {User}", authService.Profile.Username);
-                } else{
+                }
+                else
+                {
                     logger?.LogWarning("Authentication failed - anonymous mode");
                 }
-            } catch (Exception ex){
+            }
+            catch (Exception ex)
+            {
                 logger?.LogError(ex, "Authentication initialization failed");
             }
         }
 
         // Start queue processing AFTER auth is initialized
         var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-        using (var scope = app.Services.CreateScope()){
+        using (var scope = app.Services.CreateScope())
+        {
             var queueService = scope.ServiceProvider.GetRequiredService<IQueueService>();
             var configService = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
             var queueLogger = scope.ServiceProvider.GetService<ILogger<Program>>();
-            _ = Task.Run(async () =>{
-                try{
+            _ = Task.Run(async () =>
+            {
+                try
+                {
                     await queueService.ProcessQueueAsync(configService, null, lifetime.ApplicationStopping);
-                } catch (OperationCanceledException){
+                }
+                catch (OperationCanceledException)
+                {
                     // Normal shutdown
-                } catch (Exception ex){
+                }
+                catch (Exception ex)
+                {
                     queueLogger?.LogError(ex, "Queue processor crashed");
                 }
             });

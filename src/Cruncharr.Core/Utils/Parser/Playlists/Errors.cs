@@ -1,6 +1,7 @@
 namespace Cruncharr.Core.Utils.Parser;
 
-public class Errors{
+public class Errors
+{
     public static string INVALID_NUMBER_OF_PERIOD = "INVALID_NUMBER_OF_PERIOD";
     public static string INVALID_NUMBER_OF_CONTENT_STEERING = "INVALID_NUMBER_OF_CONTENT_STEERING";
     public static string DASH_EMPTY_MANIFEST = "DASH_EMPTY_MANIFEST";

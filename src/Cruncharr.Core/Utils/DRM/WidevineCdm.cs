@@ -10,29 +10,37 @@ using Newtonsoft.Json;
 
 namespace Cruncharr.Core.Utils.DRM;
 
-public class WidevineCdm{
+public class WidevineCdm
+{
     private byte[] _privateKey = Array.Empty<byte>();
     private byte[] _identifierBlob = Array.Empty<byte>();
 
     public bool CanDecrypt { get; private set; }
     public string? WidevineDirectory { get; private set; }
 
-    public WidevineCdm(string? widevineDirectory = null){
+    public WidevineCdm(string? widevineDirectory = null)
+    {
         WidevineDirectory = widevineDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "cruncharr", "widevine");
         LoadCdmFiles();
     }
 
-    public void Reload(string? widevineDirectory = null){
-        if (widevineDirectory != null){
+    public void Reload(string? widevineDirectory = null)
+    {
+        if (widevineDirectory != null)
+        {
             WidevineDirectory = widevineDirectory;
         }
         LoadCdmFiles();
     }
 
-    private void LoadCdmFiles(){
-        try{
-            if (Directory.Exists(WidevineDirectory)){
-                foreach (var file in Directory.EnumerateFiles(WidevineDirectory)){
+    private void LoadCdmFiles()
+    {
+        try
+        {
+            if (Directory.Exists(WidevineDirectory))
+            {
+                foreach (var file in Directory.EnumerateFiles(WidevineDirectory))
+                {
                     var fileInfo = new FileInfo(file);
 
                     if (fileInfo.Length >= 1024 * 8 || fileInfo.Attributes.HasFlag(FileAttributes.Directory))
@@ -40,32 +48,46 @@ public class WidevineCdm{
 
                     string fileContents = File.ReadAllText(file, Encoding.UTF8);
 
-                    if (IsPrivateKey(fileContents)){
+                    if (IsPrivateKey(fileContents))
+                    {
                         _privateKey = File.ReadAllBytes(file);
-                    } else if (IsWidevineIdentifierBlob(fileContents)){
+                    }
+                    else if (IsWidevineIdentifierBlob(fileContents))
+                    {
                         _identifierBlob = File.ReadAllBytes(file);
                     }
                 }
             }
 
-            if (_privateKey.Length > 0 && _identifierBlob.Length > 0){
+            if (_privateKey.Length > 0 && _identifierBlob.Length > 0)
+            {
                 CanDecrypt = true;
-            } else{
+            }
+            else
+            {
                 CanDecrypt = false;
-                if (_privateKey.Length == 0){
+                if (_privateKey.Length == 0)
+                {
                     Console.Error.WriteLine("Private key missing");
                 }
-                if (_identifierBlob.Length == 0){
+                if (_identifierBlob.Length == 0)
+                {
                     Console.Error.WriteLine("Identifier blob missing");
                 }
             }
-        } catch (IOException ioEx){
+        }
+        catch (IOException ioEx)
+        {
             Console.Error.WriteLine("I/O error accessing Widevine files: " + ioEx);
             CanDecrypt = false;
-        } catch (UnauthorizedAccessException uaEx){
+        }
+        catch (UnauthorizedAccessException uaEx)
+        {
             Console.Error.WriteLine("Permission error accessing Widevine files: " + uaEx);
             CanDecrypt = false;
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             Console.Error.WriteLine("Unexpected Widevine error: " + ex);
             CanDecrypt = false;
         }
@@ -73,28 +95,34 @@ public class WidevineCdm{
         Console.WriteLine($"CDM available: {CanDecrypt}");
     }
 
-    private bool IsPrivateKey(string content){
+    private bool IsPrivateKey(string content)
+    {
         return content.Contains("-BEGIN RSA PRIVATE KEY-", StringComparison.Ordinal) ||
                content.Contains("-BEGIN PRIVATE KEY-", StringComparison.Ordinal);
     }
 
-    private bool IsWidevineIdentifierBlob(string content){
+    private bool IsWidevineIdentifierBlob(string content)
+    {
         return content.Contains("widevine_cdm_version", StringComparison.Ordinal);
     }
 
-    public async Task<List<ContentKey>> GetKeysAsync(string? pssh, string licenseServer, Dictionary<string, string> authData, HttpClient httpClient){
-        if (pssh == null || !CanDecrypt){
+    public async Task<List<ContentKey>> GetKeysAsync(string? pssh, string licenseServer, Dictionary<string, string> authData, HttpClient httpClient)
+    {
+        if (pssh == null || !CanDecrypt)
+        {
             Console.Error.WriteLine("Missing pssh or cdm files");
             return new List<ContentKey>();
         }
 
-        try{
+        try
+        {
             byte[] psshBuffer = Convert.FromBase64String(pssh);
 
-            Session ses = new Session(new ContentDecryptionModule{ identifierBlob = _identifierBlob, privateKey = _privateKey }, psshBuffer);
+            Session ses = new Session(new ContentDecryptionModule { identifierBlob = _identifierBlob, privateKey = _privateKey }, psshBuffer);
 
             var playbackRequest = new HttpRequestMessage(HttpMethod.Post, licenseServer);
-            foreach (var kvp in authData){
+            foreach (var kvp in authData)
+            {
                 playbackRequest.Headers.Add(kvp.Key, kvp.Value);
             }
 
@@ -105,7 +133,8 @@ public class WidevineCdm{
 
             // Use a clean HttpClient without cookies for Widevine license requests
             // Cookies from Crunchyroll auth can cause 401 Forbidden on the license server
-            var cleanHandler = new SocketsHttpHandler{
+            var cleanHandler = new SocketsHttpHandler
+            {
                 UseCookies = false,
                 AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
             };
@@ -116,7 +145,8 @@ public class WidevineCdm{
 
             var (isOk, responseContent, error) = await SendWithRetryAsync(cleanClient, playbackRequest);
 
-            if (!isOk){
+            if (!isOk)
+            {
                 Console.Error.WriteLine($"Failed to get Keys! Error: {error}, Response: {responseContent}");
                 return new List<ContentKey>();
             }
@@ -126,26 +156,36 @@ public class WidevineCdm{
             ses.ProvideLicense(Convert.FromBase64String(resp.license));
 
             return ses.ContentKeys;
-        } catch (Exception e){
+        }
+        catch (Exception e)
+        {
             Console.Error.WriteLine(e);
             return new List<ContentKey>();
         }
     }
 
-    private static async Task<(bool IsOk, string ResponseContent, string Error)> SendWithRetryAsync(HttpClient httpClient, HttpRequestMessage request){
+    private static async Task<(bool IsOk, string ResponseContent, string Error)> SendWithRetryAsync(HttpClient httpClient, HttpRequestMessage request)
+    {
         string content = string.Empty;
-        for (var attempt = 0; attempt < 4; attempt++){
-            try{
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            try
+            {
                 using var requestClone = await CloneHttpRequestAsync(request);
                 var response = await httpClient.SendAsync(requestClone);
                 content = await response.Content.ReadAsStringAsync();
                 response.EnsureSuccessStatusCode();
                 return (true, content, "");
-            } catch (Exception ex){
-                if (ex.Message.Contains("SocketException") && attempt < 3){
+            }
+            catch (Exception ex)
+            {
+                if (ex.Message.Contains("SocketException") && attempt < 3)
+                {
                     Console.Error.WriteLine($"Key Request Attempt {attempt + 1} failed.");
                     await Task.Delay(1000);
-                } else{
+                }
+                else
+                {
                     return (false, content, ex.Message);
                 }
             }
@@ -153,20 +193,25 @@ public class WidevineCdm{
         return (false, content, "Max retries exceeded");
     }
 
-    private static async Task<HttpRequestMessage> CloneHttpRequestAsync(HttpRequestMessage request){
-        var clone = new HttpRequestMessage(request.Method, request.RequestUri){
+    private static async Task<HttpRequestMessage> CloneHttpRequestAsync(HttpRequestMessage request)
+    {
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri)
+        {
             Version = request.Version,
             VersionPolicy = request.VersionPolicy
         };
 
-        foreach (var header in request.Headers){
+        foreach (var header in request.Headers)
+        {
             clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
 
-        if (request.Content != null){
+        if (request.Content != null)
+        {
             var contentBytes = await request.Content.ReadAsByteArrayAsync();
             var newContent = new ByteArrayContent(contentBytes);
-            foreach (var header in request.Content.Headers){
+            foreach (var header in request.Content.Headers)
+            {
                 newContent.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
             clone.Content = newContent;
@@ -176,9 +221,10 @@ public class WidevineCdm{
     }
 }
 
-public class LicenceReqResp{
-    public string status{ get; set; } = "";
-    public string license{ get; set; } = "";
-    public string platform{ get; set; } = "";
-    public string message_type{ get; set; } = "";
+public class LicenceReqResp
+{
+    public string status { get; set; } = "";
+    public string license { get; set; } = "";
+    public string platform { get; set; } = "";
+    public string message_type { get; set; } = "";
 }

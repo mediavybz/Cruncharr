@@ -1,15 +1,16 @@
 namespace Cruncharr.Core.Utils;
 
-public static class ApiUrls{
+public static class ApiUrls
+{
     public static readonly string ApiBeta = "https://beta-api.crunchyroll.com";
     public static readonly string ApiN = "https://www.crunchyroll.com";
-    
+
     // Auth endpoints always use beta API (matching upstream behavior)
     public static string Auth => ApiBeta + "/auth/v1/token";
     public static string Profile => ApiBeta + "/accounts/v1/me/profile";
     public static string MultiProfile => ApiBeta + "/accounts/v1/me/multiprofile";
     public static string Subscription => ApiBeta + "/subs/v3/subscriptions/";
-    
+
     // Content endpoints can switch between beta and non-beta
     public static string CmsToken(bool useBetaApi) => (useBetaApi ? ApiBeta : ApiN) + "/index/v2";
     public static string Search(bool useBetaApi) => (useBetaApi ? ApiBeta : ApiN) + "/content/v2/discover/search";

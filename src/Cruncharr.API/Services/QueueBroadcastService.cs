@@ -64,8 +64,9 @@ public class QueueBroadcastService : IDisposable
                 IsGloballyPaused = _queueService.IsGloballyPaused
             };
             var json = JsonConvert.SerializeObject(response, _sseJsonSettings);
-            
-            foreach (var client in _clients.Values){
+
+            foreach (var client in _clients.Values)
+            {
                 client.TryWrite(json);
             }
         }

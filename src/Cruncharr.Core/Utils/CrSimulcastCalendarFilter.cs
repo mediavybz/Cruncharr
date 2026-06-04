@@ -4,7 +4,8 @@ using System.Text.RegularExpressions;
 
 namespace Cruncharr.Core.Utils;
 
-public class CrSimulcastCalendarFilter{
+public class CrSimulcastCalendarFilter
+{
     private static readonly Regex SeasonLangSuffix =
         new Regex(@"\bSeason\s+\d+\s*\((?&lt;tag&gt;.*)\)\s*$",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -29,7 +30,8 @@ public class CrSimulcastCalendarFilter{
         "nederlands", "dutch"
     };
 
-    public static bool IsDubOrAltLanguageSeason(string? seasonName){
+    public static bool IsDubOrAltLanguageSeason(string? seasonName)
+    {
         if (string.IsNullOrWhiteSpace(seasonName))
             return false;
 
@@ -67,7 +69,8 @@ public class CrSimulcastCalendarFilter{
     private static readonly Regex TrailingParenGroups =
         new Regex(@"\s*(\([^)]*\))\s*$", RegexOptions.Compiled);
 
-    public static bool IsMatch(string? a, string? b, double similarityThreshold = 0.85){
+    public static bool IsMatch(string? a, string? b, double similarityThreshold = 0.85)
+    {
         if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b))
             return false;
 
@@ -85,7 +88,8 @@ public class CrSimulcastCalendarFilter{
         return Similarity(na, nb) >= similarityThreshold;
     }
 
-    private static string Normalize(string s){
+    private static string Normalize(string s)
+    {
         s = s.Trim();
 
         while (TrailingParenGroups.IsMatch(s))
@@ -93,7 +97,8 @@ public class CrSimulcastCalendarFilter{
 
         s = s.Normalize(NormalizationForm.FormD);
         var sb = new StringBuilder(s.Length);
-        foreach (var ch in s){
+        foreach (var ch in s)
+        {
             var uc = CharUnicodeInfo.GetUnicodeCategory(ch);
             if (uc != UnicodeCategory.NonSpacingMark)
                 sb.Append(ch);
@@ -108,14 +113,16 @@ public class CrSimulcastCalendarFilter{
         return Regex.Replace(cleaned.ToString(), @"\s+", " ").Trim().ToLowerInvariant();
     }
 
-    private static double Similarity(string a, string b){
+    private static double Similarity(string a, string b)
+    {
         if (a.Length == 0 && b.Length == 0) return 1.0;
         int dist = LevenshteinDistance(a, b);
         int maxLen = Math.Max(a.Length, b.Length);
         return 1.0 - (double)dist / maxLen;
     }
 
-    private static int LevenshteinDistance(string a, string b){
+    private static int LevenshteinDistance(string a, string b)
+    {
         if (a.Length == 0) return b.Length;
         if (b.Length == 0) return a.Length;
 
@@ -125,9 +132,11 @@ public class CrSimulcastCalendarFilter{
         for (int j = 0; j <= b.Length; j++)
             prev[j] = j;
 
-        for (int i = 1; i <= a.Length; i++){
+        for (int i = 1; i <= a.Length; i++)
+        {
             curr[0] = i;
-            for (int j = 1; j <= b.Length; j++){
+            for (int j = 1; j <= b.Length; j++)
+            {
                 int cost = a[i - 1] == b[j - 1] ? 0 : 1;
                 curr[j] = Math.Min(
                     Math.Min(curr[j - 1] + 1, prev[j] + 1),

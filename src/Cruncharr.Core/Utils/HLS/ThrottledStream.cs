@@ -4,23 +4,29 @@ using System.Threading;
 
 namespace Cruncharr.Core.Utils.HLS;
 
-public class GlobalThrottler{
+public class GlobalThrottler
+{
     private static GlobalThrottler? _instance;
     private static readonly object _lock = new object();
     private long _totalBytesRead;
     private DateTime _lastReadTime;
     private int _downloadSpeedLimit;
 
-    private GlobalThrottler(){
+    private GlobalThrottler()
+    {
         _totalBytesRead = 0;
         _lastReadTime = DateTime.Now;
         _downloadSpeedLimit = 0;
     }
 
-    public static GlobalThrottler Instance(){
-        if (_instance == null){
-            lock (_lock){
-                if (_instance == null){
+    public static GlobalThrottler Instance()
+    {
+        if (_instance == null)
+        {
+            lock (_lock)
+            {
+                if (_instance == null)
+                {
                     _instance = new GlobalThrottler();
                 }
             }
@@ -29,36 +35,49 @@ public class GlobalThrottler{
         return _instance;
     }
 
-    public void SetSpeedLimit(int limitKbPerSecond){
-        lock (_lock){
+    public void SetSpeedLimit(int limitKbPerSecond)
+    {
+        lock (_lock)
+        {
             _downloadSpeedLimit = limitKbPerSecond;
         }
     }
 
-    public void Throttle(int bytesRead){
+    public void Throttle(int bytesRead)
+    {
         int limit;
-        lock (_lock){
+        lock (_lock)
+        {
             limit = _downloadSpeedLimit;
         }
-        
+
         if (limit == 0) return;
-        
-        lock (_lock){
+
+        lock (_lock)
+        {
             _totalBytesRead += bytesRead;
-            if (_totalBytesRead >= ((limit * 1024) / 10)){
+            if (_totalBytesRead >= ((limit * 1024) / 10))
+            {
                 var timeElapsed = DateTime.Now - _lastReadTime;
-                if (timeElapsed.TotalMilliseconds < 100){
+                if (timeElapsed.TotalMilliseconds < 100)
+                {
                     // Use SpinWait for short delays to avoid thread pool starvation in async paths
                     var delayMs = 100 - (int)timeElapsed.TotalMilliseconds;
-                    if (delayMs > 30){
+                    if (delayMs > 30)
+                    {
                         // For longer delays, use Thread.Sleep but release the lock first
                         Monitor.Exit(_lock);
-                        try{
+                        try
+                        {
                             Thread.Sleep(delayMs);
-                        } finally{
+                        }
+                        finally
+                        {
                             Monitor.Enter(_lock);
                         }
-                    } else{
+                    }
+                    else
+                    {
                         Thread.SpinWait(100 * delayMs);
                     }
                 }
@@ -69,30 +88,36 @@ public class GlobalThrottler{
         }
     }
 
-    public async Task ThrottleAsync(int bytesRead, CancellationToken cancellationToken = default){
+    public async Task ThrottleAsync(int bytesRead, CancellationToken cancellationToken = default)
+    {
         int limit;
-        lock (_lock){
+        lock (_lock)
+        {
             limit = _downloadSpeedLimit;
         }
-        
+
         if (limit == 0) return;
-        
+
         long totalBytes;
         DateTime lastRead;
-        lock (_lock){
+        lock (_lock)
+        {
             _totalBytesRead += bytesRead;
             totalBytes = _totalBytesRead;
             lastRead = _lastReadTime;
         }
-        
-        if (totalBytes >= ((limit * 1024) / 10)){
+
+        if (totalBytes >= ((limit * 1024) / 10))
+        {
             var timeElapsed = DateTime.Now - lastRead;
-            if (timeElapsed.TotalMilliseconds < 100){
+            if (timeElapsed.TotalMilliseconds < 100)
+            {
                 var delayMs = 100 - (int)timeElapsed.TotalMilliseconds;
                 await Task.Delay(delayMs, cancellationToken);
             }
-            
-            lock (_lock){
+
+            lock (_lock)
+            {
                 _totalBytesRead = 0;
                 _lastReadTime = DateTime.Now;
             }
@@ -100,12 +125,14 @@ public class GlobalThrottler{
     }
 }
 
-public class ThrottledStream : Stream{
+public class ThrottledStream : Stream
+{
     private readonly Stream _baseStream;
     private readonly GlobalThrottler _throttler;
     private int _downloadSpeedLimit;
 
-    public ThrottledStream(Stream baseStream, int downloadSpeedLimit = 0){
+    public ThrottledStream(Stream baseStream, int downloadSpeedLimit = 0)
+    {
         _baseStream = baseStream ?? throw new ArgumentNullException(nameof(baseStream));
         _throttler = GlobalThrottler.Instance();
         _downloadSpeedLimit = downloadSpeedLimit;
@@ -116,7 +143,8 @@ public class ThrottledStream : Stream{
     public override bool CanWrite => _baseStream.CanWrite;
     public override long Length => _baseStream.Length;
 
-    public override long Position{
+    public override long Position
+    {
         get => _baseStream.Position;
         set => _baseStream.Position = value;
     }
@@ -129,32 +157,42 @@ public class ThrottledStream : Stream{
 
     public override void Write(byte[] buffer, int offset, int count) => _baseStream.Write(buffer, offset, count);
 
-    public override int Read(byte[] buffer, int offset, int count){
+    public override int Read(byte[] buffer, int offset, int count)
+    {
         int bytesRead = 0;
-        if (_downloadSpeedLimit != 0){
+        if (_downloadSpeedLimit != 0)
+        {
             int bytesToRead = Math.Min(count, (_downloadSpeedLimit * 1024) / 10);
             bytesRead = _baseStream.Read(buffer, offset, bytesToRead);
             _throttler.Throttle(bytesRead);
-        } else{
+        }
+        else
+        {
             bytesRead = _baseStream.Read(buffer, offset, count);
         }
         return bytesRead;
     }
 
-    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default){
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
         int bytesRead = 0;
-        if (_downloadSpeedLimit != 0){
+        if (_downloadSpeedLimit != 0)
+        {
             int bytesToRead = Math.Min(buffer.Length, (_downloadSpeedLimit * 1024) / 10);
             bytesRead = await _baseStream.ReadAsync(buffer.Slice(0, bytesToRead), cancellationToken);
             await _throttler.ThrottleAsync(bytesRead, cancellationToken);
-        } else{
+        }
+        else
+        {
             bytesRead = await _baseStream.ReadAsync(buffer, cancellationToken);
         }
         return bytesRead;
     }
 
-    protected override void Dispose(bool disposing){
-        if (disposing){
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
             _baseStream.Dispose();
         }
 

@@ -8,16 +8,19 @@ namespace Cruncharr.API.Controllers;
 
 [ApiController]
 [Route("api/v1/[controller]")]
-public class QueueController : ControllerBase{
+public class QueueController : ControllerBase
+{
     private readonly IQueueService _queueService;
     private readonly ILogger<QueueController> _logger;
-    private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings{
+    private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings
+    {
         ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver(),
         Converters = { new Newtonsoft.Json.Converters.StringEnumConverter() },
         NullValueHandling = NullValueHandling.Ignore
     };
 
-    public QueueController(IQueueService queueService, ILogger<QueueController> logger){
+    public QueueController(IQueueService queueService, ILogger<QueueController> logger)
+    {
         _queueService = queueService;
         _logger = logger;
     }
@@ -26,16 +29,21 @@ public class QueueController : ControllerBase{
     /// Get current download queue
     /// </summary>
     [HttpGet]
-    public ActionResult<QueueResponse> GetQueue(){
-        try{
+    public ActionResult<QueueResponse> GetQueue()
+    {
+        try
+        {
             var items = _queueService.GetQueue();
-            return Ok(new QueueResponse{
+            return Ok(new QueueResponse
+            {
                 Items = items,
                 ActiveDownloads = _queueService.ActiveDownloads,
                 HasActiveDownloads = _queueService.HasActiveDownloads,
                 IsGloballyPaused = _queueService.IsGloballyPaused
             });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to get queue");
             return StatusCode(500, new { Error = "Failed to get queue", Message = ex.Message });
         }
@@ -45,13 +53,17 @@ public class QueueController : ControllerBase{
     /// Add episode to download queue
     /// </summary>
     [HttpPost]
-    public IActionResult AddToQueue([FromBody] QueueRequest request){
-        try{
-            if (string.IsNullOrEmpty(request.EpisodeId)){
+    public IActionResult AddToQueue([FromBody] QueueRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(request.EpisodeId))
+            {
                 return BadRequest(new { Error = "EpisodeId is required" });
             }
 
-            var episode = new EpisodeInfo{
+            var episode = new EpisodeInfo
+            {
                 Id = request.EpisodeId,
                 Title = request.Title ?? $"Episode {request.EpisodeId}",
                 SeriesTitle = request.SeriesTitle ?? "Unknown",
@@ -71,7 +83,9 @@ public class QueueController : ControllerBase{
             _logger.LogInformation("Added episode {EpisodeId} to queue", request.EpisodeId);
 
             return Ok(new { Message = "Added to queue", EpisodeId = request.EpisodeId });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to add episode to queue");
             return StatusCode(500, new { Error = "Failed to add to queue", Message = ex.Message });
         }
@@ -81,13 +95,17 @@ public class QueueController : ControllerBase{
     /// Remove item from queue
     /// </summary>
     [HttpDelete("{id}")]
-    public IActionResult RemoveFromQueue(string id){
-        try{
+    public IActionResult RemoveFromQueue(string id)
+    {
+        try
+        {
             var found = _queueService.RemoveFromQueue(id);
             if (!found) return NotFound(new { Message = "Item not found in queue" });
             _logger.LogInformation("Removed item {QueueItemId} from queue", id);
             return NoContent();
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to remove item from queue");
             return StatusCode(500, new { Error = "Failed to remove item", Message = ex.Message });
         }
@@ -97,12 +115,16 @@ public class QueueController : ControllerBase{
     /// Retry all failed downloads
     /// </summary>
     [HttpPost("retry-failed")]
-    public IActionResult RetryFailed(){
-        try{
+    public IActionResult RetryFailed()
+    {
+        try
+        {
             _queueService.RetryAllFailed();
             _logger.LogInformation("Retrying all failed downloads");
             return Ok(new { Message = "Retrying failed downloads" });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to retry failed downloads");
             return StatusCode(500, new { Error = "Failed to retry", Message = ex.Message });
         }
@@ -112,12 +134,16 @@ public class QueueController : ControllerBase{
     /// Clear entire queue
     /// </summary>
     [HttpDelete]
-    public IActionResult ClearQueue(){
-        try{
+    public IActionResult ClearQueue()
+    {
+        try
+        {
             _queueService.ClearQueue();
             _logger.LogInformation("Queue cleared");
             return NoContent();
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to clear queue");
             return StatusCode(500, new { Error = "Failed to clear queue", Message = ex.Message });
         }
@@ -127,12 +153,16 @@ public class QueueController : ControllerBase{
     /// Replace entire queue with new items
     /// </summary>
     [HttpPost("replace")]
-    public IActionResult ReplaceQueue([FromBody] List<QueueItem> newQueue){
-        try{
+    public IActionResult ReplaceQueue([FromBody] List<QueueItem> newQueue)
+    {
+        try
+        {
             _queueService.ReplaceQueue(newQueue ?? new List<QueueItem>());
             _logger.LogInformation("Queue replaced with {Count} items", newQueue?.Count ?? 0);
             return Ok(new { Message = "Queue replaced", Count = newQueue?.Count ?? 0 });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to replace queue");
             return StatusCode(500, new { Error = "Failed to replace queue", Message = ex.Message });
         }
@@ -142,13 +172,17 @@ public class QueueController : ControllerBase{
     /// Retry specific item
     /// </summary>
     [HttpPost("{id}/retry")]
-    public IActionResult RetryItem(string id){
-        try{
+    public IActionResult RetryItem(string id)
+    {
+        try
+        {
             var found = _queueService.RetryItem(id);
             if (!found) return NotFound(new { Message = "Item not found in queue" });
             _logger.LogInformation("Retrying item {QueueItemId}", id);
             return Ok(new { Message = "Retrying item", Id = id });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to retry item");
             return StatusCode(500, new { Error = "Failed to retry item", Message = ex.Message });
         }
@@ -158,13 +192,17 @@ public class QueueController : ControllerBase{
     /// Pause specific item
     /// </summary>
     [HttpPost("{id}/pause")]
-    public IActionResult PauseItem(string id){
-        try{
+    public IActionResult PauseItem(string id)
+    {
+        try
+        {
             var found = _queueService.PauseItem(id);
             if (!found) return NotFound(new { Message = "Item not found in queue" });
             _logger.LogInformation("Paused item {QueueItemId}", id);
             return Ok(new { Message = "Paused item", Id = id });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to pause item");
             return StatusCode(500, new { Error = "Failed to pause item", Message = ex.Message });
         }
@@ -174,13 +212,17 @@ public class QueueController : ControllerBase{
     /// Resume specific item
     /// </summary>
     [HttpPost("{id}/resume")]
-    public IActionResult ResumeItem(string id){
-        try{
+    public IActionResult ResumeItem(string id)
+    {
+        try
+        {
             var found = _queueService.ResumeItem(id);
             if (!found) return NotFound(new { Message = "Item not found in queue" });
             _logger.LogInformation("Resumed item {QueueItemId}", id);
             return Ok(new { Message = "Resumed item", Id = id });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to resume item");
             return StatusCode(500, new { Error = "Failed to resume item", Message = ex.Message });
         }
@@ -190,13 +232,17 @@ public class QueueController : ControllerBase{
     /// Start specific item immediately (bypass AutoDownload)
     /// </summary>
     [HttpPost("{id}/start")]
-    public IActionResult StartItem(string id){
-        try{
+    public IActionResult StartItem(string id)
+    {
+        try
+        {
             var found = _queueService.StartItem(id);
             if (!found) return NotFound(new { Message = "Item not found in queue" });
             _logger.LogInformation("Started item {QueueItemId}", id);
             return Ok(new { Message = "Started item", Id = id });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to start item");
             return StatusCode(500, new { Error = "Failed to start item", Message = ex.Message });
         }
@@ -206,8 +252,10 @@ public class QueueController : ControllerBase{
     /// Get queue statistics
     /// </summary>
     [HttpGet("stats")]
-    public ActionResult<QueueStats> GetQueueStats(){
-        try{
+    public ActionResult<QueueStats> GetQueueStats()
+    {
+        try
+        {
             var items = _queueService.GetQueue() ?? new List<QueueItem>();
             var total = items.Count;
             var active = items.Count(i => i.DownloadProgress?.State == DownloadState.Downloading || i.DownloadProgress?.State == DownloadState.Processing);
@@ -215,8 +263,9 @@ public class QueueController : ControllerBase{
             var completed = items.Count(i => i.DownloadProgress?.State == DownloadState.Done);
             var failed = items.Count(i => i.DownloadProgress?.State == DownloadState.Error);
             var waitingForRetry = items.Count(i => i.DownloadProgress?.IsWaitingForRetry == true);
-            
-            return Ok(new QueueStats{
+
+            return Ok(new QueueStats
+            {
                 Total = total,
                 Active = active,
                 Queued = queued,
@@ -225,7 +274,9 @@ public class QueueController : ControllerBase{
                 WaitingForRetry = waitingForRetry,
                 IsGloballyPaused = _queueService.IsGloballyPaused
             });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to get queue stats");
             return StatusCode(500, new { Error = "Failed to get queue stats", Message = ex.Message });
         }
@@ -235,18 +286,22 @@ public class QueueController : ControllerBase{
     /// Server-Sent Events endpoint for real-time queue updates
     /// </summary>
     [HttpGet("sse")]
-    public async Task GetQueueUpdates([FromServices] QueueBroadcastService broadcastService, CancellationToken cancellationToken){
-        try{
+    public async Task GetQueueUpdates([FromServices] QueueBroadcastService broadcastService, CancellationToken cancellationToken)
+    {
+        try
+        {
             Response.Headers.Append("Content-Type", "text/event-stream");
             Response.Headers.Append("Cache-Control", "no-cache");
             Response.Headers.Append("Connection", "keep-alive");
 
             var clientId = Guid.NewGuid();
             var reader = broadcastService.Subscribe(clientId);
-            try{
+            try
+            {
                 // Send initial state
                 var initialQueue = _queueService.GetQueue();
-                var initialResponse = new QueueResponse{
+                var initialResponse = new QueueResponse
+                {
                     Items = initialQueue,
                     ActiveDownloads = _queueService.ActiveDownloads,
                     HasActiveDownloads = _queueService.HasActiveDownloads,
@@ -255,15 +310,20 @@ public class QueueController : ControllerBase{
                 await WriteSseEventAsync(JsonConvert.SerializeObject(initialResponse, _sseJsonSettings), cancellationToken);
 
                 // Listen for updates
-                await foreach (var update in reader.ReadAllAsync(cancellationToken)){
+                await foreach (var update in reader.ReadAllAsync(cancellationToken))
+                {
                     if (cancellationToken.IsCancellationRequested) break;
                     await WriteSseEventAsync(update, cancellationToken);
                     await Response.Body.FlushAsync(cancellationToken);
                 }
-            } finally{
+            }
+            finally
+            {
                 broadcastService.Unsubscribe(clientId);
             }
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "SSE queue updates failed");
         }
     }
@@ -272,11 +332,15 @@ public class QueueController : ControllerBase{
     /// Pause all queue processing globally
     /// </summary>
     [HttpPost("pause")]
-    public IActionResult PauseGlobally(){
-        try{
+    public IActionResult PauseGlobally()
+    {
+        try
+        {
             _queueService.PauseGlobally();
             return Ok(new { Message = "Queue paused globally" });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to pause queue globally");
             return StatusCode(500, new { Error = "Failed to pause queue", Message = ex.Message });
         }
@@ -286,29 +350,40 @@ public class QueueController : ControllerBase{
     /// Resume queue processing globally
     /// </summary>
     [HttpPost("resume")]
-    public IActionResult ResumeGlobally(){
-        try{
+    public IActionResult ResumeGlobally()
+    {
+        try
+        {
             _queueService.ResumeGlobally();
             return Ok(new { Message = "Queue resumed globally" });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to resume queue globally");
             return StatusCode(500, new { Error = "Failed to resume queue", Message = ex.Message });
         }
     }
 
-    private async Task WriteSseEventAsync(string data, CancellationToken cancellationToken){
-        try{
+    private async Task WriteSseEventAsync(string data, CancellationToken cancellationToken)
+    {
+        try
+        {
             await Response.WriteAsync($"data: {data}\n\n", cancellationToken);
             await Response.Body.FlushAsync(cancellationToken);
-        } catch (IOException){
+        }
+        catch (IOException)
+        {
             // Client disconnected, ignore
-        } catch (OperationCanceledException){
+        }
+        catch (OperationCanceledException)
+        {
             // Cancellation requested, ignore
         }
     }
 }
 
-public class QueueRequest{
+public class QueueRequest
+{
     public string EpisodeId { get; set; } = "";
     public string? Title { get; set; }
     public string? SeriesTitle { get; set; }
@@ -324,14 +399,16 @@ public class QueueRequest{
     public List<EpisodeVersion>? Versions { get; set; }
 }
 
-public class QueueResponse{
+public class QueueResponse
+{
     public List<QueueItem> Items { get; set; } = new();
     public int ActiveDownloads { get; set; }
     public bool HasActiveDownloads { get; set; }
     public bool IsGloballyPaused { get; set; }
 }
 
-public class QueueStats{
+public class QueueStats
+{
     public int Total { get; set; }
     public int Active { get; set; }
     public int Queued { get; set; }

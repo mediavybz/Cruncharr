@@ -8,26 +8,31 @@ using Microsoft.Extensions.Logging;
 
 namespace Cruncharr.Core.Utils.Muxing.Syncing;
 
-public interface IVideoSyncer{
+public interface IVideoSyncer
+{
     Task<(double offSet, double startOffset, double endOffset, double lengthDiff)> ProcessVideo(string baseVideoPath, string compareVideoPath, string tempDir, string ffmpegPath);
 }
 
-public class VideoSyncer : IVideoSyncer{
+public class VideoSyncer : IVideoSyncer
+{
     private readonly ISyncingService _syncingService;
     private readonly ILogger<VideoSyncer>? _logger;
 
-    public VideoSyncer(ISyncingService syncingService, ILogger<VideoSyncer>? logger = null){
+    public VideoSyncer(ISyncingService syncingService, ILogger<VideoSyncer>? logger = null)
+    {
         _syncingService = syncingService;
         _logger = logger;
     }
 
-    public async Task<(double offSet, double startOffset, double endOffset, double lengthDiff)> ProcessVideo(string baseVideoPath, string compareVideoPath, string tempDir, string ffmpegPath){
+    public async Task<(double offSet, double startOffset, double endOffset, double lengthDiff)> ProcessVideo(string baseVideoPath, string compareVideoPath, string tempDir, string ffmpegPath)
+    {
         string baseFramesDir, baseFramesDirEnd;
         string compareFramesDir, compareFramesDirEnd;
         string cleanupDir = string.Empty;
         double baseEndWindowOffset = 0;
         double compareEndWindowOffset = 0;
-        try{
+        try
+        {
             string uuid = Guid.NewGuid().ToString();
 
             cleanupDir = Path.Combine(tempDir, uuid);
@@ -40,20 +45,24 @@ public class VideoSyncer : IVideoSyncer{
             Directory.CreateDirectory(baseFramesDirEnd);
             Directory.CreateDirectory(compareFramesDir);
             Directory.CreateDirectory(compareFramesDirEnd);
-        } catch (Exception e){
+        }
+        catch (Exception e)
+        {
             _logger?.LogError(e, "Failed to create sync directories");
             Console.Error.WriteLine(e);
             return (-100, 0, 0, 0);
         }
 
-        try{
+        try
+        {
             var extractFramesBaseStart = await _syncingService.ExtractFrames(baseVideoPath, baseFramesDir, 0, 120, ffmpegPath);
             var extractFramesCompareStart = await _syncingService.ExtractFrames(compareVideoPath, compareFramesDir, 0, 120, ffmpegPath);
 
             TimeSpan? baseVideoDurationTimeSpan = await GetMediaDurationAsync(ffmpegPath, baseVideoPath);
             TimeSpan? compareVideoDurationTimeSpan = await GetMediaDurationAsync(ffmpegPath, compareVideoPath);
 
-            if (baseVideoDurationTimeSpan == null || compareVideoDurationTimeSpan == null){
+            if (baseVideoDurationTimeSpan == null || compareVideoDurationTimeSpan == null)
+            {
                 Console.Error.WriteLine("Failed to retrieve video durations");
                 return (-100, 0, 0, 0);
             }
@@ -66,27 +75,32 @@ public class VideoSyncer : IVideoSyncer{
             var extractFramesBaseEnd = await _syncingService.ExtractFrames(baseVideoPath, baseFramesDirEnd, baseEndWindowOffset, baseEndWindowDuration, ffmpegPath);
             var extractFramesCompareEnd = await _syncingService.ExtractFrames(compareVideoPath, compareFramesDirEnd, compareEndWindowOffset, compareEndWindowDuration, ffmpegPath);
 
-            if (!extractFramesBaseStart.IsOk || !extractFramesCompareStart.IsOk || !extractFramesBaseEnd.IsOk || !extractFramesCompareEnd.IsOk){
+            if (!extractFramesBaseStart.IsOk || !extractFramesCompareStart.IsOk || !extractFramesBaseEnd.IsOk || !extractFramesCompareEnd.IsOk)
+            {
                 Console.Error.WriteLine("Failed to extract Frames to Compare");
                 return (-100, 0, 0, 0);
             }
 
-            var baseFramesStart = Directory.GetFiles(baseFramesDir).Select(fp => new FrameData{
+            var baseFramesStart = Directory.GetFiles(baseFramesDir).Select(fp => new FrameData
+            {
                 FilePath = fp,
                 Time = GetTimeFromFileName(fp, extractFramesBaseStart.frameRate, 0)
             }).OrderBy(frame => frame.Time).ToList();
 
-            var compareFramesStart = Directory.GetFiles(compareFramesDir).Select(fp => new FrameData{
+            var compareFramesStart = Directory.GetFiles(compareFramesDir).Select(fp => new FrameData
+            {
                 FilePath = fp,
                 Time = GetTimeFromFileName(fp, extractFramesCompareStart.frameRate, 0)
             }).OrderBy(frame => frame.Time).ToList();
 
-            var baseFramesEnd = Directory.GetFiles(baseFramesDirEnd).Select(fp => new FrameData{
+            var baseFramesEnd = Directory.GetFiles(baseFramesDirEnd).Select(fp => new FrameData
+            {
                 FilePath = fp,
                 Time = GetTimeFromFileName(fp, extractFramesBaseEnd.frameRate, baseEndWindowOffset)
             }).OrderBy(frame => frame.Time).ToList();
 
-            var compareFramesEnd = Directory.GetFiles(compareFramesDirEnd).Select(fp => new FrameData{
+            var compareFramesEnd = Directory.GetFiles(compareFramesDirEnd).Select(fp => new FrameData
+            {
                 FilePath = fp,
                 Time = GetTimeFromFileName(fp, extractFramesCompareEnd.frameRate, compareEndWindowOffset)
             }).OrderBy(frame => frame.Time).ToList();
@@ -96,7 +110,8 @@ public class VideoSyncer : IVideoSyncer{
 
             var lengthDiff = (baseVideoDurationTimeSpan.Value.TotalMicroseconds - compareVideoDurationTimeSpan.Value.TotalMicroseconds) / 1000000;
 
-            if (double.IsNaN(startOffset) || double.IsNaN(endOffset)){
+            if (double.IsNaN(startOffset) || double.IsNaN(endOffset))
+            {
                 Console.Error.WriteLine("Couldn't find enough matching frames to sync dub.");
                 return (-100, startOffset, endOffset, lengthDiff);
             }
@@ -110,7 +125,8 @@ public class VideoSyncer : IVideoSyncer{
 
             var difference = Math.Abs(startOffset - endOffset);
 
-            switch (difference){
+            switch (difference)
+            {
                 case < 0.1:
                     return (startOffset, startOffset, endOffset, lengthDiff);
                 case > 1:
@@ -123,32 +139,42 @@ public class VideoSyncer : IVideoSyncer{
                 default:
                     return (endOffset, startOffset, endOffset, lengthDiff);
             }
-        } catch (Exception e){
+        }
+        catch (Exception e)
+        {
             _logger?.LogError(e, "Error processing video sync");
             Console.Error.WriteLine(e);
             return (-100, 0, 0, 0);
-        } finally{
+        }
+        finally
+        {
             CleanupDirectory(cleanupDir);
         }
     }
 
-    private static void CleanupDirectory(string dirPath){
-        if (!string.IsNullOrEmpty(dirPath) && Directory.Exists(dirPath)){
+    private static void CleanupDirectory(string dirPath)
+    {
+        if (!string.IsNullOrEmpty(dirPath) && Directory.Exists(dirPath))
+        {
             Directory.Delete(dirPath, true);
         }
     }
 
-    private static double GetTimeFromFileName(string fileName, double frameRate, double timeOffset){
+    private static double GetTimeFromFileName(string fileName, double frameRate, double timeOffset)
+    {
         var match = Regex.Match(Path.GetFileName(fileName), @"frame(\d+)");
-        if (match.Success){
+        if (match.Success)
+        {
             return timeOffset + int.Parse(match.Groups[1].Value) / frameRate;
         }
 
         return timeOffset;
     }
 
-    private static async Task<TimeSpan?> GetMediaDurationAsync(string ffmpegPath, string videoPath){
-        try{
+    private static async Task<TimeSpan?> GetMediaDurationAsync(string ffmpegPath, string videoPath)
+    {
+        try
+        {
             using var process = new System.Diagnostics.Process();
             process.StartInfo.FileName = ffmpegPath;
             process.StartInfo.Arguments = $"-i \"{videoPath}\" -f null -";
@@ -161,13 +187,16 @@ public class VideoSyncer : IVideoSyncer{
             await process.WaitForExitAsync();
 
             var match = Regex.Match(output, @"Duration: (\d+):(\d+):(\d+\.\d+)");
-            if (match.Success){
+            if (match.Success)
+            {
                 int hours = int.Parse(match.Groups[1].Value);
                 int minutes = int.Parse(match.Groups[2].Value);
                 double seconds = double.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
                 return new TimeSpan(0, hours, minutes, 0) + TimeSpan.FromSeconds(seconds);
             }
-        } catch{
+        }
+        catch
+        {
             // Ignore
         }
         return null;

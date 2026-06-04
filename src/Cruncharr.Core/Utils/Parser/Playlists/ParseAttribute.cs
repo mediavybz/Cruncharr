@@ -7,7 +7,8 @@ using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser;
 
-public class ParseAttribute{
+public class ParseAttribute
+{
     public static Dictionary<string, Func<string, object>> ParsersDictionary = new Dictionary<string, Func<string, object>>{
         { "mediaPresentationDuration", MediaPresentationDuration },
         { "availabilityStartTime", AvailabilityStartTime },
@@ -48,8 +49,10 @@ public class ParseAttribute{
     public static object Timescale(string value) => int.Parse(value);
     public static object PresentationTimeOffset(string value) => int.Parse(value);
 
-    public static object Duration(string value){
-        if (int.TryParse(value, out int parsedValue)){
+    public static object Duration(string value)
+    {
+        if (int.TryParse(value, out int parsedValue))
+        {
             return parsedValue;
         }
 
@@ -62,15 +65,21 @@ public class ParseAttribute{
     public static object PresentationTime(string value) => int.Parse(value);
     public static object DefaultParser(string value) => value;
 
-    public static dynamic ParseAttributes(XmlNode? el){
+    public static dynamic ParseAttributes(XmlNode? el)
+    {
         var expandoObj = new ExpandoObject() as IDictionary<string, object>;
 
-        if (el is{ Attributes: not null }){
-            foreach (XmlAttribute attr in el.Attributes){
+        if (el is { Attributes: not null })
+        {
+            foreach (XmlAttribute attr in el.Attributes)
+            {
                 Func<string, object>? parseFn;
-                if (ParsersDictionary.TryGetValue(attr.Name, out parseFn)){
+                if (ParsersDictionary.TryGetValue(attr.Name, out parseFn))
+                {
                     expandoObj[attr.Name] = parseFn(attr.Value);
-                } else{
+                }
+                else
+                {
                     expandoObj[attr.Name] = DefaultParser(attr.Value);
                 }
             }

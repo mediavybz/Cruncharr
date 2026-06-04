@@ -7,35 +7,43 @@ using Cruncharr.Core.Utils.Muxing.Structs;
 
 namespace Cruncharr.Core.Utils.Muxing;
 
-public class Merger{
+public class Merger
+{
     public MergerOptions Options;
 
-    public Merger(MergerOptions options){
+    public Merger(MergerOptions options)
+    {
         Options = options;
 
 
-        if (Options.VideoTitle is{ Length: > 0 }){
+        if (Options.VideoTitle is { Length: > 0 })
+        {
             Options.VideoTitle = Options.VideoTitle.Replace("\"", "'");
         }
     }
-    
-    public string FFmpeg(){
+
+    public string FFmpeg()
+    {
         return new FFmpegCommandBuilder(Options).Build();
     }
 
-    public string MkvMerge(){
+    public string MkvMerge()
+    {
         return new MkvMergeCommandBuilder(Options).Build();
     }
-    
 
-    public async Task<bool> Merge(string type, string bin, CancellationToken cancellationToken = default){
-        string command = type switch{
+
+    public async Task<bool> Merge(string type, string bin, CancellationToken cancellationToken = default)
+    {
+        string command = type switch
+        {
             "ffmpeg" => FFmpeg(),
             "mkvmerge" => MkvMerge(),
             _ => ""
         };
 
-        if (string.IsNullOrEmpty(command)){
+        if (string.IsNullOrEmpty(command))
+        {
             Console.Error.WriteLine("Unable to merge files.");
             return false;
         }
@@ -44,13 +52,18 @@ public class Merger{
         Console.WriteLine($"[{type}] Command: {command}");
         var result = await MuxingHelpers.ExecuteCommandAsync(bin, command, cancellationToken);
 
-        if (!result.IsOk && type == "mkvmerge" && result.ErrorCode == 1){
+        if (!result.IsOk && type == "mkvmerge" && result.ErrorCode == 1)
+        {
             Console.Error.WriteLine($"[{type}] Mkvmerge finished with at least one warning");
-        } else if (!result.IsOk){
+        }
+        else if (!result.IsOk)
+        {
             Console.Error.WriteLine($"[{type}] Merging failed with exit code {result.ErrorCode}");
             Console.Error.WriteLine($"[{type}] Merging failed command: {command}");
             return false;
-        } else{
+        }
+        else
+        {
             Console.WriteLine($"[{type} Done]");
         }
 
@@ -58,7 +71,8 @@ public class Merger{
     }
 
 
-    public void CleanUp(){
+    public void CleanUp()
+    {
         // Combine all media file lists and iterate through them
         var allMediaFiles = Options.OnlyAudio.Concat(Options.OnlyVid).Concat(Options.VideoAndAudio)
             .ToList();
@@ -72,7 +86,8 @@ public class Merger{
         // Delete chapter files if any
         Options.Chapters?.ForEach(chapter => MuxingHelpers.DeleteFile(chapter.Path));
 
-        if (!Options.SkipSubMux){
+        if (!Options.SkipSubMux)
+        {
             // Delete subtitle files
             Options.Subtitles.ForEach(subtitle => MuxingHelpers.DeleteFile(subtitle.File));
         }

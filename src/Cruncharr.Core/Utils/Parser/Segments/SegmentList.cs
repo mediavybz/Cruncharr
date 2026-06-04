@@ -4,10 +4,13 @@ using System.Linq;
 
 namespace Cruncharr.Core.Utils.Parser.Segments;
 
-public class SegmentList{
-    public static List<dynamic> SegmentsFromList(dynamic attributes, List<dynamic> segmentTimeline){
+public class SegmentList
+{
+    public static List<dynamic> SegmentsFromList(dynamic attributes, List<dynamic> segmentTimeline)
+    {
         if ((!attributes.duration && segmentTimeline == null) ||
-            (attributes.duration && segmentTimeline != null)){
+            (attributes.duration && segmentTimeline != null))
+        {
             throw new Exception("Segment time unspecified");
         }
 
@@ -15,14 +18,19 @@ public class SegmentList{
         var segmentUrlMap = segmentUrls.Select(segmentUrlObject => SegmentURLToSegmentObject(attributes, segmentUrlObject)).ToList();
 
         List<dynamic> segmentTimeInfo = new List<dynamic>();
-        if (attributes.duration != null){
+        if (attributes.duration != null)
+        {
             segmentTimeInfo = DurationTimeParser.ParseByDuration(attributes);
-        } else if (segmentTimeline != null){
+        }
+        else if (segmentTimeline != null)
+        {
             segmentTimeInfo = TimelineTimeParser.ParseByTimeline(attributes, segmentTimeline);
         }
 
-        var segments = segmentTimeInfo.Select((segmentTime, index) => {
-            if (index < segmentUrlMap.Count){
+        var segments = segmentTimeInfo.Select((segmentTime, index) =>
+        {
+            if (index < segmentUrlMap.Count)
+            {
                 var segment = segmentUrlMap[index];
                 segment.Timeline = segmentTime.Timeline;
                 segment.Duration = segmentTime.Duration;
@@ -38,14 +46,17 @@ public class SegmentList{
         return segments;
     }
 
-    public static dynamic SegmentURLToSegmentObject(dynamic attributes, dynamic segmentUrl){
-        var initSegment = UrlType.UrlTypeToSegment(new{
+    public static dynamic SegmentURLToSegmentObject(dynamic attributes, dynamic segmentUrl)
+    {
+        var initSegment = UrlType.UrlTypeToSegment(new
+        {
             baseUrl = attributes.baseUrl,
             source = attributes.initialization?.sourceURL,
             range = attributes.initialization?.range
         });
 
-        var segment = UrlType.UrlTypeToSegment(new{
+        var segment = UrlType.UrlTypeToSegment(new
+        {
             baseUrl = attributes.baseUrl,
             source = segmentUrl.media,
             range = segmentUrl.mediaRange

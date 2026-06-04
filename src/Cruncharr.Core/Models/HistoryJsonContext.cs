@@ -8,5 +8,6 @@ namespace Cruncharr.Core.Models;
 [JsonSerializable(typeof(HistoryEpisode))]
 [JsonSerializable(typeof(List<DownloadHistory>))]
 [JsonSerializable(typeof(DownloadHistory))]
-public partial class HistoryJsonContext : JsonSerializerContext{
+public partial class HistoryJsonContext : JsonSerializerContext
+{
 }

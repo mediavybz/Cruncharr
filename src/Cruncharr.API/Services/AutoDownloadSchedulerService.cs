@@ -5,7 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Cruncharr.API.Services;
 
-public class AutoDownloadSchedulerService : IHostedService, IDisposable{
+public class AutoDownloadSchedulerService : IHostedService, IDisposable
+{
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AutoDownloadSchedulerService> _logger;
     private CancellationTokenSource? _cts;
@@ -13,7 +14,8 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable{
     private DateTimeOffset? _lastRun;
     private bool _isRunning;
 
-    public AutoDownloadSchedulerService(IServiceProvider serviceProvider, ILogger<AutoDownloadSchedulerService> logger){
+    public AutoDownloadSchedulerService(IServiceProvider serviceProvider, ILogger<AutoDownloadSchedulerService> logger)
+    {
         _serviceProvider = serviceProvider;
         _logger = logger;
     }
@@ -21,39 +23,52 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable{
     public bool IsRunning => _isRunning;
     public DateTimeOffset? LastRun => _lastRun;
 
-    public Task StartAsync(CancellationToken cancellationToken){
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
         _logger.LogInformation("Auto-download scheduler starting...");
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _executeTask = ExecuteAsync(_cts.Token);
         return Task.CompletedTask;
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken){
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
         _logger.LogInformation("Auto-download scheduler stopping...");
-        if (_cts != null){
+        if (_cts != null)
+        {
             await _cts.CancelAsync();
             _cts.Dispose();
             _cts = null;
         }
-        if (_executeTask != null){
-            try{
+        if (_executeTask != null)
+        {
+            try
+            {
                 await _executeTask.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-            } catch (TimeoutException){
+            }
+            catch (TimeoutException)
+            {
                 _logger.LogWarning("Auto-download scheduler did not stop within 10 seconds");
-            } catch (OperationCanceledException){
+            }
+            catch (OperationCanceledException)
+            {
                 // Expected
             }
         }
     }
 
-    private async Task ExecuteAsync(CancellationToken cancellationToken){
-        while (!cancellationToken.IsCancellationRequested){
-            try{
+    private async Task ExecuteAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
                 using var scope = _serviceProvider.CreateScope();
                 var config = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
 
                 var intervalMinutes = config.History?.AutoRefreshIntervalMinutes ?? 0;
-                if (intervalMinutes <= 0){
+                if (intervalMinutes <= 0)
+                {
                     // No interval set, wait and check again later
                     await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
                     continue;
@@ -69,21 +84,29 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable{
 
                 _logger.LogInformation("Auto-download check completed. Next check in {Interval} minutes", intervalMinutes);
                 await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), cancellationToken);
-            } catch (OperationCanceledException){
+            }
+            catch (OperationCanceledException)
+            {
                 break;
-            } catch (Exception ex){
+            }
+            catch (Exception ex)
+            {
                 _logger.LogError(ex, "Auto-download check failed");
                 _isRunning = false;
-                try{
+                try
+                {
                     await Task.Delay(TimeSpan.FromMinutes(5), cancellationToken);
-                } catch (OperationCanceledException){
+                }
+                catch (OperationCanceledException)
+                {
                     break;
                 }
             }
         }
     }
 
-    public async Task RunCheckAsync(IServiceProvider serviceProvider, CruncharrConfig config, CancellationToken cancellationToken){
+    public async Task RunCheckAsync(IServiceProvider serviceProvider, CruncharrConfig config, CancellationToken cancellationToken)
+    {
         if (config.History == null || !config.History.Enabled) return;
 
         var historyService = serviceProvider.GetRequiredService<IHistoryService>();
@@ -93,7 +116,8 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable{
 
         var mode = config.History.AutoRefreshMode;
 
-        switch (mode){
+        switch (mode)
+        {
             case 0: // DefaultAll
                 _logger.LogInformation("Refreshing all history series...");
                 await RefreshHistoryAsync(historyService, cancellationToken);
@@ -109,34 +133,46 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable{
                 break;
         }
 
-        if (config.History.AutoRefreshAddToQueue){
+        if (config.History.AutoRefreshAddToQueue)
+        {
             _logger.LogInformation("Adding missing episodes to queue...");
             await AddNewMissingToQueueAsync(historyService, queueService, cancellationToken);
         }
     }
 
-    private async Task RefreshHistoryAsync(IHistoryService historyService, CancellationToken cancellationToken){
-        try{
+    private async Task RefreshHistoryAsync(IHistoryService historyService, CancellationToken cancellationToken)
+    {
+        try
+        {
             var seriesList = await historyService.GetHistorySeriesAsync();
             if (seriesList == null || seriesList.Count == 0) return;
 
-            foreach (var series in seriesList){
-                try{
+            foreach (var series in seriesList)
+            {
+                try
+                {
                     cancellationToken.ThrowIfCancellationRequested();
                     _logger.LogDebug("Refreshing series: {SeriesId} ({Title})", series.SeriesId, series.SeriesTitle);
                     await historyService.CrUpdateSeriesAsync(series.SeriesId, "");
-                } catch (Exception ex){
+                }
+                catch (Exception ex)
+                {
                     _logger.LogWarning(ex, "Failed to refresh series {SeriesId}", series.SeriesId);
                 }
             }
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "History refresh failed");
         }
     }
 
-    private async Task RefreshHistoryWithNewReleasesAsync(IHistoryService historyService, ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, CancellationToken cancellationToken){
-        try{
-            if (string.IsNullOrEmpty(authService.Token?.access_token)){
+    private async Task RefreshHistoryWithNewReleasesAsync(IHistoryService historyService, ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(authService.Token?.access_token))
+            {
                 _logger.LogWarning("Cannot check for new releases: not authenticated");
                 return;
             }
@@ -147,29 +183,37 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable{
 
             _logger.LogInformation("Found {Count} new episodes", newEpisodesBase.Data.Count);
             await historyService.UpdateWithEpisodeAsync(newEpisodesBase.Data);
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "New releases check failed");
         }
     }
 
-    private async Task AddNewMissingToQueueAsync(IHistoryService historyService, IQueueService queueService, CancellationToken cancellationToken){
-        try{
+    private async Task AddNewMissingToQueueAsync(IHistoryService historyService, IQueueService queueService, CancellationToken cancellationToken)
+    {
+        try
+        {
             var seriesList = await historyService.GetHistorySeriesAsync();
             if (seriesList == null || seriesList.Count == 0) return;
 
             int addedCount = 0;
             var queueItems = queueService.GetQueue();
 
-            foreach (var series in seriesList){
-                try{
+            foreach (var series in seriesList)
+            {
+                try
+                {
                     cancellationToken.ThrowIfCancellationRequested();
 
                     if (series.Seasons == null || series.Seasons.Count == 0) continue;
 
-                    foreach (var season in series.Seasons){
+                    foreach (var season in series.Seasons)
+                    {
                         if (season.EpisodesList == null || season.EpisodesList.Count == 0) continue;
 
-                        foreach (var episode in season.EpisodesList){
+                        foreach (var episode in season.EpisodesList)
+                        {
                             // Skip already downloaded episodes
                             if (episode.WasDownloaded) continue;
 
@@ -182,7 +226,8 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable{
                             if (inQueue) continue;
 
                             // Add to queue
-                            var episodeInfo = new EpisodeInfo{
+                            var episodeInfo = new EpisodeInfo
+                            {
                                 Id = episode.EpisodeId ?? $"{series.SeriesId}-{season.SeasonNum}-{episode.Episode}",
                                 Title = episode.EpisodeTitle ?? $"Episode {episode.Episode}",
                                 SeriesTitle = series.SeriesTitle ?? "Unknown",
@@ -200,20 +245,26 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable{
                             addedCount++;
                         }
                     }
-                } catch (Exception ex){
+                }
+                catch (Exception ex)
+                {
                     _logger.LogWarning(ex, "Failed to add missing episodes for series {SeriesId}", series.SeriesId);
                 }
             }
 
-            if (addedCount > 0){
+            if (addedCount > 0)
+            {
                 _logger.LogInformation("Added {Count} missing episodes to queue", addedCount);
             }
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Add missing to queue failed");
         }
     }
 
-    public void Dispose(){
+    public void Dispose()
+    {
         _cts?.Dispose();
     }
 }

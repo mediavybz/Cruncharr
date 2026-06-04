@@ -1,17 +1,20 @@
 namespace Cruncharr.Core.Utils.DRM;
 
-public class PSSHBox{
-    static readonly byte[] PSSH_HEADER = new byte[]{ 0x70, 0x73, 0x73, 0x68 };
+public class PSSHBox
+{
+    static readonly byte[] PSSH_HEADER = new byte[] { 0x70, 0x73, 0x73, 0x68 };
 
-    public List<byte[]> KIDs{ get; set; } = new List<byte[]>();
-    public byte[]? Data{ get; set; }
+    public List<byte[]> KIDs { get; set; } = new List<byte[]>();
+    public byte[]? Data { get; set; }
 
-    PSSHBox(List<byte[]> kids, byte[]? data){
+    PSSHBox(List<byte[]> kids, byte[]? data)
+    {
         KIDs = kids;
         Data = data;
     }
 
-    public static PSSHBox FromByteArray(byte[] psshbox){
+    public static PSSHBox FromByteArray(byte[] psshbox)
+    {
         using var stream = new System.IO.MemoryStream(psshbox);
 
         stream.Seek(4, System.IO.SeekOrigin.Current);
@@ -30,7 +33,8 @@ public class PSSHBox{
         uint kidCount = BitConverter.ToUInt32(kidCountBytes);
 
         List<byte[]> kids = new List<byte[]>();
-        for (int i = 0; i < kidCount; i++){
+        for (int i = 0; i < kidCount; i++)
+        {
             byte[] kid = new byte[16];
             stream.Read(kid);
             kids.Add(kid);

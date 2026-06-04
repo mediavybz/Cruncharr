@@ -5,12 +5,15 @@ using System.Security.Cryptography;
 
 namespace Cruncharr.Core.Utils.DRM;
 
-public class CryptoUtils{
-    public static byte[] GetHMACSHA256Digest(byte[] data, byte[] key){
+public class CryptoUtils
+{
+    public static byte[] GetHMACSHA256Digest(byte[] data, byte[] key)
+    {
         return new HMACSHA256(key).ComputeHash(data);
     }
 
-    public static byte[] GetCMACDigest(byte[] data, byte[] key){
+    public static byte[] GetCMACDigest(byte[] data, byte[] key)
+    {
         var cipher = new AesEngine();
         var mac = new CMac(cipher, 128);
         var keyParam = new KeyParameter(key);

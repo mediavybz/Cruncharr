@@ -4,13 +4,15 @@ using System.Linq;
 
 namespace Cruncharr.Core.Services;
 
-public interface IEncodingService{
+public interface IEncodingService
+{
     List<VideoPreset> GetPresets();
     VideoPreset? GetPreset(string presetName);
     void AddPreset(VideoPreset preset);
 }
 
-public class EncodingService : IEncodingService{
+public class EncodingService : IEncodingService
+{
     private static readonly List<VideoPreset> _presets = new(){
         new(){ PresetName = "AV1 1080p24", Codec = "libaom-av1", Resolution = "1920:1080", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },
         new(){ PresetName = "AV1 720p24", Codec = "libaom-av1", Resolution = "1280:720", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },
@@ -31,9 +33,11 @@ public class EncodingService : IEncodingService{
 
     public List<VideoPreset> GetPresets() => _presets;
 
-    public VideoPreset? GetPreset(string presetName){
+    public VideoPreset? GetPreset(string presetName)
+    {
         var preset = _presets.FirstOrDefault(x => x.PresetName == presetName);
-        if (preset != null){
+        if (preset != null)
+        {
             return preset;
         }
 
@@ -41,8 +45,10 @@ public class EncodingService : IEncodingService{
         return null;
     }
 
-    public void AddPreset(VideoPreset preset){
-        if (_presets.Exists(x => x.PresetName == preset.PresetName)){
+    public void AddPreset(VideoPreset preset)
+    {
+        if (_presets.Exists(x => x.PresetName == preset.PresetName))
+        {
             Console.Error.WriteLine($"Preset {preset.PresetName} already exists.");
             return;
         }
@@ -51,11 +57,12 @@ public class EncodingService : IEncodingService{
     }
 }
 
-public class VideoPreset{
-    public string? PresetName{ get; set; }
-    public string? Codec{ get; set; }
-    public string? Resolution{ get; set; }
-    public string? FrameRate{ get; set; }
-    public int Crf{ get; set; }
-    public List<string> AdditionalParameters{ get; set; } = new List<string>();
+public class VideoPreset
+{
+    public string? PresetName { get; set; }
+    public string? Codec { get; set; }
+    public string? Resolution { get; set; }
+    public string? FrameRate { get; set; }
+    public int Crf { get; set; }
+    public List<string> AdditionalParameters { get; set; } = new List<string>();
 }

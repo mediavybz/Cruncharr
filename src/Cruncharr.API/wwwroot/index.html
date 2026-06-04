@@ -972,12 +972,6 @@ MAINTENANCE NOTES:
         /* Sonarr icon placeholder */
         .sonarr-icon { width: 24px; height: 24px; background: var(--accent-green); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7em; color: #fff; }
 
-        /* Dropdown menu */
-        .dropdown-menu { position: absolute; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100; min-width: 200px; display: none; }
-        .dropdown-item { padding: 10px 15px; cursor: pointer; font-size: 0.9em; color: var(--text-primary); }
-        .dropdown-item:hover { background: var(--bg-hover); }
-        .dropdown-divider { height: 1px; background: var(--border-color); margin: 5px 0; }
-
         /* Sonarr match status indicators */
         .sonarr-matched { border-left: 3px solid var(--accent-green); }
         .sonarr-unmatched { border-left: 3px solid var(--text-secondary); }
@@ -1895,7 +1889,7 @@ MAINTENANCE NOTES:
                         </div>
                         <div class="episode-info">
                             <div class="episode-title">${escapeHtml(ep.name) || 'Unknown Episode'}</div>
-                            <div class="episode-meta">${escapeHtml(ep.seasonTitle || '')} - ${ep.airDate ? new Date(ep.airDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
+                            <div class="episode-meta">${escapeHtml(ep.seasonTitle || '')} - ${(() => { const d = ep.airDate ? new Date(ep.airDate) : null; return d && !isNaN(d.getTime()) ? d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''; })()}</div>
                             ${ep.description ? `<div class="episode-desc" style="font-size:0.85em; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(ep.description)}</div>` : ''}
                             <div class="dub-section-label">Select Dubs:</div>
                             <div class="dub-selector">
@@ -2186,7 +2180,10 @@ MAINTENANCE NOTES:
                 monday.setDate(now.getDate() - dayOfWeek + 1);
                 if (dayOfWeek === 0) monday.setDate(monday.getDate() - 7);
                 monday.setDate(monday.getDate() + (calendarWeekOffset * 7));
-                const dateStr = monday.toISOString().split('T')[0];
+                const year = monday.getFullYear();
+                const month = String(monday.getMonth() + 1).padStart(2, '0');
+                const day = String(monday.getDate()).padStart(2, '0');
+                const dateStr = `${year}-${month}-${day}`;
                 
                 const langSelect = document.getElementById('calendar-lang');
                 const language = langSelect ? langSelect.value : 'en-us';
@@ -2206,19 +2203,24 @@ MAINTENANCE NOTES:
                 }
 
                 const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-                grid.innerHTML = '<div class="calendar-grid">' + data.days.map((day, idx) => {
-                    const date = new Date(day.date);
-                    const dayName = day.dayName || dayNames[date.getDay()] || 'Day';
+                grid.className = 'calendar-grid';
+                grid.innerHTML = data.days.map((day, idx) => {
+                    const date = day.date ? new Date(day.date) : null;
+                    const dayName = day.dayName || (date && !isNaN(date.getTime()) ? dayNames[date.getDay()] : 'Day');
+                    const dateDisplay = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
                     return `
                         <div class="calendar-day">
                             <div class="calendar-day-header">
-                                <div class="calendar-day-date">${date.toLocaleDateString()}</div>
+                                <div class="calendar-day-date">${dateDisplay}</div>
                                 <div class="calendar-day-name">${escapeHtml(dayName)}</div>
                             </div>
                             <div class="calendar-day-content">
-                                ${day.episodes && day.episodes.length > 0 ? day.episodes.map(ep => `
+                                ${day.episodes && day.episodes.length > 0 ? day.episodes.map(ep => {
+                                    const epDate = ep.airDate ? new Date(ep.airDate) : null;
+                                    const timeDisplay = epDate && !isNaN(epDate.getTime()) ? epDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+                                    return `
                                     <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''}">
-                                        <div class="calendar-episode-time">${ep.airDate ? new Date(ep.airDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
+                                        <div class="calendar-episode-time">${timeDisplay}</div>
                                         <div class="calendar-episode-thumb">
                                             ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img src="${escapeHtml(ep.thumbnailUrl)}" alt="">` : '📺'}
                                             <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
@@ -2227,18 +2229,22 @@ MAINTENANCE NOTES:
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
                                         ${ep.hasPassed ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}')">Download</button>` : ''}
                                     </div>
-                                `).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
+                                    `;
+                                }).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
                             </div>
                         </div>
                     `;
-                }).join('') + '</div>';
+                }).join('');
             } catch (e) {
                 const grid = document.getElementById('calendar-grid');
-                if (grid) grid.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">&#10060;</div>
-                        <div class="empty-state-title">Failed to load calendar</div>
-                    </div>`;
+                if (grid) {
+                    grid.className = '';
+                    grid.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">&#10060;</div>
+                            <div class="empty-state-title">Failed to load calendar</div>
+                        </div>`;
+                }
             }
         }
 
@@ -2285,7 +2291,7 @@ MAINTENANCE NOTES:
 
         function renderUpcomingSeasonsContent(episodes) {
             const content = document.getElementById('seasons-content');
-            if (episodes.length === 0) {
+            if (!episodes || episodes.length === 0) {
                 content.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#128270;</div>
@@ -2362,7 +2368,7 @@ MAINTENANCE NOTES:
         function renderBrowseContent(series) {
             const content = document.getElementById('browse-content');
             if (!content) return;
-            if (series.length === 0) {
+            if (!series || series.length === 0) {
                 content.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#128270;</div>
@@ -2532,7 +2538,7 @@ MAINTENANCE NOTES:
         function renderSeasonalContent(series) {
             const content = document.getElementById('seasonal-content');
             if (!content) return;
-            if (series.length === 0) {
+            if (!series || series.length === 0) {
                 content.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#128270;</div>
@@ -2741,6 +2747,12 @@ MAINTENANCE NOTES:
                 </div>
             `;
             fetchHistoryData();
+            // Restart history polling if not already running
+            if (!historyIntervalId) {
+                historyIntervalId = setInterval(() => {
+                    if (currentPage === 'history') fetchHistoryData();
+                }, 5000);
+            }
         }
 
         async function fetchHistoryData() {
@@ -2761,6 +2773,7 @@ MAINTENANCE NOTES:
 
         function renderHistoryContent() {
             const content = document.getElementById('history-content');
+            if (!content) return;
             const filteredData = historyFilterText 
                 ? historyData.filter(item => 
                     (item.seriesTitle || '').toLowerCase().includes(historyFilterText) ||
@@ -4692,9 +4705,12 @@ MAINTENANCE NOTES:
         function getDoingText(progress) {
             if (!progress) return 'Queued';
             // Handle waiting for retry
-            if (progress.retryAtUtc && new Date(progress.retryAtUtc) > new Date()) {
-                const retryTime = new Date(progress.retryAtUtc).toLocaleTimeString();
-                return `Rate limited, retrying at ${retryTime}`;
+            if (progress.retryAtUtc) {
+                const retryDate = new Date(progress.retryAtUtc);
+                if (!isNaN(retryDate.getTime()) && retryDate > new Date()) {
+                    const retryTime = retryDate.toLocaleTimeString();
+                    return `Rate limited, retrying at ${escapeHtml(retryTime)}`;
+                }
             }
             // Use doing if not empty, otherwise derive from state
             if (progress.doing && progress.doing.trim().length > 0) {
@@ -4721,9 +4737,11 @@ MAINTENANCE NOTES:
             startQueueSSE();
             
             // Keep polling history (no SSE for history yet)
-            historyIntervalId = setInterval(() => {
-                if (currentPage === 'history') fetchHistoryData();
-            }, 5000);
+            if (!historyIntervalId) {
+                historyIntervalId = setInterval(() => {
+                    if (currentPage === 'history') fetchHistoryData();
+                }, 5000);
+            }
             
             // Clear intervals and SSE on page unload
             window.addEventListener('beforeunload', () => {

@@ -5,10 +5,12 @@ using Cruncharr.Core.Utils.Muxing.Structs;
 
 namespace Cruncharr.Core.Utils.Muxing.Commands;
 
-public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(options){
+public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(options)
+{
     private bool hasVideo;
 
-    public override string Build(){
+    public override string Build()
+    {
         AddOutput();
         AddCustomOptions();
         AddVideoAudio();
@@ -23,54 +25,65 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
     }
 
 
-    private void AddOutput(){
+    private void AddOutput()
+    {
         Add($"-o \"{MuxingHelpers.AddUncPrefixIfNeeded(Options.Output)}\"");
     }
 
-    private void AddCustomOptions(){
+    private void AddCustomOptions()
+    {
         if (Options.Options.Mkvmerge != null)
             AddRange(Options.Options.Mkvmerge);
     }
 
-    private void AddVideoAudio(){
+    private void AddVideoAudio()
+    {
         if (Options.VideoAndAudio.Count > 0)
             AddCombinedVideoAudio();
-        else{
+        else
+        {
             AddVideoOnly();
             AddAudioOnly();
         }
     }
 
-    private void AddCombinedVideoAudio(){
+    private void AddCombinedVideoAudio()
+    {
         var rank = Options.DubLangList
-            .Select((v, i) => new{ v, i })
+            .Select((v, i) => new { v, i })
             .ToDictionary(x => x.v, x => x.i, StringComparer.OrdinalIgnoreCase);
 
         var sorted = Options.VideoAndAudio
-            .OrderBy(m => {
+            .OrderBy(m =>
+            {
                 var key = m.Language?.CrLocale ?? string.Empty;
                 return rank.TryGetValue(key, out var r) ? r : int.MaxValue;
             })
             .ThenBy(m => m.IsAudioRoleDescription)
             .ToList();
 
-        foreach (var track in sorted){
+        foreach (var track in sorted)
+        {
             AddCombinedTrack(track);
         }
     }
 
-    private void AddCombinedTrack(MergerInput track){
+    private void AddCombinedTrack(MergerInput track)
+    {
         var videoTrackNum = "0";
         var audioTrackNum = "1";
 
-        if (!hasVideo || Options.KeepAllVideos){
+        if (!hasVideo || Options.KeepAllVideos)
+        {
             Add($"--video-tracks {videoTrackNum}");
             Add($"--audio-tracks {audioTrackNum}");
 
             AddTrackMetadata(videoTrackNum, track.Language);
 
             hasVideo = true;
-        } else{
+        }
+        else
+        {
             Add("--no-video");
             Add($"--audio-tracks {audioTrackNum}");
         }
@@ -80,9 +93,12 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
         AddInput(track.Path);
     }
 
-    private void AddVideoOnly(){
-        foreach (var vid in Options.OnlyVid){
-            if (!hasVideo || Options.KeepAllVideos){
+    private void AddVideoOnly()
+    {
+        foreach (var vid in Options.OnlyVid)
+        {
+            if (!hasVideo || Options.KeepAllVideos)
+            {
                 Add("--video-tracks 0");
                 Add("--no-audio");
 
@@ -95,43 +111,52 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
         }
     }
 
-    private void AddAudioOnly(){
+    private void AddAudioOnly()
+    {
         var sorted = Options.OnlyAudio
-            .OrderBy(a => {
+            .OrderBy(a =>
+            {
                 var index = Options.DubLangList.IndexOf(a.Language.CrLocale);
                 return index != -1 ? index : int.MaxValue;
             })
             .ToList();
 
-        foreach (var aud in sorted){
+        foreach (var aud in sorted)
+        {
             Add("--audio-tracks 0");
             Add("--no-video");
 
             AddAudioMetadata("0", aud);
 
-            if (aud.Delay is{ } delay && delay != 0)
+            if (aud.Delay is { } delay && delay != 0)
                 Add($"--sync 0:{delay}");
 
             AddInput(aud.Path);
         }
     }
 
-    private void AddTrackMetadata(string trackNum, LanguageItem lang){
+    private void AddTrackMetadata(string trackNum, LanguageItem lang)
+    {
         Add($"--track-name {trackNum}:\"{lang.Name}\"");
         Add($"--language {trackNum}:{lang.Code}");
         AddDefaultVideo(trackNum, lang);
     }
 
-    private void AddDefaultVideo(string trackNum, LanguageItem lang){
+    private void AddDefaultVideo(string trackNum, LanguageItem lang)
+    {
         if (Options.Defaults.Video?.Code == lang.Code &&
-            Options.Defaults.Video != Languages.DEFAULT_lang){
+            Options.Defaults.Video != Languages.DEFAULT_lang)
+        {
             Add($"--default-track {trackNum}");
-        } else{
+        }
+        else
+        {
             Add($"--default-track {trackNum}:0");
         }
     }
 
-    private void AddAudioMetadata(string trackNum, MergerInput track){
+    private void AddAudioMetadata(string trackNum, MergerInput track)
+    {
         var name = track.Language.Name +
                    (track.IsAudioRoleDescription ? " [AD]" : "");
 
@@ -141,17 +166,23 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
         AddDefaultAudio(trackNum, track.Language);
     }
 
-    private void AddDefaultAudio(string trackNum, LanguageItem lang){
+    private void AddDefaultAudio(string trackNum, LanguageItem lang)
+    {
         if (Options.Defaults.Audio?.Code == lang.Code &&
-            Options.Defaults.Audio != Languages.DEFAULT_lang){
+            Options.Defaults.Audio != Languages.DEFAULT_lang)
+        {
             Add($"--default-track {trackNum}");
-        } else{
+        }
+        else
+        {
             Add($"--default-track {trackNum}:0");
         }
     }
 
-    private void AddSubtitles(){
-        if (Options.Subtitles.Count == 0 || Options.SkipSubMux){
+    private void AddSubtitles()
+    {
+        if (Options.Subtitles.Count == 0 || Options.SkipSubMux)
+        {
             Add("--no-subtitles");
             return;
         }
@@ -171,7 +202,8 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
             AddSubtitle(sub, hasSignsSub);
     }
 
-    private void AddSubtitle(SubtitleInput subObj, bool hasSignsSub){
+    private void AddSubtitle(SubtitleInput subObj, bool hasSignsSub)
+    {
         bool isForced = false;
 
         AddIf(subObj.Delay.HasValue, $"--sync 0:{subObj.Delay}");
@@ -195,58 +227,75 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
         AddInput(subObj.File);
     }
 
-    private void AddSubtitleDefaults(SubtitleInput subObj, bool hasSignsSub, ref bool isForced){
-        if (Options.Defaults.Sub != null && Options.Defaults.Sub != Languages.DEFAULT_lang){
+    private void AddSubtitleDefaults(SubtitleInput subObj, bool hasSignsSub, ref bool isForced)
+    {
+        if (Options.Defaults.Sub != null && Options.Defaults.Sub != Languages.DEFAULT_lang)
+        {
             if (Options.Defaults.Sub.Code == subObj.Language.Code &&
                 (Options.DefaultSubSigns == subObj.Signs || Options.DefaultSubSigns && !hasSignsSub) &&
-                subObj.ClosedCaption == false){
+                subObj.ClosedCaption == false)
+            {
                 Add("--default-track 0");
 
-                if (Options.DefaultSubForcedDisplay){
+                if (Options.DefaultSubForcedDisplay)
+                {
                     Add("--forced-track 0:yes");
                     isForced = true;
                 }
-            } else{
+            }
+            else
+            {
                 Add("--default-track 0:0");
             }
-        } else{
+        }
+        else
+        {
             Add("--default-track 0:0");
         }
     }
 
-    private void AddFonts(){
-        if (Options.Fonts is not{ Count: > 0 }){
+    private void AddFonts()
+    {
+        if (Options.Fonts is not { Count: > 0 })
+        {
             Add("--no-attachments");
             return;
         }
 
-        foreach (var font in Options.Fonts){
+        foreach (var font in Options.Fonts)
+        {
             Add($"--attachment-name \"{font.Name}\"");
             Add($"--attachment-mime-type \"{font.Mime}\"");
             Add($"--attach-file \"{MuxingHelpers.AddUncPrefixIfNeeded(font.Path)}\"");
         }
     }
 
-    private void AddChapters(){
-        if (Options.Chapters is{ Count: > 0 })
+    private void AddChapters()
+    {
+        if (Options.Chapters is { Count: > 0 })
             Add($"--chapters \"{MuxingHelpers.AddUncPrefixIfNeeded(Options.Chapters[0].Path)}\"");
     }
 
-    private void AddTitle(){
+    private void AddTitle()
+    {
         if (!string.IsNullOrEmpty(Options.VideoTitle))
             Add($"--title \"{Options.VideoTitle}\"");
     }
 
-    private void AddDescription(){
-        if (Options.Description is{ Count: > 0 })
+    private void AddDescription()
+    {
+        if (Options.Description is { Count: > 0 })
             Add($"--global-tags \"{MuxingHelpers.AddUncPrefixIfNeeded(Options.Description[0].Path)}\"");
     }
 
-    private void AddCover(){
+    private void AddCover()
+    {
         var cover = Options.Cover.FirstOrDefault();
 
-        if (cover?.Path != null){
-            if (!File.Exists(cover.Path)){
+        if (cover?.Path != null)
+        {
+            if (!File.Exists(cover.Path))
+            {
                 Console.Error.WriteLine($"Cover file not found, skipping attachment: {cover.Path}");
                 return;
             }

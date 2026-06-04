@@ -10,12 +10,14 @@ namespace Cruncharr.API.Controllers;
 
 [ApiController]
 [Route("api/v1/[controller]")]
-public class CalendarController : ControllerBase{
+public class CalendarController : ControllerBase
+{
     private readonly ICalendarService _calendarService;
     private readonly CruncharrConfig _config;
     private readonly ILogger<CalendarController> _logger;
 
-    public CalendarController(ICalendarService calendarService, CruncharrConfig config, ILogger<CalendarController> logger){
+    public CalendarController(ICalendarService calendarService, CruncharrConfig config, ILogger<CalendarController> logger)
+    {
         _calendarService = calendarService;
         _config = config;
         _logger = logger;
@@ -28,27 +30,34 @@ public class CalendarController : ControllerBase{
     public async Task<ActionResult<CalendarWeekResponse>> GetCalendar(
         [FromQuery] string? date = null,
         [FromQuery] string language = "en-us",
-        [FromQuery] bool forceUpdate = false){
-        try{
+        [FromQuery] bool forceUpdate = false)
+    {
+        try
+        {
             DateTime targetDate;
-            if (string.IsNullOrEmpty(date)){
+            if (string.IsNullOrEmpty(date))
+            {
                 targetDate = DateTime.Now;
-            } else if (!DateTime.TryParseExact(date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out targetDate)){
+            }
+            else if (!DateTime.TryParseExact(date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out targetDate))
+            {
                 return BadRequest(new { Error = "Invalid date format. Use yyyy-MM-dd" });
             }
-            
+
             // Get Monday of the week
             var monday = targetDate.AddDays(-(int)targetDate.DayOfWeek + (int)DayOfWeek.Monday);
             if (targetDate.DayOfWeek == DayOfWeek.Sunday) monday = monday.AddDays(-7);
-            
+
             var week = await _calendarService.GetCalendarForDateAsync(
-                monday.ToString("yyyy-MM-dd"), 
-                language, 
+                monday.ToString("yyyy-MM-dd"),
+                language,
                 forceUpdate);
 
             var response = MapToResponse(week, language);
             return Ok(response);
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to get calendar");
             return StatusCode(500, new { Error = "Failed to get calendar", Message = ex.Message });
         }
@@ -61,19 +70,26 @@ public class CalendarController : ControllerBase{
     public async Task<ActionResult<CalendarWeekResponse>> GetCustomCalendar(
         [FromQuery] string? date = null,
         [FromQuery] string language = "en-us",
-        [FromQuery] bool forceUpdate = false){
-        try{
+        [FromQuery] bool forceUpdate = false)
+    {
+        try
+        {
             DateTime targetDate;
-            if (string.IsNullOrEmpty(date)){
+            if (string.IsNullOrEmpty(date))
+            {
                 targetDate = DateTime.Now;
-            } else if (!DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out targetDate)){
+            }
+            else if (!DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out targetDate))
+            {
                 return BadRequest(new { Error = "Invalid date format", Message = "Date must be in yyyy-MM-dd format" });
             }
-            
+
             var week = await _calendarService.GetCustomCalendarAsync(targetDate, language, forceUpdate);
             var response = MapToResponse(week, language);
             return Ok(response);
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to get custom calendar");
             return StatusCode(500, new { Error = "Failed to get custom calendar", Message = ex.Message });
         }
@@ -83,22 +99,29 @@ public class CalendarController : ControllerBase{
     /// Get upcoming episodes for the next 7 days
     /// </summary>
     [HttpGet("upcoming")]
-    public async Task<ActionResult<List<CalendarEpisodeResponse>>> GetUpcoming([FromQuery] string language = "en-us"){
-        try{
+    public async Task<ActionResult<List<CalendarEpisodeResponse>>> GetUpcoming([FromQuery] string language = "en-us")
+    {
+        try
+        {
             var upcoming = await _calendarService.GetUpcomingEpisodesAsync(language);
             var response = upcoming.Select(MapEpisodeToResponse).ToList();
             return Ok(response);
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger.LogError(ex, "Failed to get upcoming episodes");
             return StatusCode(500, new { Error = "Failed to get upcoming episodes", Message = ex.Message });
         }
     }
 
-    private CalendarWeekResponse MapToResponse(CalendarWeek week, string language = "en-us"){
+    private CalendarWeekResponse MapToResponse(CalendarWeek week, string language = "en-us")
+    {
         var hideDubs = _config.Calendar?.HideDubs ?? false;
-        return new CalendarWeekResponse{
+        return new CalendarWeekResponse
+        {
             StartDate = week.FirstDayOfWeek,
-            Days = week.CalendarDays?.Select(day => new CalendarDayResponse{
+            Days = week.CalendarDays?.Select(day => new CalendarDayResponse
+            {
                 Date = day.DateTime,
                 DayName = day.DayName ?? day.DateTime.ToString("dddd"),
                 Episodes = day.CalendarEpisodes
@@ -109,24 +132,29 @@ public class CalendarController : ControllerBase{
         };
     }
 
-    private static CalendarEpisodeResponse MapEpisodeToResponse(CalendarEpisode episode){
+    private static CalendarEpisodeResponse MapEpisodeToResponse(CalendarEpisode episode)
+    {
         // Extract episode ID from EpisodeUrl
         // Handles: /watch/G0DUN2EZP/... , /es/watch/G0DUN2EZP/... , https://crunchyroll.com/watch/G0DUN2EZP/...
         var episodeId = episode.CrSeriesID ?? "";
-        if (!string.IsNullOrEmpty(episode.EpisodeUrl)){
+        if (!string.IsNullOrEmpty(episode.EpisodeUrl))
+        {
             var url = episode.EpisodeUrl.Trim('/');
             // Find the segment after "watch/"
             var watchIndex = url.IndexOf("watch/", StringComparison.OrdinalIgnoreCase);
-            if (watchIndex >= 0){
+            if (watchIndex >= 0)
+            {
                 var afterWatch = url.Substring(watchIndex + 6); // 6 = "watch/".Length
                 var parts = afterWatch.Split('/');
-                if (parts.Length > 0 && !string.IsNullOrEmpty(parts[0])){
+                if (parts.Length > 0 && !string.IsNullOrEmpty(parts[0]))
+                {
                     episodeId = parts[0]; // The episode ID is the first segment after watch/
                 }
             }
         }
-        
-        return new CalendarEpisodeResponse{
+
+        return new CalendarEpisodeResponse
+        {
             Id = episodeId,
             Title = episode.EpisodeName ?? "",
             SeriesTitle = episode.SeasonName ?? "",
@@ -142,18 +170,21 @@ public class CalendarController : ControllerBase{
     }
 }
 
-public class CalendarWeekResponse{
+public class CalendarWeekResponse
+{
     public DateTime StartDate { get; set; }
     public List<CalendarDayResponse> Days { get; set; } = new();
 }
 
-public class CalendarDayResponse{
+public class CalendarDayResponse
+{
     public DateTime Date { get; set; }
     public string DayName { get; set; } = "";
     public List<CalendarEpisodeResponse> Episodes { get; set; } = new();
 }
 
-public class CalendarEpisodeResponse{
+public class CalendarEpisodeResponse
+{
     public string Id { get; set; } = "";
     public string Title { get; set; } = "";
     public string SeriesTitle { get; set; } = "";

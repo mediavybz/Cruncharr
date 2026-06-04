@@ -13,7 +13,8 @@ using Image = SixLabors.ImageSharp.Image;
 
 namespace Cruncharr.Core.Utils.Muxing.Syncing;
 
-public interface ISyncingService{
+public interface ISyncingService
+{
     Task<(bool IsOk, int ErrorCode, double frameRate)> ExtractFrames(string videoPath, string outputDir, double offset, double duration, string ffmpegPath);
     double ExtractFrameRate(string ffmpegOutput);
     (double ssim, double pixelDiff) ComputeSSIM(string imagePath1, string imagePath2, int targetWidth, int targetHeight);
@@ -23,21 +24,26 @@ public interface ISyncingService{
     double CalculateOffset(List<FrameData> baseFrames, List<FrameData> compareFrames, bool reverseCompare = false, double ssimThreshold = 0.9);
 }
 
-public class SyncingService : ISyncingService{
+public class SyncingService : ISyncingService
+{
     private readonly ILogger<SyncingService>? _logger;
 
-    public SyncingService(ILogger<SyncingService>? logger = null){
+    public SyncingService(ILogger<SyncingService>? logger = null)
+    {
         _logger = logger;
     }
 
-    public async Task<(bool IsOk, int ErrorCode, double frameRate)> ExtractFrames(string videoPath, string outputDir, double offset, double duration, string ffmpegPath){
+    public async Task<(bool IsOk, int ErrorCode, double frameRate)> ExtractFrames(string videoPath, string outputDir, double offset, double duration, string ffmpegPath)
+    {
         var arguments =
             $"-ss {offset} -t {duration} -i \"{videoPath}\" -vf \"select='gt(scene,0.1)',showinfo\" -vsync vfr -frame_pts true \"{outputDir}/frame%05d.jpg\"";
 
         var output = "";
 
-        try{
-            using (var process = new Process()){
+        try
+        {
+            using (var process = new Process())
+            {
                 process.StartInfo.FileName = ffmpegPath;
                 process.StartInfo.Arguments = arguments;
                 process.StartInfo.RedirectStandardOutput = true;
@@ -45,14 +51,18 @@ public class SyncingService : ISyncingService{
                 process.StartInfo.UseShellExecute = false;
                 process.StartInfo.CreateNoWindow = true;
 
-                process.OutputDataReceived += (sender, e) => {
-                    if (!string.IsNullOrEmpty(e.Data)){
+                process.OutputDataReceived += (sender, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.Data))
+                    {
                         Console.WriteLine(e.Data);
                     }
                 };
 
-                process.ErrorDataReceived += (sender, e) => {
-                    if (!string.IsNullOrEmpty(e.Data)){
+                process.ErrorDataReceived += (sender, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.Data))
+                    {
                         output += e.Data;
                     }
                 };
@@ -67,16 +77,20 @@ public class SyncingService : ISyncingService{
                 double frameRate = ExtractFrameRate(output);
                 return (IsOk: isSuccess, ErrorCode: process.ExitCode, frameRate);
             }
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger?.LogError(ex, "Error extracting frames from {VideoPath}", videoPath);
             Console.Error.WriteLine($"An error occurred: {ex.Message}");
             return (IsOk: false, ErrorCode: -1, 0);
         }
     }
 
-    public double ExtractFrameRate(string ffmpegOutput){
+    public double ExtractFrameRate(string ffmpegOutput)
+    {
         var match = Regex.Match(ffmpegOutput, @"Stream #0:0.*?(\d+(?:\.\d+)?) fps");
-        if (match.Success){
+        if (match.Success)
+        {
             return double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
         }
 
@@ -84,14 +98,16 @@ public class SyncingService : ISyncingService{
         return 0;
     }
 
-    private static double CalculateSSIM(float[] pixels1, float[] pixels2){
+    private static double CalculateSSIM(float[] pixels1, float[] pixels2)
+    {
         double mean1 = pixels1.Average();
         double mean2 = pixels2.Average();
 
         double var1 = 0, var2 = 0, covariance = 0;
         int count = pixels1.Length;
 
-        for (int i = 0; i < count; i++){
+        for (int i = 0; i < count; i++)
+        {
             var1 += (pixels1[i] - mean1) * (pixels1[i] - mean1);
             var2 += (pixels2[i] - mean2) * (pixels2[i] - mean2);
             covariance += (pixels1[i] - mean1) * (pixels2[i] - mean2);
@@ -110,14 +126,18 @@ public class SyncingService : ISyncingService{
         return ssim;
     }
 
-    private static float[] ExtractPixels(Image<Rgba32> image, int width, int height){
+    private static float[] ExtractPixels(Image<Rgba32> image, int width, int height)
+    {
         float[] pixels = new float[width * height];
         int index = 0;
 
-        image.ProcessPixelRows(accessor => {
-            for (int y = 0; y < accessor.Height; y++){
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
                 Span<Rgba32> row = accessor.GetRowSpan(y);
-                for (int x = 0; x < row.Length; x++){
+                for (int x = 0; x < row.Length; x++)
+                {
                     pixels[index++] = row[x].R / 255f;
                 }
             }
@@ -126,15 +146,19 @@ public class SyncingService : ISyncingService{
         return pixels;
     }
 
-    public (double ssim, double pixelDiff) ComputeSSIM(string imagePath1, string imagePath2, int targetWidth, int targetHeight){
+    public (double ssim, double pixelDiff) ComputeSSIM(string imagePath1, string imagePath2, int targetWidth, int targetHeight)
+    {
         using (var image1 = Image.Load<Rgba32>(imagePath1))
-        using (var image2 = Image.Load<Rgba32>(imagePath2)){
-            image1.Mutate(x => x.Resize(new ResizeOptions{
+        using (var image2 = Image.Load<Rgba32>(imagePath2))
+        {
+            image1.Mutate(x => x.Resize(new ResizeOptions
+            {
                 Size = new Size(targetWidth, targetHeight),
                 Mode = ResizeMode.Max
             }).Grayscale());
 
-            image2.Mutate(x => x.Resize(new ResizeOptions{
+            image2.Mutate(x => x.Resize(new ResizeOptions
+            {
                 Size = new Size(targetWidth, targetHeight),
                 Mode = ResizeMode.Max
             }).Grayscale());
@@ -143,7 +167,8 @@ public class SyncingService : ISyncingService{
             float[] pixels2 = ExtractPixels(image2, targetWidth, targetHeight);
 
             if (IsBlackFrame(pixels1) || IsBlackFrame(pixels2) ||
-                IsMonochromaticFrame(pixels1) || IsMonochromaticFrame(pixels2)){
+                IsMonochromaticFrame(pixels1) || IsMonochromaticFrame(pixels2))
+            {
                 return (-1.0, 99);
             }
 
@@ -151,51 +176,61 @@ public class SyncingService : ISyncingService{
         }
     }
 
-    private static double CalculatePixelDifference(float[] pixels1, float[] pixels2){
+    private static double CalculatePixelDifference(float[] pixels1, float[] pixels2)
+    {
         double totalDifference = 0;
         int count = pixels1.Length;
 
-        for (int i = 0; i < count; i++){
+        for (int i = 0; i < count; i++)
+        {
             totalDifference += Math.Abs(pixels1[i] - pixels2[i]);
         }
 
         return totalDifference / count;
     }
 
-    private static bool IsBlackFrame(float[] pixels, float threshold = 0.02f){
+    private static bool IsBlackFrame(float[] pixels, float threshold = 0.02f)
+    {
         return pixels.All(p => p <= threshold);
     }
 
-    private static bool IsMonochromaticFrame(float[] pixels, float stdDevThreshold = 0.05f){
+    private static bool IsMonochromaticFrame(float[] pixels, float stdDevThreshold = 0.05f)
+    {
         float avg = pixels.Average();
         double variance = pixels.Average(p => Math.Pow(p - avg, 2));
         double stdDev = Math.Sqrt(variance);
         return stdDev < stdDevThreshold;
     }
 
-    public bool AreFramesSimilar(string imagePath1, string imagePath2, double ssimThreshold){
+    public bool AreFramesSimilar(string imagePath1, string imagePath2, double ssimThreshold)
+    {
         var (ssim, pixelDiff) = ComputeSSIM(imagePath1, imagePath2, 256, 144);
         return ssim > ssimThreshold && pixelDiff < 0.04;
     }
 
-    public float[] GetPixelsArray(string imagePath, int targetWidth = 256, int targetHeight = 144){
+    public float[] GetPixelsArray(string imagePath, int targetWidth = 256, int targetHeight = 144)
+    {
         using var image = Image.Load<Rgba32>(imagePath);
-        image.Mutate(x => x.Resize(new ResizeOptions{
+        image.Mutate(x => x.Resize(new ResizeOptions
+        {
             Size = new Size(targetWidth, targetHeight),
             Mode = ResizeMode.Max
         }).Grayscale());
         return ExtractPixels(image, targetWidth, targetHeight);
     }
 
-    public bool AreFramesSimilarPreprocessed(float[] image1, float[] image2, double ssimThreshold){
+    public bool AreFramesSimilarPreprocessed(float[] image1, float[] image2, double ssimThreshold)
+    {
         if (IsBlackFrame(image1) || IsBlackFrame(image2) ||
-            IsMonochromaticFrame(image1) || IsMonochromaticFrame(image2)){
+            IsMonochromaticFrame(image1) || IsMonochromaticFrame(image2))
+        {
             return false;
         }
 
         var pixelDiff = CalculatePixelDifference(image1, image2);
 
-        if (pixelDiff > 0.04){
+        if (pixelDiff > 0.04)
+        {
             return false;
         }
 
@@ -204,29 +239,36 @@ public class SyncingService : ISyncingService{
         return ssim > ssimThreshold && pixelDiff < 0.04;
     }
 
-    public double CalculateOffset(List<FrameData> baseFrames, List<FrameData> compareFrames, bool reverseCompare = false, double ssimThreshold = 0.9){
-        if (reverseCompare){
+    public double CalculateOffset(List<FrameData> baseFrames, List<FrameData> compareFrames, bool reverseCompare = false, double ssimThreshold = 0.9)
+    {
+        if (reverseCompare)
+        {
             baseFrames.Reverse();
             compareFrames.Reverse();
         }
 
-        var preprocessedCompareFrames = compareFrames.Select(f => new{
+        var preprocessedCompareFrames = compareFrames.Select(f => new
+        {
             Frame = f,
             Pixels = GetPixelsArray(f.FilePath)
         }).ToList();
 
         var delay = double.NaN;
 
-        foreach (var baseFrame in baseFrames){
+        foreach (var baseFrame in baseFrames)
+        {
             var baseFramePixels = GetPixelsArray(baseFrame.FilePath);
             var matchingFrame = preprocessedCompareFrames.AsParallel()
                 .WithExecutionMode(ParallelExecutionMode.ForceParallelism).FirstOrDefault(f => AreFramesSimilarPreprocessed(baseFramePixels, f.Pixels, ssimThreshold));
-            if (matchingFrame != null){
+            if (matchingFrame != null)
+            {
                 _logger?.LogDebug("Matched Frame - Base: {BasePath} Time: {BaseTime}, Compare: {ComparePath} Time: {CompareTime}",
                     baseFrame.FilePath, baseFrame.Time, matchingFrame.Frame.FilePath, matchingFrame.Frame.Time);
                 delay = baseFrame.Time - matchingFrame.Frame.Time;
                 break;
-            } else{
+            }
+            else
+            {
                 Debug.WriteLine($"No Match Found for Base Frame Time: {baseFrame.Time}");
             }
         }
@@ -238,7 +280,8 @@ public class SyncingService : ISyncingService{
     }
 }
 
-public class FrameData{
-    public string FilePath{ get; set; } = "";
-    public double Time{ get; set; }
+public class FrameData
+{
+    public string FilePath { get; set; } = "";
+    public double Time { get; set; }
 }

@@ -9,7 +9,8 @@ using Cruncharr.Core.Utils.Muxing.Structs;
 
 namespace Cruncharr.Core.Utils.Muxing.Commands;
 
-public class FFmpegCommandBuilder : CommandBuilder{
+public class FFmpegCommandBuilder : CommandBuilder
+{
     private readonly List<string> metaData = new();
 
     private int index;
@@ -17,10 +18,12 @@ public class FFmpegCommandBuilder : CommandBuilder{
     private int audioIndex;
     private bool hasVideo;
 
-    public FFmpegCommandBuilder(MergerOptions options) : base(options){
+    public FFmpegCommandBuilder(MergerOptions options) : base(options)
+    {
     }
 
-    public override string Build(){
+    public override string Build()
+    {
         AddLogLevel();
 
         if (!Options.mp3)
@@ -31,11 +34,13 @@ public class FFmpegCommandBuilder : CommandBuilder{
         return string.Join(" ", Args);
     }
 
-    private void AddLogLevel(){
+    private void AddLogLevel()
+    {
         Add("-loglevel warning");
     }
 
-    private void BuildMux(){
+    private void BuildMux()
+    {
         AddVideoInputs();
         AddAudioInputs();
         AddChapterInput();
@@ -50,9 +55,12 @@ public class FFmpegCommandBuilder : CommandBuilder{
         AddOutput();
     }
 
-    private void AddVideoInputs(){
-        foreach (var vid in Options.OnlyVid){
-            if (!hasVideo || Options.KeepAllVideos){
+    private void AddVideoInputs()
+    {
+        foreach (var vid in Options.OnlyVid)
+        {
+            if (!hasVideo || Options.KeepAllVideos)
+            {
                 Add($"-i \"{vid.Path}\"");
 
                 metaData.Add($"-map {index}:v");
@@ -66,18 +74,25 @@ public class FFmpegCommandBuilder : CommandBuilder{
         }
     }
 
-    private void AddVideoDisposition(MergerInput vid){
+    private void AddVideoDisposition(MergerInput vid)
+    {
         if (Options.Defaults.Video?.Code == vid.Language.Code &&
-            Options.Defaults.Video != Languages.DEFAULT_lang){
+            Options.Defaults.Video != Languages.DEFAULT_lang)
+        {
             metaData.Add($"-disposition:v:{videoIndex} default");
-        } else{
+        }
+        else
+        {
             metaData.Add($"-disposition:v:{videoIndex} 0");
         }
     }
 
-    private void AddAudioInputs(){
-        foreach (var aud in Options.OnlyAudio){
-            if (aud.Delay is{ } delay && delay != 0){
+    private void AddAudioInputs()
+    {
+        foreach (var aud in Options.OnlyAudio)
+        {
+            if (aud.Delay is { } delay && delay != 0)
+            {
                 double offset = delay / 1000.0;
                 Add($"-itsoffset {offset.ToString(CultureInfo.InvariantCulture)}");
             }
@@ -94,17 +109,23 @@ public class FFmpegCommandBuilder : CommandBuilder{
         }
     }
 
-    private void AddAudioDisposition(MergerInput aud){
+    private void AddAudioDisposition(MergerInput aud)
+    {
         if (Options.Defaults.Audio?.Code == aud.Language.Code &&
-            Options.Defaults.Audio != Languages.DEFAULT_lang){
+            Options.Defaults.Audio != Languages.DEFAULT_lang)
+        {
             metaData.Add($"-disposition:a:{audioIndex} default");
-        } else{
+        }
+        else
+        {
             metaData.Add($"-disposition:a:{audioIndex} 0");
         }
     }
 
-    private void AddChapterInput(){
-        if (Options.Chapters is{ Count: > 0 }){
+    private void AddChapterInput()
+    {
+        if (Options.Chapters is { Count: > 0 })
+        {
             ConvertChapterFileForFFMPEG(Options.Chapters[0].Path);
 
             Add($"-i \"{Options.Chapters[0].Path}\"");
@@ -115,7 +136,8 @@ public class FFmpegCommandBuilder : CommandBuilder{
         }
     }
 
-    private void AddSubtitleInputs(){
+    private void AddSubtitleInputs()
+    {
         if (Options.SkipSubMux)
             return;
 
@@ -123,13 +145,16 @@ public class FFmpegCommandBuilder : CommandBuilder{
             Options.Subtitles.Any(s =>
                 s.Signs && Options.Defaults.Sub?.Code == s.Language.Code);
 
-        foreach (var sub in Options.Subtitles.Select((value, i) => new{ value, i })){
+        foreach (var sub in Options.Subtitles.Select((value, i) => new { value, i }))
+        {
             AddSubtitle(sub.value, sub.i, hasSignsSub);
         }
     }
 
-    private void AddSubtitle(SubtitleInput sub, int subIndex, bool hasSignsSub){
-        if (sub.Delay is{ } delay && delay != 0){
+    private void AddSubtitle(SubtitleInput sub, int subIndex, bool hasSignsSub)
+    {
+        if (sub.Delay is { } delay && delay != 0)
+        {
             double offset = delay / 1000.0;
             Add($"-itsoffset {offset.ToString(CultureInfo.InvariantCulture)}");
         }
@@ -140,16 +165,20 @@ public class FFmpegCommandBuilder : CommandBuilder{
 
         if (Options.Defaults.Sub?.Code == sub.Language.Code &&
             (Options.DefaultSubSigns == sub.Signs || Options.DefaultSubSigns && !hasSignsSub) &&
-            !sub.ClosedCaption){
+            !sub.ClosedCaption)
+        {
             metaData.Add($"-disposition:s:{subIndex} default");
-        } else{
+        }
+        else
+        {
             metaData.Add($"-disposition:s:{subIndex} 0");
         }
 
         index++;
     }
 
-    private void AddCodecs(){
+    private void AddCodecs()
+    {
         Add("-c:v copy");
         Add("-c:a copy");
 
@@ -160,7 +189,8 @@ public class FFmpegCommandBuilder : CommandBuilder{
         );
     }
 
-    private void AddSubtitleMetadata(){
+    private void AddSubtitleMetadata()
+    {
         if (Options.SkipSubMux)
             return;
 
@@ -174,11 +204,13 @@ public class FFmpegCommandBuilder : CommandBuilder{
         );
     }
 
-    private void AddGlobalMetadata(){
+    private void AddGlobalMetadata()
+    {
         if (!string.IsNullOrEmpty(Options.VideoTitle))
             Add($"-metadata title=\"{Options.VideoTitle}\"");
 
-        if (Options.Description is{ Count: > 0 } && !string.IsNullOrEmpty(Options.Description[0].Path)){
+        if (Options.Description is { Count: > 0 } && !string.IsNullOrEmpty(Options.Description[0].Path))
+        {
             XmlDocument doc = new();
             doc.Load(Options.Description[0].Path);
 
@@ -195,16 +227,19 @@ public class FFmpegCommandBuilder : CommandBuilder{
         }
     }
 
-    private void AddCustomOptions(){
+    private void AddCustomOptions()
+    {
         if (Options.Options.Ffmpeg?.Count > 0)
             AddRange(Options.Options.Ffmpeg);
     }
 
-    private void AddOutput(){
+    private void AddOutput()
+    {
         Add($"\"{Options.Output}\"");
     }
 
-    private void BuildMp3(){
+    private void BuildMp3()
+    {
         if (Options.OnlyAudio.Count > 1)
             Console.Error.WriteLine(
                 "Multiple audio files detected. Only one audio file can be converted to MP3 at a time."
@@ -221,19 +256,22 @@ public class FFmpegCommandBuilder : CommandBuilder{
     }
 
 
-    private void ConvertChapterFileForFFMPEG(string chapterFilePath){
+    private void ConvertChapterFileForFFMPEG(string chapterFilePath)
+    {
         var chapterLines = File.ReadAllLines(chapterFilePath);
-        var ffmpegChapterLines = new List<string>{ ";FFMETADATA1" };
+        var ffmpegChapterLines = new List<string> { ";FFMETADATA1" };
         var chapters = new List<(double StartTime, string Title)>();
 
-        for (int i = 0; i < chapterLines.Length; i += 2){
+        for (int i = 0; i < chapterLines.Length; i += 2)
+        {
             var timeLine = chapterLines[i];
             var nameLine = chapterLines[i + 1];
 
             var timeParts = timeLine.Split('=');
             var nameParts = nameLine.Split('=');
 
-            if (timeParts.Length == 2 && nameParts.Length == 2){
+            if (timeParts.Length == 2 && nameParts.Length == 2)
+            {
                 var startTime = TimeSpan.Parse(timeParts[1]).TotalMilliseconds;
                 var title = nameParts[1];
                 chapters.Add((startTime, title));
@@ -243,12 +281,14 @@ public class FFmpegCommandBuilder : CommandBuilder{
         // Sort chapters by start time
         chapters = chapters.OrderBy(c => c.StartTime).ToList();
 
-        for (int i = 0; i < chapters.Count; i++){
+        for (int i = 0; i < chapters.Count; i++)
+        {
             var startTime = chapters[i].StartTime;
             var title = chapters[i].Title;
             var endTime = (i + 1 < chapters.Count) ? chapters[i + 1].StartTime : startTime + 10000; // Add 10 seconds to the last chapter end time
 
-            if (endTime < startTime){
+            if (endTime < startTime)
+            {
                 endTime = startTime + 10000; // Correct end time if it is before start time
             }
 

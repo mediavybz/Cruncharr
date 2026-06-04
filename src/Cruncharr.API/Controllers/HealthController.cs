@@ -7,12 +7,14 @@ namespace Cruncharr.API.Controllers;
 
 [ApiController]
 [Route("api/v1/[controller]")]
-public class HealthController : ControllerBase{
+public class HealthController : ControllerBase
+{
     private readonly IQueueService _queueService;
     private readonly ICrunchyrollAuthService _auth;
     private readonly UpdateCheckerService? _updateChecker;
 
-    public HealthController(IQueueService queueService, ICrunchyrollAuthService auth, UpdateCheckerService? updateChecker = null){
+    public HealthController(IQueueService queueService, ICrunchyrollAuthService auth, UpdateCheckerService? updateChecker = null)
+    {
         _queueService = queueService;
         _auth = auth;
         _updateChecker = updateChecker;
@@ -22,9 +24,12 @@ public class HealthController : ControllerBase{
     /// Health check endpoint for *arr integration
     /// </summary>
     [HttpGet]
-    public ActionResult<HealthResponse> GetHealth(){
-        try{
-            return Ok(new HealthResponse{
+    public ActionResult<HealthResponse> GetHealth()
+    {
+        try
+        {
+            return Ok(new HealthResponse
+            {
                 Status = "healthy",
                 Version = GetType().Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "0.2.0-beta.1",
                 Timestamp = DateTimeOffset.UtcNow,
@@ -32,7 +37,9 @@ public class HealthController : ControllerBase{
                 HasActiveDownloads = _queueService.HasActiveDownloads,
                 AuthStatus = _auth.IsAuthenticated ? "authenticated" : "anonymous"
             });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             return StatusCode(500, new { Error = "Health check failed", Message = ex.Message });
         }
     }
@@ -41,39 +48,53 @@ public class HealthController : ControllerBase{
     /// Readiness check for Docker/Kubernetes
     /// </summary>
     [HttpGet("ready")]
-    public IActionResult GetReady(){
-        try{
+    public IActionResult GetReady()
+    {
+        try
+        {
             return Ok(new { Status = "ready" });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             return StatusCode(500, new { Error = "Readiness check failed", Message = ex.Message });
         }
     }
 
     [HttpGet("live")]
-    public IActionResult GetLive(){
-        try{
+    public IActionResult GetLive()
+    {
+        try
+        {
             return Ok(new { Status = "alive" });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             return StatusCode(500, new { Error = "Liveness check failed", Message = ex.Message });
         }
     }
 
     [HttpGet("version")]
-    public ActionResult GetVersion(){
-        try{
+    public ActionResult GetVersion()
+    {
+        try
+        {
             var currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
-            return Ok(new{
+            return Ok(new
+            {
                 CurrentVersion = currentVersion?.ToString(),
                 LatestVersion = _updateChecker?.LatestVersion,
                 UpdateAvailable = _updateChecker?.UpdateAvailable ?? false
             });
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             return StatusCode(500, new { Error = "Version check failed", Message = ex.Message });
         }
     }
 }
 
-public class HealthResponse{
+public class HealthResponse
+{
     public string Status { get; set; } = "";
     public string Version { get; set; } = "";
     public DateTimeOffset Timestamp { get; set; }

@@ -3,7 +3,8 @@ using System.Text.RegularExpressions;
 
 namespace Cruncharr.Core.Utils;
 
-public class Languages{
+public class Languages
+{
     public static readonly LanguageItem[] languages ={
         new(){ CrLocale = "ja-JP", Locale = "ja", Code = "jpn", Name = "Japanese" },
         new(){ CrLocale = "de-DE", Locale = "de", Code = "deu", Name = "German" },
@@ -32,8 +33,9 @@ public class Languages{
         new(){ CrLocale = "ko-KR", Locale = "ko", Code = "kor", Name = "Korean" },
         new(){ CrLocale = "th-TH", Locale = "th-TH", Code = "tha", Name = "Thai", Language = "ไทย" },
     };
-    
-    public static readonly LanguageItem DEFAULT_lang = new LanguageItem{
+
+    public static readonly LanguageItem DEFAULT_lang = new LanguageItem
+    {
         CrLocale = "und",
         Locale = "un",
         Code = "und",
@@ -41,10 +43,12 @@ public class Languages{
         Language = string.Empty
     };
 
-    public static List<string> SortListByLangList(List<string> langList){
-        var orderMap = languages.Select((value, index) => new{ Value = value.CrLocale, Index = index })
+    public static List<string> SortListByLangList(List<string> langList)
+    {
+        var orderMap = languages.Select((value, index) => new { Value = value.CrLocale, Index = index })
             .ToDictionary(x => x.Value, x => x.Index);
-        langList.Sort((x, y) => {
+        langList.Sort((x, y) =>
+        {
             bool xExists = orderMap.ContainsKey(x);
             bool yExists = orderMap.ContainsKey(y);
 
@@ -61,8 +65,10 @@ public class Languages{
         return langList;
     }
 
-    public static LanguageItem FixAndFindCrLc(string cr_locale){
-        if (string.IsNullOrEmpty(cr_locale)){
+    public static LanguageItem FixAndFindCrLc(string cr_locale)
+    {
+        if (string.IsNullOrEmpty(cr_locale))
+        {
             return DEFAULT_lang;
         }
 
@@ -70,15 +76,18 @@ public class Languages{
         return FindLang(str);
     }
 
-    public static string FixLanguageTag(string tag){
+    public static string FixLanguageTag(string tag)
+    {
         tag = tag ?? "und";
 
         var match = Regex.Match(tag, @"^(\w{2})-?(\w{2})$");
-        if (match.Success){
+        if (match.Success)
+        {
             string tagLang = $"{match.Groups[1].Value}-{match.Groups[2].Value.ToUpper()}";
 
             var langObj = FindLang(tagLang);
-            if (langObj.CrLocale != "und"){
+            if (langObj.CrLocale != "und")
+            {
                 return langObj.CrLocale;
             }
 
@@ -88,34 +97,45 @@ public class Languages{
         return tag;
     }
 
-    public static LanguageItem FindLang(string crLocale){
+    public static LanguageItem FindLang(string crLocale)
+    {
         LanguageItem? lang = languages.FirstOrDefault(l => l.CrLocale == crLocale);
-        if (lang?.CrLocale != null){
+        if (lang?.CrLocale != null)
+        {
             return lang;
-        } else{
+        }
+        else
+        {
             return DEFAULT_lang;
         }
     }
 
-    public static LanguageItem Locale2language(string locale){
+    public static LanguageItem Locale2language(string locale)
+    {
         LanguageItem? filteredLocale = languages.FirstOrDefault(l => { return l.Locale == locale || l.CrLocale == locale; });
-        if (filteredLocale != null){
+        if (filteredLocale != null)
+        {
             return filteredLocale;
-        } else{
+        }
+        else
+        {
             return DEFAULT_lang;
         }
     }
 
-    public static List<T> SortSubtitles<T>(List<T> data, string sortKey = "locale"){
+    public static List<T> SortSubtitles<T>(List<T> data, string sortKey = "locale")
+    {
         var idx = new Dictionary<string, int>();
         var tags = new HashSet<string>(languages.Select(e => e.Locale));
 
         int order = 1;
-        foreach (var l in tags){
+        foreach (var l in tags)
+        {
             idx[l] = order++;
         }
 
-        return data.OrderBy(item => {
+        return data.OrderBy(item =>
+        {
             var property = typeof(T).GetProperty(sortKey, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             if (property == null) throw new ArgumentException($"Property '{sortKey}' not found on type '{typeof(T).Name}'.");
 

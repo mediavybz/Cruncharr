@@ -12,69 +12,82 @@ using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser;
 
-public class Segment{
-    public string uri{ get; set; } = "";
-    public double timeline{ get; set; }
-    public double duration{ get; set; }
-    public Map map{ get; set; } = new();
+public class Segment
+{
+    public string uri { get; set; } = "";
+    public double timeline { get; set; }
+    public double duration { get; set; }
+    public Map map { get; set; } = new();
 
-    public ByteRange? byteRange{ get; set; }
-    public double? number{ get; set; }
-    public double? presentationTime{ get; set; }
+    public ByteRange? byteRange { get; set; }
+    public double? number { get; set; }
+    public double? presentationTime { get; set; }
 }
 
-public class Map{
-    public string uri{ get; set; } = "";
+public class Map
+{
+    public string uri { get; set; } = "";
 
-    public ByteRange? byteRange{ get; set; }
+    public ByteRange? byteRange { get; set; }
 }
 
-public class PlaylistItem{
-    public string? pssh{ get; set; }
+public class PlaylistItem
+{
+    public string? pssh { get; set; }
 
-    public List<ContentKey> encryptionKeys{ get; set; } = [];
-    public int bandwidth{ get; set; }
-    public List<Segment> segments{ get; set; } = [];
+    public List<ContentKey> encryptionKeys { get; set; } = [];
+    public int bandwidth { get; set; }
+    public List<Segment> segments { get; set; } = [];
 }
 
-public class AudioPlaylist : PlaylistItem{
-    public LanguageItem? language{ get; set; }
-    public int audioSamplingRate{ get; set; }
-    public bool @default{ get; set; }
+public class AudioPlaylist : PlaylistItem
+{
+    public LanguageItem? language { get; set; }
+    public int audioSamplingRate { get; set; }
+    public bool @default { get; set; }
 }
 
-public class VideoPlaylist : PlaylistItem{
-    public Quality quality{ get; set; } = new();
-    public string codecs{ get; set; } = "";
+public class VideoPlaylist : PlaylistItem
+{
+    public Quality quality { get; set; } = new();
+    public string codecs { get; set; } = "";
 }
 
-public class VideoItem : VideoPlaylist{
-    public string resolutionText{ get; set; } = "";
+public class VideoItem : VideoPlaylist
+{
+    public string resolutionText { get; set; } = "";
 }
 
-public class AudioItem : AudioPlaylist{
-    public string resolutionText{ get; set; } = "";
-    public string resolutionTextSnap{ get; set; } = "";
+public class AudioItem : AudioPlaylist
+{
+    public string resolutionText { get; set; } = "";
+    public string resolutionTextSnap { get; set; } = "";
 }
 
-public class Quality{
-    public int width{ get; set; }
-    public int height{ get; set; }
+public class Quality
+{
+    public int width { get; set; }
+    public int height { get; set; }
 }
 
-public class MPDParsed{
-    public Dictionary<string, ServerData> Data{ get; set; } = new();
+public class MPDParsed
+{
+    public Dictionary<string, ServerData> Data { get; set; } = new();
 }
 
-public class ServerData{
-    public List<string> servers{ get; set; } = [];
-    public List<AudioPlaylist>? audio{ get; set; } = [];
-    public List<VideoPlaylist>? video{ get; set; } = [];
+public class ServerData
+{
+    public List<string> servers { get; set; } = [];
+    public List<AudioPlaylist>? audio { get; set; } = [];
+    public List<VideoPlaylist>? video { get; set; } = [];
 }
 
-public static class MpdParser{
-    public async static Task<MPDParsed> Parse(string manifest, LanguageItem? language, string? url, HttpClient httpClient){
-        if (!manifest.Contains("BaseURL") && url != null){
+public static class MpdParser
+{
+    public async static Task<MPDParsed> Parse(string manifest, LanguageItem? language, string? url, HttpClient httpClient)
+    {
+        if (!manifest.Contains("BaseURL") && url != null)
+        {
             XDocument doc = XDocument.Parse(manifest);
             XElement? mpd = doc.Element("MPD");
             mpd?.AddFirst(new XElement("BaseURL", url));
@@ -83,10 +96,12 @@ public static class MpdParser{
 
         dynamic parsed = DashParser.Parse(manifest);
 
-        MPDParsed ret = new MPDParsed{ Data = new Dictionary<string, ServerData>() };
+        MPDParsed ret = new MPDParsed { Data = new Dictionary<string, ServerData>() };
 
-        foreach (var item in parsed.mediaGroups.AUDIO.audio.Values){
-            foreach (var playlist in item.playlists){
+        foreach (var item in parsed.mediaGroups.AUDIO.audio.Values)
+        {
+            foreach (var playlist in item.playlists)
+            {
                 var uri = new Uri(playlist.resolvedUri);
                 var host = uri.Host;
 
@@ -95,8 +110,10 @@ public static class MpdParser{
                 List<dynamic> segments = playlist.segments;
                 List<Segment>? segmentsFromSidx = null;
 
-                if (ObjectUtilities.GetMemberValue(playlist, "sidx") != null){
-                    if (segments == null || segments.Count == 0){
+                if (ObjectUtilities.GetMemberValue(playlist, "sidx") != null)
+                {
+                    if (segments == null || segments.Count == 0)
+                    {
                         var sidxRange = playlist.sidx.ByteRange;
 
                         var sidxBytes = await DownloadSidxAsync(
@@ -107,7 +124,8 @@ public static class MpdParser{
 
                         var sidx = ParseSidx(sidxBytes, sidxRange.offset);
 
-                        var byteRange = new ByteRange(){
+                        var byteRange = new ByteRange()
+                        {
                             Length = playlist.sidx.map.ByteRange.length,
                             Offset = playlist.sidx.map.ByteRange.offset,
                         };
@@ -118,7 +136,7 @@ public static class MpdParser{
                             byteRange);
                     }
                 }
-                
+
 
                 var foundLanguage =
                     Languages.FindLang(
@@ -130,7 +148,8 @@ public static class MpdParser{
                         ? foundLanguage
                         : (language ?? foundLanguage);
 
-                var pItem = new AudioPlaylist{
+                var pItem = new AudioPlaylist
+                {
                     bandwidth = playlist.attributes.BANDWIDTH,
                     audioSamplingRate = ObjectUtilities.GetMemberValue(playlist.attributes, "AUDIOSAMPLINGRATE") ?? 0,
                     language = audioLang,
@@ -144,7 +163,8 @@ public static class MpdParser{
             }
         }
 
-        foreach (var playlist in parsed.playlists){
+        foreach (var playlist in parsed.playlists)
+        {
             var uri = new Uri(playlist.resolvedUri);
             var host = uri.Host;
 
@@ -153,8 +173,10 @@ public static class MpdParser{
             List<dynamic> segments = playlist.segments;
             List<Segment>? segmentsFromSidx = null;
 
-            if (ObjectUtilities.GetMemberValue(playlist, "sidx") != null){
-                if (segments == null || segments.Count == 0){
+            if (ObjectUtilities.GetMemberValue(playlist, "sidx") != null)
+            {
+                if (segments == null || segments.Count == 0)
+                {
                     var sidxRange = playlist.sidx.ByteRange;
 
                     var sidxBytes = await DownloadSidxAsync(
@@ -165,7 +187,8 @@ public static class MpdParser{
 
                     var sidx = ParseSidx(sidxBytes, sidxRange.offset);
 
-                    var byteRange = new ByteRange(){
+                    var byteRange = new ByteRange()
+                    {
                         Length = playlist.sidx.map.ByteRange.length,
                         Offset = playlist.sidx.map.ByteRange.offset,
                     };
@@ -180,10 +203,12 @@ public static class MpdParser{
             dynamic resolution =
                 ObjectUtilities.GetMemberValue(playlist.attributes, "RESOLUTION") ?? new Quality();
 
-            var pItem = new VideoPlaylist{
+            var pItem = new VideoPlaylist
+            {
                 bandwidth = playlist.attributes.BANDWIDTH,
                 codecs = ObjectUtilities.GetMemberValue(playlist.attributes, "CODECS") ?? "",
-                quality = new Quality{
+                quality = new Quality
+                {
                     height = resolution.height,
                     width = resolution.width
                 },
@@ -198,8 +223,10 @@ public static class MpdParser{
         return ret;
     }
 
-    private static List<Segment> ConvertSegments(List<dynamic>? segments){
-        return segments?.Select(segment => new Segment{
+    private static List<Segment> ConvertSegments(List<dynamic>? segments)
+    {
+        return segments?.Select(segment => new Segment
+        {
             duration = segment.duration,
             timeline = segment.timeline,
             number = segment.number,
@@ -207,14 +234,16 @@ public static class MpdParser{
             uri = segment.resolvedUri,
             byteRange = ObjectUtilities.GetMemberValue(segment, "byterange"),
 
-            map = new Map{
+            map = new Map
+            {
                 uri = segment.map.resolvedUri,
                 byteRange = ObjectUtilities.GetMemberValue(segment.map, "byterange")
             }
         }).ToList() ?? [];
     }
 
-    private static string? ExtractWidevinePssh(dynamic playlist){
+    private static string? ExtractWidevinePssh(dynamic playlist)
+    {
         var dict =
             ObjectUtilities.GetMemberValue(playlist, "contentProtection")
                 as IDictionary<string, dynamic>;
@@ -231,9 +260,12 @@ public static class MpdParser{
         return Convert.ToBase64String(widevine.pssh);
     }
 
-    private static void EnsureHostEntryExists(MPDParsed ret, string host){
-        if (!ret.Data.ContainsKey(host)){
-            ret.Data[host] = new ServerData{
+    private static void EnsureHostEntryExists(MPDParsed ret, string host)
+    {
+        if (!ret.Data.ContainsKey(host))
+        {
+            ret.Data[host] = new ServerData
+            {
                 audio = new List<AudioPlaylist>(),
                 video = new List<VideoPlaylist>()
             };
@@ -243,22 +275,27 @@ public static class MpdParser{
     public static List<Segment> BuildSegmentsFromSidx(
         SidxInfo sidx,
         string uri,
-        ByteRange mapRange){
+        ByteRange mapRange)
+    {
         var segments = new List<Segment>();
 
-        foreach (var r in sidx.References){
-            segments.Add(new Segment{
+        foreach (var r in sidx.References)
+        {
+            segments.Add(new Segment
+            {
                 uri = uri,
                 duration = (double)r.Duration / sidx.Timescale,
                 presentationTime = r.PresentationTime,
                 timeline = 0,
 
-                map = new Map{
+                map = new Map
+                {
                     uri = uri,
                     byteRange = mapRange
                 },
 
-                byteRange = new ByteRange{
+                byteRange = new ByteRange
+                {
                     Offset = r.Offset,
                     Length = r.Size
                 }
@@ -268,17 +305,20 @@ public static class MpdParser{
         return segments;
     }
 
-    static uint ReadUInt32BE(BinaryReader reader){
+    static uint ReadUInt32BE(BinaryReader reader)
+    {
         var b = reader.ReadBytes(4);
         return (uint)(b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3]);
     }
 
-    static ushort ReadUInt16BE(BinaryReader reader){
+    static ushort ReadUInt16BE(BinaryReader reader)
+    {
         var b = reader.ReadBytes(2);
         return (ushort)(b[0] << 8 | b[1]);
     }
 
-    static ulong ReadUInt64BE(BinaryReader reader){
+    static ulong ReadUInt64BE(BinaryReader reader)
+    {
         var b = reader.ReadBytes(8);
 
         return
@@ -292,7 +332,8 @@ public static class MpdParser{
             b[7];
     }
 
-    public static SidxInfo ParseSidx(byte[] data, long sidxOffset){
+    public static SidxInfo ParseSidx(byte[] data, long sidxOffset)
+    {
         using var ms = new MemoryStream(data);
         using var reader = new BinaryReader(ms);
 
@@ -311,10 +352,13 @@ public static class MpdParser{
         ulong earliestPresentationTime;
         ulong firstOffset;
 
-        if (version == 0){
+        if (version == 0)
+        {
             earliestPresentationTime = ReadUInt32BE(reader);
             firstOffset = ReadUInt32BE(reader);
-        } else{
+        }
+        else
+        {
             earliestPresentationTime = ReadUInt64BE(reader);
             firstOffset = ReadUInt64BE(reader);
         }
@@ -327,7 +371,8 @@ public static class MpdParser{
 
         var references = new List<SidxReference>();
 
-        for (int i = 0; i < referenceCount; i++){
+        for (int i = 0; i < referenceCount; i++)
+        {
             uint refInfo = ReadUInt32BE(reader);
 
             bool referenceType = (refInfo & 0x80000000) != 0;
@@ -336,7 +381,8 @@ public static class MpdParser{
             uint subsegmentDuration = ReadUInt32BE(reader);
             uint sap = ReadUInt32BE(reader);
 
-            references.Add(new SidxReference{
+            references.Add(new SidxReference
+            {
                 Size = referenceSize,
                 Duration = subsegmentDuration,
                 Offset = offset,
@@ -347,7 +393,8 @@ public static class MpdParser{
             earliestPresentationTime += subsegmentDuration;
         }
 
-        return new SidxInfo{
+        return new SidxInfo
+        {
             Timescale = timescale,
             References = references
         };
@@ -357,7 +404,8 @@ public static class MpdParser{
         HttpClient httpClient,
         string url,
         long start,
-        long end){
+        long end)
+    {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(start, end);
 
@@ -367,15 +415,17 @@ public static class MpdParser{
         return await response.Content.ReadAsByteArrayAsync();
     }
 
-    public class SidxInfo{
-        public uint Timescale{ get; set; }
-        public List<SidxReference> References{ get; set; } = [];
+    public class SidxInfo
+    {
+        public uint Timescale { get; set; }
+        public List<SidxReference> References { get; set; } = [];
     }
 
-    public class SidxReference{
-        public long Size{ get; set; }
-        public long Duration{ get; set; }
-        public long Offset{ get; set; }
-        public long PresentationTime{ get; set; }
+    public class SidxReference
+    {
+        public long Size { get; set; }
+        public long Duration { get; set; }
+        public long Offset { get; set; }
+        public long PresentationTime { get; set; }
     }
 }

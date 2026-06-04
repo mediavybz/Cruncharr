@@ -5,8 +5,10 @@ using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser.Segments;
 
-public class UrlType{
-    public static dynamic UrlTypeToSegment(dynamic input){
+public class UrlType
+{
+    public static dynamic UrlTypeToSegment(dynamic input)
+    {
         string baseUrl = Convert.ToString(ObjectUtilities.GetMemberValue(input, "baseUrl"));
         string source = Convert.ToString(ObjectUtilities.GetMemberValue(input, "source"));
 
@@ -22,14 +24,16 @@ public class UrlType{
                 : ObjectUtilities.GetMemberValue(input, "indexRange")
         );
 
-        if (!string.IsNullOrEmpty(rangeStr)){
+        if (!string.IsNullOrEmpty(rangeStr))
+        {
             var ranges = rangeStr.Split('-');
 
             long startRange = long.Parse(ranges[0]);
             long endRange = long.Parse(ranges[1]);
             long length = endRange - startRange + 1;
 
-            segment.ByteRange = new{
+            segment.ByteRange = new
+            {
                 length = length,
                 offset = startRange
             };
@@ -38,7 +42,8 @@ public class UrlType{
         return segment;
     }
 
-    public static string ByteRangeToString(dynamic byteRange){
+    public static string ByteRangeToString(dynamic byteRange)
+    {
         long endRange = byteRange.offset + byteRange.length - 1;
         return $"{byteRange.offset}-{endRange}";
     }

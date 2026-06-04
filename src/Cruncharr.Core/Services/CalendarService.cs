@@ -15,21 +15,23 @@ using Newtonsoft.Json;
 
 namespace Cruncharr.Core.Services;
 
-public interface ICalendarService{
+public interface ICalendarService
+{
     Task<CalendarWeek> GetCalendarForDateAsync(string weeksMondayDate, string language, bool forceUpdate = false);
     Task<CalendarWeek> GetCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate = false);
     Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language);
 }
 
-public class CalendarService : ICalendarService{
+public class CalendarService : ICalendarService
+{
     private readonly ILogger<CalendarService>? _logger;
     private readonly ICrunchyrollApiService _apiService;
     private readonly ICrunchyrollAuthService _authService;
     private readonly HttpClientWrapper _httpClient;
-    
+
     private readonly Dictionary<string, CalendarWeek> _calendarCache = new();
     private readonly Dictionary<string, List<CalendarEpisode>> _anilistCache = new();
-    
+
     private readonly Dictionary<string, string> _calendarLanguageUrls = new(){
         { "en-us", "https://www.crunchyroll.com/simulcastcalendar" },
         { "es", "https://www.crunchyroll.com/es/simulcastcalendar" },
@@ -44,17 +46,20 @@ public class CalendarService : ICalendarService{
         { "hi", "https://www.crunchyroll.com/hi/simulcastcalendar" },
     };
 
-    public CalendarService(ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, ILogger<CalendarService>? logger = null){
+    public CalendarService(ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, ILogger<CalendarService>? logger = null)
+    {
         _apiService = apiService;
         _authService = authService;
         _logger = logger;
         _httpClient = new HttpClientWrapper();
     }
 
-    public async Task<CalendarWeek> GetCalendarForDateAsync(string weeksMondayDate, string language, bool forceUpdate = false){
+    public async Task<CalendarWeek> GetCalendarForDateAsync(string weeksMondayDate, string language, bool forceUpdate = false)
+    {
         var cacheKey = $"{language}_{weeksMondayDate}";
-        
-        if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek)){
+
+        if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek))
+        {
             return cachedWeek;
         }
 
@@ -68,64 +73,80 @@ public class CalendarService : ICalendarService{
 
         var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
 
-        if (!isOk){
+        if (!isOk)
+        {
             if (content.Contains("<title>Just a moment...</title>") ||
                 content.Contains("<title>Access denied</title>") ||
                 content.Contains("<title>Attention Required! | Cloudflare</title>") ||
                 content.Trim().Equals("error code: 1020") ||
-                content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1){
+                content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1)
+            {
                 _logger?.LogError("Blocked by Cloudflare. Use the custom calendar.");
-            } else{
+            }
+            else
+            {
                 _logger?.LogError("Calendar request failed: {Error}", error);
             }
 
-            return new CalendarWeek{ CalendarDays = new List<CalendarDay>() };
+            return new CalendarWeek { CalendarDays = new List<CalendarDay>() };
         }
 
         var week = ParseCalendarHtml(content);
-        
-        if (week != null){
+
+        if (week != null)
+        {
             _calendarCache[cacheKey] = week;
         }
 
-        return week ?? new CalendarWeek{ CalendarDays = new List<CalendarDay>() };
+        return week ?? new CalendarWeek { CalendarDays = new List<CalendarDay>() };
     }
 
-    private CalendarWeek? ParseCalendarHtml(string html){
-        try{
+    private CalendarWeek? ParseCalendarHtml(string html)
+    {
+        try
+        {
             var doc = new HtmlDocument();
             doc.LoadHtml(WebUtility.HtmlDecode(html));
 
-            var week = new CalendarWeek{
+            var week = new CalendarWeek
+            {
                 CalendarDays = new List<CalendarDay>()
             };
 
             var dayNodes = doc.DocumentNode.SelectNodes("//li[contains(@class, 'day')]");
 
-            if (dayNodes != null){
-                foreach (var day in dayNodes){
+            if (dayNodes != null)
+            {
+                foreach (var day in dayNodes)
+                {
                     var date = day.SelectSingleNode(".//time[@datetime]")?.GetAttributeValue("datetime", null);
-                    if (date != null){
+                    if (date != null)
+                    {
                         DateTime dayDateTime = DateTime.Parse(date, null, DateTimeStyles.RoundtripKind);
 
-                        if (week.FirstDayOfWeek == DateTime.MinValue){
+                        if (week.FirstDayOfWeek == DateTime.MinValue)
+                        {
                             week.FirstDayOfWeek = dayDateTime;
                             week.FirstDayOfWeekString = dayDateTime.ToString("yyyy-MM-dd");
                         }
 
                         var dayName = day.SelectSingleNode(".//h1[@class='day-name']/time")?.InnerText.Trim();
 
-                        var calDay = new CalendarDay{
+                        var calDay = new CalendarDay
+                        {
                             CalendarEpisodes = new List<CalendarEpisode>(),
                             DayName = dayName,
                             DateTime = dayDateTime
                         };
 
                         var episodes = day.SelectNodes(".//article[contains(@class, 'release')]");
-                        if (episodes != null){
-                            foreach (var episode in episodes){
+                        if (episodes != null)
+                        {
+                            foreach (var episode in episodes)
+                            {
                                 var episodeTimeStr = episode.SelectSingleNode(".//time[contains(@class, 'available-time')]")?.GetAttributeValue("datetime", null);
-                                if (episodeTimeStr != null){
+                                if (episodeTimeStr != null)
+                                {
                                     DateTime episodeTime = DateTime.Parse(episodeTimeStr, null, DateTimeStyles.RoundtripKind);
                                     var hasPassed = DateTime.Now > episodeTime;
 
@@ -138,7 +159,8 @@ public class CalendarService : ICalendarService{
                                     var seasonName = episode.SelectSingleNode(".//a[contains(@class, 'js-season-name-link')]")?.SelectSingleNode(".//cite[@itemprop='name']")?.InnerText.Trim();
                                     var episodeNumber = episode.SelectSingleNode(".//meta[contains(@itemprop, 'episodeNumber')]")?.GetAttributeValue("content", "?");
 
-                                    var calEpisode = new CalendarEpisode{
+                                    var calEpisode = new CalendarEpisode
+                                    {
                                         DateTime = episodeTime,
                                         HasPassed = hasPassed,
                                         EpisodeName = episodeName,
@@ -162,25 +184,32 @@ public class CalendarService : ICalendarService{
             }
 
             return week;
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger?.LogError(ex, "Failed to parse calendar HTML");
             return null;
         }
     }
 
-    public async Task<CalendarWeek> GetCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate = false){
+    public async Task<CalendarWeek> GetCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate = false)
+    {
         var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}";
-        
-        if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek)){
+
+        if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek))
+        {
             return cachedWeek;
         }
 
-        var week = new CalendarWeek{
+        var week = new CalendarWeek
+        {
             CalendarDays = new List<CalendarDay>()
         };
 
-        for (int i = 0; i < 7; i++){
-            var calDay = new CalendarDay{
+        for (int i = 0; i < 7; i++)
+        {
+            var calDay = new CalendarDay
+            {
                 CalendarEpisodes = new List<CalendarEpisode>(),
                 DateTime = targetDate.AddDays(-i),
                 DayName = targetDate.AddDays(-i).DayOfWeek.ToString()
@@ -193,45 +222,56 @@ public class CalendarService : ICalendarService{
 
         // Get new episodes from API
         var newEpisodes = await GetNewEpisodesFromApiAsync(language);
-        
-        if (newEpisodes != null && newEpisodes.Count > 0){
-            foreach (var episode in newEpisodes){
+
+        if (newEpisodes != null && newEpisodes.Count > 0)
+        {
+            foreach (var episode in newEpisodes)
+            {
                 var targetDay = week.CalendarDays.FirstOrDefault(d => d.DateTime.Date == episode.DateTime.Date);
-                if (targetDay != null){
+                if (targetDay != null)
+                {
                     // Check for existing episode with same series and locale
                     var existingEpisode = targetDay.CalendarEpisodes
                         .FirstOrDefault(e => e.CrSeriesID == episode.CrSeriesID && e.AudioLocale == episode.AudioLocale);
-                    
-                    if (existingEpisode != null){
+
+                    if (existingEpisode != null)
+                    {
                         // Merge episode numbers
-                        if (!int.TryParse(existingEpisode.EpisodeNumber, out _)){
+                        if (!int.TryParse(existingEpisode.EpisodeNumber, out _))
+                        {
                             existingEpisode.EpisodeNumber = "...";
-                        } else{
+                        }
+                        else
+                        {
                             var existingNumbers = existingEpisode.EpisodeNumber
                                 .Split('-')
                                 .Select(n => int.TryParse(n, out var num) ? num : 0)
                                 .Where(n => n > 0)
                                 .ToList();
-                            
-                            if (int.TryParse(episode.EpisodeNumber, out var newEpisodeNumber)){
+
+                            if (int.TryParse(episode.EpisodeNumber, out var newEpisodeNumber))
+                            {
                                 existingNumbers.Add(newEpisodeNumber);
                             }
-                            
+
                             existingNumbers.Sort();
                             var lowest = existingNumbers.First();
                             var highest = existingNumbers.Last();
-                            
+
                             existingEpisode.EpisodeNumber = lowest == highest
                                 ? lowest.ToString()
                                 : $"{lowest}-{highest}";
-                            
-                            if (lowest == 1){
+
+                            if (lowest == 1)
+                            {
                                 existingEpisode.IsPremiere = true;
                             }
                         }
-                        
+
                         existingEpisode.CalendarEpisodes.Add(episode);
-                    } else{
+                    }
+                    else
+                    {
                         targetDay.CalendarEpisodes.Add(episode);
                     }
                 }
@@ -239,14 +279,17 @@ public class CalendarService : ICalendarService{
         }
 
         // Sort episodes
-        foreach (var day in week.CalendarDays){
-            if (day.CalendarEpisodes.Count > 0){
+        foreach (var day in week.CalendarDays)
+        {
+            if (day.CalendarEpisodes.Count > 0)
+            {
                 day.CalendarEpisodes = day.CalendarEpisodes
                     .Where(e => !e.FilteredOut)
                     .OrderBy(e => e.AnilistEpisode) // False first, then true
                     .ThenBy(e => e.DateTime)
                     .ThenBy(e => e.SeasonName)
-                    .ThenBy(e => {
+                    .ThenBy(e =>
+                    {
                         double parsedNumber;
                         return double.TryParse(e.EpisodeNumber, out parsedNumber) ? parsedNumber : double.MinValue;
                     })
@@ -258,53 +301,62 @@ public class CalendarService : ICalendarService{
         return week;
     }
 
-    private async Task<List<CalendarEpisode>> GetNewEpisodesFromApiAsync(string language){
-        try{
+    private async Task<List<CalendarEpisode>> GetNewEpisodesFromApiAsync(string language)
+    {
+        try
+        {
             _logger?.LogInformation("Fetching new episodes from API for calendar");
-            
+
             var newEpisodesBase = await _apiService.GetNewEpisodesAsync(language, 2000, true);
-            
-            if (newEpisodesBase?.Data == null || newEpisodesBase.Data.Count == 0){
+
+            if (newEpisodesBase?.Data == null || newEpisodesBase.Data.Count == 0)
+            {
                 return new List<CalendarEpisode>();
             }
-            
+
             var calendarEpisodes = new List<CalendarEpisode>();
-            
-            foreach (var crBrowseEpisode in newEpisodesBase.Data){
+
+            foreach (var crBrowseEpisode in newEpisodesBase.Data)
+            {
                 var metadata = crBrowseEpisode.EpisodeMetadata;
-                
+
                 // Determine target date for calendar placement
                 DateTime episodeAirDate = metadata.EpisodeAirDate.Kind == DateTimeKind.Utc
                     ? metadata.EpisodeAirDate.ToLocalTime()
                     : metadata.EpisodeAirDate;
-                
+
                 DateTime premiumAvailableStart = metadata.PremiumAvailableDate.Kind == DateTimeKind.Utc
                     ? metadata.PremiumAvailableDate.ToLocalTime()
                     : metadata.PremiumAvailableDate;
-                
+
                 DateTime targetDate = premiumAvailableStart;
                 DateTime oneYearFromNow = DateTime.Now.AddYears(1);
-                
-                if (targetDate >= oneYearFromNow){
+
+                if (targetDate >= oneYearFromNow)
+                {
                     DateTime freeAvailableStart = metadata.FreeAvailableDate.Kind == DateTimeKind.Utc
                         ? metadata.FreeAvailableDate.ToLocalTime()
                         : metadata.FreeAvailableDate;
-                    
-                    if (freeAvailableStart <= oneYearFromNow){
+
+                    if (freeAvailableStart <= oneYearFromNow)
+                    {
                         targetDate = freeAvailableStart;
-                    } else{
+                    }
+                    else
+                    {
                         targetDate = episodeAirDate;
                     }
                 }
-                
+
                 // Build season title
                 string? seasonTitle = string.IsNullOrEmpty(metadata.SeasonTitle)
                     ? metadata.SeriesTitle
                     : LooksLikeGenericSeasonLabel(metadata.SeasonTitle, metadata.SeasonNumber)
                         ? $"{metadata.SeriesTitle} {metadata.SeasonTitle}"
                         : metadata.SeasonTitle;
-                
-                var calEpisode = new CalendarEpisode{
+
+                var calEpisode = new CalendarEpisode
+                {
                     DateTime = targetDate,
                     HasPassed = DateTime.Now > targetDate,
                     EpisodeName = crBrowseEpisode.Title,
@@ -318,45 +370,55 @@ public class CalendarService : ICalendarService{
                     CrSeriesID = metadata.SeriesId,
                     AudioLocale = metadata.AudioLocale
                 };
-                
+
                 calendarEpisodes.Add(calEpisode);
             }
-            
+
             return calendarEpisodes;
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger?.LogError(ex, "Failed to fetch new episodes for calendar");
             return new List<CalendarEpisode>();
         }
     }
-    
-    private static bool LooksLikeGenericSeasonLabel(string? seasonTitle, double seasonNumber){
+
+    private static bool LooksLikeGenericSeasonLabel(string? seasonTitle, double seasonNumber)
+    {
         if (string.IsNullOrEmpty(seasonTitle)) return false;
         var genericLabels = new[] { "Season", "Cour" };
         return genericLabels.Any(label => seasonTitle.Contains(label, StringComparison.OrdinalIgnoreCase));
     }
 
-    public async Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language){
-        try{
+    public async Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language)
+    {
+        try
+        {
             await LoadAnilistUpcomingAsync(language);
-            
+
             var upcoming = new List<CalendarEpisode>();
             var today = DateTime.Today.ToString("yyyy-MM-dd");
-            
-            if (_anilistCache.TryGetValue(today, out var cached)){
+
+            if (_anilistCache.TryGetValue(today, out var cached))
+            {
                 upcoming.AddRange(cached.Where(e => e.DateTime.Date >= DateTime.Today));
             }
-            
+
             return upcoming.OrderBy(e => e.DateTime).ToList();
-        } catch (Exception ex){
+        }
+        catch (Exception ex)
+        {
             _logger?.LogError(ex, "Failed to get upcoming episodes");
             return new List<CalendarEpisode>();
         }
     }
 
-    private async Task LoadAnilistUpcomingAsync(string language){
+    private async Task LoadAnilistUpcomingAsync(string language)
+    {
         var today = DateTime.Today.ToString("yyyy-MM-dd");
-        
-        if (_anilistCache.ContainsKey(today)){
+
+        if (_anilistCache.ContainsKey(today))
+        {
             return;
         }
 
@@ -401,30 +463,34 @@ public class CalendarService : ICalendarService{
         int currentPage = 1;
         bool hasNextPage;
 
-        do{
-            var variables = new{
+        do
+        {
+            var variables = new
+            {
                 weekStart = todayMidnightUnix,
                 weekEnd = sevenDaysLaterUnix,
                 page = currentPage
             };
 
-            var payload = new{ query, variables };
+            var payload = new { query, variables };
             var jsonPayload = JsonConvert.SerializeObject(payload, Formatting.Indented);
 
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://graphql.anilist.co"){
+            var request = new HttpRequestMessage(HttpMethod.Post, "https://graphql.anilist.co")
+            {
                 Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
             };
 
             var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
 
-            if (!isOk){
+            if (!isOk)
+            {
                 _logger?.LogError("AniList request failed: {Error}", error);
                 return;
             }
 
             var response = JsonConvert.DeserializeObject<AniListResponseCalendar>(content);
             var schedules = response?.Data?.Page?.AiringSchedules ?? new List<AniListAiringSchedule>();
-            
+
             allSchedules.AddRange(schedules);
             hasNextPage = response?.Data?.Page?.PageInfo?.HasNextPage ?? false;
             currentPage++;
@@ -432,14 +498,16 @@ public class CalendarService : ICalendarService{
 
         // Filter for Crunchyroll content
         var crunchyrollSchedules = allSchedules
-            .Where(s => s.Media?.ExternalLinks != null && 
+            .Where(s => s.Media?.ExternalLinks != null &&
                        s.Media.ExternalLinks.Any(e => string.Equals(e.Site, "Crunchyroll", StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         var calendarEpisodes = new List<CalendarEpisode>();
 
-        foreach (var schedule in crunchyrollSchedules){
-            var calEp = new CalendarEpisode{
+        foreach (var schedule in crunchyrollSchedules)
+        {
+            var calEp = new CalendarEpisode
+            {
                 DateTime = DateTimeOffset.FromUnixTimeSeconds(schedule.AiringAt).UtcDateTime.ToLocalTime(),
                 HasPassed = false,
                 EpisodeName = schedule.Media?.Title?.English ?? schedule.Media?.Title?.Romaji,
@@ -454,13 +522,16 @@ public class CalendarService : ICalendarService{
             };
 
             // Extract Crunchyroll series ID from external links
-            if (schedule.Media?.ExternalLinks != null){
-                var crLink = schedule.Media.ExternalLinks.FirstOrDefault(e => 
+            if (schedule.Media?.ExternalLinks != null)
+            {
+                var crLink = schedule.Media.ExternalLinks.FirstOrDefault(e =>
                     string.Equals(e.Site, "Crunchyroll", StringComparison.OrdinalIgnoreCase));
-                
-                if (crLink?.Url != null){
+
+                if (crLink?.Url != null)
+                {
                     var match = Regex.Match(crLink.Url, @"series/([^/]+)");
-                    if (match.Success){
+                    if (match.Success)
+                    {
                         calEp.CrSeriesID = match.Groups[1].Value;
                         calEp.SeriesUrl += calEp.CrSeriesID;
                     }
@@ -471,9 +542,11 @@ public class CalendarService : ICalendarService{
         }
 
         // Group by date
-        foreach (var episode in calendarEpisodes){
+        foreach (var episode in calendarEpisodes)
+        {
             var airDate = episode.DateTime.ToString("yyyy-MM-dd");
-            if (!_anilistCache.TryGetValue(airDate, out var value)){
+            if (!_anilistCache.TryGetValue(airDate, out var value))
+            {
                 value = new List<CalendarEpisode>();
                 _anilistCache[airDate] = value;
             }

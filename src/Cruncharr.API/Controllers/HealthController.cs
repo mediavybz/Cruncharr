@@ -31,7 +31,7 @@ public class HealthController : ControllerBase
             return Ok(new HealthResponse
             {
                 Status = "healthy",
-                Version = GetType().Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "0.2.0-beta.2",
+                Version = GetType().Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).Cast<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "0.2.0-beta.3",
                 Timestamp = DateTimeOffset.UtcNow,
                 ActiveDownloads = _queueService.ActiveDownloads,
                 HasActiveDownloads = _queueService.HasActiveDownloads,

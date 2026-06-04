@@ -125,6 +125,7 @@ public class QueueService : IQueueService, IDisposable{
     }
 
     public void AddToQueue(EpisodeInfo episode){
+        ArgumentNullException.ThrowIfNull(episode);
         var item = new QueueItem{
             Episode = episode,
             DownloadProgress = new DownloadProgress{ State = DownloadState.Queued }
@@ -173,6 +174,13 @@ public class QueueService : IQueueService, IDisposable{
     }
 
     public void ReplaceQueue(List<QueueItem> newQueue){
+        if (newQueue == null){
+            _logger?.LogWarning("ReplaceQueue called with null list, clearing queue");
+            _queue.Clear();
+            OnQueueStateChanged();
+            ScheduleSave();
+            return;
+        }
         _queue.Clear();
         foreach (var item in newQueue){
             if (item != null){

@@ -37,18 +37,18 @@ public class UpdateCheckerService : BackgroundService{
     }
     
     private async Task CheckForUpdateAsync(CancellationToken cancellationToken){
-        var request = new HttpRequestMessage(HttpMethod.Get, 
+        using var request = new HttpRequestMessage(HttpMethod.Get, 
             "https://api.github.com/repos/Crunchy-DL/Crunchy-Downloader/releases/latest");
         request.Headers.Add("User-Agent", "Cruncharr-UpdateChecker/1.0");
         
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode) return;
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         var release = JsonConvert.DeserializeObject<GitHubRelease>(json);
         if (release?.TagName == null) return;
         
-        var currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
+        var currentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
         var latestVersion = ParseVersion(release.TagName.TrimStart('v'));
         LatestVersion = release.TagName;
         

@@ -135,7 +135,7 @@ public class NotificationService : INotificationService{
             }
             
             var method = new HttpMethod(config.Notifications.WebhookMethod);
-            var request = new HttpRequestMessage(method, config.Notifications.WebhookUrl);
+            using var request = new HttpRequestMessage(method, config.Notifications.WebhookUrl);
             
             // Add configured headers
             if (config.Notifications.WebhookHeaders != null){
@@ -164,7 +164,7 @@ public class NotificationService : INotificationService{
                 }
             }
             
-            var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to send webhook notification");

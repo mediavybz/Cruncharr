@@ -2323,7 +2323,7 @@ MAINTENANCE NOTES:
                                 <div class="history-poster-title" title="${escapeHtml(series.seriesTitle)}">${escapeHtml(series.seriesTitle)}</div>
                                 <div class="history-poster-meta">${series.episodes.length} upcoming episode(s)</div>
                                 <div class="history-poster-meta" style="color: var(--accent-green);">
-                                    Next: ${formatDate(series.episodes[0].airDate)}
+                                    Next: ${series.episodes?.length > 0 ? formatDate(series.episodes[0].airDate) : 'Unknown'}
                                 </div>
                             </div>
                         </div>
@@ -2591,6 +2591,7 @@ MAINTENANCE NOTES:
         function formatDate(dateStr) {
             if (!dateStr) return 'Unknown';
             const date = new Date(dateStr);
+            if (isNaN(date.getTime())) return 'Unknown';
             const now = new Date();
             const diff = date - now;
             const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -3091,11 +3092,11 @@ MAINTENANCE NOTES:
             if (useDefault){
                 const endpoint = document.getElementById('setting-stream-endpoint' + (endpointNum===2?'-2':''))?.value || 'tv/android_tv';
                 const label = STREAM_DEVICE_LABELS[endpoint] || endpoint;
-                document.getElementById('setting-stream-device-type' + (endpointNum===2?'-2':'')).value = label;
-                document.getElementById('setting-stream-device-name' + (endpointNum===2?'-2':'')).value = label;
+                document.getElementById('setting-stream-device-type' + (endpointNum===2?'-2':''))?.value = label;
+                document.getElementById('setting-stream-device-name' + (endpointNum===2?'-2':''))?.value = label;
                 // Auth/User-Agent cleared - server handles defaults when useDefault=true
-                document.getElementById('setting-stream-auth' + (endpointNum===2?'-2':'')).value = '';
-                document.getElementById('setting-stream-ua' + (endpointNum===2?'-2':'')).value = '';
+                document.getElementById('setting-stream-auth' + (endpointNum===2?'-2':''))?.value = '';
+                document.getElementById('setting-stream-ua' + (endpointNum===2?'-2':''))?.value = '';
             }
         }
 

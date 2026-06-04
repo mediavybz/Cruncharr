@@ -208,13 +208,13 @@ public class QueueController : ControllerBase{
     [HttpGet("stats")]
     public ActionResult<QueueStats> GetQueueStats(){
         try{
-            var items = _queueService.GetQueue();
+            var items = _queueService.GetQueue() ?? new List<QueueItem>();
             var total = items.Count;
-            var active = items.Count(i => i.DownloadProgress.State == DownloadState.Downloading || i.DownloadProgress.State == DownloadState.Processing);
-            var queued = items.Count(i => i.DownloadProgress.State == DownloadState.Queued);
-            var completed = items.Count(i => i.DownloadProgress.State == DownloadState.Done);
-            var failed = items.Count(i => i.DownloadProgress.State == DownloadState.Error);
-            var waitingForRetry = items.Count(i => i.DownloadProgress.IsWaitingForRetry);
+            var active = items.Count(i => i.DownloadProgress?.State == DownloadState.Downloading || i.DownloadProgress?.State == DownloadState.Processing);
+            var queued = items.Count(i => i.DownloadProgress?.State == DownloadState.Queued);
+            var completed = items.Count(i => i.DownloadProgress?.State == DownloadState.Done);
+            var failed = items.Count(i => i.DownloadProgress?.State == DownloadState.Error);
+            var waitingForRetry = items.Count(i => i.DownloadProgress?.IsWaitingForRetry == true);
             
             return Ok(new QueueStats{
                 Total = total,

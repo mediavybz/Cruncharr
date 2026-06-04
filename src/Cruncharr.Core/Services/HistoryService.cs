@@ -63,7 +63,7 @@ public class HistoryService : IHistoryService, IDisposable{
     private readonly ICrunchyrollAuthService? _authService;
     private readonly CruncharrConfig _config;
     private List<HistorySeries> _historyList = [];
-    private bool _loaded = false;
+    private volatile bool _loaded = false;
     
     public HistoryService(string? historyPath = null, ILogger<HistoryService>? logger = null, ISonarrService? sonarrService = null, ICrunchyrollApiService? apiService = null, IMusicService? musicService = null, ICrunchyrollAuthService? authService = null, CruncharrConfig? config = null){
         _historyPath = historyPath ?? Path.Combine(
@@ -386,9 +386,29 @@ public class HistoryService : IHistoryService, IDisposable{
                 content = await File.ReadAllTextAsync(_historyPath);
             }
             _historyList = JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListHistorySeries) ?? [];
+            SanitizeHistoryCollections();
         } catch (Exception ex){
             _logger?.LogError(ex, "Failed to load rich history");
             _historyList = [];
+        }
+    }
+
+    private void SanitizeHistoryCollections(){
+        foreach (var series in _historyList){
+            series.Seasons ??= [];
+            series.HistorySeriesDubLangOverride ??= [];
+            series.HistorySeriesSoftSubsOverride ??= [];
+            foreach (var season in series.Seasons){
+                season.EpisodesList ??= [];
+                season.HistorySeasonDubLangOverride ??= [];
+                season.HistorySeasonSoftSubsOverride ??= [];
+                foreach (var episode in season.EpisodesList){
+                    episode.DownloadedDubLang ??= [];
+                    episode.DownloadedSoftSubs ??= [];
+                    episode.HistoryEpisodeAvailableDubLang ??= [];
+                    episode.HistoryEpisodeAvailableSoftSubs ??= [];
+                }
+            }
         }
     }
 
@@ -409,14 +429,20 @@ public class HistoryService : IHistoryService, IDisposable{
                 // Fallback to uncompressed
                 content = await File.ReadAllTextAsync(_flatHistoryPath);
             }
-            return JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListDownloadHistory) ?? new List<DownloadHistory>();
-        } catch{
+            var flatHistory = JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListDownloadHistory) ?? new List<DownloadHistory>();
+            return flatHistory;
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to load flat history");
             return new List<DownloadHistory>();
         }
     }
 
-    private async Task SaveHistoryAsync(List<DownloadHistory> history){
-        await WriteJsonToFileCompressedAsync(_flatHistoryPath, history, keepBackups: 5);
+    private async Task SaveHistoryAsync(List<DownloadHistory> flatHistory){
+        try{
+            await WriteJsonToFileCompressedAsync(_flatHistoryPath, flatHistory, keepBackups: 5);
+        } catch (Exception ex){
+            _logger?.LogError(ex, "Failed to save flat history");
+        }
     }
     
     // Ported from upstream CfgManager.WriteJsonToFileCompressed
@@ -638,7 +664,6 @@ public class HistoryService : IHistoryService, IDisposable{
                 .ToList();
 
             var titleCandidates = episodesToMatch
-                .AsParallel()
                 .Select(historyEpisode => {
                     var match = FindClosestMatchEpisodeWithScore(titleAvailableEpisodes, historyEpisode.EpisodeTitle ?? string.Empty);
                     return new{

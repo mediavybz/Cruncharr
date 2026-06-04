@@ -302,10 +302,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
         try{
             _logger?.LogInformation("Checking for auth credential updates from {Url}...", dataUrl);
             
-            var request = new HttpRequestMessage(HttpMethod.Get, dataUrl);
+            using var request = new HttpRequestMessage(HttpMethod.Get, dataUrl);
             request.Headers.Add("User-Agent", "Cruncharr/1.0");
             
-            var response = await _httpClient.Client.SendAsync(request, cancellationToken);
+            using var response = await _httpClient.Client.SendAsync(request, cancellationToken);
             if (response.IsSuccessStatusCode){
                 authResponse = await response.Content.ReadAsStringAsync(cancellationToken);
             } else{
@@ -320,10 +320,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService{
             try{
                 _logger?.LogInformation("Trying fallback URL {Url}...", fallbackUrl);
                 
-                var request = new HttpRequestMessage(HttpMethod.Get, fallbackUrl);
+                using var request = new HttpRequestMessage(HttpMethod.Get, fallbackUrl);
                 request.Headers.Add("User-Agent", "Cruncharr/1.0");
                 
-                var response = await _httpClient.Client.SendAsync(request, cancellationToken);
+                using var response = await _httpClient.Client.SendAsync(request, cancellationToken);
                 if (response.IsSuccessStatusCode){
                     authResponse = await response.Content.ReadAsStringAsync(cancellationToken);
                 } else{

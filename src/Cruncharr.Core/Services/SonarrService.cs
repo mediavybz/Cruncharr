@@ -35,10 +35,10 @@ public class SonarrService : ISonarrService{
     public virtual async Task<bool> TestConnectionAsync(SonarrConfig config){
         try{
             var url = $"{BuildBaseUrl(config)}/system/status";
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Add("X-Api-Key", config.ApiKey);
             
-            var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request);
             return response.IsSuccessStatusCode;
         } catch (Exception ex){
             _logger?.LogError(ex, "Sonarr connection test failed");
@@ -49,10 +49,10 @@ public class SonarrService : ISonarrService{
     public virtual async Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config){
         try{
             var url = $"{BuildBaseUrl(config)}/series";
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Add("X-Api-Key", config.ApiKey);
             
-            var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request);
             if (!response.IsSuccessStatusCode) return new List<SonarrSeries>();
             
             var content = await response.Content.ReadAsStringAsync();
@@ -73,10 +73,10 @@ public class SonarrService : ISonarrService{
     public virtual async Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config){
         try{
             var url = $"{BuildBaseUrl(config)}/episode?seriesId={seriesId}";
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Add("X-Api-Key", config.ApiKey);
             
-            var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request);
             if (!response.IsSuccessStatusCode) return new List<SonarrEpisode>();
             
             var content = await response.Content.ReadAsStringAsync();

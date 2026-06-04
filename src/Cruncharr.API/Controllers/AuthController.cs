@@ -116,6 +116,9 @@ public class AuthController : ControllerBase{
     /// </summary>
     [HttpPost("login-test")]
     public async Task<ActionResult> LoginTest([FromBody] LoginRequest request){
+        if (request == null){
+            return BadRequest(new { Success = false, Message = "Request body is required" });
+        }
         if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password)){
             return BadRequest(new { Success = false, Message = "Email and password are required" });
         }
@@ -145,6 +148,12 @@ public class AuthController : ControllerBase{
     /// </summary>
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request){
+        if (request == null){
+            return BadRequest(new LoginResponse{
+                Success = false,
+                Message = "Request body is required"
+            });
+        }
         if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password)){
             return BadRequest(new LoginResponse{
                 Success = false,

@@ -98,7 +98,8 @@ public class NotificationService : INotificationService{
                 };
                 using var process = Process.Start(psi);
                 if (process != null){
-                    await process.WaitForExitAsync();
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    await process.WaitForExitAsync(cts.Token);
                 }
                 _logger?.LogInformation("Executed DownloadFinishedExecutePath: {Path}", config.Notifications.DownloadFinishedExecutePath);
             } catch (Exception ex){

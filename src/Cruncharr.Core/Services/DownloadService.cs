@@ -164,7 +164,7 @@ public class DownloadService : IDownloadService{
             // Fallback: try config's default audio
             if (currentVersion == null && !string.IsNullOrEmpty(config.Download.DefaultAudio)){
                 currentVersion = episode.Versions.FirstOrDefault(v => 
-                    v.AudioLocale.Equals(config.Download.DefaultAudio, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(v.AudioLocale, config.Download.DefaultAudio, StringComparison.OrdinalIgnoreCase));
             }
             
             // Fallback: if only one version, use it
@@ -392,7 +392,7 @@ public class DownloadService : IDownloadService{
                     
                     if (!hasAdVersion && audioTrackLanguages.Count > 0){
                         var primaryAudio = audioTrackLanguages.FirstOrDefault(a => 
-                            a.Lang.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
+                            string.Equals(a.Lang, episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
                         
                         if (primaryAudio.Path != null && File.Exists(primaryAudio.Path)){
                             var adLocale = episode.AudioLocale;
@@ -425,7 +425,7 @@ public class DownloadService : IDownloadService{
                     
                     foreach (var dub in selectedDubs){
                         var dubVersion = episode.Versions.FirstOrDefault(v => 
-                            v.AudioLocale.Equals(dub, StringComparison.OrdinalIgnoreCase));
+                            string.Equals(v.AudioLocale, dub, StringComparison.OrdinalIgnoreCase));
                         
                         if (dubVersion == null) continue;
                         
@@ -505,7 +505,7 @@ public class DownloadService : IDownloadService{
                         var adLocale = adVersion.AudioLocale;
                         // Skip if we already downloaded this locale (AD tracks share locale with main track)
                         var alreadyDownloaded = audioTrackLanguages.Any(a => 
-                            a.Lang.Equals(adLocale, StringComparison.OrdinalIgnoreCase));
+                            string.Equals(a.Lang, adLocale, StringComparison.OrdinalIgnoreCase));
                         
                         if (!alreadyDownloaded){
                             var adMediaGuid = adVersion.Guid;
@@ -692,7 +692,7 @@ public class DownloadService : IDownloadService{
                 
                 // Find base video path (first video file that's not a sync video)
                 var baseVideoPath = downloadedFiles.FirstOrDefault(f => 
-                    !syncVideos.Values.Any(sv => sv.Equals(f, StringComparison.OrdinalIgnoreCase)) &&
+                    !syncVideos.Values.Any(sv => string.Equals(sv, f, StringComparison.OrdinalIgnoreCase)) &&
                     (f.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase)));
                 
                 if (!string.IsNullOrEmpty(baseVideoPath)){
@@ -745,7 +745,7 @@ public class DownloadService : IDownloadService{
                                     // Remove old video for this locale if exists
                                     var oldVideo = downloadedFiles.FirstOrDefault(f => 
                                         videoLocales.TryGetValue(f, out var vl) && 
-                                        vl.Equals(failedLocale, StringComparison.OrdinalIgnoreCase));
+                                        string.Equals(vl, failedLocale, StringComparison.OrdinalIgnoreCase));
                                     if (oldVideo != null){
                                         downloadedFiles.Remove(oldVideo);
                                         videoLocales.Remove(oldVideo);
@@ -2217,7 +2217,7 @@ public class DownloadService : IDownloadService{
         try{
             // Find version for this locale
             var version = episode.Versions?.FirstOrDefault(v => 
-                v.AudioLocale.Equals(locale, StringComparison.OrdinalIgnoreCase));
+                string.Equals(v.AudioLocale, locale, StringComparison.OrdinalIgnoreCase));
             
             if (version == null){
                 _logger?.LogWarning("No version found for locale {Locale}", locale);

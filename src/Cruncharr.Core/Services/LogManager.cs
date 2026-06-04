@@ -10,11 +10,16 @@ public static class LogManager{
             if (!_isLogModeEnabled){
                 try{
                     var fileStream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-                    _logFile = new StreamWriter(fileStream);
-                    _logFile.AutoFlush = true;
-                    Console.SetError(_logFile);
-                    _isLogModeEnabled = true;
-                    Console.Error.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Log mode enabled.");
+                    try{
+                        _logFile = new StreamWriter(fileStream);
+                        _logFile.AutoFlush = true;
+                        Console.SetError(_logFile);
+                        _isLogModeEnabled = true;
+                        Console.Error.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Log mode enabled.");
+                    } catch{
+                        fileStream.Dispose();
+                        throw;
+                    }
                 } catch (Exception e){
                     Console.Error.WriteLine($"Couldn't enable logging: {e}");
                 }

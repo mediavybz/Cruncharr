@@ -15,6 +15,8 @@ public class HistoryController : ControllerBase{
         _logger = logger;
     }
 
+    private static bool IsValidId(string id) => !string.IsNullOrWhiteSpace(id) && !id.Contains("..") && !id.Contains("/") && !id.Contains("\\");
+
     /// <summary>
     /// Get download history
     /// </summary>
@@ -52,6 +54,7 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("check/{episodeId}/{audioLanguage}")]
     public async Task<ActionResult<HistoryCheckResponse>> CheckHistory(string episodeId, string audioLanguage){
+        if (!IsValidId(episodeId)) return BadRequest(new { Error = "Invalid episodeId" });
         try{
             var exists = await _historyService.IsDownloadedAsync(episodeId, audioLanguage);
             return Ok(new HistoryCheckResponse{
@@ -86,6 +89,7 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("series/{seriesId}")]
     public async Task<ActionResult<HistorySeriesResponse?>> GetSeriesHistory(string seriesId){
+        if (!IsValidId(seriesId)) return BadRequest(new { Error = "Invalid seriesId" });
         try{
             var history = await _historyService.GetHistorySeriesAsync();
             var series = history?.FirstOrDefault(s => s.SeriesId == seriesId);
@@ -103,6 +107,7 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("downloaded/{seriesId}/{seasonId}/{episodeId}")]
     public async Task<IActionResult> SetDownloaded(string seriesId, string seasonId, string episodeId){
+        if (!IsValidId(seriesId) || !IsValidId(seasonId) || !IsValidId(episodeId)) return BadRequest(new { Error = "Invalid path parameters" });
         try{
             await _historyService.SetAsDownloadedAsync(seriesId, seasonId, episodeId);
             return Ok(new { Message = "Marked as downloaded" });
@@ -133,6 +138,8 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("update-series/{seriesId}")]
     public async Task<IActionResult> UpdateSeries(string seriesId, [FromQuery] string? seasonId = null){
+        if (!IsValidId(seriesId)) return BadRequest(new { Error = "Invalid seriesId" });
+        if (seasonId != null && !IsValidId(seasonId)) return BadRequest(new { Error = "Invalid seasonId" });
         try{
             var result = await _historyService.CrUpdateSeriesAsync(seriesId, seasonId);
             return Ok(new { Success = result });
@@ -163,6 +170,7 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("episode-with-dir/{seriesId}/{seasonId}/{episodeId}")]
     public async Task<ActionResult> GetEpisodeWithDir(string seriesId, string seasonId, string episodeId){
+        if (!IsValidId(seriesId) || !IsValidId(seasonId) || !IsValidId(episodeId)) return BadRequest(new { Error = "Invalid path parameters" });
         try{
             var (episode, dir) = await _historyService.GetHistoryEpisodeWithDownloadDirAsync(seriesId, seasonId, episodeId);
             if (episode == null) return NotFound();
@@ -179,6 +187,7 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("episode-with-dubs/{seriesId}/{seasonId}/{episodeId}")]
     public async Task<ActionResult> GetEpisodeWithDubs(string seriesId, string seasonId, string episodeId){
+        if (!IsValidId(seriesId) || !IsValidId(seasonId) || !IsValidId(episodeId)) return BadRequest(new { Error = "Invalid path parameters" });
         try{
             var (episode, dubs, subs, dir, quality) = await _historyService.GetHistoryEpisodeWithDubListAndDownloadDirAsync(seriesId, seasonId, episodeId);
             if (episode == null) return NotFound();
@@ -195,6 +204,7 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("dubs/{seriesId}/{seasonId}")]
     public async Task<ActionResult<List<string>>> GetDubList(string seriesId, string seasonId){
+        if (!IsValidId(seriesId) || !IsValidId(seasonId)) return BadRequest(new { Error = "Invalid path parameters" });
         try{
             var dubs = await _historyService.GetDubListAsync(seriesId, seasonId);
             return Ok(dubs);
@@ -209,6 +219,7 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpGet("subs/{seriesId}/{seasonId}")]
     public async Task<ActionResult> GetSubList(string seriesId, string seasonId){
+        if (!IsValidId(seriesId) || !IsValidId(seasonId)) return BadRequest(new { Error = "Invalid path parameters" });
         try{
             var (subs, quality) = await _historyService.GetSubListAsync(seriesId, seasonId);
             return Ok(new { SubList = subs, VideoQuality = quality });
@@ -239,6 +250,7 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("sonarr/match-episodes/{seriesId}")]
     public async Task<IActionResult> MatchHistoryEpisodesWithSonarr(string seriesId, [FromQuery] bool rematchAll = false){
+        if (!IsValidId(seriesId)) return BadRequest(new { Error = "Invalid seriesId" });
         try{
             await _historyService.MatchHistoryEpisodesWithSonarrAsync(seriesId, rematchAll);
             return Ok(new { Message = "Episode matching completed" });
@@ -254,6 +266,8 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("series/{seriesId}/settings")]
     public async Task<IActionResult> SetSeriesSettingsOverride(string seriesId, [FromBody] HistorySettingsOverrideRequest request){
+        if (!IsValidId(seriesId)) return BadRequest(new { Error = "Invalid seriesId" });
+        if (request == null) return BadRequest(new { Error = "Request body is required" });
         try{
             await _historyService.SetSeriesSettingsOverrideAsync(seriesId, request.VideoQuality, request.DubLanguages, request.SoftSubs);
             return Ok(new { Message = "Series settings updated" });
@@ -269,6 +283,8 @@ public class HistoryController : ControllerBase{
     /// </summary>
     [HttpPost("season/{seasonId}/settings")]
     public async Task<IActionResult> SetSeasonSettingsOverride(string seasonId, [FromBody] HistorySettingsOverrideRequest request){
+        if (!IsValidId(seasonId)) return BadRequest(new { Error = "Invalid seasonId" });
+        if (request == null) return BadRequest(new { Error = "Request body is required" });
         try{
             await _historyService.SetSeasonSettingsOverrideAsync(seasonId, request.VideoQuality, request.DubLanguages, request.SoftSubs);
             return Ok(new { Message = "Season settings updated" });

@@ -270,6 +270,7 @@ public class ConfigController : ControllerBase{
                 UpdateConfigFromRequest(request);
                 
                 var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+                configPath = ValidatePath(configPath, "ConfigPath");
                 _config.Save(configPath);
                 _logger.LogInformation("Configuration saved to {Path}", configPath);
             }
@@ -444,9 +445,9 @@ public class ConfigController : ControllerBase{
             if (n.NotifyLoginExpired.HasValue) _config.Notifications.NotifyLoginExpired = n.NotifyLoginExpired.Value;
             if (n.NotifyUpdateAvailable.HasValue) _config.Notifications.NotifyUpdateAvailable = n.NotifyUpdateAvailable.Value;
             if (n.DownloadFinishedPlaySound.HasValue) _config.Notifications.DownloadFinishedPlaySound = n.DownloadFinishedPlaySound.Value;
-            if (n.DownloadFinishedSoundPath != null) _config.Notifications.DownloadFinishedSoundPath = n.DownloadFinishedSoundPath;
+            if (n.DownloadFinishedSoundPath != null) _config.Notifications.DownloadFinishedSoundPath = ValidatePath(n.DownloadFinishedSoundPath, nameof(n.DownloadFinishedSoundPath));
             if (n.DownloadFinishedExecute.HasValue) _config.Notifications.DownloadFinishedExecute = n.DownloadFinishedExecute.Value;
-            if (n.DownloadFinishedExecutePath != null) _config.Notifications.DownloadFinishedExecutePath = n.DownloadFinishedExecutePath;
+            if (n.DownloadFinishedExecutePath != null) _config.Notifications.DownloadFinishedExecutePath = ValidatePath(n.DownloadFinishedExecutePath, nameof(n.DownloadFinishedExecutePath));
         }
         
         if (request.Sonarr != null){
@@ -496,7 +497,7 @@ public class ConfigController : ControllerBase{
             var a = request.Appearance;
             if (!string.IsNullOrEmpty(a.Theme)) _config.Appearance.Theme = a.Theme;
             if (a.AccentColor != null) _config.Appearance.AccentColor = a.AccentColor;
-            if (a.BackgroundImagePath != null) _config.Appearance.BackgroundImagePath = a.BackgroundImagePath;
+            if (a.BackgroundImagePath != null) _config.Appearance.BackgroundImagePath = ValidatePath(a.BackgroundImagePath, nameof(a.BackgroundImagePath));
             if (a.BackgroundImageOpacity.HasValue) _config.Appearance.BackgroundImageOpacity = a.BackgroundImageOpacity.Value;
             if (a.BackgroundImageBlurRadius.HasValue) _config.Appearance.BackgroundImageBlurRadius = a.BackgroundImageBlurRadius.Value;
         }

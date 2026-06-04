@@ -125,8 +125,8 @@ public class AuthController : ControllerBase{
             return Ok(new { 
                 Success = success, 
                 Message = success ? "Login successful" : "Login failed",
-                Username = _auth.Profile.Username ?? "",
-                HasPremium = _auth.Profile.HasPremium,
+                Username = _auth.Profile?.Username ?? "",
+                HasPremium = _auth.Profile?.HasPremium ?? false,
                 UseBetaApi = _config?.Crunchyroll?.UseBetaApi ?? true
             });
         } catch (Exception ex){
@@ -158,9 +158,9 @@ public class AuthController : ControllerBase{
             if (success){
                 return Ok(new LoginResponse{
                     Success = true,
-                    Message = $"Logged in as {_auth.Profile.Username}",
-                    Username = _auth.Profile.Username ?? "",
-                    HasPremium = _auth.Profile.HasPremium
+                    Message = $"Logged in as {_auth.Profile?.Username ?? ""}",
+                    Username = _auth.Profile?.Username ?? "",
+                    HasPremium = _auth.Profile?.HasPremium ?? false
                 });
             } else{
                 return Unauthorized(new LoginResponse{

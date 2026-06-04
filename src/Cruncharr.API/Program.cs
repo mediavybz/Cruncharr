@@ -58,7 +58,11 @@ public class Program{
         builder.Services.AddSingleton<IMovieService, MovieService>();
         builder.Services.AddSingleton<IMusicService, MusicService>();
         builder.Services.AddSingleton<IEncodingService, EncodingService>();
+        builder.Services.AddHttpClient();
+        builder.Services.AddSingleton<AutoDownloadSchedulerService>();
         builder.Services.AddHostedService<AutoDownloadSchedulerService>();
+        builder.Services.AddSingleton<UpdateCheckerService>();
+        builder.Services.AddHostedService<UpdateCheckerService>();
 
         // Add CORS - configurable via environment variable
         var corsOrigins = Environment.GetEnvironmentVariable("CORS_ORIGINS")?.Split(',') ?? new[] { "http://localhost:8585" };
@@ -96,9 +100,22 @@ public class Program{
             Directory.CreateDirectory(configDir);
         }
 
-        // Ensure directories exist
-        Directory.CreateDirectory(config.Download.OutputDirectory);
-        Directory.CreateDirectory(config.Download.TempDirectory);
+        // Ensure directories exist with validation
+        var appLogger = app.Services.GetService<ILogger<Program>>();
+        if (!string.IsNullOrWhiteSpace(config.Download.OutputDirectory)){
+            try{
+                Directory.CreateDirectory(config.Download.OutputDirectory);
+            } catch (Exception ex){
+                appLogger?.LogError(ex, "Failed to create output directory: {Path}", config.Download.OutputDirectory);
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(config.Download.TempDirectory)){
+            try{
+                Directory.CreateDirectory(config.Download.TempDirectory);
+            } catch (Exception ex){
+                appLogger?.LogError(ex, "Failed to create temp directory: {Path}", config.Download.TempDirectory);
+            }
+        }
 
         // Initialize auth FIRST - queue auto-download must wait for auth to be ready
         using (var scope = app.Services.CreateScope()){
@@ -121,7 +138,14 @@ public class Program{
         using (var scope = app.Services.CreateScope()){
             var queueService = scope.ServiceProvider.GetRequiredService<IQueueService>();
             var configService = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
-            _ = queueService.ProcessQueueAsync(configService, null, CancellationToken.None);
+            var queueLogger = scope.ServiceProvider.GetService<ILogger<Program>>();
+            _ = Task.Run(async () =>{
+                try{
+                    await queueService.ProcessQueueAsync(configService, null, CancellationToken.None);
+                } catch (Exception ex){
+                    queueLogger?.LogError(ex, "Queue processor crashed");
+                }
+            });
             // [PT] Ported from upstream c123093: set initialized flag after auth init completes
             queueService.SetInitialized(true);
         }

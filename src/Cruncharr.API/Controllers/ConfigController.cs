@@ -10,11 +10,13 @@ namespace Cruncharr.API.Controllers;
 public class ConfigController : ControllerBase{
     private readonly CruncharrConfig _config;
     private readonly ILogger<ConfigController> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
     private static readonly object _configLock = new object();
 
-    public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger){
+    public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger, IHttpClientFactory httpClientFactory){
         _config = config;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     /// <summary>
@@ -22,6 +24,7 @@ public class ConfigController : ControllerBase{
     /// </summary>
     [HttpGet]
     public ActionResult GetConfig(){
+        try{
         return Ok(new{
             Crunchyroll = new{
                 Email = _config.Crunchyroll.Email,
@@ -214,6 +217,10 @@ public class ConfigController : ControllerBase{
                 TokenFilePath = _config.TokenFilePath
             }
         });
+        } catch (Exception ex){
+            _logger.LogError(ex, "Failed to get config");
+            return StatusCode(500, new { Error = "Failed to get config", Message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -250,7 +257,8 @@ public class ConfigController : ControllerBase{
         }
         
         try{
-            using var client = new HttpClient{ Timeout = TimeSpan.FromSeconds(30) };
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(30);
             var payload = new{
                 event_type = "test",
                 message = "This is a test webhook from Cruncharr",
@@ -293,15 +301,14 @@ public class ConfigController : ControllerBase{
     private static object? SanitizeStreamEndpoint(object? endpoint){
         if (endpoint == null) return null;
         // Create a shallow copy with Authorization stripped
-        var json = System.Text.Json.JsonSerializer.Serialize(endpoint);
-        using var doc = System.Text.Json.JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        var dict = new Dictionary<string, object?>();
-        foreach (var prop in root.EnumerateObject()){
-            if (prop.NameEquals("Authorization") || prop.NameEquals("authorization")){
-                dict[prop.Name] = ""; // Strip auth token
-            } else{
-                dict[prop.Name] = System.Text.Json.JsonSerializer.Deserialize<object>(prop.Value.GetRawText());
+        // Use Newtonsoft.Json instead of System.Text.Json to avoid trimming issues
+        var json = Newtonsoft.Json.JsonConvert.SerializeObject(endpoint);
+        var dict = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, object?>>(json) ?? new Dictionary<string, object?>();
+        // Strip any Authorization property
+        foreach (var key in dict.Keys.ToList()){
+            if (key.Equals("Authorization", StringComparison.OrdinalIgnoreCase) || 
+                key.Equals("authorization", StringComparison.OrdinalIgnoreCase)){
+                dict[key] = "";
             }
         }
         return dict;

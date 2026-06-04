@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Cruncharr.API.Controllers;
 using Cruncharr.Core.Services;
@@ -8,14 +9,10 @@ namespace Cruncharr.API.Services;
 
 public class QueueBroadcastService
 {
-    private readonly Channel<string> _channel = Channel.CreateBounded<string>(new BoundedChannelOptions(100) {
-        FullMode = BoundedChannelFullMode.DropWrite
-    });
+    private readonly ConcurrentDictionary<Guid, ChannelWriter<string>> _clients = new();
     private readonly IQueueService _queueService;
     private readonly ILogger<QueueBroadcastService> _logger;
     private readonly JsonSerializerSettings _sseJsonSettings;
-
-    public ChannelReader<string> Reader => _channel.Reader;
 
     public QueueBroadcastService(IQueueService queueService, ILogger<QueueBroadcastService> logger)
     {
@@ -31,6 +28,24 @@ public class QueueBroadcastService
         _queueService.QueueStateChanged += OnQueueStateChanged;
     }
 
+    public ChannelReader<string> Subscribe(Guid clientId)
+    {
+        var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(100)
+        {
+            FullMode = BoundedChannelFullMode.DropWrite
+        });
+        _clients[clientId] = channel.Writer;
+        return channel.Reader;
+    }
+
+    public void Unsubscribe(Guid clientId)
+    {
+        if (_clients.TryRemove(clientId, out var writer))
+        {
+            writer.Complete();
+        }
+    }
+
     private void OnQueueStateChanged(object? sender, EventArgs e)
     {
         try
@@ -40,10 +55,15 @@ public class QueueBroadcastService
             {
                 Items = queue,
                 ActiveDownloads = _queueService.ActiveDownloads,
-                HasActiveDownloads = _queueService.HasActiveDownloads
+                HasActiveDownloads = _queueService.HasActiveDownloads,
+                IsGloballyPaused = _queueService.IsGloballyPaused
             };
             var json = JsonConvert.SerializeObject(response, _sseJsonSettings);
-            _channel.Writer.TryWrite(json);
+            
+            foreach (var client in _clients.Values)
+            {
+                client.TryWrite(json);
+            }
         }
         catch (Exception ex)
         {

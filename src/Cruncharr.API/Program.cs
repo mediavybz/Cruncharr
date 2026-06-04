@@ -182,7 +182,9 @@ public class Program
                     queueLogger?.LogError(ex, "Queue processor crashed");
                 }
             });
-            // [PT] Ported from upstream c123093: set initialized flag after auth init completes
+            // Set initialized flag after ProcessQueueAsync has started and assigned _config
+            // Small delay to ensure ProcessQueueAsync has entered its main loop
+            await Task.Delay(100);
             queueService.SetInitialized(true);
         }
 

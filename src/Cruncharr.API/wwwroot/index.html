@@ -1312,7 +1312,7 @@ MAINTENANCE NOTES:
                 </a>
             </div>
             <div class="sidebar-footer">
-                <div id="version-info">v0.2.0-beta.8</div>
+                <div id="version-info">v0.2.0-beta.9</div>
                 <div id="connection-status" style="color: var(--accent-green);">Connected</div>
             </div>
         </aside>
@@ -1653,7 +1653,7 @@ MAINTENANCE NOTES:
                                 <div class="download-header">
                                     <div style="min-width:0;">
                                         <div class="download-title ${item.episode?.highlightAllAvailable ? 'highlight' : ''}">${escapeHtml(item.episode?.title) || 'Unknown'}</div>
-                                        <div class="download-info" title="${escapeHtml(item.infoText || item.infoTextHover || item.episode?.description || '')}">${escapeHtml(item.infoText || item.episode?.seriesTitle || '')}</div>
+                                        <div class="download-info" title="${escapeHtmlAttribute(item.infoText || item.infoTextHover || item.episode?.description || '')}">${escapeHtml(item.infoText || item.episode?.seriesTitle || '')}</div>
                                     </div>
                                     <div class="download-actions">
                                         ${state === 'queued' || state === 'waitingforretry'
@@ -2388,7 +2388,7 @@ MAINTENANCE NOTES:
                                 ${series.episodes.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
                             </div>
                             <div class="history-poster-info">
-                                <div class="history-poster-title" title="${escapeHtml(series.seriesTitle)}">${escapeHtml(series.seriesTitle)}</div>
+                                <div class="history-poster-title" title="${escapeHtmlAttribute(series.seriesTitle)}">${escapeHtml(series.seriesTitle)}</div>
                                 <div class="history-poster-meta">${series.episodes.length} upcoming episode(s)</div>
                                 <div class="history-poster-meta" style="color: var(--accent-green);">
                                     Next: ${series.episodes?.length > 0 ? formatDate(series.episodes[0].airDate) : 'Unknown'}
@@ -2447,7 +2447,7 @@ MAINTENANCE NOTES:
                                 ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" alt="">` : '📺'}
                             </div>
                             <div class="history-poster-info">
-                                <div class="history-poster-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</div>
+                                <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
                                 <div class="history-poster-meta">${s.seasons?.length || 0} season(s)</div>
                             </div>
                         </div>
@@ -2617,7 +2617,7 @@ MAINTENANCE NOTES:
                                 ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" alt="">` : '📺'}
                             </div>
                             <div class="history-poster-info">
-                                <div class="history-poster-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</div>
+                                <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
                                 <div class="history-poster-meta">${s.seasons?.length || 0} season(s)</div>
                             </div>
                         </div>
@@ -2664,7 +2664,8 @@ MAINTENANCE NOTES:
             
             if (days === 0) return 'Today';
             if (days === 1) return 'Tomorrow';
-            if (days < 7) return `In ${days} days`;
+            if (days > 1 && days < 7) return `In ${days} days`;
+            if (days < 0) return 'Aired';
             return date.toLocaleDateString();
         }
 
@@ -2857,7 +2858,7 @@ MAINTENANCE NOTES:
                             ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
                         </div>
                         <div class="history-poster-info">
-                            <div class="history-poster-title" title="${escapeHtml(item.seriesTitle || '')}">${escapeHtml(item.seriesTitle) || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
+                                <div class="history-poster-title" title="${escapeHtmlAttribute(item.seriesTitle || '')}">${escapeHtml(item.seriesTitle) || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
                             <div class="history-poster-meta">${escapeHtml(item.sonarrNextAirDate || '')}</div>
                             <div class="history-poster-meta" style="font-size:0.7em; margin-top:4px;">
                                 ${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0} episodes
@@ -4056,8 +4057,12 @@ MAINTENANCE NOTES:
                 });
                 if (res.ok) {
                     showToast('Settings saved', 'success');
-                    // Merge the saved section into our local config cache
-                    Object.assign(config, newConfig);
+                    // Deep merge: merge each section's properties individually
+                    // to avoid overwriting properties from other tabs
+                    Object.keys(newConfig).forEach(section => {
+                        config[section] = config[section] || {};
+                        Object.assign(config[section], newConfig[section]);
+                    });
                     applyTheme();
                 }
                 else showToast('Failed to save settings', 'error');

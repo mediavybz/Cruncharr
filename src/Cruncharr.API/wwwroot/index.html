@@ -1727,7 +1727,10 @@ MAINTENANCE NOTES:
         function onAddSearchInput(value) {
             clearTimeout(searchDebounce);
             const popup = document.getElementById('search-popup');
-            if (!value.trim()) { popup.innerHTML = ''; popup.style.display = 'none'; return; }
+            if (!value.trim()) {
+                if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
+                return;
+            }
             searchDebounce = setTimeout(() => doAddSearch(value), 400);
         }
 
@@ -1737,10 +1740,11 @@ MAINTENANCE NOTES:
             if (searchAbortController) {
                 searchAbortController.abort();
             }
-            searchAbortController = new AbortController();
+            const controller = new AbortController();
+            searchAbortController = controller;
             try {
                 const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`, {
-                    signal: searchAbortController.signal
+                    signal: controller.signal
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const results = await res.json();
@@ -1768,7 +1772,9 @@ MAINTENANCE NOTES:
                 popup.innerHTML = '<div style="padding:15px; color:var(--accent-red);">Search failed</div>';
                 popup.style.display = 'block';
             } finally {
-                searchAbortController = null;
+                if (searchAbortController === controller) {
+                    searchAbortController = null;
+                }
             }
         }
 
@@ -2460,6 +2466,85 @@ MAINTENANCE NOTES:
                     `).join('')}
                 </div>
             `;
+        }
+
+        async function selectBrowseResult(seriesId) {
+            navigateTo('add-download');
+            selectBrowseResultTimeout = setTimeout(async () => {
+                const listContainer = document.getElementById('add-episodes-list');
+                if (listContainer) {
+                    listContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
+                }
+                try {
+                    const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
+                    const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
+                    const res = await fetch(`/api/v1/series/${seriesId}/list?${dubLangParam}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const result = await res.json();
+                    
+                    if (!result || !result.list) {
+                        showToast('No episodes found for this series', 'error');
+                        return;
+                    }
+                    
+                    addDownloadEpisodeList = result.list || [];
+                    addDownloadSeriesData = result.data || {};
+                    
+                    const searchInput = document.getElementById('add-search-input');
+                    if (searchInput) searchInput.value = 'Selected Series';
+                    
+                    const musicBtn = document.getElementById('music-btn');
+                    if (musicBtn) musicBtn.style.display = 'inline-flex';
+                    
+                    const seasonMap = new Map();
+                    addDownloadEpisodeList.forEach(ep => {
+                        const seasonId = ep.id;
+                        if (seasonId && !seasonMap.has(seasonId)) {
+                            seasonMap.set(seasonId, {
+                                id: seasonId,
+                                title: ep.seasonTitle || `Season ${ep.season}`
+                            });
+                        }
+                    });
+                    const seasons = Array.from(seasonMap.values());
+                    
+                    selectedEpisodeDubs.clear();
+                    const defaultDubs = new Set(dubLangs);
+                    addDownloadEpisodeList.forEach(ep => {
+                        const epKey = ep.e;
+                        const epData = addDownloadSeriesData[epKey];
+                        if (epData && epData.variants) {
+                            const availableDubs = new Set(epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale));
+                            const selected = new Set([...defaultDubs].filter(d => availableDubs.has(d)));
+                            if (selected.size > 0) {
+                                selectedEpisodeDubs.set(epKey, selected);
+                            }
+                        }
+                    });
+                    
+                    const dropdown = document.getElementById('season-dropdown');
+                    if (dropdown) {
+                        dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
+                        if (seasons.length > 0) {
+                            dropdown.value = seasons[0].id;
+                            onSeasonChange(seasons[0].id);
+                        } else {
+                            selectedEpisodes.clear();
+                            renderAddEpisodesMultiDub();
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to load series:', e);
+                    showToast('Failed to load series episodes', 'error');
+                    const listContainer = document.getElementById('add-episodes-list');
+                    if (listContainer) {
+                        listContainer.innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-state-icon">❌</div>
+                                <div class="empty-state-title">Failed to load episodes</div>
+                                <div>Please try again</div>
+                            </div>
+                        `;
                     }
                 }
             }, 100);
@@ -2731,6 +2816,12 @@ MAINTENANCE NOTES:
                 </div>
             `;
             fetchHistoryData();
+            // Restart history auto-refresh interval if it was cleared
+            if (!historyIntervalId) {
+                historyIntervalId = setInterval(() => {
+                    if (currentPage === 'history') fetchHistoryData();
+                }, HISTORY_POLL_INTERVAL_MS);
+            }
         }
 
         async function fetchHistoryData() {
@@ -2891,7 +2982,7 @@ MAINTENANCE NOTES:
                             <div style="display:flex; align-items:center; justify-content:space-between; padding:10px; border-bottom:1px solid var(--border-color); ${p.isSelected ? 'background:rgba(244,117,33,0.1);' : ''}">
                                 <div style="display:flex; align-items:center; gap:10px;">
                                     <div style="width:32px; height:32px; border-radius:50%; background:var(--bg-tertiary); display:flex; align-items:center; justify-content:center; font-size:0.8em;">
-                                        ${p.profileName ? escapeHtml(p.profileName).charAt(0).toUpperCase() : '?'}
+                                        ${p.profileName ? escapeHtml(p.profileName.charAt(0).toUpperCase()) : '?'}
                                     </div>
                                     <div>
                                         <div style="font-weight:500;">${escapeHtml(p.profileName) || 'Unknown'}</div>
@@ -3429,7 +3520,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
                                 ${renderListInput('setting-ffmpeg', dl.ffmpegOptions, '-option')}
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><select class="form-select" id="setting-encode-preset" style="min-width:200px;" onfocus="loadEncodingPresets()"><option value="">${dl.encodePreset || 'None'}</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><select class="form-select" id="setting-encode-preset" style="min-width:200px;" onfocus="loadEncodingPresets()"><option value="">${dl.encodingPreset || 'None'}</option></select></div>
                             </div>
                         </div>
                     `;
@@ -3443,8 +3534,8 @@ MAINTENANCE NOTES:
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Persist Queue</div><div class="setting-desc">Save queue on exit</div></div><label class="toggle-switch"><input type="checkbox" id="setting-persist-queue" ${q.persistQueue?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-queue-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs||2)}" min="1" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Queue File Path</div></div><input type="text" class="form-input" id="setting-queue-path" value="${escapeHtmlAttribute(q.queueFilePath||'Cruncharr/queue.json')}" style="width:250px;"></div>
                             </div>
@@ -3666,7 +3757,7 @@ MAINTENANCE NOTES:
                     
                     const dl = {};
                     const dubLangs = getMultiSelect('setting-dub-langs');
-                    if (dubLangs.length) dl.dubLanguages = dubLangs;
+                    dl.dubLanguages = dubLangs;
                     const dlAd = getFieldValue('setting-dl-ad', 'bool');
                     if (dlAd !== undefined) dl.downloadDescriptionAudio = dlAd;
                     const dlMulti = getFieldValue('setting-download-multi-dub', 'bool');
@@ -3676,7 +3767,7 @@ MAINTENANCE NOTES:
                     const hardFallback = getFieldValue('setting-hard-fallback', 'bool');
                     if (hardFallback !== undefined) dl.hardSubRawFallback = hardFallback;
                     const softSubs = getMultiSelect('setting-soft-subs');
-                    if (softSubs.length) dl.softSubs = softSubs;
+                    dl.softSubs = softSubs;
                     const scaledBorder = getFieldValue('setting-scaled-border');
                     if (scaledBorder !== undefined) dl.subsAddScaledBorder = scaledBorder;
                     const signsForced = getFieldValue('setting-signs-forced', 'bool');
@@ -3868,9 +3959,9 @@ MAINTENANCE NOTES:
                     if (procJobs !== undefined) q.simultaneousProcessingJobs = procJobs;
                     const queuePath = getFieldValue('setting-queue-path');
                     if (queuePath !== undefined) q.queueFilePath = queuePath;
-                    const earlyStart = getFieldValue('setting-early-start', 'bool');
+                    const earlyStart = getFieldValue('setting-queue-early-start', 'bool');
                     if (earlyStart !== undefined) q.downloadAllowEarlyStart = earlyStart;
-                    const skipMissing = getFieldValue('setting-skip-missing', 'bool');
+                    const skipMissing = getFieldValue('setting-queue-skip-missing', 'bool');
                     if (skipMissing !== undefined) q.downloadOnlyWithAllSelectedDubSub = skipMissing;
                     if (Object.keys(q).length) newConfig.queue = q;
                     break;

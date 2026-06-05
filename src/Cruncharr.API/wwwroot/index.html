@@ -4419,7 +4419,7 @@ MAINTENANCE NOTES:
 
         function sortHistoryBy(field) {
             if (!historyData) return;
-            historyData.sort((a, b) => {
+            historyData = [...historyData].sort((a, b) => {
                 if (field === 'title') return (a.seriesTitle || '').localeCompare(b.seriesTitle || '');
 
                 if (field === 'status') {

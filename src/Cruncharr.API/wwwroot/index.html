@@ -2057,7 +2057,7 @@ MAINTENANCE NOTES:
                                 thumbnailUrl: item.image || '',
                                 coverArtUrl: addDownloadSelectedSeries?.coverArtUrl || '',
                                 selectedDubs: item.selectedDubs || [],
-                                downloadSubs: item.downloadSubs || [],
+                                selectedSubs: item.downloadSubs || [],
                                 hslang: item.hslang || 'none',
                                 videoQuality: item.videoQuality || 'best',
                                 versions: item.data?.map(v => ({
@@ -2276,7 +2276,7 @@ MAINTENANCE NOTES:
                                         </div>
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
-                                        ${ep.hasPassed ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}')">Download</button>` : ''}
+                                        ${ep.hasAired ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}')">Download</button>` : ''}
                                     </div>
                                     `;
                                 }).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
@@ -2768,11 +2768,7 @@ MAINTENANCE NOTES:
                         </div>
                         <div class="search-popup" id="history-search-popup" style="display:none;"></div>
                     </div>
-                    <div class="mode-selector" style="margin-left:8px;" title="Only download selected components for partial episodes">
-                        <button class="mode-btn ${onlyDownloadMode.video ? 'active' : ''}" onclick="toggleOnlyDownloadMode('video')">Video</button>
-                        <button class="mode-btn ${onlyDownloadMode.audio ? 'active' : ''}" onclick="toggleOnlyDownloadMode('audio')">Audio</button>
-                        <button class="mode-btn ${onlyDownloadMode.sub ? 'active' : ''}" onclick="toggleOnlyDownloadMode('sub')">Sub</button>
-                    </div>
+                    <!-- Download mode toggles hidden - not yet wired to queue logic -->
                     <button class="toolbar-btn" id="btn-sonarr-menu" onclick="openSonarrMenu(event)">
                         <span class="icon">&#127758;</span>
                         <span>Sonarr</span>
@@ -2885,7 +2881,7 @@ MAINTENANCE NOTES:
                                             ${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}
                                             <br><small style="color:var(--text-secondary);">${item.seriesDescription ? escapeHtml(item.seriesDescription.substring(0, 80)) + '...' : ''}</small>
                                         </td>
-                                        <td>${getStatusBadge(item.downloadStatus || 'done')}</td>
+                                        <td>${getHistoryStatusBadge(item)}</td>
                                         <td>${item.sonarrSeriesId ? `✓ ${escapeHtml(item.sonarrSlugTitle) || 'Matched'}` : '—'}</td>
                                         <td>${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0}</td>
                                         <td>${item.hasNewEpisodes ? '✓' : '—'}</td>
@@ -3400,7 +3396,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Output Directory</div><div class="setting-desc">Where downloads are saved</div></div><input type="text" class="form-input" id="setting-output-dir" value="${escapeHtmlAttribute(dl.outputDirectory||'/downloads')}" style="width:250px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Temp Directory</div></div><input type="text" class="form-input" id="setting-temp-dir" value="${escapeHtmlAttribute(dl.tempDirectory||'/tmp/cruncharr')}" style="width:250px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use Temp Folder</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-temp" ${dl.useTempFolder?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Part Size</div></div><input type="number" class="form-input" id="setting-part-size" value="${escapeHtmlAttribute(dl.partSize||10)}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Part Size</div></div><input type="number" class="form-input" id="setting-part-size" value="${escapeHtmlAttribute(dl.partSize ?? 10)}" min="1" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Dub Download Delay (seconds)</div></div><input type="number" class="form-input" id="setting-dub-delay" value="${escapeHtmlAttribute(dl.dubDownloadDelaySeconds||0)}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Cooldown Between Downloads (seconds)</div><div class="setting-desc">Delay before starting next download</div></div><input type="number" class="form-input" id="setting-cooldown" value="${escapeHtmlAttribute(dl.cooldownDelaySeconds||0)}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Downloads</div></div><input type="number" class="form-input" id="setting-concurrent" value="${escapeHtmlAttribute(dl.simultaneousDownloads||2)}" min="1" max="10" style="width:80px;"></div>
@@ -3410,7 +3406,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Retry Attempts</div></div><input type="number" class="form-input" id="setting-retry" value="${escapeHtmlAttribute(dl.retryAttempts||5)}" min="1" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-delay" value="${escapeHtmlAttribute(dl.retryDelay||5)}" min="0" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Playback Rate Limit Retry Delay (seconds)</div></div><input type="number" class="form-input" id="setting-rate-limit-delay" value="${escapeHtmlAttribute(dl.playbackRateLimitRetryDelaySeconds||30)}" min="0" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Retry Max Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-max-delay" value="${escapeHtmlAttribute(dl.retryMaxDelaySeconds||3600)}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Retry Max Delay (seconds)</div></div><input type="number" class="form-input" id="setting-retry-max-delay" value="${escapeHtmlAttribute(dl.retryMaxDelaySeconds ?? 300)}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use New Download Method</div></div><label class="toggle-switch"><input type="checkbox" id="setting-new-method" ${dl.downloadMethodeNew?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Replace Existing Files</div></div><label class="toggle-switch"><input type="checkbox" id="setting-replace-existing" ${dl.replaceExistingFiles?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
@@ -3455,7 +3451,7 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Filename Settings</span><span class="settings-section-desc">Configure output filenames</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Leading zeros for seasons/episodes</div></div><input type="number" class="form-input" id="setting-leading-zeros" value="${escapeHtmlAttribute(dl.leadingNumbers||2)}" min="1" style="width:80px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Leading zeros for seasons/episodes</div></div><input type="number" class="form-input" id="setting-leading-zeros" value="${escapeHtmlAttribute(dl.leadingNumbers ?? 2)}" min="1" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Filename Whitespace Substitute</div></div><input type="text" class="form-input" id="setting-whitespace-sub" value="${escapeHtmlAttribute(dl.filenameWhitespaceSubstitute||'')}" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Filename Template (\${var} syntax)</div><div class="setting-desc">Variables: \${seriesTitle}, \${season}, \${episode}, \${height}, \${width}, \${videoBitrate}, \${audioBitrate}, \${episodeTitle}, \${seasonTitle}, \${seriesId}, \${episodeId}</div></div><input type="text" class="form-input" id="setting-filename" value="${escapeHtmlAttribute(dl.filename||'\\${seriesTitle} - S\\${season}E\\${episode} [\\${height}p]')}" style="width:400px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Filename Template ({var:00} syntax)</div><div class="setting-desc">Advanced: {seriesTitle}, {season:00}, {episode:00}, {height}, {width}, {episodeTitle}, {seasonTitle}</div></div><input type="text" class="form-input" id="setting-filename-template" value="${escapeHtmlAttribute(dl.filenameTemplate||'')}" style="width:400px;" placeholder="Leave empty to use default above"></div>
@@ -3630,8 +3626,8 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}" style="width:300px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity||0.5)}" min="0" max="1" step="0.1" style="width:100px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input" id="setting-bg-blur" value="${escapeHtmlAttribute(a.backgroundImageBlurRadius||10)}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity ?? 0.5)}" min="0" max="1" step="0.1" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input" id="setting-bg-blur" value="${escapeHtmlAttribute(a.backgroundImageBlurRadius ?? 10)}" min="0" style="width:100px;"></div>
                             </div>
                         </div>
                     `;
@@ -3707,8 +3703,12 @@ MAINTENANCE NOTES:
                 case 'crunchyroll':
                     newConfig.crunchyroll = {
                         useBetaApi: document.getElementById('setting-use-beta-api')?.checked ?? true,
-                        markAsWatched: document.getElementById('setting-mark-watched')?.checked || false,
-                        streamEndpoint: {
+                        markAsWatched: document.getElementById('setting-mark-watched')?.checked || false
+                    };
+                    // Only include streamEndpoint if the controls exist (Download tab is active)
+                    // Otherwise we would overwrite custom endpoints with defaults
+                    if (document.getElementById('setting-stream-endpoint')) {
+                        newConfig.crunchyroll.streamEndpoint = {
                             endpoint: document.getElementById('setting-stream-endpoint')?.value || 'tv/android_tv',
                             authorization: document.getElementById('setting-stream-auth')?.value || '',
                             userAgent: document.getElementById('setting-stream-ua')?.value || '',
@@ -3717,8 +3717,10 @@ MAINTENANCE NOTES:
                             video: document.getElementById('setting-stream-video')?.checked ?? true,
                             audio: document.getElementById('setting-stream-audio')?.checked ?? true,
                             useDefault: document.getElementById('setting-stream-use-default')?.checked ?? false
-                        },
-                        streamEndpointSecondary: {
+                        };
+                    }
+                    if (document.getElementById('setting-stream-endpoint-2')) {
+                        newConfig.crunchyroll.streamEndpointSecondary = {
                             endpoint: document.getElementById('setting-stream-endpoint-2')?.value || '',
                             authorization: document.getElementById('setting-stream-auth-2')?.value || '',
                             userAgent: document.getElementById('setting-stream-ua-2')?.value || '',
@@ -3727,8 +3729,8 @@ MAINTENANCE NOTES:
                             video: document.getElementById('setting-stream-video-2')?.checked ?? true,
                             audio: document.getElementById('setting-stream-audio-2')?.checked ?? true,
                             useDefault: document.getElementById('setting-stream-use-default-2')?.checked ?? false
-                        }
-                    };
+                        };
+                    }
                     // Language/subtitle settings are displayed on the crunchyroll tab
                     newConfig.download = {
                         dubLanguages: getMultiSelect('setting-dub-langs'),
@@ -3781,7 +3783,7 @@ MAINTENANCE NOTES:
                         retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 5,
                         retryDelay: parseInt(document.getElementById('setting-retry-delay')?.value) || 5,
                         playbackRateLimitRetryDelaySeconds: parseInt(document.getElementById('setting-rate-limit-delay')?.value) || 30,
-                        retryMaxDelaySeconds: parseInt(document.getElementById('setting-retry-max-delay')?.value) || 3600,
+                        retryMaxDelaySeconds: parseInt(document.getElementById('setting-retry-max-delay')?.value) || 300,
                         partSize: parseInt(document.getElementById('setting-part-size')?.value) || 10,
                         noVideo: !(document.getElementById('setting-dl-video')?.checked ?? true),
                         noAudio: !(document.getElementById('setting-dl-audio')?.checked ?? true),
@@ -4875,6 +4877,15 @@ MAINTENANCE NOTES:
                 'paused': '<span class="badge badge-retry">Paused</span>'
             };
             return badges[state?.toLowerCase()] || `<span class="badge badge-queued">${escapeHtml(state)}</span>`;
+        }
+
+        function getHistoryStatusBadge(series) {
+            const downloaded = series.downloadedEpisodes || 0;
+            const total = series.totalEpisodes || 0;
+            if (total === 0) return '<span class="badge badge-queued">Empty</span>';
+            if (downloaded >= total) return '<span class="badge badge-done">Complete</span>';
+            if (downloaded > 0) return '<span class="badge badge-downloading">Partial</span>';
+            return '<span class="badge badge-queued">None</span>';
         }
 
         function formatDownloadSpeed(bytesPerSec) {

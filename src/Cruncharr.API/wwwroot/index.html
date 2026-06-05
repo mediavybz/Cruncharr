@@ -943,6 +943,7 @@ MAINTENANCE NOTES:
         }
 
         .dropdown-item:hover { background: var(--bg-hover); }
+        .dropdown-divider { border-top: 1px solid var(--border-color); margin: 4px 0; }
 
         /* Checkbox */
         .checkbox-label {
@@ -1195,6 +1196,7 @@ MAINTENANCE NOTES:
         }
         .history-season-title { font-weight: 600; }
         .history-season-actions { display: flex; gap: 8px; }
+        .history-season-body { padding: 0 15px 15px; }
 
         .history-episode {
             display: flex;
@@ -1326,7 +1328,7 @@ MAINTENANCE NOTES:
         </main>
     </div>
 
-    <div class="modal-overlay" id="modal">
+    <div class="modal-overlay" id="modal" onclick="if(event.target===this)closeModal()">
         <div class="modal">
             <div class="modal-header">
                 <div class="modal-title" id="modal-title">Title</div>
@@ -1351,7 +1353,7 @@ MAINTENANCE NOTES:
         let selectedEpisodes = new Set();
         let addDownloadSearchResults = [];
         let addDownloadSelectedSeries = null;
-        let addDownloadEpisodes = [];
+
         let addDownloadSeriesData = null; // Stores EpisodeAndLanguage data from ListSeriesId
         let addDownloadEpisodeList = []; // Stores EpisodeDisplay list from ListSeriesId
         let selectedEpisodeDubs = new Map(); // episodeKey -> Set of selected dub locales
@@ -1401,7 +1403,8 @@ MAINTENANCE NOTES:
             loadPage(savedPage);
             // Mark nav item active for restored page
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-            const navItem = document.querySelector(`.nav-item[data-page="${CSS.escape(savedPage)}"]`);
+            const escapedPage = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(savedPage) : savedPage.replace(/(["\\])/g, '\\$1');
+            const navItem = document.querySelector(`.nav-item[data-page="${escapedPage}"]`);
             if (navItem) navItem.classList.add('active');
             startPolling();
             setupNavigation();
@@ -1448,6 +1451,8 @@ MAINTENANCE NOTES:
                 clearInterval(historyIntervalId);
                 historyIntervalId = null;
             }
+            // Close history search popup if open
+            if (historySearchPopupOpen) closeHistorySearchPopup();
             currentPage = page;
             const content = document.getElementById('content');
             switch(page) {
@@ -3318,20 +3323,28 @@ MAINTENANCE NOTES:
             renderSettingsTab();
         }
 
+        // Helper: read stream endpoint property (backend may return PascalCase or camelCase)
+        function getStreamProp(endpoint, key, fallback) {
+            if (!endpoint) return fallback;
+            // Check camelCase first, then PascalCase
+            const val = endpoint[key] !== undefined ? endpoint[key] : endpoint[key.charAt(0).toUpperCase() + key.slice(1)];
+            return val !== undefined ? val : fallback;
+        }
+
         function renderSettingsTab() {
             const content = document.getElementById('settings-content');
-            const c = config || {};
-            const cr = c.crunchyroll || {};
-            const dl = c.download || {};
-            const q = c.queue || {};
-            const h = c.history || {};
-            const n = c.notifications || {};
-            const s = c.sonarr || {};
-            const p = c.proxy || {};
-            const f = c.flareSolverr || {};
-            const cal = c.calendar || {};
-            const a = c.appearance || {};
-            const g = c.general || {};
+            if (!content) return;
+            const dl = config?.download || {};
+            const cr = config?.crunchyroll || {};
+            const q = config?.queue || {};
+            const h = config?.history || {};
+            const s = config?.sonarr || {};
+            const n = config?.notifications || {};
+            const p = config?.proxy || {};
+            const f = config?.flareSolverr || {};
+            const a = config?.appearance || {};
+            const cal = config?.calendar || {};
+            
             switch(settingsTab) {
                 case 'general':
                     content.innerHTML = `
@@ -3414,22 +3427,22 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Stream Endpoints</span><span class="settings-section-desc">Stream endpoint configuration</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Primary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint" style="min-width:150px;" onchange="updateStreamDefaults(1)">${STREAM_ENDPOINT_OPTIONS.map(o=>`<option value="${o.value}" ${(cr.streamEndpoint?.endpoint||'tv/android_tv')===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Primary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default" ${cr.streamEndpoint?.useDefault!==false?'checked':''} onchange="updateStreamDefaults(1)"><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth" value="${escapeHtmlAttribute(cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.authorization||''):(cr.streamEndpoint?.authorization||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpoint?.authorization||'Authorization')}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua" value="${escapeHtmlAttribute(cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.userAgent||''):(cr.streamEndpoint?.userAgent||''))}" style="width:250px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpoint?.userAgent||'User-Agent')}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type" value="${escapeHtmlAttribute(cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.deviceType||''):(cr.streamEndpoint?.deviceType||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpoint?.deviceType||'Device Type')}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-1" style="opacity:${cr.streamEndpoint?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name" value="${escapeHtmlAttribute(cr.streamEndpoint?.useDefault!==false?(cr.defaultStreamEndpoint?.deviceName||''):(cr.streamEndpoint?.deviceName||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpoint?.deviceName||'Device Name')}" ${cr.streamEndpoint?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row"><div><div class="setting-label">Primary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video" ${cr.streamEndpoint?.video!==false?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Primary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio" ${cr.streamEndpoint?.audio!==false?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint-2" style="min-width:150px;" onchange="updateStreamDefaults(2)"><option value="" ${!cr.streamEndpointSecondary?.endpoint?'selected':''}>None</option>${STREAM_ENDPOINT_OPTIONS.map(o=>`<option value="${o.value}" ${(cr.streamEndpointSecondary?.endpoint||'')===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default-2" ${cr.streamEndpointSecondary?.useDefault!==false?'checked':''} onchange="updateStreamDefaults(2)"><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth-2" value="${escapeHtmlAttribute(cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.authorization||''):(cr.streamEndpointSecondary?.authorization||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpointSecondary?.authorization||'Authorization')}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua-2" value="${escapeHtmlAttribute(cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.userAgent||''):(cr.streamEndpointSecondary?.userAgent||''))}" style="width:250px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpointSecondary?.userAgent||'User-Agent')}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type-2" value="${escapeHtmlAttribute(cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.deviceType||''):(cr.streamEndpointSecondary?.deviceType||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpointSecondary?.deviceType||'Device Type')}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row stream-field-2" style="opacity:${cr.streamEndpointSecondary?.useDefault!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name-2" value="${escapeHtmlAttribute(cr.streamEndpointSecondary?.useDefault!==false?(cr.defaultStreamEndpointSecondary?.deviceName||''):(cr.streamEndpointSecondary?.deviceName||''))}" style="width:200px;" placeholder="${escapeHtmlAttribute(cr.defaultStreamEndpointSecondary?.deviceName||'Device Name')}" ${cr.streamEndpointSecondary?.useDefault!==false?'disabled':''}></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video-2" ${cr.streamEndpointSecondary?.video!==false?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Secondary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio-2" ${cr.streamEndpointSecondary?.audio!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint" style="min-width:150px;" onchange="updateStreamDefaults(1)">${STREAM_ENDPOINT_OPTIONS.map(o=>`<option value="${o.value}" ${(getStreamProp(cr.streamEndpoint,'endpoint','tv/android_tv'))===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default" ${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'checked':''} onchange="updateStreamDefaults(1)"><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row stream-field-1" style="opacity:${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'0.5':'1'}"><div><div class="setting-label">Primary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth" value="${escapeHtmlAttribute(getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?(getStreamProp(cr.defaultStreamEndpoint,'authorization','')):(getStreamProp(cr.streamEndpoint,'authorization','')))}" style="width:200px;" placeholder="${escapeHtmlAttribute(getStreamProp(cr.defaultStreamEndpoint,'authorization','Authorization'))}" ${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'0.5':'1'}"><div><div class="setting-label">Primary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua" value="${escapeHtmlAttribute(getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?(getStreamProp(cr.defaultStreamEndpoint,'userAgent','')):(getStreamProp(cr.streamEndpoint,'userAgent','')))}" style="width:250px;" placeholder="${escapeHtmlAttribute(getStreamProp(cr.defaultStreamEndpoint,'userAgent','User-Agent'))}" ${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type" value="${escapeHtmlAttribute(getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?(getStreamProp(cr.defaultStreamEndpoint,'deviceType','')):(getStreamProp(cr.streamEndpoint,'deviceType','')))}" style="width:200px;" placeholder="${escapeHtmlAttribute(getStreamProp(cr.defaultStreamEndpoint,'deviceType','Device Type'))}" ${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-1" style="opacity:${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'0.5':'1'}"><div><div class="setting-label">Primary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name" value="${escapeHtmlAttribute(getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?(getStreamProp(cr.defaultStreamEndpoint,'deviceName','')):(getStreamProp(cr.streamEndpoint,'deviceName','')))}" style="width:200px;" placeholder="${escapeHtmlAttribute(getStreamProp(cr.defaultStreamEndpoint,'deviceName','Device Name'))}" ${getStreamProp(cr.streamEndpoint,'useDefault',true)!==false?'disabled':''}></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video" ${getStreamProp(cr.streamEndpoint,'video',true)!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Primary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio" ${getStreamProp(cr.streamEndpoint,'audio',true)!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Endpoint</div></div><select class="form-select" id="setting-stream-endpoint-2" style="min-width:150px;" onchange="updateStreamDefaults(2)"><option value="" ${!getStreamProp(cr.streamEndpointSecondary,'endpoint','')?'selected':''}>None</option>${STREAM_ENDPOINT_OPTIONS.map(o=>`<option value="${o.value}" ${(getStreamProp(cr.streamEndpointSecondary,'endpoint',''))===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Use Default</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-use-default-2" ${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'checked':''} onchange="updateStreamDefaults(2)"><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row stream-field-2" style="opacity:${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Auth</div></div><input type="text" class="form-input" id="setting-stream-auth-2" value="${escapeHtmlAttribute(getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?(getStreamProp(cr.defaultStreamEndpointSecondary,'authorization','')):(getStreamProp(cr.streamEndpointSecondary,'authorization','')))}" style="width:200px;" placeholder="${escapeHtmlAttribute(getStreamProp(cr.defaultStreamEndpointSecondary,'authorization','Authorization'))}" ${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'0.5':'1'}"><div><div class="setting-label">Secondary User-Agent</div></div><input type="text" class="form-input" id="setting-stream-ua-2" value="${escapeHtmlAttribute(getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?(getStreamProp(cr.defaultStreamEndpointSecondary,'userAgent','')):(getStreamProp(cr.streamEndpointSecondary,'userAgent','')))}" style="width:250px;" placeholder="${escapeHtmlAttribute(getStreamProp(cr.defaultStreamEndpointSecondary,'userAgent','User-Agent'))}" ${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Type</div></div><input type="text" class="form-input" id="setting-stream-device-type-2" value="${escapeHtmlAttribute(getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?(getStreamProp(cr.defaultStreamEndpointSecondary,'deviceType','')):(getStreamProp(cr.streamEndpointSecondary,'deviceType','')))}" style="width:200px;" placeholder="${escapeHtmlAttribute(getStreamProp(cr.defaultStreamEndpointSecondary,'deviceType','Device Type'))}" ${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'disabled':''}></div>
+                                <div class="setting-row stream-field-2" style="opacity:${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'0.5':'1'}"><div><div class="setting-label">Secondary Device Name</div></div><input type="text" class="form-input" id="setting-stream-device-name-2" value="${escapeHtmlAttribute(getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?(getStreamProp(cr.defaultStreamEndpointSecondary,'deviceName','')):(getStreamProp(cr.streamEndpointSecondary,'deviceName','')))}" style="width:200px;" placeholder="${escapeHtmlAttribute(getStreamProp(cr.defaultStreamEndpointSecondary,'deviceName','Device Name'))}" ${getStreamProp(cr.streamEndpointSecondary,'useDefault',true)!==false?'disabled':''}></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Video</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-video-2" ${getStreamProp(cr.streamEndpointSecondary,'video',true)!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Secondary Audio</div></div><label class="toggle-switch"><input type="checkbox" id="setting-stream-audio-2" ${getStreamProp(cr.streamEndpointSecondary,'audio',true)!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                         <div class="settings-section">
@@ -3496,6 +3509,8 @@ MAINTENANCE NOTES:
                             </div>
                         </div>
                     `;
+                    // Load encoding presets after rendering so the select is populated
+                    setTimeout(() => loadEncodingPresets(), 0);
                     break;
                 case 'queue':
                     content.innerHTML = `
@@ -3686,137 +3701,256 @@ MAINTENANCE NOTES:
             if (config?.appearance?.theme === 'System') applyTheme();
         });
 
+        // Helper: safely read a form field value only if the element exists
+        function getFieldValue(id, parser) {
+            const el = document.getElementById(id);
+            if (!el) return undefined;
+            if (parser === 'bool') return el.checked;
+            if (parser === 'int') {
+                const n = parseInt(el.value);
+                return isNaN(n) ? undefined : n;
+            }
+            if (parser === 'float') {
+                const n = parseFloat(el.value);
+                return isNaN(n) ? undefined : n;
+            }
+            return el.value || undefined;
+        }
+
         async function saveSettings() {
-            // Build config update for ONLY the currently active tab
-            // This prevents overwriting settings from inactive tabs whose inputs don't exist in the DOM
             let newConfig = {};
             
             switch(settingsTab) {
-                case 'general':
-                    newConfig.general = {
-                        logMode: document.getElementById('setting-log-mode')?.checked || false,
-                        removeFinishedDownload: document.getElementById('setting-remove-finished')?.checked || false,
-                        tokenFilePath: document.getElementById('setting-token-path')?.value || ''
-                    };
+                case 'general': {
+                    const g = {};
+                    const logMode = getFieldValue('setting-log-mode', 'bool');
+                    if (logMode !== undefined) g.logMode = logMode;
+                    const removeFinished = getFieldValue('setting-remove-finished', 'bool');
+                    if (removeFinished !== undefined) g.removeFinishedDownload = removeFinished;
+                    const tokenPath = getFieldValue('setting-token-path');
+                    if (tokenPath !== undefined) g.tokenFilePath = tokenPath;
+                    if (Object.keys(g).length) newConfig.general = g;
                     break;
+                }
                     
-                case 'crunchyroll':
-                    newConfig.crunchyroll = {
-                        useBetaApi: document.getElementById('setting-use-beta-api')?.checked ?? true,
-                        markAsWatched: document.getElementById('setting-mark-watched')?.checked || false
-                    };
-                    // Only include streamEndpoint if the controls exist (Download tab is active)
-                    // Otherwise we would overwrite custom endpoints with defaults
-                    if (document.getElementById('setting-stream-endpoint')) {
-                        newConfig.crunchyroll.streamEndpoint = {
-                            endpoint: document.getElementById('setting-stream-endpoint')?.value || 'tv/android_tv',
-                            authorization: document.getElementById('setting-stream-auth')?.value || '',
-                            userAgent: document.getElementById('setting-stream-ua')?.value || '',
-                            deviceType: document.getElementById('setting-stream-device-type')?.value || '',
-                            deviceName: document.getElementById('setting-stream-device-name')?.value || '',
-                            video: document.getElementById('setting-stream-video')?.checked ?? true,
-                            audio: document.getElementById('setting-stream-audio')?.checked ?? true,
-                            useDefault: document.getElementById('setting-stream-use-default')?.checked ?? false
-                        };
-                    }
-                    if (document.getElementById('setting-stream-endpoint-2')) {
-                        newConfig.crunchyroll.streamEndpointSecondary = {
-                            endpoint: document.getElementById('setting-stream-endpoint-2')?.value || '',
-                            authorization: document.getElementById('setting-stream-auth-2')?.value || '',
-                            userAgent: document.getElementById('setting-stream-ua-2')?.value || '',
-                            deviceType: document.getElementById('setting-stream-device-type-2')?.value || '',
-                            deviceName: document.getElementById('setting-stream-device-name-2')?.value || '',
-                            video: document.getElementById('setting-stream-video-2')?.checked ?? true,
-                            audio: document.getElementById('setting-stream-audio-2')?.checked ?? true,
-                            useDefault: document.getElementById('setting-stream-use-default-2')?.checked ?? false
-                        };
-                    }
-                    // Language/subtitle settings are displayed on the crunchyroll tab
-                    newConfig.download = {
-                        dubLanguages: getMultiSelect('setting-dub-langs'),
-                        downloadDescriptionAudio: document.getElementById('setting-dl-ad')?.checked ?? false,
-                        downloadMultipleDubs: document.getElementById('setting-download-multi-dub')?.checked || false,
-                        hardSubLang: document.getElementById('setting-hard-sub')?.value || 'none',
-                        hardSubRawFallback: document.getElementById('setting-hard-fallback')?.checked || false,
-                        softSubs: getMultiSelect('setting-soft-subs'),
-                        subsAddScaledBorder: document.getElementById('setting-scaled-border')?.value || 'DontAdd',
-                        signsSubsAsForced: document.getElementById('setting-signs-forced')?.checked || false,
-                        ccSubsMuxingFlag: document.getElementById('setting-cc-hi')?.checked || false,
-                        convertVttToAss: document.getElementById('setting-cc-convert')?.checked ?? true,
-                        ccSubsFont: document.getElementById('setting-cc-font')?.value || 'Trebuchet MS'
-                    };
-                    break;
+                case 'crunchyroll': {
+                    const cr = {};
+                    const useBeta = getFieldValue('setting-use-beta-api', 'bool');
+                    if (useBeta !== undefined) cr.useBetaApi = useBeta;
+                    const markWatched = getFieldValue('setting-mark-watched', 'bool');
+                    if (markWatched !== undefined) cr.markAsWatched = markWatched;
                     
-                case 'download':
-                case 'filename':
-                case 'muxing':
-                    newConfig.download = {
-                        outputDirectory: document.getElementById('setting-output-dir')?.value || '/downloads',
-                        tempDirectory: document.getElementById('setting-temp-dir')?.value || '/tmp/cruncharr',
-                        useTempFolder: document.getElementById('setting-use-temp')?.checked || false,
-                        filename: document.getElementById('setting-filename')?.value || '\\${seriesTitle} - S\\${season}E\\${episode} [\\${height}p]',
-                        filenameTemplate: document.getElementById('setting-filename-template')?.value || '',
-                        filenameWhitespaceSubstitute: document.getElementById('setting-whitespace-sub')?.value || '',
-                        videoTitle: document.getElementById('setting-video-title')?.value || null,
-                        includeVideoDescription: document.getElementById('setting-include-desc')?.checked || false,
-                        descriptionLang: document.getElementById('setting-desc-lang')?.value || 'en-US',
-                        leadingNumbers: parseInt(document.getElementById('setting-leading-zeros')?.value) || 2,
-                        qualityVideo: document.getElementById('setting-quality-video')?.value || 'best',
-                        qualityAudio: document.getElementById('setting-quality-audio')?.value || 'best',
-                        defaultAudio: document.getElementById('setting-default-audio')?.value || document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
-                        dlVideoOnce: !(document.getElementById('setting-dl-video-every')?.checked ?? false),
-                        keepDubsSeparate: document.getElementById('setting-keep-separate')?.checked || false,
-                        dubDownloadDelaySeconds: parseInt(document.getElementById('setting-dub-delay')?.value) || 0,
-                        cooldownDelaySeconds: parseInt(document.getElementById('setting-cooldown')?.value) || 0,
-                        defaultSub: document.getElementById('setting-default-sub')?.value || document.getElementById('setting-mux-default-sub')?.value || 'en-US',
-                        simultaneousDownloads: parseInt(document.getElementById('setting-concurrent')?.value) || 2,
-                        simultaneousProcessingJobs: parseInt(document.getElementById('setting-proc-jobs')?.value) || 2,
-                        downloadMethodeNew: document.getElementById('setting-new-method')?.checked || false,
-                        replaceExistingFiles: document.getElementById('setting-replace-existing')?.checked || false,
-                        downloadAllowEarlyStart: document.getElementById('setting-early-start')?.checked || false,
-                        downloadOnlyWithAllSelectedDubSub: document.getElementById('setting-skip-missing')?.checked || false,
-                        defaultVideo: document.getElementById('setting-default-video')?.value || 'none',
-                        muxDefaultSubSigns: document.getElementById('setting-default-sub-signs')?.checked ?? false,
-                        muxDefaultSubForcedDisplay: document.getElementById('setting-default-sub-forced')?.checked ?? false,
-                        downloadSpeedLimit: parseInt(document.getElementById('setting-speed-limit')?.value) || 0,
-                        downloadSpeedInBits: document.getElementById('setting-speed-bits')?.checked || false,
-                        retryAttempts: parseInt(document.getElementById('setting-retry')?.value) || 5,
-                        retryDelay: parseInt(document.getElementById('setting-retry-delay')?.value) || 5,
-                        playbackRateLimitRetryDelaySeconds: parseInt(document.getElementById('setting-rate-limit-delay')?.value) || 30,
-                        retryMaxDelaySeconds: parseInt(document.getElementById('setting-retry-max-delay')?.value) || 300,
-                        partSize: parseInt(document.getElementById('setting-part-size')?.value) || 10,
-                        noVideo: !(document.getElementById('setting-dl-video')?.checked ?? true),
-                        noAudio: !(document.getElementById('setting-dl-audio')?.checked ?? true),
-                        includeChapters: document.getElementById('setting-chapters')?.checked ?? true,
-                        skipMuxing: document.getElementById('setting-skip-mux')?.checked || false,
-                        muxMp4: document.getElementById('setting-mux-mp4')?.checked || false,
-                        muxAudioOnlyToMp3: document.getElementById('setting-mux-mp3')?.checked || false,
-                        skipSubMux: document.getElementById('setting-skip-sub-mux')?.checked || false,
-                        muxFonts: document.getElementById('setting-mux-fonts')?.checked || false,
-                        muxTypesettingFonts: document.getElementById('setting-mux-ts-fonts')?.checked || false,
-                        muxCover: document.getElementById('setting-mux-cover')?.checked || false,
-                        muxDefaultDub: document.getElementById('setting-default-audio')?.value || document.getElementById('setting-mux-default-dub')?.value || 'ja-JP',
-                        muxDefaultSub: document.getElementById('setting-default-sub')?.value || document.getElementById('setting-mux-default-sub')?.value || 'en-US',
-                        muxDefaultSubSigns: document.getElementById('setting-default-sub-signs')?.checked ?? document.getElementById('setting-mux-default-signs')?.checked ?? false,
-                        muxDefaultSubForcedDisplay: document.getElementById('setting-default-sub-forced')?.checked ?? document.getElementById('setting-mux-forced')?.checked ?? false,
-                        syncTiming: document.getElementById('setting-sync-timing')?.checked || false,
-                        syncTimingFullQualityFallback: document.getElementById('setting-sync-fallback')?.checked || false,
-                        syncHwAccel: document.getElementById('setting-sync-hwaccel')?.value || null,
-                        mkvmergeOptions: getListInput('setting-mkvmerge'),
-                        ffmpegOptions: getListInput('setting-ffmpeg'),
-                        encodeEnabled: document.getElementById('setting-encode')?.checked || false,
-                        encodingPreset: document.getElementById('setting-encode-preset')?.value || null
-                    };
-                    break;
+                    const dl = {};
+                    const dubLangs = getMultiSelect('setting-dub-langs');
+                    if (dubLangs.length) dl.dubLanguages = dubLangs;
+                    const dlAd = getFieldValue('setting-dl-ad', 'bool');
+                    if (dlAd !== undefined) dl.downloadDescriptionAudio = dlAd;
+                    const dlMulti = getFieldValue('setting-download-multi-dub', 'bool');
+                    if (dlMulti !== undefined) dl.downloadMultipleDubs = dlMulti;
+                    const hardSub = getFieldValue('setting-hard-sub');
+                    if (hardSub !== undefined) dl.hardSubLang = hardSub;
+                    const hardFallback = getFieldValue('setting-hard-fallback', 'bool');
+                    if (hardFallback !== undefined) dl.hardSubRawFallback = hardFallback;
+                    const softSubs = getMultiSelect('setting-soft-subs');
+                    if (softSubs.length) dl.softSubs = softSubs;
+                    const scaledBorder = getFieldValue('setting-scaled-border');
+                    if (scaledBorder !== undefined) dl.subsAddScaledBorder = scaledBorder;
+                    const signsForced = getFieldValue('setting-signs-forced', 'bool');
+                    if (signsForced !== undefined) dl.signsSubsAsForced = signsForced;
+                    const ccHi = getFieldValue('setting-cc-hi', 'bool');
+                    if (ccHi !== undefined) dl.ccSubsMuxingFlag = ccHi;
+                    const ccConvert = getFieldValue('setting-cc-convert', 'bool');
+                    if (ccConvert !== undefined) dl.convertVttToAss = ccConvert;
+                    const ccFont = getFieldValue('setting-cc-font');
+                    if (ccFont !== undefined) dl.ccSubsFont = ccFont;
                     
-                case 'queue':
-                    newConfig.queue = {
-                        persistQueue: document.getElementById('setting-persist-queue')?.checked || false,
-                        autoDownload: document.getElementById('setting-auto-download')?.checked || false,
-                        simultaneousProcessingJobs: parseInt(document.getElementById('setting-queue-proc-jobs')?.value) || 2,
-                        queueFilePath: document.getElementById('setting-queue-path')?.value || 'Cruncharr/queue.json'
-                    };
+                    if (Object.keys(cr).length) newConfig.crunchyroll = cr;
+                    if (Object.keys(dl).length) newConfig.download = dl;
                     break;
+                }
+                    
+                case 'download': {
+                    const dl = {};
+                    const outDir = getFieldValue('setting-output-dir');
+                    if (outDir !== undefined) dl.outputDirectory = outDir;
+                    const tempDir = getFieldValue('setting-temp-dir');
+                    if (tempDir !== undefined) dl.tempDirectory = tempDir;
+                    const useTemp = getFieldValue('setting-use-temp', 'bool');
+                    if (useTemp !== undefined) dl.useTempFolder = useTemp;
+                    const partSize = getFieldValue('setting-part-size', 'int');
+                    if (partSize !== undefined) dl.partSize = partSize;
+                    const dubDelay = getFieldValue('setting-dub-delay', 'int');
+                    if (dubDelay !== undefined) dl.dubDownloadDelaySeconds = dubDelay;
+                    const cooldown = getFieldValue('setting-cooldown', 'int');
+                    if (cooldown !== undefined) dl.cooldownDelaySeconds = cooldown;
+                    const concurrent = getFieldValue('setting-concurrent', 'int');
+                    if (concurrent !== undefined) dl.simultaneousDownloads = concurrent;
+                    const procJobs = getFieldValue('setting-proc-jobs', 'int');
+                    if (procJobs !== undefined) dl.simultaneousProcessingJobs = procJobs;
+                    const speedLimit = getFieldValue('setting-speed-limit', 'int');
+                    if (speedLimit !== undefined) dl.downloadSpeedLimit = speedLimit;
+                    const speedBits = getFieldValue('setting-speed-bits', 'bool');
+                    if (speedBits !== undefined) dl.downloadSpeedInBits = speedBits;
+                    const retry = getFieldValue('setting-retry', 'int');
+                    if (retry !== undefined) dl.retryAttempts = retry;
+                    const retryDelay = getFieldValue('setting-retry-delay', 'int');
+                    if (retryDelay !== undefined) dl.retryDelay = retryDelay;
+                    const rateLimitDelay = getFieldValue('setting-rate-limit-delay', 'int');
+                    if (rateLimitDelay !== undefined) dl.playbackRateLimitRetryDelaySeconds = rateLimitDelay;
+                    const retryMax = getFieldValue('setting-retry-max-delay', 'int');
+                    if (retryMax !== undefined) dl.retryMaxDelaySeconds = retryMax;
+                    const newMethod = getFieldValue('setting-new-method', 'bool');
+                    if (newMethod !== undefined) dl.downloadMethodeNew = newMethod;
+                    const replaceExisting = getFieldValue('setting-replace-existing', 'bool');
+                    if (replaceExisting !== undefined) dl.replaceExistingFiles = replaceExisting;
+                    const earlyStart = getFieldValue('setting-early-start', 'bool');
+                    if (earlyStart !== undefined) dl.downloadAllowEarlyStart = earlyStart;
+                    const skipMissing = getFieldValue('setting-skip-missing', 'bool');
+                    if (skipMissing !== undefined) dl.downloadOnlyWithAllSelectedDubSub = skipMissing;
+                    const defaultVideo = getFieldValue('setting-default-video');
+                    if (defaultVideo !== undefined) dl.defaultVideo = defaultVideo;
+                    
+                    // Stream endpoints (rendered in Download tab)
+                    const streamEndpoint = {};
+                    const ep1 = getFieldValue('setting-stream-endpoint');
+                    if (ep1 !== undefined) streamEndpoint.endpoint = ep1;
+                    const useDef1 = getFieldValue('setting-stream-use-default', 'bool');
+                    if (useDef1 !== undefined) streamEndpoint.useDefault = useDef1;
+                    const auth1 = getFieldValue('setting-stream-auth');
+                    if (auth1 !== undefined) streamEndpoint.authorization = auth1;
+                    const ua1 = getFieldValue('setting-stream-ua');
+                    if (ua1 !== undefined) streamEndpoint.userAgent = ua1;
+                    const dt1 = getFieldValue('setting-stream-device-type');
+                    if (dt1 !== undefined) streamEndpoint.deviceType = dt1;
+                    const dn1 = getFieldValue('setting-stream-device-name');
+                    if (dn1 !== undefined) streamEndpoint.deviceName = dn1;
+                    const vid1 = getFieldValue('setting-stream-video', 'bool');
+                    if (vid1 !== undefined) streamEndpoint.video = vid1;
+                    const aud1 = getFieldValue('setting-stream-audio', 'bool');
+                    if (aud1 !== undefined) streamEndpoint.audio = aud1;
+                    
+                    const streamSecondary = {};
+                    const ep2 = getFieldValue('setting-stream-endpoint-2');
+                    if (ep2 !== undefined) streamSecondary.endpoint = ep2;
+                    const useDef2 = getFieldValue('setting-stream-use-default-2', 'bool');
+                    if (useDef2 !== undefined) streamSecondary.useDefault = useDef2;
+                    const auth2 = getFieldValue('setting-stream-auth-2');
+                    if (auth2 !== undefined) streamSecondary.authorization = auth2;
+                    const ua2 = getFieldValue('setting-stream-ua-2');
+                    if (ua2 !== undefined) streamSecondary.userAgent = ua2;
+                    const dt2 = getFieldValue('setting-stream-device-type-2');
+                    if (dt2 !== undefined) streamSecondary.deviceType = dt2;
+                    const dn2 = getFieldValue('setting-stream-device-name-2');
+                    if (dn2 !== undefined) streamSecondary.deviceName = dn2;
+                    const vid2 = getFieldValue('setting-stream-video-2', 'bool');
+                    if (vid2 !== undefined) streamSecondary.video = vid2;
+                    const aud2 = getFieldValue('setting-stream-audio-2', 'bool');
+                    if (aud2 !== undefined) streamSecondary.audio = aud2;
+                    
+                    if (Object.keys(streamEndpoint).length) dl.streamEndpoint = streamEndpoint;
+                    if (Object.keys(streamSecondary).length) dl.streamEndpointSecondary = streamSecondary;
+                    
+                    if (Object.keys(dl).length) newConfig.download = dl;
+                    break;
+                }
+                    
+                case 'filename': {
+                    const dl = {};
+                    const filename = getFieldValue('setting-filename');
+                    if (filename !== undefined) dl.filename = filename;
+                    const filenameTemplate = getFieldValue('setting-filename-template');
+                    if (filenameTemplate !== undefined) dl.filenameTemplate = filenameTemplate;
+                    const whitespaceSub = getFieldValue('setting-whitespace-sub');
+                    if (whitespaceSub !== undefined) dl.filenameWhitespaceSubstitute = whitespaceSub;
+                    const leadingNums = getFieldValue('setting-leading-zeros', 'int');
+                    if (leadingNums !== undefined) dl.leadingNumbers = leadingNums;
+                    if (Object.keys(dl).length) newConfig.download = dl;
+                    break;
+                }
+                    
+                case 'muxing': {
+                    const dl = {};
+                    const qualityVideo = getFieldValue('setting-quality-video');
+                    if (qualityVideo !== undefined) dl.qualityVideo = qualityVideo;
+                    const qualityAudio = getFieldValue('setting-quality-audio');
+                    if (qualityAudio !== undefined) dl.qualityAudio = qualityAudio;
+                    const defaultAudio = getFieldValue('setting-default-audio');
+                    if (defaultAudio !== undefined) dl.defaultAudio = defaultAudio;
+                    const dlVideoEvery = getFieldValue('setting-dl-video-every', 'bool');
+                    if (dlVideoEvery !== undefined) dl.dlVideoOnce = !dlVideoEvery;
+                    const keepSeparate = getFieldValue('setting-keep-separate', 'bool');
+                    if (keepSeparate !== undefined) dl.keepDubsSeparate = keepSeparate;
+                    const defaultSub = getFieldValue('setting-default-sub');
+                    if (defaultSub !== undefined) dl.defaultSub = defaultSub;
+                    const muxDefaultDub = getFieldValue('setting-mux-default-dub');
+                    if (muxDefaultDub !== undefined) dl.muxDefaultDub = muxDefaultDub;
+                    const muxDefaultSub = getFieldValue('setting-mux-default-sub');
+                    if (muxDefaultSub !== undefined) dl.muxDefaultSub = muxDefaultSub;
+                    const skipMux = getFieldValue('setting-skip-mux', 'bool');
+                    if (skipMux !== undefined) dl.skipMuxing = skipMux;
+                    const muxMp4 = getFieldValue('setting-mux-mp4', 'bool');
+                    if (muxMp4 !== undefined) dl.muxMp4 = muxMp4;
+                    const muxMp3 = getFieldValue('setting-mux-mp3', 'bool');
+                    if (muxMp3 !== undefined) dl.muxAudioOnlyToMp3 = muxMp3;
+                    const skipSubMux = getFieldValue('setting-skip-sub-mux', 'bool');
+                    if (skipSubMux !== undefined) dl.skipSubMux = skipSubMux;
+                    const muxFonts = getFieldValue('setting-mux-fonts', 'bool');
+                    if (muxFonts !== undefined) dl.muxFonts = muxFonts;
+                    const muxTsFonts = getFieldValue('setting-mux-ts-fonts', 'bool');
+                    if (muxTsFonts !== undefined) dl.muxTypesettingFonts = muxTsFonts;
+                    const muxCover = getFieldValue('setting-mux-cover', 'bool');
+                    if (muxCover !== undefined) dl.muxCover = muxCover;
+                    const videoTitle = getFieldValue('setting-video-title');
+                    if (videoTitle !== undefined) dl.videoTitle = videoTitle;
+                    const includeDesc = getFieldValue('setting-include-desc', 'bool');
+                    if (includeDesc !== undefined) dl.includeVideoDescription = includeDesc;
+                    const descLang = getFieldValue('setting-desc-lang');
+                    if (descLang !== undefined) dl.descriptionLang = descLang;
+                    const muxDefaultSubSigns = getFieldValue('setting-default-sub-signs', 'bool');
+                    if (muxDefaultSubSigns !== undefined) dl.muxDefaultSubSigns = muxDefaultSubSigns;
+                    const muxDefaultSubForced = getFieldValue('setting-default-sub-forced', 'bool');
+                    if (muxDefaultSubForced !== undefined) dl.muxDefaultSubForcedDisplay = muxDefaultSubForced;
+                    const syncTiming = getFieldValue('setting-sync-timing', 'bool');
+                    if (syncTiming !== undefined) dl.syncTiming = syncTiming;
+                    const syncFallback = getFieldValue('setting-sync-fallback', 'bool');
+                    if (syncFallback !== undefined) dl.syncTimingFullQualityFallback = syncFallback;
+                    const syncHwAccel = getFieldValue('setting-sync-hwaccel');
+                    if (syncHwAccel !== undefined) dl.syncHwAccel = syncHwAccel;
+                    const mkvmerge = getListInput('setting-mkvmerge');
+                    if (mkvmerge.length) dl.mkvmergeOptions = mkvmerge;
+                    const ffmpeg = getListInput('setting-ffmpeg');
+                    if (ffmpeg.length) dl.ffmpegOptions = ffmpeg;
+                    const encode = getFieldValue('setting-encode', 'bool');
+                    if (encode !== undefined) dl.encodeEnabled = encode;
+                    const encodePreset = getFieldValue('setting-encode-preset');
+                    if (encodePreset !== undefined) dl.encodingPreset = encodePreset;
+                    const noVideo = getFieldValue('setting-dl-video', 'bool');
+                    if (noVideo !== undefined) dl.noVideo = !noVideo;
+                    const noAudio = getFieldValue('setting-dl-audio', 'bool');
+                    if (noAudio !== undefined) dl.noAudio = !noAudio;
+                    const chapters = getFieldValue('setting-chapters', 'bool');
+                    if (chapters !== undefined) dl.includeChapters = chapters;
+                    if (Object.keys(dl).length) newConfig.download = dl;
+                    break;
+                }
+                    
+                case 'queue': {
+                    const q = {};
+                    const persist = getFieldValue('setting-persist-queue', 'bool');
+                    if (persist !== undefined) q.persistQueue = persist;
+                    const autoDl = getFieldValue('setting-auto-download', 'bool');
+                    if (autoDl !== undefined) q.autoDownload = autoDl;
+                    const procJobs = getFieldValue('setting-queue-proc-jobs', 'int');
+                    if (procJobs !== undefined) q.simultaneousProcessingJobs = procJobs;
+                    const queuePath = getFieldValue('setting-queue-path');
+                    if (queuePath !== undefined) q.queueFilePath = queuePath;
+                    const earlyStart = getFieldValue('setting-early-start', 'bool');
+                    if (earlyStart !== undefined) q.downloadAllowEarlyStart = earlyStart;
+                    const skipMissing = getFieldValue('setting-skip-missing', 'bool');
+                    if (skipMissing !== undefined) q.downloadOnlyWithAllSelectedDubSub = skipMissing;
+                    if (Object.keys(q).length) newConfig.queue = q;
+                    break;
+                }
                     
                 case 'calendar':
                     newConfig.calendar = {
@@ -4281,7 +4415,11 @@ MAINTENANCE NOTES:
             historyData.sort((a, b) => {
                 if (field === 'title') return (a.seriesTitle || '').localeCompare(b.seriesTitle || '');
 
-                if (field === 'status') return (a.downloadStatus || '').localeCompare(b.downloadStatus || '');
+                if (field === 'status') {
+                    const aStatus = (a.downloadedEpisodes||0) >= (a.totalEpisodes||0) ? 2 : (a.downloadedEpisodes||0) > 0 ? 1 : 0;
+                    const bStatus = (b.downloadedEpisodes||0) >= (b.totalEpisodes||0) ? 2 : (b.downloadedEpisodes||0) > 0 ? 1 : 0;
+                    return aStatus - bStatus;
+                }
                 return 0;
             });
             renderHistoryContent();
@@ -4850,8 +4988,10 @@ MAINTENANCE NOTES:
                 if (modal && modal.classList.contains('active')) {
                     closeModal();
                 }
-                // Also close any open dropdowns
-                document.querySelectorAll('.dropdown-menu.active').forEach(d => d.remove());
+                // Also close any open dropdowns (properly remove listeners)
+                document.querySelectorAll('.dropdown-menu.active').forEach(d => {
+                    removeDropdown(d.id);
+                });
                 // Close history search popup
                 if (historySearchPopupOpen) closeHistorySearchPopup();
             }
@@ -4865,18 +5005,6 @@ MAINTENANCE NOTES:
             toast.innerHTML = `<span>${type === 'success' ? '&#10004;' : type === 'error' ? '&#10060;' : '&#9888;'}</span><span>${escapeHtml(message)}</span>`;
             container.appendChild(toast);
             setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; setTimeout(() => toast.remove(), 300); }, TOAST_DISPLAY_DURATION_MS);
-        }
-
-        function getStatusBadge(state) {
-            const badges = {
-                'queued': '<span class="badge badge-queued">Queued</span>',
-                'downloading': '<span class="badge badge-downloading">Downloading</span>',
-                'processing': '<span class="badge badge-downloading">Processing</span>',
-                'done': '<span class="badge badge-done">Done</span>',
-                'error': '<span class="badge badge-error">Error</span>',
-                'paused': '<span class="badge badge-retry">Paused</span>'
-            };
-            return badges[state?.toLowerCase()] || `<span class="badge badge-queued">${escapeHtml(state)}</span>`;
         }
 
         function getHistoryStatusBadge(series) {
@@ -4948,6 +5076,7 @@ MAINTENANCE NOTES:
             window.addEventListener('beforeunload', () => {
                 if (authIntervalId) clearInterval(authIntervalId);
                 if (historyIntervalId) clearInterval(historyIntervalId);
+                if (sseReconnectTimeout) clearTimeout(sseReconnectTimeout);
                 if (eventSource) {
                     eventSource.close();
                     eventSource = null;
@@ -4956,7 +5085,6 @@ MAINTENANCE NOTES:
         }
         
         let sseRetryCount = 0;
-        ;
         let sseReconnecting = false;
         let sseReconnectTimeout = null;
 

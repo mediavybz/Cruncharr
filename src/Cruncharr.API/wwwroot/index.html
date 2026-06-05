@@ -2385,11 +2385,11 @@ MAINTENANCE NOTES:
                         <div class="history-poster" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')" style="cursor: pointer;">
                             <div class="history-poster-img">
                                 ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img src="${escapeHtml(series.thumbnailUrl)}" alt="">` : '📺'}
-                                ${series.episodes.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
+                                ${series.episodes?.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
                             </div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(series.seriesTitle)}">${escapeHtml(series.seriesTitle)}</div>
-                                <div class="history-poster-meta">${series.episodes.length} upcoming episode(s)</div>
+                                <div class="history-poster-meta">${series.episodes?.length || 0} upcoming episode(s)</div>
                                 <div class="history-poster-meta" style="color: var(--accent-green);">
                                     Next: ${series.episodes?.length > 0 ? formatDate(series.episodes[0].airDate) : 'Unknown'}
                                 </div>

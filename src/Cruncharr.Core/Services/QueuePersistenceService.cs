@@ -17,7 +17,6 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
     private readonly string _queueFilePath;
     private readonly object _syncLock = new();
     private Timer? _saveTimer;
-    private List<QueueItem>? _latestQueue;
     private readonly ILogger<QueuePersistenceService>? _logger;
 
     public QueuePersistenceService(string queueFilePath, ILogger<QueuePersistenceService>? logger = null)

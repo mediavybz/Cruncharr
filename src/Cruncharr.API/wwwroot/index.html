@@ -3529,6 +3529,21 @@ MAINTENANCE NOTES:
             {value:'ta-IN',label:'Tamil'},{value:'te-IN',label:'Telugu'}
         ];
 
+        // Calendar language codes match Crunchyroll simulcast calendar filter keys
+        const CALENDAR_LANG_OPTIONS = [
+            {value:'en-us', label:'English (US)'},
+            {value:'es', label:'Spanish'},
+            {value:'es-es', label:'Spanish (Spain)'},
+            {value:'pt-br', label:'Portuguese (Brazil)'},
+            {value:'pt-pt', label:'Portuguese (Portugal)'},
+            {value:'fr', label:'French'},
+            {value:'de', label:'German'},
+            {value:'it', label:'Italian'},
+            {value:'ru', label:'Russian'},
+            {value:'ar', label:'Arabic'},
+            {value:'hi', label:'Hindi'}
+        ];
+
         const STREAM_ENDPOINT_OPTIONS = [
             {value:'tv/android_tv',label:'Android TV'},
             {value:'android/phone',label:'Android Phone'},
@@ -3957,7 +3972,7 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Calendar Settings</span><span class="settings-section-desc">Calendar display options</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Calendar Language</div></div><select class="form-select" id="setting-cal-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${cal.language===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Calendar Language</div></div><select class="form-select" id="setting-cal-lang" style="min-width:150px;">${CALENDAR_LANG_OPTIONS.map(o=>`<option value="${o.value}" ${cal.language===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Dub Filter</div></div><select class="form-select" id="setting-cal-dub-filter" style="min-width:150px;"><option value="none" ${cal.dubFilter==='none'?'selected':''}>None</option><option value="dubbed" ${cal.dubFilter==='dubbed'?'selected':''}>Dubbed Only</option><option value="subbed" ${cal.dubFilter==='subbed'?'selected':''}>Subbed Only</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Hide Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-hide-dubs" ${cal.hideDubs?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>

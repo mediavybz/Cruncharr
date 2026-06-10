@@ -90,8 +90,19 @@ public class CrSimulcastCalendarFilter
 
         var lang = (language ?? "en-us").ToLowerInvariant();
 
-        // If no filter defined for this language, include all
+        // Try exact match, then fall back to base language code (e.g., "fr-fr" -> "fr")
         if (!LanguageFilters.TryGetValue(lang, out var hints))
+        {
+            var dashIndex = lang.IndexOf('-');
+            if (dashIndex > 0)
+            {
+                var baseLang = lang.Substring(0, dashIndex);
+                LanguageFilters.TryGetValue(baseLang, out hints);
+            }
+        }
+
+        // If no filter defined for this language, include all
+        if (hints == null)
             return true;
 
         // Check if season name contains any hint for this language

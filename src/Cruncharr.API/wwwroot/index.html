@@ -106,15 +106,28 @@ MAINTENANCE NOTES:
         }
 
         [data-theme="light"] {
-            --bg-primary: var(--cr-white);
-            --bg-secondary: var(--cr-gray-100);
-            --bg-tertiary: var(--cr-gray-200);
-            --bg-hover: var(--cr-gray-200);
-            --bg-card: var(--cr-white);
-            --text-primary: #000000;
-            --text-secondary: var(--cr-gray-600);
-            --text-muted: var(--cr-gray-400);
-            --border-color: var(--cr-gray-200);
+            --cr-hero-bg: #f5f5f5;
+            --cr-dark: #ffffff;
+            --cr-charcoal: #f0f0f0;
+            --cr-gray-900: #e8e8e8;
+            --cr-gray-800: #dddddd;
+            --cr-gray-700: #cccccc;
+            --cr-gray-600: #999999;
+            --cr-gray-500: #777777;
+            --cr-gray-400: #555555;
+            --cr-gray-300: #333333;
+            --cr-gray-200: #222222;
+            --cr-gray-100: #111111;
+            --cr-white: #000000;
+            --bg-primary: var(--cr-hero-bg);
+            --bg-secondary: var(--cr-charcoal);
+            --bg-tertiary: var(--cr-gray-900);
+            --bg-hover: var(--cr-gray-800);
+            --bg-card: var(--cr-dark);
+            --text-primary: #1a1a1a;
+            --text-secondary: var(--cr-gray-400);
+            --text-muted: var(--cr-gray-600);
+            --border-color: var(--cr-gray-700);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -124,6 +137,7 @@ MAINTENANCE NOTES:
             background: var(--bg-primary);
             color: var(--text-primary);
             overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .app-container { display: flex; height: 100vh; }
@@ -1250,16 +1264,318 @@ MAINTENANCE NOTES:
             color: var(--accent-green);
         }
 
-        /* Responsive */
+        /* Mobile Responsive - Comprehensive */
         @media (max-width: 768px) {
-            .sidebar { width: 60px; }
-            .sidebar-title, .nav-item span, .nav-section-title { display: none; }
-            .header-search { width: 200px; }
+            :root { --sidebar-width: 0px; }
+            
+            .app-container { flex-direction: column; }
+            
+            /* Mobile Sidebar - Bottom Navigation */
+            .sidebar {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                height: 60px;
+                flex-direction: row;
+                border-right: none;
+                border-top: 1px solid var(--border-color);
+                z-index: 1000;
+                background: var(--bg-secondary);
+                overflow: visible;
+            }
+            
+            .sidebar-header { display: none; }
+            .sidebar-footer { display: none; }
+            .nav-section-title { display: none; }
+            
+            .sidebar-nav {
+                display: flex;
+                flex-direction: row;
+                justify-content: space-around;
+                align-items: center;
+                padding: 0;
+                flex: 1;
+                width: 100%;
+            }
+            
+            .nav-item {
+                flex-direction: column;
+                padding: 6px 8px;
+                gap: 2px;
+                font-size: 0.65em;
+                border-left: none;
+                border-top: 3px solid transparent;
+                flex: 1;
+                justify-content: center;
+                text-align: center;
+                min-width: 0;
+            }
+            
+            .nav-item.active {
+                border-left-color: transparent;
+                border-top-color: var(--accent-orange);
+            }
+            
+            .nav-item span {
+                display: block;
+                font-size: 0.85em;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 100%;
+            }
+            
+            .nav-icon {
+                width: 22px;
+                height: 22px;
+                font-size: 1.3em;
+            }
+            
+            /* Main Content Adjustments */
+            .main-content {
+                height: calc(100vh - 60px);
+                padding-bottom: 60px;
+            }
+            
+            .header {
+                height: 50px;
+                padding: 0 12px;
+            }
+            
+            .header-search {
+                width: 100%;
+                max-width: 200px;
+            }
+            
+            .header-actions { gap: 8px; }
+            .header-btn { padding: 6px 10px; font-size: 0.8em; }
+            
+            .content { padding: 12px; }
+            
+            .page-title { font-size: 1.3em; }
+            .page-subtitle { font-size: 0.85em; }
+            
+            /* Cards */
+            .card { padding: 12px; margin-bottom: 12px; }
+            .card-title { font-size: 1em; }
+            
+            /* Downloads */
+            .download-item {
+                flex-direction: column;
+                gap: 10px;
+                padding: 12px;
+            }
+            
+            .download-thumb {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 16/9;
+            }
+            
+            .download-info { width: 100%; }
+            .download-actions {
+                width: 100%;
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
+            
+            /* Episodes */
+            .episode-item {
+                flex-direction: column;
+                gap: 8px;
+                padding: 10px;
+            }
+            
+            .episode-thumb {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 16/9;
+            }
+            
+            .episode-info { width: 100%; }
+            
+            /* Series Grid */
+            .series-grid {
+                grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+                gap: 10px;
+            }
+            
+            .series-card-thumb {
+                height: 180px;
+            }
+            
+            .series-card-title {
+                font-size: 0.8em;
+            }
+            
+            /* Calendar */
             .calendar-grid { grid-template-columns: 1fr; }
-            .download-item { flex-direction: column; }
-            .download-thumb { width: 100%; height: auto; aspect-ratio: 16/9; }
-            .episode-item { flex-direction: column; }
-            .episode-thumb { width: 100%; height: auto; aspect-ratio: 16/9; }
+            .calendar-day { min-height: auto; }
+            
+            /* History */
+            .history-item {
+                flex-direction: column;
+                gap: 8px;
+                padding: 10px;
+            }
+            
+            .history-thumb {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 16/9;
+            }
+            
+            /* Forms */
+            .form-grid {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+            
+            .form-group {
+                margin-bottom: 12px;
+            }
+            
+            /* Settings */
+            .settings-tabs {
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+            
+            .settings-tab {
+                padding: 6px 10px;
+                font-size: 0.8em;
+            }
+            
+            .setting-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 6px;
+            }
+            
+            .setting-label {
+                font-size: 0.85em;
+            }
+            
+            /* Queue Stats */
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            
+            .stat-card {
+                padding: 10px;
+            }
+            
+            .stat-value {
+                font-size: 1.5em;
+            }
+            
+            /* Modals */
+            .modal-content {
+                width: 95%;
+                max-width: 95%;
+                margin: 10px;
+                max-height: 90vh;
+            }
+            
+            /* Toast */
+            .toast {
+                left: 10px;
+                right: 10px;
+                max-width: none;
+                bottom: 70px;
+            }
+            
+            /* Touch-friendly buttons */
+            .header-btn, .action-btn, .nav-item {
+                min-height: 36px;
+                min-width: 36px;
+            }
+            
+            /* Progress bars */
+            .progress-bar {
+                height: 6px;
+            }
+            
+            /* Search results */
+            .search-results {
+                max-height: 50vh;
+            }
+        }
+        
+        /* Tablet (769px - 1024px) */
+        @media (min-width: 769px) and (max-width: 1024px) {
+            :root { --sidebar-width: 180px; }
+            
+            .sidebar-header {
+                padding: 15px;
+            }
+            
+            .nav-item {
+                padding: 10px 15px;
+                font-size: 0.85em;
+            }
+            
+            .header-search {
+                width: 250px;
+            }
+            
+            .series-grid {
+                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            }
+        }
+        
+        /* Large screens */
+        @media (min-width: 1400px) {
+            .series-grid {
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            }
+            
+            .content {
+                padding: 30px;
+            }
+        }
+        
+        /* Safe area for notched phones */
+        @supports (padding-bottom: env(safe-area-inset-bottom)) {
+            @media (max-width: 768px) {
+                .sidebar {
+                    padding-bottom: env(safe-area-inset-bottom);
+                    height: calc(60px + env(safe-area-inset-bottom));
+                }
+                
+                .main-content {
+                    padding-bottom: calc(60px + env(safe-area-inset-bottom));
+                }
+                
+                .toast {
+                    bottom: calc(70px + env(safe-area-inset-bottom));
+                }
+            }
+        }
+        
+        /* Touch device optimizations */
+        @media (hover: none) and (pointer: coarse) {
+            .nav-item, .header-btn, .action-btn, .series-card, .episode-item, .download-item {
+                cursor: default;
+            }
+            
+            /* Larger touch targets */
+            .nav-item {
+                padding-top: 8px;
+                padding-bottom: 8px;
+            }
+            
+            /* Remove hover effects that stick on touch */
+            .nav-item:hover {
+                background: transparent;
+            }
+            
+            .nav-item.active:hover {
+                background: var(--bg-tertiary);
+            }
         }
     </style>
 </head>

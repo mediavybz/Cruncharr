@@ -1,5 +1,6 @@
-using System.Text.Json;
+using Newtonsoft.Json;
 using Cruncharr.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace Cruncharr.Core.Services;
 
@@ -17,11 +18,17 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
     private readonly object _syncLock = new();
     private Timer? _saveTimer;
     private List<QueueItem>? _latestQueue;
+    private readonly ILogger<QueuePersistenceService>? _logger;
 
-    public QueuePersistenceService(string queueFilePath)
+    public QueuePersistenceService(string queueFilePath, ILogger<QueuePersistenceService>? logger = null)
     {
         _queueFilePath = queueFilePath ?? throw new ArgumentNullException(nameof(queueFilePath));
-        Directory.CreateDirectory(Path.GetDirectoryName(_queueFilePath)!);
+        _logger = logger;
+        var dir = Path.GetDirectoryName(_queueFilePath);
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
     }
 
     public void SaveQueue(List<QueueItem> queue)
@@ -36,25 +43,8 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
     public void ScheduleSave(List<QueueItem> queue)
     {
-        lock (_syncLock)
-        {
-            _latestQueue = queue;
-            if (_saveTimer == null)
-            {
-                _saveTimer = new Timer(_ =>
-                {
-                    List<QueueItem>? q;
-                    lock (_syncLock)
-                    {
-                        q = _latestQueue;
-                    }
-                    if (q != null) PersistQueue(q);
-                }, null, TimeSpan.FromMilliseconds(750), Timeout.InfiniteTimeSpan);
-                return;
-            }
-
-            _saveTimer.Change(TimeSpan.FromMilliseconds(750), Timeout.InfiniteTimeSpan);
-        }
+        // Save immediately instead of using timer (timer may be trimmed in release builds)
+        PersistQueue(queue);
     }
 
     public List<QueueItem>? LoadQueue()
@@ -68,10 +58,7 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
             if (string.IsNullOrWhiteSpace(json))
                 return null;
 
-            var queue = JsonSerializer.Deserialize<List<QueueItem>>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+            var queue = JsonConvert.DeserializeObject<List<QueueItem>>(json);
 
             if (queue != null)
             {
@@ -83,8 +70,9 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
             return queue;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger?.LogError(ex, "Failed to load queue from {Path}", _queueFilePath);
             return null;
         }
     }
@@ -117,18 +105,16 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
             return;
         }
 
-        var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
+        var json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
 
         try
         {
             File.WriteAllText(_queueFilePath, json);
+            _logger?.LogDebug("Queue persisted: {Count} items to {Path}", snapshot.Count, _queueFilePath);
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore write failures - queue will be re-persisted on next change
+            _logger?.LogError(ex, "Failed to write queue file to {Path}", _queueFilePath);
         }
     }
 
@@ -158,8 +144,8 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
     {
         try
         {
-            var json = JsonSerializer.Serialize(item);
-            return JsonSerializer.Deserialize<QueueItem>(json);
+            var json = JsonConvert.SerializeObject(item);
+            return JsonConvert.DeserializeObject<QueueItem>(json);
         }
         catch
         {

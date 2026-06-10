@@ -289,7 +289,13 @@ public class DownloadConfig
     public string QualityAudio { get; set; } = "best";
 
     [YamlMember(Alias = "dub_languages", ApplyNamingConventions = false)]
-    public List<string> DubLanguages { get; set; } = new() { "ja-JP" };
+    public List<string> DubLanguages { get; set; } = new() {
+        "ja-JP", "de-DE", "en-US", "en-IN", "es-419", "es-ES",
+        "pt-BR", "pt-PT", "fr-FR", "it-IT", "pl-PL", "id-ID",
+        "ms-MY", "ca-ES", "vi-VN", "tr-TR", "ru-RU", "ar-SA",
+        "hi-IN", "ta-IN", "te-IN", "zh-CN", "zh-HK", "zh-TW",
+        "ko-KR", "th-TH"
+    };
 
     [YamlMember(Alias = "default_audio", ApplyNamingConventions = false)]
     public string DefaultAudio { get; set; } = "ja-JP";
@@ -331,10 +337,22 @@ public class DownloadConfig
     public int StreamServer { get; set; } = 0;
 
     [YamlMember(Alias = "subtitle_languages", ApplyNamingConventions = false)]
-    public List<string> SubtitleLanguages { get; set; } = new() { "en-US" };
+    public List<string> SubtitleLanguages { get; set; } = new() {
+        "ja-JP", "de-DE", "en-US", "en-IN", "es-419", "es-ES",
+        "pt-BR", "pt-PT", "fr-FR", "it-IT", "pl-PL", "id-ID",
+        "ms-MY", "ca-ES", "vi-VN", "tr-TR", "ru-RU", "ar-SA",
+        "hi-IN", "ta-IN", "te-IN", "zh-CN", "zh-HK", "zh-TW",
+        "ko-KR", "th-TH"
+    };
 
     [YamlMember(Alias = "soft_subs", ApplyNamingConventions = false)]
-    public List<string> SoftSubs { get; set; } = new() { "en-US" };
+    public List<string> SoftSubs { get; set; } = new() {
+        "ja-JP", "de-DE", "en-US", "en-IN", "es-419", "es-ES",
+        "pt-BR", "pt-PT", "fr-FR", "it-IT", "pl-PL", "id-ID",
+        "ms-MY", "ca-ES", "vi-VN", "tr-TR", "ru-RU", "ar-SA",
+        "hi-IN", "ta-IN", "te-IN", "zh-CN", "zh-HK", "zh-TW",
+        "ko-KR", "th-TH"
+    };
 
     [YamlMember(Alias = "default_sub", ApplyNamingConventions = false)]
     public string DefaultSub { get; set; } = "en-US";
@@ -539,9 +557,7 @@ public class QueueConfig
     public int SimultaneousProcessingJobs { get; set; } = 2;
 
     [YamlMember(Alias = "queue_file_path", ApplyNamingConventions = false)]
-    public string QueueFilePath { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "Cruncharr", "queue.json");
+    public string QueueFilePath { get; set; } = "/config/queue.json";
 
     [YamlMember(Alias = "shutdown_when_queue_empty", ApplyNamingConventions = false)]
     public bool ShutdownWhenQueueEmpty { get; set; } = false;

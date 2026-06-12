@@ -2303,8 +2303,14 @@ MAINTENANCE NOTES:
         }
 
         function toggleAddAll(checked) {
+            // Only act on the episodes currently displayed (season filter applied),
+            // otherwise hidden episodes from other seasons get queued too
+            const currentSeasonId = document.getElementById('season-dropdown')?.value;
+            const visibleEpisodes = currentSeasonId
+                ? addDownloadEpisodeList.filter(ep => ep.id === currentSeasonId)
+                : addDownloadEpisodeList;
             if (checked) {
-                addDownloadEpisodeList.forEach(ep => {
+                visibleEpisodes.forEach(ep => {
                     const epKey = ep.e;
                     selectedEpisodes.add(epKey);
                     // Select all available dubs
@@ -2506,7 +2512,7 @@ MAINTENANCE NOTES:
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                     <button class="header-btn" onclick="changeWeek(-1)">&#9664; Prev</button>
                     <div style="display:flex; gap:10px; align-items:center;">
-                        <button class="header-btn" onclick="fetchCalendar()">&#128260; Refresh</button>
+                        <button class="header-btn" onclick="fetchCalendar(true)">&#128260; Refresh</button>
                         <select class="form-select" id="calendar-lang" style="min-width:150px;" onchange="onCalendarLanguageChange(this.value)">
                             <option value="en-us">English</option>
                             <option value="es">Spanish</option>
@@ -2559,7 +2565,7 @@ MAINTENANCE NOTES:
             fetchCalendar();
         }
 
-        async function fetchCalendar() {
+        async function fetchCalendar(forceUpdate = false) {
             try {
                 // Compute Monday of target week
                 // dayOfWeek: 0=Sun, 1=Mon, ..., 6=Sat
@@ -2577,7 +2583,7 @@ MAINTENANCE NOTES:
                 const langSelect = document.getElementById('calendar-lang');
                 const language = langSelect ? langSelect.value : 'en-us';
                 
-                const res = await fetch(`/api/v1/calendar?date=${dateStr}&language=${language}`);
+                const res = await fetch(`/api/v1/calendar?date=${dateStr}&language=${language}${forceUpdate ? '&forceUpdate=true' : ''}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const grid = document.getElementById('calendar-grid');
@@ -2665,7 +2671,8 @@ MAINTENANCE NOTES:
 
         async function fetchUpcomingSeasons() {
             try {
-                const res = await fetch('/api/v1/calendar/upcoming');
+                const language = (config?.calendar?.language || 'en-us').toLowerCase();
+                const res = await fetch(`/api/v1/calendar/upcoming?language=${encodeURIComponent(language)}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const episodes = await res.json();
                 renderUpcomingSeasonsContent(episodes || []);
@@ -2805,9 +2812,13 @@ MAINTENANCE NOTES:
                     
                     addDownloadEpisodeList = result.list || [];
                     addDownloadSeriesData = result.data || {};
-                    
+                    // onSeasonChange and showFeaturedMusic require a selected series -
+                    // without this the episode list never renders when coming from Browse
+                    const browseTitle = addDownloadEpisodeList[0]?.seasonTitle || 'Selected Series';
+                    addDownloadSelectedSeries = { id: seriesId, title: browseTitle };
+
                     const searchInput = document.getElementById('add-search-input');
-                    if (searchInput) searchInput.value = 'Selected Series';
+                    if (searchInput) searchInput.value = browseTitle;
                     
                     const musicBtn = document.getElementById('music-btn');
                     if (musicBtn) musicBtn.style.display = 'inline-flex';
@@ -3146,6 +3157,8 @@ MAINTENANCE NOTES:
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 historyData = data || [];
+                // Same endpoint feeds the series-detail modal - keep its cache fresh
+                historyRichData = historyData;
                 renderHistoryContent();
             } catch (e) {
                 const el = document.getElementById('history-content');
@@ -3972,7 +3985,7 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Calendar Settings</span><span class="settings-section-desc">Calendar display options</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Calendar Language</div></div><select class="form-select" id="setting-cal-lang" style="min-width:150px;">${CALENDAR_LANG_OPTIONS.map(o=>`<option value="${o.value}" ${cal.language===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Calendar Language</div></div><select class="form-select" id="setting-cal-lang" style="min-width:150px;">${CALENDAR_LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(cal.language||'').toLowerCase()===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Dub Filter</div></div><select class="form-select" id="setting-cal-dub-filter" style="min-width:150px;"><option value="none" ${cal.dubFilter==='none'?'selected':''}>None</option><option value="dubbed" ${cal.dubFilter==='dubbed'?'selected':''}>Dubbed Only</option><option value="subbed" ${cal.dubFilter==='subbed'?'selected':''}>Subbed Only</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Hide Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-hide-dubs" ${cal.hideDubs?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
@@ -4094,7 +4107,7 @@ MAINTENANCE NOTES:
                     const dlMulti = getFieldValue('setting-download-multi-dub', 'bool');
                     if (dlMulti !== undefined) dl.downloadMultipleDubs = dlMulti;
                     const hardSub = getFieldValue('setting-hard-sub');
-                    if (hardSub !== undefined && hardSub !== '' && hardSub !== 'none') dl.hardSubLang = hardSub;
+                    if (hardSub !== undefined && hardSub !== '') dl.hardSubLang = hardSub;
                     const hardFallback = getFieldValue('setting-hard-fallback', 'bool');
                     if (hardFallback !== undefined) dl.hardSubRawFallback = hardFallback;
                     const softSubs = getMultiSelect('setting-soft-subs');
@@ -4164,14 +4177,19 @@ MAINTENANCE NOTES:
                     if (ep1 !== undefined) crStream.endpoint = ep1;
                     const useDef1 = getFieldValue('setting-stream-use-default', 'bool');
                     if (useDef1 !== undefined) crStream.useDefault = useDef1;
-                    const auth1 = getFieldValue('setting-stream-auth');
-                    if (auth1 !== undefined) crStream.authorization = auth1;
-                    const ua1 = getFieldValue('setting-stream-ua');
-                    if (ua1 !== undefined) crStream.userAgent = ua1;
-                    const dt1 = getFieldValue('setting-stream-device-type');
-                    if (dt1 !== undefined) crStream.deviceType = dt1;
-                    const dn1 = getFieldValue('setting-stream-device-name');
-                    if (dn1 !== undefined) crStream.deviceName = dn1;
+                    // When "Use Default" is on, the disabled inputs just echo server defaults -
+                    // persisting them (especially the sanitized empty authorization) would wipe
+                    // any custom values stored server-side
+                    if (useDef1 === false) {
+                        const auth1 = getFieldValue('setting-stream-auth');
+                        if (auth1) crStream.authorization = auth1;
+                        const ua1 = getFieldValue('setting-stream-ua');
+                        if (ua1 !== undefined) crStream.userAgent = ua1;
+                        const dt1 = getFieldValue('setting-stream-device-type');
+                        if (dt1 !== undefined) crStream.deviceType = dt1;
+                        const dn1 = getFieldValue('setting-stream-device-name');
+                        if (dn1 !== undefined) crStream.deviceName = dn1;
+                    }
                     const vid1 = getFieldValue('setting-stream-video', 'bool');
                     if (vid1 !== undefined) crStream.video = vid1;
                     const aud1 = getFieldValue('setting-stream-audio', 'bool');
@@ -4182,14 +4200,16 @@ MAINTENANCE NOTES:
                     if (ep2 !== undefined) crStreamSecondary.endpoint = ep2;
                     const useDef2 = getFieldValue('setting-stream-use-default-2', 'bool');
                     if (useDef2 !== undefined) crStreamSecondary.useDefault = useDef2;
-                    const auth2 = getFieldValue('setting-stream-auth-2');
-                    if (auth2 !== undefined) crStreamSecondary.authorization = auth2;
-                    const ua2 = getFieldValue('setting-stream-ua-2');
-                    if (ua2 !== undefined) crStreamSecondary.userAgent = ua2;
-                    const dt2 = getFieldValue('setting-stream-device-type-2');
-                    if (dt2 !== undefined) crStreamSecondary.deviceType = dt2;
-                    const dn2 = getFieldValue('setting-stream-device-name-2');
-                    if (dn2 !== undefined) crStreamSecondary.deviceName = dn2;
+                    if (useDef2 === false) {
+                        const auth2 = getFieldValue('setting-stream-auth-2');
+                        if (auth2) crStreamSecondary.authorization = auth2;
+                        const ua2 = getFieldValue('setting-stream-ua-2');
+                        if (ua2 !== undefined) crStreamSecondary.userAgent = ua2;
+                        const dt2 = getFieldValue('setting-stream-device-type-2');
+                        if (dt2 !== undefined) crStreamSecondary.deviceType = dt2;
+                        const dn2 = getFieldValue('setting-stream-device-name-2');
+                        if (dn2 !== undefined) crStreamSecondary.deviceName = dn2;
+                    }
                     const vid2 = getFieldValue('setting-stream-video-2', 'bool');
                     if (vid2 !== undefined) crStreamSecondary.video = vid2;
                     const aud2 = getFieldValue('setting-stream-audio-2', 'bool');
@@ -4262,10 +4282,9 @@ MAINTENANCE NOTES:
                     if (syncFallback !== undefined) dl.syncTimingFullQualityFallback = syncFallback;
                     const syncHwAccel = getFieldValue('setting-sync-hwaccel');
                     if (syncHwAccel !== undefined) dl.syncHwAccel = syncHwAccel;
-                    const mkvmerge = getListInput('setting-mkvmerge');
-                    if (mkvmerge.length) dl.mkvmergeOptions = mkvmerge;
-                    const ffmpeg = getListInput('setting-ffmpeg');
-                    if (ffmpeg.length) dl.ffmpegOptions = ffmpeg;
+                    // Always send the lists when the inputs are present so removing all entries works
+                    if (document.getElementById('setting-mkvmerge')) dl.mkvmergeOptions = getListInput('setting-mkvmerge');
+                    if (document.getElementById('setting-ffmpeg')) dl.ffmpegOptions = getListInput('setting-ffmpeg');
                     const encode = getFieldValue('setting-encode', 'bool');
                     if (encode !== undefined) dl.encodeEnabled = encode;
                     const encodePreset = getFieldValue('setting-encode-preset');
@@ -4290,11 +4309,15 @@ MAINTENANCE NOTES:
                     if (procJobs !== undefined) q.simultaneousProcessingJobs = procJobs;
                     const queuePath = getFieldValue('setting-queue-path');
                     if (queuePath !== undefined) q.queueFilePath = queuePath;
-                    const earlyStart = getFieldValue('setting-queue-early-start', 'bool');
-                    if (earlyStart !== undefined) q.downloadAllowEarlyStart = earlyStart;
-                    const skipMissing = getFieldValue('setting-queue-skip-missing', 'bool');
-                    if (skipMissing !== undefined) q.downloadOnlyWithAllSelectedDubSub = skipMissing;
                     if (Object.keys(q).length) newConfig.queue = q;
+                    // These two belong to the download section of the backend config,
+                    // even though they're shown on the Queue tab
+                    const dlq = {};
+                    const earlyStart = getFieldValue('setting-queue-early-start', 'bool');
+                    if (earlyStart !== undefined) dlq.downloadAllowEarlyStart = earlyStart;
+                    const skipMissing = getFieldValue('setting-queue-skip-missing', 'bool');
+                    if (skipMissing !== undefined) dlq.downloadOnlyWithAllSelectedDubSub = skipMissing;
+                    if (Object.keys(dlq).length) newConfig.download = dlq;
                     break;
                 }
                     
@@ -4306,27 +4329,34 @@ MAINTENANCE NOTES:
                     };
                     break;
                     
-                case 'history':
+                case 'history': {
+                    // Mode 0 ("Default All") is a valid value - don't let || swallow it
+                    const histMode = parseInt(document.getElementById('setting-history-mode')?.value);
                     newConfig.history = {
                         enabled: document.getElementById('setting-history-enabled')?.checked ?? true,
                         includeCrArtists: document.getElementById('setting-cr-artists')?.checked || false,
                         removeMissingEpisodes: document.getElementById('setting-remove-missing')?.checked ?? true,
                         lang: document.getElementById('setting-history-lang')?.value || 'en-US',
                         autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
-                        autoRefreshMode: parseInt(document.getElementById('setting-history-mode')?.value) || 50
+                        autoRefreshMode: isNaN(histMode) ? 0 : histMode
                     };
                     break;
+                }
                     
-                case 'sonarr':
+                case 'sonarr': {
                     newConfig.sonarr = {
                         enabled: document.getElementById('setting-sonarr-enabled')?.checked || false,
                         host: document.getElementById('setting-sonarr-host')?.value || null,
                         port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
-                        apiKey: document.getElementById('setting-sonarr-apikey')?.value || null,
                         useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
                         urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null
                     };
+                    // GET /config returns the placeholder "[configured]" instead of the real key -
+                    // only send the key if the user actually typed a new one
+                    const sonarrApiKey = document.getElementById('setting-sonarr-apikey')?.value;
+                    if (sonarrApiKey && sonarrApiKey !== '[configured]') newConfig.sonarr.apiKey = sonarrApiKey;
                     break;
+                }
                     
                 case 'notifications':
                     const headersText = document.getElementById('setting-webhook-headers')?.value || '';
@@ -4353,16 +4383,20 @@ MAINTENANCE NOTES:
                     };
                     break;
                     
-                case 'proxy':
+                case 'proxy': {
                     newConfig.proxy = {
                         enabled: document.getElementById('setting-proxy-enabled')?.checked || false,
                         socks: document.getElementById('setting-proxy-socks')?.checked || false,
                         host: document.getElementById('setting-proxy-host')?.value || null,
                         port: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
-                        username: document.getElementById('setting-proxy-user')?.value || null,
-                        password: document.getElementById('setting-proxy-pass')?.value || null
+                        username: document.getElementById('setting-proxy-user')?.value || null
                     };
+                    // GET /config returns the placeholder "[configured]" instead of the real password -
+                    // only send it if the user actually typed a new one
+                    const proxyPassword = document.getElementById('setting-proxy-pass')?.value;
+                    if (proxyPassword && proxyPassword !== '[configured]') newConfig.proxy.password = proxyPassword;
                     break;
+                }
                     
                 case 'flaresolverr':
                     newConfig.flareSolverr = {
@@ -4377,15 +4411,19 @@ MAINTENANCE NOTES:
                     };
                     break;
                     
-                case 'appearance':
+                case 'appearance': {
+                    // 0 is a valid opacity/blur value - don't let || swallow it
+                    const bgOpacity = parseFloat(document.getElementById('setting-bg-opacity')?.value);
+                    const bgBlur = parseFloat(document.getElementById('setting-bg-blur')?.value);
                     newConfig.appearance = {
                         theme: document.getElementById('setting-theme')?.value || 'System',
                         accentColor: document.getElementById('setting-accent')?.value || null,
                         backgroundImagePath: document.getElementById('setting-bg-path')?.value || null,
-                        backgroundImageOpacity: parseFloat(document.getElementById('setting-bg-opacity')?.value) || 0.5,
-                        backgroundImageBlurRadius: parseFloat(document.getElementById('setting-bg-blur')?.value) || 10
+                        backgroundImageOpacity: isNaN(bgOpacity) ? 0.5 : bgOpacity,
+                        backgroundImageBlurRadius: isNaN(bgBlur) ? 10 : bgBlur
                     };
                     break;
+                }
                     
                 default:
                     showToast('Unknown settings tab', 'error');

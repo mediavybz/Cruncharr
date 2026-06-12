@@ -178,7 +178,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
             }
 
             var lang = authService.Profile?.PreferredContentAudioLanguage ?? "ja-JP";
-            var newEpisodesBase = await apiService.GetNewEpisodesAsync(lang, 2000, true, cancellationToken);
+            var newEpisodesBase = await apiService.GetNewEpisodesAsync(lang, 1000, true, cancellationToken);
             if (newEpisodesBase?.Data == null || newEpisodesBase.Data.Count == 0) return;
 
             _logger.LogInformation("Found {Count} new episodes", newEpisodesBase.Data.Count);

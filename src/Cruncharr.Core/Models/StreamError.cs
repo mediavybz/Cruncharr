@@ -7,6 +7,9 @@ public class StreamError
     [JsonProperty("error")]
     public string? Error { get; set; }
 
+    [JsonProperty("reason")]
+    public string? Reason { get; set; }
+
     [JsonProperty("activeStreams")]
     public List<ActiveStream> ActiveStreams { get; set; } = new();
 

@@ -1792,6 +1792,38 @@ public class NumericStringPropertyComparer : IComparer<HistoryEpisode>
         {
             return xDouble.CompareTo(yDouble);
         }
+
+        // [PT] Upstream: sort multi-episode ranges like "11-12" by their starting number
+        if (TryParseEpisodeSortNumber(x?.Episode, out xDouble) &&
+            TryParseEpisodeSortNumber(y?.Episode, out yDouble))
+        {
+            int numericCompare = xDouble.CompareTo(yDouble);
+            if (numericCompare != 0)
+            {
+                return numericCompare;
+            }
+        }
+
         return string.Compare(x?.Episode, y?.Episode, StringComparison.Ordinal);
+    }
+
+    private static bool TryParseEpisodeSortNumber(string? episode, out double episodeNumber)
+    {
+        return double.TryParse(episode, NumberStyles.Any, CultureInfo.InvariantCulture, out episodeNumber) ||
+               TryParseEpisodeRangeStart(episode, out episodeNumber);
+    }
+
+    private static bool TryParseEpisodeRangeStart(string? episode, out double episodeNumber)
+    {
+        episodeNumber = 0;
+        if (string.IsNullOrWhiteSpace(episode))
+        {
+            return false;
+        }
+
+        string[] parts = episode.Split('-', 2, StringSplitOptions.TrimEntries);
+        return parts.Length == 2 &&
+               double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out episodeNumber) &&
+               double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out _);
     }
 }

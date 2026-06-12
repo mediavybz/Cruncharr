@@ -480,6 +480,264 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     public async Task<bool> LoginAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default)
     {
+        // [PT] Upstream CrAuth.Auth(AuthData): TV endpoints keep the password grant,
+        // other endpoints use the SSO authorization-code (PKCE) flow
+        if (StreamEndpoint.Endpoint.StartsWith("tv", StringComparison.OrdinalIgnoreCase))
+        {
+            return await LoginPasswordGrantAsync(email, password, useBetaApi, cancellationToken);
+        }
+
+        try
+        {
+            return await LoginWithCodeFlowAsync(email, password, useBetaApi, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "SSO code login failed, falling back to password grant");
+            return await LoginPasswordGrantAsync(email, password, useBetaApi, cancellationToken);
+        }
+    }
+
+    // [PT] Ported from upstream CrAuth.AuthCode / GetCodeAuth / LoginWithCode (PKCE flow)
+    private string _authCodeVerifier = string.Empty;
+    private string _authCode = string.Empty;
+    private const string SsoDomain = "sso.crunchyroll.com";
+
+    private async Task<bool> LoginWithCodeFlowAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken)
+    {
+        _logger?.LogInformation("Logging in as {Email} via SSO code flow", email);
+
+        var uuid = ResolveDeviceId();
+        var loginPayload = JsonConvert.SerializeObject(new Dictionary<string, object>
+        {
+            { "email", email },
+            { "password", password },
+            { "eventSettings", new Dictionary<string, object>() }
+        });
+        var requestContent = new StringContent(loginPayload, System.Text.Encoding.UTF8);
+        requestContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain") { CharSet = "UTF-8" };
+
+        var ssoRequest = new HttpRequestMessage(HttpMethod.Post, $"https://{SsoDomain}/api/login")
+        {
+            Content = requestContent
+        };
+        ssoRequest.Headers.Add("User-Agent", StreamEndpoint.UserAgent);
+
+        var (ssoOk, ssoContent, ssoError) = await _httpClient.SendRequestAsync(ssoRequest);
+
+        if (!ssoOk)
+        {
+            throw new Exception(BuildLoginErrorMessage(ssoContent, ssoError));
+        }
+
+        var refreshToken = _httpClient.GetCookieValue(SsoDomain, "etp_rt");
+        if (string.IsNullOrEmpty(refreshToken))
+        {
+            throw new Exception("SSO login did not return a refresh token cookie");
+        }
+
+        Token = new CrToken { refresh_token = refreshToken, device_id = uuid };
+
+        await GetCodeAuthAsync(cancellationToken);
+        return await LoginWithCodeAsync(useBetaApi, uuid, cancellationToken);
+    }
+
+    private async Task GetCodeAuthAsync(CancellationToken cancellationToken)
+    {
+        var uuid = Guid.NewGuid().ToString();
+
+        _authCodeVerifier = GenerateCodeVerifier();
+        var clientId = GetClientIdFromBasicHeader(StreamEndpoint.Authorization);
+
+        var query = System.Web.HttpUtility.ParseQueryString(string.Empty);
+        query["client_id"] = clientId;
+        query["redirect_uri"] = "sso.crunchyroll://auth";
+        query["response_type"] = "code";
+        query["scope"] = "offline_access";
+        query["state"] = "{\"flow\":\"SIGN_IN\",\"flowRoot\":\"ONBOARDING\"}";
+        query["code_challenge"] = _authCodeVerifier;
+        query["code_challenge_method"] = "plain";
+
+        _httpClient.AddCookie(SsoDomain, new Cookie("client_id", clientId));
+        _httpClient.AddCookie(SsoDomain, new Cookie("device_id", uuid));
+
+        var uriBuilder = new UriBuilder($"https://{SsoDomain}/authorize")
+        {
+            Query = query.ToString()
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Get, uriBuilder.ToString());
+        request.Headers.Add("User-Agent", StreamEndpoint.UserAgent);
+
+        var (_, content, _) = await _httpClient.SendRequestAsync(request);
+
+        _authCode = ExtractCode(content ?? string.Empty);
+
+        if (string.IsNullOrEmpty(_authCode))
+        {
+            _logger?.LogError("Auth code is empty");
+        }
+    }
+
+    private async Task<bool> LoginWithCodeAsync(bool useBetaApi, string uuid, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(_authCode))
+        {
+            throw new Exception("Missing authorization code from SSO flow");
+        }
+
+        var formData = new Dictionary<string, string>
+        {
+            { "code", _authCode },
+            { "code_verifier", _authCodeVerifier },
+            { "grant_type", "authorization_code" },
+            { "scope", "offline_access" },
+            { "device_id", uuid },
+            { "device_type", StreamEndpoint.Device_type }
+        };
+
+        if (!string.IsNullOrEmpty(StreamEndpoint.Device_name))
+        {
+            formData.Add("device_name", StreamEndpoint.Device_name);
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
+        {
+            Content = new FormUrlEncodedContent(formData)
+        };
+        request.Headers.Add("Authorization", StreamEndpoint.Authorization);
+        request.Headers.Add("User-Agent", StreamEndpoint.UserAgent);
+
+        SetETPCookie(Token?.refresh_token ?? string.Empty);
+
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+
+        if (!isOk)
+        {
+            throw new Exception(BuildLoginErrorMessage(content, error));
+        }
+
+        JsonTokenToFileAndVariable(content, uuid);
+
+        if (Token?.refresh_token != null)
+        {
+            SetETPCookie(Token.refresh_token);
+            SaveToken();
+            await GetMultiProfileAsync(useBetaApi, cancellationToken);
+            return true;
+        }
+
+        throw new Exception("Login failed - no refresh token received from Crunchyroll");
+    }
+
+    private string ResolveDeviceId()
+    {
+        return string.IsNullOrEmpty(Token?.device_id) ? Guid.NewGuid().ToString() : Token!.device_id!;
+    }
+
+    // [PT] Ported from upstream CrAuth.GenerateCodeVerifier (RFC 7636)
+    private static string GenerateCodeVerifier(int length = 64)
+    {
+        const string allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(length);
+        var stringBuilder = new System.Text.StringBuilder(length);
+
+        foreach (var value in bytes)
+        {
+            stringBuilder.Append(allowed[value % allowed.Length]);
+        }
+
+        return stringBuilder.ToString();
+    }
+
+    // [PT] Ported from upstream CrAuth.GetClientIdFromBasicHeader
+    private static string GetClientIdFromBasicHeader(string authorizationHeader)
+    {
+        if (string.IsNullOrWhiteSpace(authorizationHeader))
+        {
+            throw new ArgumentException("Authorization header is null/empty.", nameof(authorizationHeader));
+        }
+
+        const string prefix = "Basic ";
+        if (!authorizationHeader.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new FormatException("Authorization header is not Basic.");
+        }
+
+        var base64 = authorizationHeader[prefix.Length..].Trim();
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(base64);
+        }
+        catch (FormatException ex)
+        {
+            throw new FormatException("Basic token is not valid Base64.", ex);
+        }
+
+        var decoded = System.Text.Encoding.UTF8.GetString(bytes);
+        var separatorIndex = decoded.IndexOf(':');
+        if (separatorIndex <= 0)
+        {
+            throw new FormatException("Decoded Basic value is not in 'clientId:clientSecret' format.");
+        }
+
+        return decoded[..separatorIndex];
+    }
+
+    // [PT] Ported from upstream CrAuth.Normalize / ExtractCode
+    private static string NormalizeAuthBody(string value)
+    {
+        value = System.Text.RegularExpressions.Regex.Unescape(value);
+        value = value.Replace(@"&", "&");
+        value = value.Replace("\\\"", "\"");
+        return value;
+    }
+
+    private static string ExtractCode(string body)
+    {
+        var text = NormalizeAuthBody(body);
+
+        var match = System.Text.RegularExpressions.Regex.Match(text, @"(?:[?&]|\\u0026)code=([A-Za-z0-9\-_]+)");
+        if (match.Success)
+        {
+            return match.Groups[1].Value;
+        }
+
+        match = System.Text.RegularExpressions.Regex.Match(text, @"code=([A-Za-z0-9\-_]+)");
+        if (match.Success)
+        {
+            return match.Groups[1].Value;
+        }
+
+        return string.Empty;
+    }
+
+    private static string BuildLoginErrorMessage(string? content, string? error)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return $"Login failed: {error}";
+        }
+        if (content.Contains("invalid_credentials"))
+        {
+            return "Invalid credentials - please check your email and password";
+        }
+        if (content.Contains("<title>Just a moment...</title>") ||
+            content.Contains("<title>Access denied</title>") ||
+            content.Contains("<title>Attention Required! | Cloudflare</title>") ||
+            content.Trim().Equals("error code: 1020") ||
+            content.IndexOf("<title>DDOS-GUARD</title>", StringComparison.OrdinalIgnoreCase) > -1)
+        {
+            return "Cloudflare/DDOS protection detected - try enabling Beta API in settings";
+        }
+        var responsePreview = content.Substring(0, Math.Min(500, content.Length));
+        return $"Login failed: {responsePreview}";
+    }
+
+    private async Task<bool> LoginPasswordGrantAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default)
+    {
         _logger?.LogInformation("Logging in as {Email} (BetaAPI: {UseBeta})", email, useBetaApi);
 
         string uuid = Guid.NewGuid().ToString();

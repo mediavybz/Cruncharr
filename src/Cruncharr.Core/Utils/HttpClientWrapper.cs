@@ -86,13 +86,59 @@ public class HttpClientWrapper : IDisposable
                 webProxy.Credentials = new NetworkCredential(proxy.Username, proxy.Password);
             }
 
-            handler.Proxy = webProxy;
+            // [PT] Upstream: proxy_all_traffic=false routes only Crunchyroll traffic through the proxy
+            handler.Proxy = proxy.AllTraffic ? webProxy : new CrunchyrollOnlyProxy(webProxy);
             handler.UseProxy = true;
-            _logger?.LogInformation("Proxy configured: {ProxyUri}", proxyUri);
+            var proxyScope = proxy.AllTraffic ? "all traffic" : "Crunchyroll traffic only";
+            _logger?.LogInformation("Proxy configured for {ProxyScope}: {ProxyUri}", proxyScope, proxyUri);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to configure proxy");
+        }
+    }
+
+    // [PT] Ported from upstream HttpClientReq.CrunchyrollOnlyProxy
+    private sealed class CrunchyrollOnlyProxy : IWebProxy
+    {
+        private readonly WebProxy _proxy;
+
+        public CrunchyrollOnlyProxy(WebProxy proxy)
+        {
+            _proxy = proxy;
+        }
+
+        public ICredentials? Credentials
+        {
+            get => _proxy.Credentials;
+            set => _proxy.Credentials = value;
+        }
+
+        public Uri? GetProxy(Uri destination)
+        {
+            return IsCrunchyrollProxyTarget(destination) ? _proxy.GetProxy(destination) : destination;
+        }
+
+        public bool IsBypassed(Uri host)
+        {
+            return !IsCrunchyrollProxyTarget(host);
+        }
+
+        private static bool IsCrunchyrollProxyTarget(Uri destination)
+        {
+            if (!destination.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                !destination.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (destination.ToString().Equals(ApiUrls.WidevineLicenceUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return destination.Host.Equals("crunchyroll.com", StringComparison.OrdinalIgnoreCase) ||
+                   destination.Host.EndsWith(".crunchyroll.com", StringComparison.OrdinalIgnoreCase);
         }
     }
 

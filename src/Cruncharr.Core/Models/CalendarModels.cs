@@ -1,7 +1,17 @@
 using System;
 using System.Collections.Generic;
+using Cruncharr.Core.Services;
 
 namespace Cruncharr.Core.Models;
+
+// [PT] Ported from upstream CalendarStructs.CalendarHistoryDownloadState
+public enum CalendarHistoryDownloadState
+{
+    None,
+    NotDownloaded,
+    PartlyDownloaded,
+    Downloaded
+}
 
 public class CalendarWeek
 {
@@ -30,9 +40,21 @@ public class CalendarEpisode
     public bool IsPremiere { get; set; }
     public string? SeasonName { get; set; }
     public string? CrSeriesID { get; set; }
+    public string? CrSeasonID { get; set; }
+    public string? CrEpisodeID { get; set; }
     public bool AnilistEpisode { get; set; }
     public bool FilteredOut { get; set; }
     public string? AudioLocale { get; set; }
+
+    // [PT] Upstream calendar history marks
+    public List<Services.CrBrowseEpisodeVersion>? Versions { get; set; }
+    public string? OriginalEpisodeGuid { get; set; }
+    public string? OriginalSeasonGuid { get; set; }
+    public List<string> VersionGuids { get; set; } = [];
+    public bool IsInHistory { get; set; }
+    public bool ShowHistoryMark { get; set; } = true;
+    public CalendarHistoryDownloadState HistoryDownloadState { get; set; }
+
     public List<CalendarEpisode> CalendarEpisodes { get; set; } = [];
 }
 

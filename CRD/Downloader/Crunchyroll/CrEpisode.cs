@@ -35,7 +35,7 @@ public class CrEpisode(){
         var response = await HttpClientReq.Instance.SendHttpRequest(request);
 
         if (!response.IsOk){
-            Console.Error.WriteLine("Series Request Failed");
+            Console.Error.WriteLine($"Episode request failed for id '{id}'");
             return null;
         }
 
@@ -253,25 +253,97 @@ public class CrEpisode(){
             }
         }
 
-        query["n"] = requestAmount + "";
         query["sort_by"] = "newly_added";
         query["type"] = "episode";
 
-        var request = HttpClientReq.CreateRequestMessage($"{ApiUrls.Browse}", HttpMethod.Get, true, crunInstance.CrAuthGuest.Token?.access_token, query);
+        if (requestAmount <= 0){
+            return new CrBrowseEpisodeBase{
+                Data = []
+            };
+        }
 
-        var response = await HttpClientReq.Instance.SendHttpRequest(request);
+        const int maxPageSize = 100;
+        const int stalePageTolerance = 3;
+        CrBrowseEpisodeBase? series = null;
+        var episodes = new List<CrBrowseEpisode>();
+        var stalePageCount = 0;
+        var firstWeekDayDate = firstWeekDay?.Date;
 
-        if (!response.IsOk){
-            Console.Error.WriteLine("Series Request Failed");
+        for (var start = 0; start < requestAmount; start += maxPageSize){
+            var pageSize = Math.Min(maxPageSize, requestAmount - start);
+            query["start"] = start.ToString();
+            query["n"] = pageSize.ToString();
+
+            var request = HttpClientReq.CreateRequestMessage($"{ApiUrls.Browse}", HttpMethod.Get, true, crunInstance.CrAuthGuest.Token?.access_token, query);
+
+            var response = await HttpClientReq.Instance.SendHttpRequest(request);
+
+            if (!response.IsOk){
+                Console.Error.WriteLine($"New episodes request failed for start '{start}' and n '{pageSize}'");
+                return null;
+            }
+
+            var page = Helpers.Deserialize<CrBrowseEpisodeBase>(response.ResponseContent, crunInstance.SettingsJsonSerializerSettings);
+            series ??= page;
+
+            if (page?.Data is not{ Count: > 0 } pageData){
+                break;
+            }
+
+            episodes.AddRange(pageData);
+
+            if (firstWeekDayDate.HasValue){
+                if (pageData.Any(episode => GetCalendarTargetDate(episode).Date >= firstWeekDayDate.Value)){
+                    stalePageCount = 0;
+                } else{
+                    stalePageCount++;
+
+                    if (stalePageCount >= stalePageTolerance){
+                        break;
+                    }
+                }
+            }
+
+            if (pageData.Count < pageSize){
+                break;
+            }
+        }
+
+        if (series == null){
             return null;
         }
 
-        CrBrowseEpisodeBase? series = Helpers.Deserialize<CrBrowseEpisodeBase>(response.ResponseContent, crunInstance.SettingsJsonSerializerSettings);
+        series.Data = episodes;
 
         series?.Data?.Sort((a, b) =>
             b.EpisodeMetadata.PremiumAvailableDate.CompareTo(a.EpisodeMetadata.PremiumAvailableDate));
 
         return series;
+    }
+
+    private static DateTime GetCalendarTargetDate(CrBrowseEpisode episode){
+        DateTime episodeAirDate = episode.EpisodeMetadata.EpisodeAirDate.Kind == DateTimeKind.Utc
+            ? episode.EpisodeMetadata.EpisodeAirDate.ToLocalTime()
+            : episode.EpisodeMetadata.EpisodeAirDate;
+
+        DateTime premiumAvailableStart = episode.EpisodeMetadata.PremiumAvailableDate.Kind == DateTimeKind.Utc
+            ? episode.EpisodeMetadata.PremiumAvailableDate.ToLocalTime()
+            : episode.EpisodeMetadata.PremiumAvailableDate;
+
+        DateTime targetDate = premiumAvailableStart;
+        DateTime oneYearFromNow = DateTime.Now.AddYears(1);
+
+        if (targetDate >= oneYearFromNow){
+            DateTime freeAvailableStart = episode.EpisodeMetadata.FreeAvailableDate.Kind == DateTimeKind.Utc
+                ? episode.EpisodeMetadata.FreeAvailableDate.ToLocalTime()
+                : episode.EpisodeMetadata.FreeAvailableDate;
+
+            targetDate = freeAvailableStart <= oneYearFromNow
+                ? freeAvailableStart
+                : episodeAirDate;
+        }
+
+        return targetDate;
     }
 
     public async Task MarkAsWatched(string episodeId){

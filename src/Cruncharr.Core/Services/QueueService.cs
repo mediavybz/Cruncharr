@@ -558,6 +558,11 @@ public class QueueService : IQueueService, IDisposable
                     {
                         await Task.Delay(TimeSpan.FromSeconds(_config.Download.CooldownDelaySeconds), _cancellationToken);
                     }
+                    // [PT] Upstream: episode-based download delay (when dub-based delay is disabled)
+                    if (_config?.Download.DownloadDelaySeconds > 0 && !_config.Download.DownloadDelayUseDubBased)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(_config.Download.DownloadDelaySeconds), _cancellationToken);
+                    }
                     await RunDownloadAsync(item, _cancellationToken);
                 }
                 catch (Exception ex)

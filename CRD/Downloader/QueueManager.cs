@@ -57,6 +57,7 @@ public sealed partial class QueueManager : ObservableObject{
     private bool hasFailedItem;
 
     public event EventHandler? QueueStateChanged;
+    public event EventHandler? QueuePersistenceRequested;
 
     private readonly CrunchyrollManager crunchyrollManager;
 
@@ -71,7 +72,10 @@ public sealed partial class QueueManager : ObservableObject{
             crunchyrollManager.CrunOptions.SimultaneousProcessingJobs);
 
         queue.CollectionChanged += UpdateItemListOnRemove;
-        queue.CollectionChanged += (_, _) => OnQueueStateChanged();
+        queue.CollectionChanged += (_, _) => {
+            OnQueueStateChanged();
+            OnQueuePersistenceRequested();
+        };
     }
 
     public void AddToQueue(CrunchyEpMeta item){
@@ -95,6 +99,27 @@ public sealed partial class QueueManager : ObservableObject{
 
     public void RefreshQueue(){
         uiMutationQueue.Enqueue(() => queue.Refresh());
+    }
+
+    public void RefreshItem(CrunchyEpMeta item){
+        uiMutationQueue.Enqueue(() => RefreshItemCore(item));
+    }
+
+    public void NotifyQueueItemStateChanged(CrunchyEpMeta item){
+        uiMutationQueue.Enqueue(() => {
+            RefreshItemCore(item);
+            HasFailedItem = queue.Any(queueItem => queueItem.DownloadProgress.IsError);
+            OnQueueStateChanged();
+            OnQueuePersistenceRequested();
+
+            if (crunchyrollManager.CrunOptions.AutoDownload){
+                RequestPump();
+            }
+        });
+    }
+
+    private void RefreshItemCore(CrunchyEpMeta item){
+        downloadItems.Find(item)?.Refresh();
     }
 
 
@@ -210,7 +235,13 @@ public sealed partial class QueueManager : ObservableObject{
     }
 
     private void UpdateItemListOnRemove(object? sender, NotifyCollectionChangedEventArgs e){
-        if (e.Action == NotifyCollectionChangedAction.Remove){
+        if (e.Action == NotifyCollectionChangedAction.Add){
+            if (e.NewItems != null){
+                foreach (var newItem in e.NewItems.OfType<CrunchyEpMeta>()){
+                    downloadItems.AddOrRefresh(newItem);
+                }
+            }
+        } else if (e.Action == NotifyCollectionChangedAction.Remove){
             if (e.OldItems != null){
                 foreach (var oldItem in e.OldItems.OfType<CrunchyEpMeta>()){
                     downloadItems.Remove(oldItem);
@@ -218,9 +249,15 @@ public sealed partial class QueueManager : ObservableObject{
             }
         } else if (e.Action == NotifyCollectionChangedAction.Reset && queue.Count == 0){
             downloadItems.Clear();
+        } else{
+            UpdateDownloadListItems();
         }
+        
+        HasFailedItem = queue.Any(item => item.DownloadProgress.IsError);
 
-        UpdateDownloadListItems();
+        if (crunchyrollManager.CrunOptions.AutoDownload){
+            RequestPump();
+        }
     }
 
     public void MarkDownloadFinished(CrunchyEpMeta item, bool removeFromQueue){
@@ -230,10 +267,12 @@ public sealed partial class QueueManager : ObservableObject{
                 if (index >= 0)
                     queue.RemoveAt(index);
             } else{
-                queue.Refresh();
+                RefreshItemCore(item);
+                HasFailedItem = queue.Any(queueItem => queueItem.DownloadProgress.IsError);
             }
 
             OnQueueStateChanged();
+            OnQueuePersistenceRequested();
         });
     }
 
@@ -385,8 +424,9 @@ public sealed partial class QueueManager : ObservableObject{
                     }
                 }
 
-                RefreshQueue();
-                UpdateDownloadListItems();
+                if (crunchyrollManager.CrunOptions.AutoDownload){
+                    RequestPump();
+                }
             } catch (OperationCanceledException){
                 // ignored
             }
@@ -395,8 +435,7 @@ public sealed partial class QueueManager : ObservableObject{
 
     public void ScheduleRetry(CrunchyEpMeta item, TimeSpan delay, string statusText, CancellationToken cancellationToken = default){
         item.DownloadProgress.ScheduleRetry(delay, statusText);
-        RefreshQueue();
-        OnQueueStateChanged();
+        NotifyQueueItemStateChanged(item);
 
         ScheduleRetryWake(item, item.DownloadProgress.RetryAtUtc, cancellationToken);
     }
@@ -449,8 +488,7 @@ public sealed partial class QueueManager : ObservableObject{
                 }
 
                 item.DownloadProgress.RetryAtUtc = null;
-                RefreshQueue();
-                UpdateDownloadListItems();
+                NotifyQueueItemStateChanged(item);
             } catch (OperationCanceledException){
                 // ignored
             }
@@ -460,6 +498,10 @@ public sealed partial class QueueManager : ObservableObject{
 
     private void OnQueueStateChanged(){
         QueueStateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnQueuePersistenceRequested(){
+        QueuePersistenceRequested?.Invoke(this, EventArgs.Empty);
     }
     
     private void NotifyDownloadStateChanged(){

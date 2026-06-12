@@ -55,6 +55,10 @@ public class CruncharrConfig
     [YamlMember(Alias = "appearance", ApplyNamingConventions = false)]
     public AppearanceConfig Appearance { get; set; } = new();
 
+    [JsonPropertyName("add_download")]
+    [YamlMember(Alias = "add_download", ApplyNamingConventions = false)]
+    public AddDownloadConfig AddDownload { get; set; } = new();
+
     [JsonPropertyName("token_file")]
     [YamlMember(Alias = "token_file", ApplyNamingConventions = false)]
     public string TokenFilePath { get; set; } = Path.Combine(
@@ -318,8 +322,11 @@ public class DownloadConfig
     [YamlMember(Alias = "keep_dubs_separate", ApplyNamingConventions = false)]
     public bool KeepDubsSeparate { get; set; } = false;
 
-    [YamlMember(Alias = "dub_download_delay_seconds", ApplyNamingConventions = false)]
-    public int DubDownloadDelaySeconds { get; set; } = 0;
+    [YamlMember(Alias = "download_delay_seconds", ApplyNamingConventions = false)]
+    public int DownloadDelaySeconds { get; set; } = 0;
+
+    [YamlMember(Alias = "download_delay_use_dub_based", ApplyNamingConventions = false)]
+    public bool DownloadDelayUseDubBased { get; set; } = false;
 
     [YamlMember(Alias = "cooldown_delay_seconds", ApplyNamingConventions = false)]
     public int CooldownDelaySeconds { get; set; } = 0;
@@ -517,6 +524,9 @@ public class HistoryConfig
     [YamlMember(Alias = "count_missing", ApplyNamingConventions = false)]
     public bool CountMissing { get; set; } = false;
 
+    [YamlMember(Alias = "check_partial_downloads", ApplyNamingConventions = false)]
+    public bool CheckPartialDownloads { get; set; } = true;
+
     [YamlMember(Alias = "include_cr_artists", ApplyNamingConventions = false)]
     public bool IncludeCrArtists { get; set; } = false;
 
@@ -649,6 +659,9 @@ public class ProxyConfig
     [YamlMember(Alias = "enabled", ApplyNamingConventions = false)]
     public bool Enabled { get; set; } = false;
 
+    [YamlMember(Alias = "all_traffic", ApplyNamingConventions = false)]
+    public bool AllTraffic { get; set; } = true;
+
     [YamlMember(Alias = "socks", ApplyNamingConventions = false)]
     public bool Socks { get; set; } = false;
 
@@ -711,6 +724,21 @@ public class CalendarConfig
 
     [YamlMember(Alias = "update_history", ApplyNamingConventions = false)]
     public bool UpdateHistory { get; set; } = false;
+
+    [YamlMember(Alias = "show_history_mark", ApplyNamingConventions = false)]
+    public bool ShowHistoryMark { get; set; } = true;
+}
+
+public class AddDownloadConfig
+{
+    [YamlMember(Alias = "search_add_to_history", ApplyNamingConventions = false)]
+    public bool SearchAddToHistory { get; set; } = true;
+
+    [YamlMember(Alias = "single_episode_instant_add", ApplyNamingConventions = false)]
+    public bool SingleEpisodeInstantAdd { get; set; } = true;
+
+    [YamlMember(Alias = "default_search_enabled", ApplyNamingConventions = false)]
+    public bool DefaultSearchEnabled { get; set; } = false;
 }
 
 public class AppearanceConfig

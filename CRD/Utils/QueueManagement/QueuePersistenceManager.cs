@@ -17,7 +17,7 @@ public sealed class QueuePersistenceManager : IDisposable{
 
     public QueuePersistenceManager(QueueManager queueManager){
         this.queueManager = queueManager ?? throw new ArgumentNullException(nameof(queueManager));
-        this.queueManager.QueueStateChanged += OnQueueStateChanged;
+        this.queueManager.QueuePersistenceRequested += OnQueuePersistenceRequested;
     }
 
     public void RestoreQueue(){
@@ -58,7 +58,7 @@ public sealed class QueuePersistenceManager : IDisposable{
         }
     }
 
-    private void OnQueueStateChanged(object? sender, EventArgs e){
+    private void OnQueuePersistenceRequested(object? sender, EventArgs e){
         ScheduleSave();
     }
 
@@ -119,6 +119,6 @@ public sealed class QueuePersistenceManager : IDisposable{
             saveTimer = null;
         }
 
-        queueManager.QueueStateChanged -= OnQueueStateChanged;
+        queueManager.QueuePersistenceRequested -= OnQueuePersistenceRequested;
     }
 }

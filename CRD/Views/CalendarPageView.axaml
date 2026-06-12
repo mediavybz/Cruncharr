@@ -103,6 +103,9 @@
                                         <CheckBox IsChecked="{Binding UpdateHistoryFromCalendar}"
                                                   Content="Update History from Calendar" Margin="5 5 0 0">
                                         </CheckBox>
+                                        <CheckBox IsChecked="{Binding ShowHistoryMark}"
+                                                  Content="Show History mark" Margin="5 5 0 0">
+                                        </CheckBox>
                                     </StackPanel>
 
                                 </controls:SettingsExpander.Footer>
@@ -225,6 +228,18 @@
                                                                 </Canvas>
                                                             </Viewbox>
                                                         </Canvas>
+                                                    </StackPanel>
+                                                    <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Left"
+                                                                IsVisible="{Binding IsHistoryMarkVisible}" Margin="5,0,0,5">
+                                                        <Grid>
+                                                            <Ellipse Width="25" Height="25"
+                                                                     Fill="{Binding HistoryDownloadStatusBrush}" />
+                                                            <controls:SymbolIcon Symbol="Checkmark"
+                                                                                 FontSize="18" />
+                                                            <ToolTip.Tip>
+                                                                <TextBlock Text="{Binding HistoryDownloadStatusTooltip}" FontSize="15" />
+                                                            </ToolTip.Tip>
+                                                        </Grid>
                                                     </StackPanel>
                                                 </Grid>
 

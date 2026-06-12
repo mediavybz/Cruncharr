@@ -206,7 +206,7 @@ public sealed partial class ProgramManager : ObservableObject{
     internal async Task RefreshHistoryWithNewReleases(CrunchyrollManager crunchyManager, CrDownloadOptions crunOptions){
         var newEpisodesBase = await crunchyManager.CrEpisode.GetNewEpisodes(
             string.IsNullOrEmpty(crunOptions.HistoryLang) ? crunchyManager.DefaultLocale : crunOptions.HistoryLang,
-            2000, null, true);
+            1000, null, true);
         var newEpisodes = newEpisodesBase?.Data ?? [];
 
         if (newEpisodesBase is{ Data.Count: > 0 }){
@@ -244,7 +244,7 @@ public sealed partial class ProgramManager : ObservableObject{
 
         releaseFeedEpisodes ??= (await crunchyManager.CrEpisode.GetNewEpisodes(
             string.IsNullOrEmpty(crunchyManager.CrunOptions.HistoryLang) ? crunchyManager.DefaultLocale : crunchyManager.CrunOptions.HistoryLang,
-            2000, null, true))?.Data ?? [];
+            1000, null, true))?.Data ?? [];
 
         var notificationSettings = settings.NotificationSettings;
         var historyUpdated = false;

@@ -263,7 +263,12 @@ public class CrunchyEpisode : IHistorySource{
     }
 
     public bool IsSpecialEpisode(){
-        return !int.TryParse(Episode, out _);
+        return Episode != null && !IsRegularEpisodeNumber(Episode);
+    }
+
+    public static bool IsRegularEpisodeNumber(string? episode){
+        return !string.IsNullOrWhiteSpace(episode) &&
+               Regex.IsMatch(episode, @"^\d+(\.\d+)?(\s*-\s*\d+(\.\d+)?)?$");
     }
 
     public List<string> GetAnimeIds(){

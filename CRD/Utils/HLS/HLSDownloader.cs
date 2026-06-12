@@ -314,7 +314,7 @@ public class HlsDownloader{
                     return (Ok: false, _data.Parts);
                 }
 
-                QueueManager.Instance.RefreshQueue();
+                QueueManager.Instance.RefreshItem(_currentEpMeta);
 
                 await WaitWhilePausedAsync(_cancellationToken);
                 if (!QueueManager.Instance.Queue.Contains(_currentEpMeta)){
@@ -413,7 +413,7 @@ public class HlsDownloader{
                 return;
             }
 
-            QueueManager.Instance.RefreshQueue();
+            QueueManager.Instance.RefreshItem(_currentEpMeta);
 
             await WaitWhilePausedAsync(token);
             if (!QueueManager.Instance.Queue.Contains(_currentEpMeta)){
@@ -627,7 +627,7 @@ public class HlsDownloader{
                     Doing = _isAudio ? "Merging Audio" : (_isVideo ? "Merging Video" : "")
                 };
 
-                QueueManager.Instance.RefreshQueue();
+                QueueManager.Instance.RefreshItem(_currentEpMeta);
 
                 if (!QueueManager.Instance.Queue.Contains(_currentEpMeta)){
                     CleanupBufferedArtifacts();

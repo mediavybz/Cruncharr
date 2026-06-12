@@ -163,8 +163,20 @@ public class HistoryEpisode
 
     public void SetDownloadedMedia(List<string> downloadedDubs, List<string> downloadedSubs)
     {
-        DownloadedDubLang = downloadedDubs;
-        DownloadedSoftSubs = downloadedSubs;
+        WasDownloaded = true;
+        // [PT] Upstream: merge with already-downloaded locales instead of replacing,
+        // so partial download tracking isn't overwritten on each download
+        DownloadedDubLang = MergeDownloadedLocales(DownloadedDubLang, downloadedDubs);
+        DownloadedSoftSubs = MergeDownloadedLocales(DownloadedSoftSubs, downloadedSubs);
+    }
+
+    private static List<string> MergeDownloadedLocales(IEnumerable<string> existingLocales, IEnumerable<string> newLocales)
+    {
+        return existingLocales
+            .Concat(newLocales)
+            .Where(locale => !string.IsNullOrWhiteSpace(locale))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public bool IsPartiallyDownloaded(IEnumerable<string> requestedDubs, IEnumerable<string> requestedSoftSubs)

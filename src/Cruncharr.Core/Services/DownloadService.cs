@@ -584,11 +584,12 @@ public class DownloadService : IDownloadService
                             _logger?.LogWarning(ex, "Failed to download additional dub: {Dub}", dub);
                         }
 
-                        // [PT] Ported from upstream: Dub download delay between dubs
-                        if (config.Download.DubDownloadDelaySeconds > 0)
+                        // [PT] Ported from upstream: download delay between dubs (only when dub-based delay is enabled;
+                        // otherwise the delay applies once per episode in QueueService)
+                        if (config.Download.DownloadDelayUseDubBased && config.Download.DownloadDelaySeconds > 0)
                         {
-                            _logger?.LogInformation("Waiting {Delay}s before next dub download...", config.Download.DubDownloadDelaySeconds);
-                            await Task.Delay(TimeSpan.FromSeconds(config.Download.DubDownloadDelaySeconds), cancellationToken);
+                            _logger?.LogInformation("Waiting {Delay}s before next dub download...", config.Download.DownloadDelaySeconds);
+                            await Task.Delay(TimeSpan.FromSeconds(config.Download.DownloadDelaySeconds), cancellationToken);
                         }
                     }
                 }
@@ -1373,7 +1374,8 @@ public class DownloadService : IDownloadService
 
                 if (!string.IsNullOrEmpty(streamError?.Error))
                 {
-                    _logger?.LogError("Playback API error: {Error}", streamError.Error);
+                    // [PT] Upstream: include the reason field in playback error output
+                    _logger?.LogError("Playback API error: {Error} {Reason}", streamError.Error, streamError.Reason ?? "");
                 }
             }
         }

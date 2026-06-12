@@ -36,6 +36,9 @@ public partial class CalendarPageViewModel : ViewModelBase{
     private bool _updateHistoryFromCalendar;
 
     [ObservableProperty]
+    private bool _showHistoryMark;
+
+    [ObservableProperty]
     private bool _hideDubs;
 
     public ObservableCollection<ComboBoxItem> CalendarDubFilter{ get; } = new(){
@@ -78,6 +81,7 @@ public partial class CalendarPageViewModel : ViewModelBase{
         HideDubs = CrunchyrollManager.Instance.CrunOptions.CalendarHideDubs;
         ShowUpcomingEpisodes = CrunchyrollManager.Instance.CrunOptions.CalendarShowUpcomingEpisodes;
         UpdateHistoryFromCalendar = CrunchyrollManager.Instance.CrunOptions.UpdateHistoryFromCalendar;
+        ShowHistoryMark = CrunchyrollManager.Instance.CrunOptions.CalendarShowHistoryMark;
 
         ComboBoxItem? dubfilter = CalendarDubFilter.FirstOrDefault(a => a.Content != null && (string)a.Content == CrunchyrollManager.Instance.CrunOptions.CalendarDubFilter) ?? null;
         CurrentCalendarDubFilter = dubfilter ?? CalendarDubFilter[0];
@@ -301,6 +305,30 @@ public partial class CalendarPageViewModel : ViewModelBase{
 
         CrunchyrollManager.Instance.CrunOptions.UpdateHistoryFromCalendar = value;
         CfgManager.WriteCrSettings();
+    }
+
+    partial void OnShowHistoryMarkChanged(bool value){
+        if (loading){
+            return;
+        }
+
+        CrunchyrollManager.Instance.CrunOptions.CalendarShowHistoryMark = value;
+        CfgManager.WriteCrSettings();
+        RefreshVisibleHistoryMarks(value);
+    }
+
+    private void RefreshVisibleHistoryMarks(bool value){
+        foreach (var calendarEpisode in CalendarDays.SelectMany(day => day.CalendarEpisodes)){
+            SetHistoryMarkVisibility(calendarEpisode, value);
+        }
+    }
+
+    private static void SetHistoryMarkVisibility(CalendarEpisode calendarEpisode, bool value){
+        calendarEpisode.ShowHistoryMark = value;
+
+        foreach (var childEpisode in calendarEpisode.CalendarEpisodes){
+            SetHistoryMarkVisibility(childEpisode, value);
+        }
     }
     
 }

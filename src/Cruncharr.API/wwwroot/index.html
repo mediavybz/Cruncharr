@@ -570,6 +570,21 @@ MAINTENANCE NOTES:
         .calendar-episode:hover { background: var(--bg-hover); }
         .calendar-episode.premiere { background: rgba(244, 117, 33, 0.15); }
 
+        /* Calendar history marks (upstream parity) */
+        .calendar-history-mark {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            z-index: 1;
+        }
+        .calendar-history-mark.mark-downloaded { background: #21a556; }
+        .calendar-history-mark.mark-partlydownloaded { background: #f78c25; }
+        .calendar-history-mark.mark-notdownloaded { background: #888888; }
+        .calendar-history-mark.mark-none { display: none; }
+
         .calendar-episode-time { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px; }
 
         .calendar-episode-thumb {
@@ -2613,8 +2628,15 @@ MAINTENANCE NOTES:
                                 ${day.episodes && day.episodes.length > 0 ? day.episodes.map(ep => {
                                     const epDate = ep.airDate ? new Date(ep.airDate) : null;
                                     const timeDisplay = epDate && !isNaN(epDate.getTime()) ? epDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+                                    const historyMark = ep.isInHistory && ep.showHistoryMark
+                                        ? `<div class="calendar-history-mark mark-${(ep.historyDownloadState || 'none').toLowerCase()}" title="${
+                                            ep.historyDownloadState === 'Downloaded' ? 'Downloaded'
+                                            : ep.historyDownloadState === 'PartlyDownloaded' ? 'Partly downloaded'
+                                            : ep.historyDownloadState === 'NotDownloaded' ? 'Not downloaded' : ''}"></div>`
+                                        : '';
                                     return `
                                     <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''}">
+                                        ${historyMark}
                                         <div class="calendar-episode-time">${timeDisplay}</div>
                                         <div class="calendar-episode-thumb">
                                             ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img src="${escapeHtml(ep.thumbnailUrl)}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
@@ -3702,6 +3724,7 @@ MAINTENANCE NOTES:
             const f = config?.flareSolverr || {};
             const a = config?.appearance || {};
             const cal = config?.calendar || {};
+            const ad = config?.addDownload || {};
             const g = config?.general || {};
             
             switch(settingsTab) {
@@ -3769,7 +3792,8 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Temp Directory</div></div><input type="text" class="form-input" id="setting-temp-dir" value="${escapeHtmlAttribute(dl.tempDirectory||'/tmp/cruncharr')}" style="width:250px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use Temp Folder</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-temp" ${dl.useTempFolder?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Part Size</div></div><input type="number" class="form-input" id="setting-part-size" value="${escapeHtmlAttribute(dl.partSize ?? 10)}" min="1" style="width:80px;"></div>
-                                <div class="setting-row"><div><div class="setting-label">Dub Download Delay (seconds)</div></div><input type="number" class="form-input" id="setting-dub-delay" value="${escapeHtmlAttribute(dl.dubDownloadDelaySeconds||0)}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Delay (seconds)</div><div class="setting-desc">Delay before each download</div></div><input type="number" class="form-input" id="setting-download-delay" value="${escapeHtmlAttribute(dl.downloadDelaySeconds||0)}" min="0" style="width:100px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Delay Between Dubs</div><div class="setting-desc">Apply the delay per dub instead of per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-delay-dub-based" ${dl.downloadDelayUseDubBased?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Cooldown Between Downloads (seconds)</div><div class="setting-desc">Delay before starting next download</div></div><input type="number" class="form-input" id="setting-cooldown" value="${escapeHtmlAttribute(dl.cooldownDelaySeconds||0)}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Downloads</div></div><input type="number" class="form-input" id="setting-concurrent" value="${escapeHtmlAttribute(dl.simultaneousDownloads||2)}" min="1" max="10" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input" id="setting-proc-jobs" value="${escapeHtmlAttribute(dl.simultaneousProcessingJobs||2)}" min="1" style="width:80px;"></div>
@@ -3894,6 +3918,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-enabled" ${h.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include CR Artists</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cr-artists" ${h.includeCrArtists?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Remove Missing Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-missing" ${h.removeMissingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Check Partial Downloads</div><div class="setting-desc">Track missing dubs/subs on downloaded episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-partial" ${h.checkPartialDownloads!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">History Language</div></div><select class="form-select" id="setting-history-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${h.lang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div></div><input type="number" class="form-input" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0" style="width:100px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div></div><select class="form-select" id="setting-history-mode" style="min-width:150px;"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
@@ -3954,6 +3979,7 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">Proxy Settings</span><span class="settings-section-desc">Configure proxy connection</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-proxy-enabled" ${p.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Proxy All Traffic</div><div class="setting-desc">Off = only Crunchyroll traffic uses the proxy</div></div><label class="toggle-switch"><input type="checkbox" id="setting-proxy-all-traffic" ${p.allTraffic!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">SOCKS Proxy</div></div><label class="toggle-switch"><input type="checkbox" id="setting-proxy-socks" ${p.socks?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input" id="setting-proxy-host" value="${escapeHtmlAttribute(p.host||'')}" style="width:200px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input" id="setting-proxy-port" value="${escapeHtmlAttribute(p.port||0)}" style="width:100px;"></div>
@@ -3988,6 +4014,15 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Calendar Language</div></div><select class="form-select" id="setting-cal-lang" style="min-width:150px;">${CALENDAR_LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(cal.language||'').toLowerCase()===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Dub Filter</div></div><select class="form-select" id="setting-cal-dub-filter" style="min-width:150px;"><option value="none" ${cal.dubFilter==='none'?'selected':''}>None</option><option value="dubbed" ${cal.dubFilter==='dubbed'?'selected':''}>Dubbed Only</option><option value="subbed" ${cal.dubFilter==='subbed'?'selected':''}>Subbed Only</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Hide Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-hide-dubs" ${cal.hideDubs?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Show History Marks</div><div class="setting-desc">Mark calendar episodes that are in your history</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-history-mark" ${cal.showHistoryMark!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                            </div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header"><span class="settings-section-title">Add Download Settings</span><span class="settings-section-desc">Add Download tab behavior</span></div>
+                            <div class="settings-section-body">
+                                <div class="setting-row"><div><div class="setting-label">Add Search Results to History</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-search-history" ${ad.searchAddToHistory!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Single Episode Instant Add</div><div class="setting-desc">Add single-episode URLs to the queue immediately</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-instant-add" ${ad.singleEpisodeInstantAdd!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Default to Search</div><div class="setting-desc">Search by title instead of expecting a URL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-default-search" ${ad.defaultSearchEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -4138,8 +4173,10 @@ MAINTENANCE NOTES:
                     if (useTemp !== undefined) dl.useTempFolder = useTemp;
                     const partSize = getFieldValue('setting-part-size', 'int');
                     if (partSize !== undefined) dl.partSize = partSize;
-                    const dubDelay = getFieldValue('setting-dub-delay', 'int');
-                    if (dubDelay !== undefined) dl.dubDownloadDelaySeconds = dubDelay;
+                    const downloadDelay = getFieldValue('setting-download-delay', 'int');
+                    if (downloadDelay !== undefined) dl.downloadDelaySeconds = downloadDelay;
+                    const delayDubBased = getFieldValue('setting-download-delay-dub-based', 'bool');
+                    if (delayDubBased !== undefined) dl.downloadDelayUseDubBased = delayDubBased;
                     const cooldown = getFieldValue('setting-cooldown', 'int');
                     if (cooldown !== undefined) dl.cooldownDelaySeconds = cooldown;
                     const concurrent = getFieldValue('setting-concurrent', 'int');
@@ -4325,7 +4362,13 @@ MAINTENANCE NOTES:
                     newConfig.calendar = {
                         language: document.getElementById('setting-cal-lang')?.value || 'en-us',
                         dubFilter: document.getElementById('setting-cal-dub-filter')?.value || 'none',
-                        hideDubs: document.getElementById('setting-cal-hide-dubs')?.checked || false
+                        hideDubs: document.getElementById('setting-cal-hide-dubs')?.checked || false,
+                        showHistoryMark: document.getElementById('setting-cal-history-mark')?.checked ?? true
+                    };
+                    newConfig.addDownload = {
+                        searchAddToHistory: document.getElementById('setting-ad-search-history')?.checked ?? true,
+                        singleEpisodeInstantAdd: document.getElementById('setting-ad-instant-add')?.checked ?? true,
+                        defaultSearchEnabled: document.getElementById('setting-ad-default-search')?.checked || false
                     };
                     break;
                     
@@ -4336,6 +4379,7 @@ MAINTENANCE NOTES:
                         enabled: document.getElementById('setting-history-enabled')?.checked ?? true,
                         includeCrArtists: document.getElementById('setting-cr-artists')?.checked || false,
                         removeMissingEpisodes: document.getElementById('setting-remove-missing')?.checked ?? true,
+                        checkPartialDownloads: document.getElementById('setting-history-partial')?.checked ?? true,
                         lang: document.getElementById('setting-history-lang')?.value || 'en-US',
                         autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
                         autoRefreshMode: isNaN(histMode) ? 0 : histMode
@@ -4386,6 +4430,7 @@ MAINTENANCE NOTES:
                 case 'proxy': {
                     newConfig.proxy = {
                         enabled: document.getElementById('setting-proxy-enabled')?.checked || false,
+                        allTraffic: document.getElementById('setting-proxy-all-traffic')?.checked ?? true,
                         socks: document.getElementById('setting-proxy-socks')?.checked || false,
                         host: document.getElementById('setting-proxy-host')?.value || null,
                         port: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
@@ -4824,6 +4869,8 @@ MAINTENANCE NOTES:
         // ================== HISTORY DETAIL & PARTIAL DOWNLOAD ==================
         
         function isEpisodePartiallyDownloaded(episode) {
+            // Upstream parity: partial download tracking can be disabled in History settings
+            if (config?.history?.checkPartialDownloads === false) return false;
             const downloadedDubs = episode.downloadedDubLang || [];
             const downloadedSubs = episode.downloadedSoftSubs || [];
             const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];

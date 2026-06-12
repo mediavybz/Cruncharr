@@ -166,6 +166,10 @@ public class CalendarController : ControllerBase
             IsPremiere = episode.IsPremiere,
             ThumbnailUrl = episode.ThumbnailUrl,
             HasAired = episode.HasPassed ?? false,
+            // [PT] Upstream calendar history marks
+            IsInHistory = episode.IsInHistory,
+            ShowHistoryMark = episode.ShowHistoryMark,
+            HistoryDownloadState = episode.HistoryDownloadState.ToString(),
         };
 
     }
@@ -196,4 +200,7 @@ public class CalendarEpisodeResponse
     public bool IsPremiere { get; set; }
     public string? ThumbnailUrl { get; set; }
     public bool HasAired { get; set; }
+    public bool IsInHistory { get; set; }
+    public bool ShowHistoryMark { get; set; }
+    public string HistoryDownloadState { get; set; } = "None";
 }

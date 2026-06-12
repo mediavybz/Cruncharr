@@ -107,6 +107,9 @@ public class CrDownloadOptions{
     [JsonProperty("history_count_missing")]
     public bool HistoryCountMissing{ get; set; }
 
+    [JsonProperty("history_check_partial_downloads")]
+    public bool HistoryCheckPartialDownloads{ get; set; } = true;
+
     [JsonProperty("history_include_cr_artists")]
     public bool HistoryIncludeCrArtists{ get; set; }
     
@@ -167,6 +170,9 @@ public class CrDownloadOptions{
 
     [JsonProperty("proxy_enabled")]
     public bool ProxyEnabled{ get; set; }
+
+    [JsonProperty("proxy_all_traffic")]
+    public bool ProxyAllTraffic{ get; set; } = true;
 
     [JsonProperty("proxy_socks")]
     public bool ProxySocks{ get; set; }
@@ -250,8 +256,11 @@ public class CrDownloadOptions{
     [JsonProperty("download_part_size")]
     public int Partsize{ get; set; }
 
-    [JsonProperty("dub_download_delay_seconds")]
-    public int DubDownloadDelaySeconds{ get; set; }
+    [JsonProperty("download_delay_seconds")]
+    public int DownloadDelaySeconds{ get; set; }
+
+    [JsonProperty("download_delay_use_dub_based")]
+    public bool DownloadDelayUseDubBased{ get; set; }
 
     [JsonProperty("soft_subs")]
     public List<string> DlSubs{ get; set; } =[];
@@ -385,6 +394,9 @@ public class CrDownloadOptions{
     [JsonProperty("calendar_update_history")]
     public bool UpdateHistoryFromCalendar{ get; set; }
 
+    [JsonProperty("calendar_show_history_mark")]
+    public bool CalendarShowHistoryMark{ get; set; } = true;
+
     [JsonProperty("stream_endpoint_settings")]
     public CrAuthSettings? StreamEndpoint{ get; set; }
 
@@ -393,6 +405,15 @@ public class CrDownloadOptions{
 
     [JsonProperty("search_fetch_featured_music")]
     public bool SearchFetchFeaturedMusic{ get; set; }
+
+    [JsonProperty("add_download_search_add_to_history")]
+    public bool AddDownloadSearchAddToHistory{ get; set; } = true;
+
+    [JsonProperty("add_download_single_episode_instant_add")]
+    public bool AddDownloadSingleEpisodeInstantAdd{ get; set; } = true;
+
+    [JsonProperty("add_download_default_search_enabled")]
+    public bool AddDownloadDefaultSearchEnabled{ get; set; }
 
     #endregion
 

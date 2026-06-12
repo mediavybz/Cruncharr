@@ -321,6 +321,10 @@ public class HistorySeries : INotifyPropertyChanged{
     }
 
     private bool IsPartialDownloadActionable(HistorySeason season, HistoryEpisode episode){
+        if (!CrunchyrollManager.Instance.CrunOptions.HistoryCheckPartialDownloads){
+            return false;
+        }
+
         var requestedDubs = GetEffectiveDubLang(this, season);
         var requestedSoftSubs = GetEffectiveSoftSubs(this, season, episode);
 

@@ -16,6 +16,7 @@ public interface ICrunchyrollApiService
     Task<List<EpisodeInfo>> GetEpisodesAsync(string seriesId, bool useBetaApi, CancellationToken cancellationToken = default);
     Task<EpisodeInfo?> GetEpisodeAsync(string episodeId, bool useBetaApi, CancellationToken cancellationToken = default);
     Task<CrBrowseEpisodeBase?> GetNewEpisodesAsync(string? crLocale, int requestAmount, bool forcedLang = false, CancellationToken cancellationToken = default);
+    Task<CrBrowseEpisodeBase?> GetNewEpisodesAsync(string? crLocale, int requestAmount, DateTime? firstWeekDay, bool forcedLang = false, CancellationToken cancellationToken = default);
 
     // Methods ported from upstream CrSeries for HistoryService
     Task<List<SeasonInfo>> ParseSeriesByIdAsync(string id, string? crLocale, bool forced = false, CancellationToken cancellationToken = default);
@@ -261,6 +262,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
     public async Task<CrBrowseEpisodeBase?> GetNewEpisodesAsync(string? crLocale, int requestAmount, bool forcedLang = false, CancellationToken cancellationToken = default)
     {
+        return await GetNewEpisodesAsync(crLocale, requestAmount, null, forcedLang, cancellationToken);
+    }
+
+    // [PT] Ported from upstream CrEpisode.GetNewEpisodes: page through results 100 at a time and
+    // stop early once pages no longer contain episodes inside the requested calendar week
+    public async Task<CrBrowseEpisodeBase?> GetNewEpisodesAsync(string? crLocale, int requestAmount, DateTime? firstWeekDay, bool forcedLang = false, CancellationToken cancellationToken = default)
+    {
         if (!await EnsureAuthenticatedAsync(true, cancellationToken))
         {
             return null;
@@ -277,36 +285,121 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         {
             queryParams["force_locale"] = crLocale;
         }
-        queryParams["n"] = requestAmount.ToString();
         queryParams["sort_by"] = "newly_added";
         queryParams["type"] = "episode";
 
-        var uriBuilder = new UriBuilder(ApiUrls.Browse(true))
+        if (requestAmount <= 0)
         {
-            Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
-        };
+            return new CrBrowseEpisodeBase { Data = new List<CrBrowseEpisode>() };
+        }
 
-        var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+        const int maxPageSize = 100;
+        const int stalePageTolerance = 3;
+        CrBrowseEpisodeBase? series = null;
+        var episodes = new List<CrBrowseEpisode>();
+        var stalePageCount = 0;
+        var firstWeekDayDate = firstWeekDay?.Date;
 
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
-
-        if (!isOk)
+        for (var start = 0; start < requestAmount; start += maxPageSize)
         {
-            _logger?.LogError("Get new episodes failed: {Error}", error);
+            var pageSize = Math.Min(maxPageSize, requestAmount - start);
+            queryParams["start"] = start.ToString();
+            queryParams["n"] = pageSize.ToString();
+
+            var uriBuilder = new UriBuilder(ApiUrls.Browse(true))
+            {
+                Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
+            };
+
+            var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+
+            var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+
+            if (!isOk)
+            {
+                _logger?.LogError("New episodes request failed for start '{Start}' and n '{PageSize}': {Error}", start, pageSize, error);
+                return null;
+            }
+
+            CrBrowseEpisodeBase? page;
+            try
+            {
+                page = JsonConvert.DeserializeObject<CrBrowseEpisodeBase>(content);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to parse new episodes data");
+                return null;
+            }
+
+            series ??= page;
+
+            if (page?.Data is not { Count: > 0 } pageData)
+            {
+                break;
+            }
+
+            episodes.AddRange(pageData);
+
+            if (firstWeekDayDate.HasValue)
+            {
+                if (pageData.Any(episode => GetCalendarTargetDate(episode).Date >= firstWeekDayDate.Value))
+                {
+                    stalePageCount = 0;
+                }
+                else
+                {
+                    stalePageCount++;
+
+                    if (stalePageCount >= stalePageTolerance)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (pageData.Count < pageSize)
+            {
+                break;
+            }
+        }
+
+        if (series == null)
+        {
             return null;
         }
 
-        try
+        series.Data = episodes;
+        series.Data?.Sort((a, b) => b.EpisodeMetadata.PremiumAvailableDate.CompareTo(a.EpisodeMetadata.PremiumAvailableDate));
+        return series;
+    }
+
+    // [PT] Ported from upstream CrEpisode.GetCalendarTargetDate
+    private static DateTime GetCalendarTargetDate(CrBrowseEpisode episode)
+    {
+        DateTime episodeAirDate = episode.EpisodeMetadata.EpisodeAirDate.Kind == DateTimeKind.Utc
+            ? episode.EpisodeMetadata.EpisodeAirDate.ToLocalTime()
+            : episode.EpisodeMetadata.EpisodeAirDate;
+
+        DateTime premiumAvailableStart = episode.EpisodeMetadata.PremiumAvailableDate.Kind == DateTimeKind.Utc
+            ? episode.EpisodeMetadata.PremiumAvailableDate.ToLocalTime()
+            : episode.EpisodeMetadata.PremiumAvailableDate;
+
+        DateTime targetDate = premiumAvailableStart;
+        DateTime oneYearFromNow = DateTime.Now.AddYears(1);
+
+        if (targetDate >= oneYearFromNow)
         {
-            var result = JsonConvert.DeserializeObject<CrBrowseEpisodeBase>(content);
-            result?.Data?.Sort((a, b) => b.EpisodeMetadata.PremiumAvailableDate.CompareTo(a.EpisodeMetadata.PremiumAvailableDate));
-            return result;
+            DateTime freeAvailableStart = episode.EpisodeMetadata.FreeAvailableDate.Kind == DateTimeKind.Utc
+                ? episode.EpisodeMetadata.FreeAvailableDate.ToLocalTime()
+                : episode.EpisodeMetadata.FreeAvailableDate;
+
+            targetDate = freeAvailableStart <= oneYearFromNow
+                ? freeAvailableStart
+                : episodeAirDate;
         }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to parse new episodes data");
-            return null;
-        }
+
+        return targetDate;
     }
 
     /// <summary>
@@ -641,6 +734,25 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         return await GetSeriesAsync(id, true, crLocale, forced, cancellationToken);
     }
 
+    // [PT] Ported from upstream CrSeries.GetEpisodeLabelFromKey
+    private static string GetEpisodeLabelFromKey(string key)
+    {
+        if (key.StartsWith("SP"))
+            return key;
+
+        var separatorIndex = key.LastIndexOf('E');
+        return separatorIndex >= 0 && separatorIndex < key.Length - 1
+            ? key[(separatorIndex + 1)..]
+            : key;
+    }
+
+    // [PT] Ported from upstream CrunchyEpisode.IsRegularEpisodeNumber
+    private static bool IsRegularEpisodeNumber(string? episode)
+    {
+        return !string.IsNullOrWhiteSpace(episode) &&
+               Regex.IsMatch(episode, @"^\d+(\.\d+)?(\s*-\s*\d+(\.\d+)?)?$");
+    }
+
     // CRITICAL: Ported from upstream CrSeries.ItemSelectMultiDub
     public Dictionary<string, CrunchyEpMeta> ItemSelectMultiDub(Dictionary<string, EpisodeAndLanguage> eps, List<string> dubLang, bool? all, List<string>? e)
     {
@@ -654,7 +766,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         foreach (var (key, episode) in eps)
         {
-            var epNum = key.StartsWith('E') ? key[1..] : key;
+            var epNum = GetEpisodeLabelFromKey(key);
 
             foreach (var v in episode.Variants)
             {
@@ -851,7 +963,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             var baseEp = item.Variants[0].Item;
 
             var epStr = baseEp.Episode;
-            var isSpecial = epStr != null && !Regex.IsMatch(epStr, @"^\d+(\.\d+)?(-\d+)?$");
+            var isSpecial = epStr != null && !IsRegularEpisodeNumber(epStr);
 
             string newKey;
             if (isSpecial && !string.IsNullOrEmpty(baseEp.Episode))
@@ -860,7 +972,14 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             }
             else
             {
-                newKey = $"{(isSpecial ? "SP" : 'E')}{(isSpecial ? (specialIndex + " " + baseEp.Id) : epIndex + "")}";
+                // [PT] Upstream: keep the season prefix and use the real episode label
+                // (supports multi-episode ranges like "11-12")
+                var episodeLabel = IsRegularEpisodeNumber(baseEp.Episode)
+                    ? baseEp.Episode
+                    : epIndex.ToString();
+                var separatorIndex = key.LastIndexOf('E');
+                var keyPrefix = separatorIndex > 0 ? key[..separatorIndex] : string.Empty;
+                newKey = $"{keyPrefix}E{episodeLabel}";
             }
 
             episodes.Remove(key);
@@ -879,7 +998,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             else epIndex++;
         }
 
-        var normal = episodes.Where(kvp => kvp.Key.StartsWith("E")).ToList();
+        var normal = episodes.Where(kvp => !kvp.Key.StartsWith("SP")).ToList();
         var specials = episodes.Where(kvp => kvp.Key.StartsWith("SP")).ToList();
 
         var sortedEpisodes = new Dictionary<string, EpisodeAndLanguage>(normal.Concat(specials));
@@ -987,7 +1106,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 SeasonTitle = DownloadQueueItemFactory.StripDubSuffix(baseEp.SeasonTitle),
                 EpisodeNum = key.StartsWith("SP")
                     ? key
-                    : (baseEp.EpisodeNumber?.ToString() ?? baseEp.Episode ?? "?"),
+                    : GetEpisodeLabelFromKey(key),
                 Id = baseEp.SeasonId ?? string.Empty,
                 Img = img,
                 Description = baseEp.Description ?? string.Empty,
@@ -1313,7 +1432,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         var baseEp = data.EpisodeAndLanguages.Variants[0].Item;
 
-        bool isSpecial = !string.IsNullOrEmpty(baseEp.Episode) && !Regex.IsMatch(baseEp.Episode, @"^\d+(\.\d+)?(-\d+)?$");
+        bool isSpecial = !string.IsNullOrEmpty(baseEp.Episode) && !IsRegularEpisodeNumber(baseEp.Episode);
 
         string newKey;
         if (isSpecial && !string.IsNullOrEmpty(baseEp.Episode))
@@ -1359,7 +1478,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     {
         CrunchyEpMeta? retMeta = null;
 
-        var epNum = episodeP.Key.StartsWith('E') ? episodeP.Key[1..] : episodeP.Key;
+        var epNum = GetEpisodeLabelFromKey(episodeP.Key);
         var hslang = "none"; // Default, could be fetched from config if needed
 
         var selectedDubs = dubLang

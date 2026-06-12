@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Linq;
 using System.Net.Http;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
 using CRD.Downloader.Crunchyroll.Utils;
@@ -26,11 +25,11 @@ public class CrSeries{
 
         var hslang = crunInstance.CrunOptions.Hslang;
 
-        bool ShouldInclude(string epNum) =>
-            all is true || (e != null && e.Contains(epNum));
+        bool ShouldInclude(string selectionKey) =>
+            all is true || (e != null && e.Contains(selectionKey));
 
         foreach (var (key, episode) in eps){
-            var epNum = key.StartsWith('E') ? key[1..] : key;
+            var epNum = GetEpisodeLabelFromKey(key);
 
             foreach (var v in episode.Variants){
                 var item = v.Item;
@@ -70,7 +69,7 @@ public class CrSeries{
                 }
 
                 // selection gate
-                if (!ShouldInclude(epNum))
+                if (!ShouldInclude(key))
                     continue;
 
                 // Create base queue item once per "key"
@@ -133,7 +132,7 @@ public class CrSeries{
     }
 
 
-    public async Task<CrunchySeriesList?> ListSeriesId(string id, string crLocale, CrunchyMultiDownload? data, bool forcedLocale = false){
+    public async Task<CrunchySeriesList?> ListSeriesId(string id, string crLocale, CrunchyMultiDownload? data, bool forcedLocale = false, bool updateHistory = true){
         bool serieshasversions = true;
 
         CrSeriesSearch? parsedSeries = await ParseSeriesById(id, crLocale, forcedLocale);
@@ -145,7 +144,7 @@ public class CrSeries{
 
         var episodes = new Dictionary<string, EpisodeAndLanguage>();
 
-        if (crunInstance.CrunOptions.History)
+        if (crunInstance.CrunOptions.History && updateHistory)
             _ = crunInstance.History.CrUpdateSeries(id, "");
 
         var cachedSeasonId = "";
@@ -170,7 +169,7 @@ public class CrSeries{
                     (episode.Episode != string.Empty ? episode.Episode : (episode.EpisodeNumber != null ? episode.EpisodeNumber + "" : $"F{fallbackIndex++}"))
                     ?? string.Empty;
 
-                var seasonIdentifier = !string.IsNullOrEmpty(s.Identifier)
+                var seasonIdentifier = !string.IsNullOrEmpty(s.Identifier) && s.Identifier.Contains('|')
                     ? s.Identifier.Split('|')[1]
                     : $"S{episode.SeasonNumber}";
 
@@ -194,7 +193,7 @@ public class CrSeries{
             }
         }
 
-        if (crunInstance.CrunOptions.History){
+        if (crunInstance.CrunOptions.History && updateHistory){
             var historySeries = crunInstance.HistoryList.FirstOrDefault(series => series.SeriesId == id);
             if (historySeries != null){
                 crunInstance.History.MatchHistorySeriesWithSonarr(false);
@@ -215,14 +214,18 @@ public class CrSeries{
 
             var baseEp = item.Variants[0].Item;
 
-            var epStr = baseEp.Episode;
-            var isSpecial = epStr != null && !Regex.IsMatch(epStr, @"^\d+(\.\d+)?$");
+            var isSpecial = baseEp.IsSpecialEpisode();
 
             string newKey;
             if (isSpecial && !string.IsNullOrEmpty(baseEp.Episode)){
                 newKey = $"SP{specialIndex}_" + baseEp.Episode;
             } else{
-                newKey = $"{(isSpecial ? "SP" : 'E')}{(isSpecial ? (specialIndex + " " + baseEp.Id) : epIndex + "")}";
+                var episodeLabel = CrunchyEpisode.IsRegularEpisodeNumber(baseEp.Episode)
+                    ? baseEp.Episode
+                    : epIndex.ToString();
+                var separatorIndex = key.LastIndexOf('E');
+                var keyPrefix = separatorIndex > 0 ? key[..separatorIndex] : string.Empty;
+                newKey = $"{keyPrefix}E{episodeLabel}";
             }
 
             episodes.Remove(key);
@@ -240,7 +243,7 @@ public class CrSeries{
             else epIndex++;
         }
 
-        var normal = episodes.Where(kvp => kvp.Key.StartsWith("E")).ToList();
+        var normal = episodes.Where(kvp => !kvp.Key.StartsWith("SP")).ToList();
         var specials = episodes.Where(kvp => kvp.Key.StartsWith("SP")).ToList();
 
         var sortedEpisodes = new Dictionary<string, EpisodeAndLanguage>(normal.Concat(specials));
@@ -259,7 +262,7 @@ public class CrSeries{
             );
 
             var title = baseEp.Title;
-            var seasonNumber = Helpers.ExtractNumberAfterS(baseEp.Identifier) ?? baseEp.SeasonNumber.ToString();
+            var seasonNumber = GetSeasonDisplaySuffix(baseEp);
 
             var languages = item.Variants
                 .Select(v => $"{(v.Item.IsPremiumOnly ? "+ " : "")}{v.Lang?.Name ?? "Unknown"}")
@@ -281,7 +284,7 @@ public class CrSeries{
 
             if (value.Variants.Count == 0){
                 return new Episode{
-                    E = key.StartsWith("E") ? key.Substring(1) : key,
+                    E = key,
                     Lang = new List<string>(),
                     Name = string.Empty,
                     Season = string.Empty,
@@ -311,15 +314,15 @@ public class CrSeries{
             Languages.SortListByLangList(langList);
 
             return new Episode{
-                E = key.StartsWith("E") ? key.Substring(1) : key,
+                E = key,
                 Lang = langList,
                 Name = baseEp.Title ?? string.Empty,
-                Season = (Helpers.ExtractNumberAfterS(baseEp.Identifier) ?? baseEp.SeasonNumber.ToString()) ?? string.Empty,
+                Season = GetSeasonDisplaySuffix(baseEp),
                 SeriesTitle = DownloadQueueItemFactory.StripDubSuffix(baseEp.SeriesTitle),
                 SeasonTitle = DownloadQueueItemFactory.StripDubSuffix(baseEp.SeasonTitle),
                 EpisodeNum = key.StartsWith("SP")
                     ? key
-                    : (baseEp.EpisodeNumber?.ToString() ?? baseEp.Episode ?? "?"),
+                    : GetEpisodeLabelFromKey(key),
                 Id = baseEp.SeasonId ?? string.Empty,
                 Img = img,
                 Description = baseEp.Description ?? string.Empty,
@@ -329,6 +332,20 @@ public class CrSeries{
         }).ToList();
 
         return crunchySeriesList;
+    }
+
+    private static string GetEpisodeLabelFromKey(string key){
+        if (key.StartsWith("SP"))
+            return key;
+
+        var separatorIndex = key.LastIndexOf('E');
+        return separatorIndex >= 0 && separatorIndex < key.Length - 1
+            ? key[(separatorIndex + 1)..]
+            : key;
+    }
+
+    private static string GetSeasonDisplaySuffix(CrunchyEpisode episode){
+        return Helpers.ExtractNumberAfterS(episode.Identifier) ?? episode.SeasonNumber.ToString();
     }
 
     public async Task<CrunchyEpisodeList> GetSeasonDataById(string seasonId, string? crLocale, bool forcedLang = false, bool log = false){
@@ -404,7 +421,7 @@ public class CrSeries{
         var response = await HttpClientReq.Instance.SendHttpRequest(request);
 
         if (!response.IsOk){
-            Console.Error.WriteLine("Series Request Failed");
+            Console.Error.WriteLine($"Series seasons request failed for series id '{id}'");
             return null;
         }
 
@@ -437,7 +454,7 @@ public class CrSeries{
         var response = await HttpClientReq.Instance.SendHttpRequest(request);
 
         if (!response.IsOk){
-            Console.Error.WriteLine("Series Request Failed");
+            Console.Error.WriteLine($"Series details request failed for series id '{id}'");
             return null;
         }
 
@@ -473,7 +490,7 @@ public class CrSeries{
         var response = await HttpClientReq.Instance.SendHttpRequest(request);
 
         if (!response.IsOk){
-            Console.Error.WriteLine("Series Request Failed");
+            Console.Error.WriteLine($"Series search request failed for query '{searchString}'");
             return null;
         }
 
@@ -519,7 +536,7 @@ public class CrSeries{
             var response = await HttpClientReq.Instance.SendHttpRequest(request);
 
             if (!response.IsOk){
-                Console.Error.WriteLine("Series Request Failed");
+                Console.Error.WriteLine($"All series browse request failed for start '{i}'");
                 return null;
             }
 
@@ -555,7 +572,7 @@ public class CrSeries{
         var response = await HttpClientReq.Instance.SendHttpRequest(request);
 
         if (!response.IsOk){
-            Console.Error.WriteLine("Series Request Failed");
+            Console.Error.WriteLine($"Seasonal series request failed for '{season}-{year}'");
             return null;
         }
 

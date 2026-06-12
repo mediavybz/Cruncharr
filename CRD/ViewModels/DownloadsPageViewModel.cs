@@ -279,7 +279,7 @@ public partial class DownloadItemModel : INotifyPropertyChanged{
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPauseIcon)));
 
             QueueManager.Instance.ReleaseDownloadSlot(epMeta);
-            QueueManager.Instance.RefreshQueue();
+            QueueManager.Instance.NotifyQueueItemStateChanged(epMeta);
             return;
         }
 
@@ -317,7 +317,7 @@ public partial class DownloadItemModel : INotifyPropertyChanged{
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DownloadSpeed)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DoingWhat)));
 
-        QueueManager.Instance.RefreshQueue();
+        QueueManager.Instance.NotifyQueueItemStateChanged(epMeta);
         StartDownload();
     }
 

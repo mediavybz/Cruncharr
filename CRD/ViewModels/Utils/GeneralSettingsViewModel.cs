@@ -47,6 +47,9 @@ public partial class GeneralSettingsViewModel : ViewModelBase{
     private bool historyCountMissing;
 
     [ObservableProperty]
+    private bool historyCheckPartialDownloads;
+
+    [ObservableProperty]
     private bool historyIncludeCrArtists;
     
     [ObservableProperty]
@@ -255,6 +258,9 @@ public partial class GeneralSettingsViewModel : ViewModelBase{
     private bool proxyEnabled;
 
     [ObservableProperty]
+    private bool proxyAllTraffic;
+
+    [ObservableProperty]
     private bool proxySocks;
 
     [ObservableProperty]
@@ -436,12 +442,14 @@ public partial class GeneralSettingsViewModel : ViewModelBase{
         }
 
         ProxyEnabled = options.ProxyEnabled;
+        ProxyAllTraffic = options.ProxyAllTraffic;
         ProxySocks = options.ProxySocks;
         ProxyHost = options.ProxyHost ?? "";
         ProxyUsername = options.ProxyUsername ?? "";
         ProxyPassword = options.ProxyPassword ?? "";
         ProxyPort = options.ProxyPort;
         HistoryCountMissing = options.HistoryCountMissing;
+        HistoryCheckPartialDownloads = options.HistoryCheckPartialDownloads;
         HistoryIncludeCrArtists = options.HistoryIncludeCrArtists;
         HistoryRemoveMissingEpisodes = options.HistoryRemoveMissingEpisodes;
         HistoryAddSpecials = options.HistoryAddSpecials;
@@ -547,6 +555,7 @@ public partial class GeneralSettingsViewModel : ViewModelBase{
 
         settings.DownloadToTempFolder = DownloadToTempFolder;
         settings.HistoryCountMissing = HistoryCountMissing;
+        settings.HistoryCheckPartialDownloads = HistoryCheckPartialDownloads;
         settings.HistoryAddSpecials = HistoryAddSpecials;
         settings.HistoryIncludeCrArtists = HistoryIncludeCrArtists;
         settings.HistoryRemoveMissingEpisodes = HistoryRemoveMissingEpisodes;
@@ -563,6 +572,7 @@ public partial class GeneralSettingsViewModel : ViewModelBase{
         QueueManager.Instance.SetProcessingLimit(settings.SimultaneousProcessingJobs);
 
         settings.ProxyEnabled = ProxyEnabled;
+        settings.ProxyAllTraffic = ProxyAllTraffic;
         settings.ProxySocks = ProxySocks;
         settings.ProxyHost = ProxyHost;
         settings.ProxyPort = Math.Clamp((int)(ProxyPort ?? 0), 0, 65535);
@@ -1220,6 +1230,15 @@ public partial class GeneralSettingsViewModel : ViewModelBase{
                 _ = Task.Run(() => SonarrClient.Instance.RefreshSonarrLite());
             } else{
                 CrunchyrollManager.Instance.HistoryList = new ObservableCollection<HistorySeries>();
+            }
+        }
+
+        if (settingsLoaded && e.PropertyName is nameof(HistoryCheckPartialDownloads)){
+            foreach (var historySeries in CrunchyrollManager.Instance.HistoryList){
+                historySeries.UpdateNewEpisodes();
+                foreach (var episode in historySeries.Seasons.SelectMany(season => season.EpisodesList)){
+                    episode.RefreshDownloadState();
+                }
             }
         }
 

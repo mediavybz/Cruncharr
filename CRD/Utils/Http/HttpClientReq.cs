@@ -28,9 +28,10 @@ public class HttpClientReq{
 
         if (CrunchyrollManager.Instance.CrunOptions.ProxyEnabled && !string.IsNullOrEmpty(CrunchyrollManager.Instance.CrunOptions.ProxyHost)){
             handler = CreateHandler(true, CrunchyrollManager.Instance.CrunOptions.ProxySocks, CrunchyrollManager.Instance.CrunOptions.ProxyHost, CrunchyrollManager.Instance.CrunOptions.ProxyPort,
-                CrunchyrollManager.Instance.CrunOptions.ProxyUsername, CrunchyrollManager.Instance.CrunOptions.ProxyPassword);
+                CrunchyrollManager.Instance.CrunOptions.ProxyUsername, CrunchyrollManager.Instance.CrunOptions.ProxyPassword, CrunchyrollManager.Instance.CrunOptions.ProxyAllTraffic);
             string scheme = CrunchyrollManager.Instance.CrunOptions.ProxySocks ? "socks5" : "http";
-            Console.Error.WriteLine($"Proxy is set: {scheme}://{CrunchyrollManager.Instance.CrunOptions.ProxyHost}:{CrunchyrollManager.Instance.CrunOptions.ProxyPort}");
+            string proxyScope = CrunchyrollManager.Instance.CrunOptions.ProxyAllTraffic ? "all traffic" : "Crunchyroll traffic only";
+            Console.Error.WriteLine($"Proxy is set for {proxyScope}: {scheme}://{CrunchyrollManager.Instance.CrunOptions.ProxyHost}:{CrunchyrollManager.Instance.CrunOptions.ProxyPort}");
             client = new HttpClient(handler);
         } else if (systemProxy != null){
             Uri testUri = new Uri("https://icanhazip.com");
@@ -93,7 +94,7 @@ public class HttpClientReq{
         };
     }
 
-    private HttpClientHandler CreateHandler(bool useProxy, bool useSocks = false, string? proxyHost = null, int proxyPort = 0, string? proxyUsername = "", string? proxyPassword = ""){
+    private HttpClientHandler CreateHandler(bool useProxy, bool useSocks = false, string? proxyHost = null, int proxyPort = 0, string? proxyUsername = "", string? proxyPassword = "", bool proxyAllTraffic = true){
         var handler = new HttpClientHandler{
             CookieContainer = new CookieContainer(),
             UseCookies = true,
@@ -103,13 +104,44 @@ public class HttpClientReq{
 
         if (useProxy && proxyHost != null){
             string scheme = useSocks ? "socks5" : "http";
-            handler.Proxy = new WebProxy($"{scheme}://{proxyHost}:{proxyPort}");
-            if (!string.IsNullOrEmpty(proxyUsername) && !string.IsNullOrEmpty(proxyPassword)){
-                handler.Proxy.Credentials = new NetworkCredential(proxyUsername, proxyPassword);
-            }
+            var proxy = new WebProxy($"{scheme}://{proxyHost}:{proxyPort}");
+            proxy.Credentials = !string.IsNullOrEmpty(proxyUsername) && !string.IsNullOrEmpty(proxyPassword)
+                ? new NetworkCredential(proxyUsername, proxyPassword)
+                : null;
+
+            handler.Proxy = proxyAllTraffic ? proxy : new CrunchyrollOnlyProxy(proxy);
         }
 
         return handler;
+    }
+
+    private sealed class CrunchyrollOnlyProxy(WebProxy proxy): IWebProxy{
+        public ICredentials? Credentials{
+            get => proxy.Credentials;
+            set => proxy.Credentials = value;
+        }
+
+        public Uri GetProxy(Uri destination){
+            return IsCrunchyrollProxyTarget(destination) ? proxy.GetProxy(destination) : destination;
+        }
+
+        public bool IsBypassed(Uri host){
+            return !IsCrunchyrollProxyTarget(host);
+        }
+
+        private static bool IsCrunchyrollProxyTarget(Uri destination){
+            if (!destination.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                !destination.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)){
+                return false;
+            }
+
+            if (destination.ToString().Equals(ApiUrls.WidevineLicenceUrl, StringComparison.OrdinalIgnoreCase)){
+                return false;
+            }
+
+            return destination.Host.Equals("crunchyroll.com", StringComparison.OrdinalIgnoreCase) ||
+                   destination.Host.EndsWith(".crunchyroll.com", StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     public async Task<(bool IsOk, string ResponseContent, string error, Dictionary<string, string> Headers)> SendHttpRequest(HttpRequestMessage request, bool suppressError = false, Dictionary<string, CookieCollection>? cookieStore = null,
@@ -397,5 +429,5 @@ public static class ApiUrls{
     public static string authBasicMob = "Basic Ym1icmt4eXgzZDd1NmpzZnlsYTQ6QUlONEQ1VkVfY3Awd1Z6Zk5vUDBZcUhVcllGcDloU2c=";
 
     public static readonly string MobileUserAgent = "Crunchyroll/3.81.6 Android/16";
-    public static readonly string FirefoxUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0";
+    public static readonly string FirefoxUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0) Gecko/20100101 Firefox/151.0";
 }

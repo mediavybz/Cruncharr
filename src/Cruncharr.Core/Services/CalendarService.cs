@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
 using HtmlAgilityPack;
@@ -31,6 +32,12 @@ public class CalendarService : ICalendarService
 
     private readonly Dictionary<string, CalendarWeek> _calendarCache = new();
     private readonly Dictionary<string, List<CalendarEpisode>> _anilistCache = new();
+    private DateTime? _anilistUpcomingLoadedDate;
+
+    // [PT] Upstream CalendarManager.GenericSeasonLabelRegex
+    private static readonly Regex GenericSeasonLabelRegex = new(
+        @"^(?<word>\p{L}+(?:[\p{L}\p{Mn}'\.\- ]*\p{L})?)\s+(?<n>\d+)$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private readonly Dictionary<string, string> _calendarLanguageUrls = new(){
         { "en-us", "https://www.crunchyroll.com/simulcastcalendar" },
@@ -46,11 +53,17 @@ public class CalendarService : ICalendarService
         { "hi", "https://www.crunchyroll.com/hi/simulcastcalendar" },
     };
 
-    public CalendarService(ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, ILogger<CalendarService>? logger = null)
+    private readonly IHistoryService? _historyService;
+    private readonly CruncharrConfig? _config;
+
+    public CalendarService(ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, ILogger<CalendarService>? logger = null,
+        IHistoryService? historyService = null, CruncharrConfig? config = null)
     {
         _apiService = apiService;
         _authService = authService;
         _logger = logger;
+        _historyService = historyService;
+        _config = config;
         _httpClient = new HttpClientWrapper();
     }
 
@@ -60,6 +73,7 @@ public class CalendarService : ICalendarService
 
         if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek))
         {
+            await RefreshHistoryStatusesAsync(cachedWeek);
             return cachedWeek;
         }
 
@@ -97,6 +111,7 @@ public class CalendarService : ICalendarService
         if (week != null)
         {
             _calendarCache[cacheKey] = week;
+            await RefreshHistoryStatusesAsync(week);
         }
 
         return week ?? new CalendarWeek { CalendarDays = new List<CalendarDay>() };
@@ -199,6 +214,7 @@ public class CalendarService : ICalendarService
 
         if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek))
         {
+            await RefreshHistoryStatusesAsync(cachedWeek);
             return cachedWeek;
         }
 
@@ -221,8 +237,8 @@ public class CalendarService : ICalendarService
         week.CalendarDays.Reverse();
         week.FirstDayOfWeek = week.CalendarDays.First().DateTime;
 
-        // Get new episodes from API
-        var newEpisodes = await GetNewEpisodesFromApiAsync(language);
+        // Get new episodes from API ([PT] upstream: pass week start so paging can stop early)
+        var newEpisodes = await GetNewEpisodesFromApiAsync(language, week.FirstDayOfWeek);
 
         if (newEpisodes != null && newEpisodes.Count > 0)
         {
@@ -270,6 +286,7 @@ public class CalendarService : ICalendarService
                         }
 
                         existingEpisode.CalendarEpisodes.Add(episode);
+                        ApplyMergedHistoryStatus(existingEpisode);
                     }
                     else
                     {
@@ -299,16 +316,17 @@ public class CalendarService : ICalendarService
         }
 
         _calendarCache[cacheKey] = week;
+        await RefreshHistoryStatusesAsync(week);
         return week;
     }
 
-    private async Task<List<CalendarEpisode>> GetNewEpisodesFromApiAsync(string language)
+    private async Task<List<CalendarEpisode>> GetNewEpisodesFromApiAsync(string language, DateTime? firstWeekDay = null)
     {
         try
         {
             _logger?.LogInformation("Fetching new episodes from API for calendar");
 
-            var newEpisodesBase = await _apiService.GetNewEpisodesAsync(language, 2000, true);
+            var newEpisodesBase = await _apiService.GetNewEpisodesAsync(language, 2000, firstWeekDay, true);
 
             if (newEpisodesBase?.Data == null || newEpisodesBase.Data.Count == 0)
             {
@@ -352,7 +370,7 @@ public class CalendarService : ICalendarService
                 // Build season title
                 string? seasonTitle = string.IsNullOrEmpty(metadata.SeasonTitle)
                     ? metadata.SeriesTitle
-                    : LooksLikeGenericSeasonLabel(metadata.SeasonTitle, metadata.SeasonNumber)
+                    : LooksLikeGenericSeasonLabel(metadata.SeasonTitle)
                         ? $"{metadata.SeriesTitle} {metadata.SeasonTitle}"
                         : metadata.SeasonTitle;
 
@@ -369,8 +387,12 @@ public class CalendarService : ICalendarService
                     SeasonName = seasonTitle,
                     EpisodeNumber = metadata.Episode ?? "?",
                     CrSeriesID = metadata.SeriesId,
-                    AudioLocale = metadata.AudioLocale
+                    CrSeasonID = metadata.SeasonId,
+                    CrEpisodeID = crBrowseEpisode.Id,
+                    AudioLocale = metadata.AudioLocale,
+                    Versions = metadata.Versions
                 };
+                ExtractVersionGuids(calEpisode);
 
                 calendarEpisodes.Add(calEpisode);
             }
@@ -384,11 +406,236 @@ public class CalendarService : ICalendarService
         }
     }
 
-    private static bool LooksLikeGenericSeasonLabel(string? seasonTitle, double seasonNumber)
+    // [PT] Upstream: only treat "Season N" style labels as generic
+    private static bool LooksLikeGenericSeasonLabel(string? seasonTitle)
     {
-        if (string.IsNullOrEmpty(seasonTitle)) return false;
-        var genericLabels = new[] { "Season", "Cour" };
-        return genericLabels.Any(label => seasonTitle.Contains(label, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(seasonTitle))
+            return true;
+
+        var t = seasonTitle.Trim();
+
+        var m = GenericSeasonLabelRegex.Match(t);
+
+        if (!m.Success)
+            return false;
+
+        var word = m.Groups["word"].Value.Trim();
+
+        return word.Equals("Season", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // [PT] Ported from upstream CalendarManager.ExtractVersionGuids
+    private static void ExtractVersionGuids(CalendarEpisode calEpisode)
+    {
+        calEpisode.VersionGuids = calEpisode.Versions?
+            .Select(version => version.Guid)
+            .Where(guid => !string.IsNullOrWhiteSpace(guid))
+            .Select(guid => guid!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+
+        var originalVersion = calEpisode.Versions?
+            .FirstOrDefault(version => version.Original);
+
+        calEpisode.OriginalEpisodeGuid = originalVersion?.Guid;
+        calEpisode.OriginalSeasonGuid = originalVersion?.SeasonGuid;
+    }
+
+    // [PT] Ported from upstream CalendarManager history mark logic (RefreshHistoryStatuses et al.)
+    private async Task RefreshHistoryStatusesAsync(CalendarWeek week)
+    {
+        if (week.CalendarDays == null || _historyService == null)
+        {
+            return;
+        }
+
+        List<HistorySeries> historyList;
+        try
+        {
+            historyList = await _historyService.GetHistorySeriesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to load history for calendar history marks");
+            return;
+        }
+
+        foreach (var calendarEpisode in week.CalendarDays.SelectMany(day => day.CalendarEpisodes))
+        {
+            RefreshHistoryStatus(calendarEpisode, historyList);
+        }
+    }
+
+    private void RefreshHistoryStatus(CalendarEpisode calendarEpisode, List<HistorySeries> historyList)
+    {
+        foreach (var childEpisode in calendarEpisode.CalendarEpisodes)
+        {
+            ApplyHistoryStatus(childEpisode, historyList);
+        }
+
+        ApplyHistoryStatus(calendarEpisode, historyList);
+
+        if (calendarEpisode.CalendarEpisodes.Count > 0)
+        {
+            ApplyMergedHistoryStatus(calendarEpisode);
+        }
+    }
+
+    private void ApplyHistoryStatus(CalendarEpisode calEpisode, List<HistorySeries> historyList)
+    {
+        calEpisode.ShowHistoryMark = _config?.Calendar?.ShowHistoryMark ?? true;
+        calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.None;
+        calEpisode.IsInHistory = false;
+
+        if (_config?.History?.Enabled != true || string.IsNullOrWhiteSpace(calEpisode.CrSeriesID))
+        {
+            return;
+        }
+
+        var historySeries = historyList
+            .FirstOrDefault(series => string.Equals(series.SeriesId, calEpisode.CrSeriesID, StringComparison.OrdinalIgnoreCase));
+
+        if (historySeries == null)
+        {
+            return;
+        }
+
+        calEpisode.IsInHistory = true;
+
+        var historyMatch = FindHistoryMatch(historySeries, calEpisode);
+        if (historyMatch.HistoryEpisode == null)
+        {
+            calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.NotDownloaded;
+            return;
+        }
+
+        if (!historyMatch.HistoryEpisode.WasDownloaded)
+        {
+            calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.NotDownloaded;
+            return;
+        }
+
+        if (_config?.History?.CheckPartialDownloads == true)
+        {
+            var requestedDubs = GetEffectiveDubLang(historySeries, historyMatch.HistorySeason);
+            var requestedSoftSubs = GetEffectiveSoftSubs(historySeries, historyMatch.HistorySeason);
+            calEpisode.HistoryDownloadState = historyMatch.HistoryEpisode.IsPartiallyDownloaded(requestedDubs, requestedSoftSubs)
+                ? CalendarHistoryDownloadState.PartlyDownloaded
+                : CalendarHistoryDownloadState.Downloaded;
+        }
+        else
+        {
+            calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.Downloaded;
+        }
+    }
+
+    private List<string> GetEffectiveDubLang(HistorySeries historySeries, HistorySeason? historySeason)
+    {
+        if (historySeason?.HistorySeasonDubLangOverride.Count > 0)
+        {
+            return historySeason.HistorySeasonDubLangOverride.ToList();
+        }
+        if (historySeries.HistorySeriesDubLangOverride.Count > 0)
+        {
+            return historySeries.HistorySeriesDubLangOverride.ToList();
+        }
+        return _config?.Download?.DubLanguages?.ToList() ?? [];
+    }
+
+    private List<string> GetEffectiveSoftSubs(HistorySeries historySeries, HistorySeason? historySeason)
+    {
+        if (historySeason?.HistorySeasonSoftSubsOverride.Count > 0)
+        {
+            return historySeason.HistorySeasonSoftSubsOverride.ToList();
+        }
+        if (historySeries.HistorySeriesSoftSubsOverride.Count > 0)
+        {
+            return historySeries.HistorySeriesSoftSubsOverride.ToList();
+        }
+        return _config?.Download?.SoftSubs?.ToList() ?? [];
+    }
+
+    // [PT] Ported from upstream CalendarManager.FindHistoryMatch
+    private static (HistorySeason? HistorySeason, HistoryEpisode? HistoryEpisode) FindHistoryMatch(
+        HistorySeries historySeries,
+        CalendarEpisode calEpisode)
+    {
+        var candidateSeasonIds = new[]
+            {
+                calEpisode.OriginalSeasonGuid,
+                calEpisode.CrSeasonID
+            }
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var candidateEpisodeIds = new List<string>();
+        if (!string.IsNullOrWhiteSpace(calEpisode.OriginalEpisodeGuid))
+        {
+            candidateEpisodeIds.Add(calEpisode.OriginalEpisodeGuid);
+        }
+
+        candidateEpisodeIds.AddRange(calEpisode.VersionGuids);
+
+        if (!string.IsNullOrWhiteSpace(calEpisode.CrEpisodeID))
+        {
+            candidateEpisodeIds.Add(calEpisode.CrEpisodeID);
+        }
+
+        candidateEpisodeIds = candidateEpisodeIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var historySeason in historySeries.Seasons
+                     .Where(historySeason => candidateSeasonIds.Count == 0 || candidateSeasonIds.Contains(historySeason.SeasonId ?? string.Empty, StringComparer.OrdinalIgnoreCase)))
+        {
+            var historyEpisode = historySeason.EpisodesList
+                .FirstOrDefault(episode => candidateEpisodeIds.Contains(episode.EpisodeId ?? string.Empty, StringComparer.OrdinalIgnoreCase));
+
+            if (historyEpisode != null)
+            {
+                return (historySeason, historyEpisode);
+            }
+        }
+
+        foreach (var historySeason in historySeries.Seasons)
+        {
+            var historyEpisode = historySeason.EpisodesList
+                .FirstOrDefault(episode => candidateEpisodeIds.Contains(episode.EpisodeId ?? string.Empty, StringComparer.OrdinalIgnoreCase));
+
+            if (historyEpisode != null)
+            {
+                return (historySeason, historyEpisode);
+            }
+        }
+
+        return (null, null);
+    }
+
+    // [PT] Ported from upstream CalendarManager.ApplyMergedHistoryStatus
+    private static void ApplyMergedHistoryStatus(CalendarEpisode calendarEpisode)
+    {
+        var episodes = new[] { calendarEpisode }
+            .Concat(calendarEpisode.CalendarEpisodes)
+            .Where(episode => episode.IsInHistory)
+            .ToList();
+
+        calendarEpisode.IsInHistory = episodes.Count > 0;
+
+        if (episodes.Count == 0)
+        {
+            calendarEpisode.HistoryDownloadState = CalendarHistoryDownloadState.None;
+        }
+        else if (episodes.Any(episode => episode.HistoryDownloadState == CalendarHistoryDownloadState.PartlyDownloaded) ||
+                 episodes.Select(episode => episode.HistoryDownloadState).Distinct().Count() > 1)
+        {
+            calendarEpisode.HistoryDownloadState = CalendarHistoryDownloadState.PartlyDownloaded;
+        }
+        else
+        {
+            calendarEpisode.HistoryDownloadState = episodes[0].HistoryDownloadState;
+        }
     }
 
     public async Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language)
@@ -418,8 +665,10 @@ public class CalendarService : ICalendarService
     {
         var today = DateTime.Today.ToString("yyyy-MM-dd");
 
-        if (_anilistCache.ContainsKey(today))
+        // [PT] Upstream: don't re-query AniList more than once per day
+        if (_anilistUpcomingLoadedDate == DateTime.Today || _anilistCache.ContainsKey(today))
         {
+            _anilistUpcomingLoadedDate = DateTime.Today;
             return;
         }
 
@@ -490,7 +739,15 @@ public class CalendarService : ICalendarService
             }
 
             var response = JsonConvert.DeserializeObject<AniListResponseCalendar>(content);
-            var schedules = response?.Data?.Page?.AiringSchedules ?? new List<AniListAiringSchedule>();
+
+            // [PT] Upstream: bail out if the response could not be parsed
+            if (response?.Data?.Page == null)
+            {
+                _logger?.LogError("Anilist response could not be parsed for upcoming calendar episodes");
+                return;
+            }
+
+            var schedules = response.Data.Page.AiringSchedules ?? new List<AniListAiringSchedule>();
 
             allSchedules.AddRange(schedules);
             hasNextPage = response?.Data?.Page?.PageInfo?.HasNextPage ?? false;
@@ -553,5 +810,7 @@ public class CalendarService : ICalendarService
             }
             value.Add(episode);
         }
+
+        _anilistUpcomingLoadedDate = DateTime.Today;
     }
 }

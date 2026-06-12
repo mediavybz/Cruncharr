@@ -255,13 +255,20 @@
                 </controls:SettingsExpanderItem>
 
 
-                <controls:SettingsExpanderItem Content="Dub Download Delay"
-                                               Description="Delay in seconds before starting the next selected dub. 0 disables the delay.">
+                <controls:SettingsExpanderItem Content="Download Delay"
+                                               Description="Delay in seconds before starting the next episode download. 0 disables the delay.">
                     <controls:SettingsExpanderItem.Footer>
                         <controls:NumberBox Minimum="0"
-                                            Value="{Binding DubDownloadDelaySeconds}"
+                                            Value="{Binding DownloadDelaySeconds}"
                                             SpinButtonPlacementMode="Hidden"
                                             HorizontalAlignment="Stretch" />
+                    </controls:SettingsExpanderItem.Footer>
+                </controls:SettingsExpanderItem>
+
+                <controls:SettingsExpanderItem Content="Dub Based Download Delay"
+                                               Description="Apply the download delay before every selected dub instead of only between episodes.">
+                    <controls:SettingsExpanderItem.Footer>
+                        <CheckBox IsChecked="{Binding DownloadDelayUseDubBased}"> </CheckBox>
                     </controls:SettingsExpanderItem.Footer>
                 </controls:SettingsExpanderItem>
 

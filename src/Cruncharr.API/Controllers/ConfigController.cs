@@ -81,7 +81,8 @@ public class ConfigController : ControllerBase
                     DownloadFirstAvailableDub = _config.Download?.DownloadFirstAvailableDub ?? false,
                     DlVideoOnce = _config.Download?.DlVideoOnce ?? false,
                     KeepDubsSeparate = _config.Download?.KeepDubsSeparate ?? false,
-                    DubDownloadDelaySeconds = _config.Download?.DubDownloadDelaySeconds ?? 0,
+                    DownloadDelaySeconds = _config.Download?.DownloadDelaySeconds ?? 0,
+                    DownloadDelayUseDubBased = _config.Download?.DownloadDelayUseDubBased ?? false,
                     CooldownDelaySeconds = _config.Download?.CooldownDelaySeconds ?? 0,
                     HardSubLang = _config.Download?.HardSubLang ?? "",
                     HardSubRawFallback = _config.Download?.HardSubRawFallback ?? false,
@@ -150,6 +151,7 @@ public class ConfigController : ControllerBase
                 {
                     Enabled = _config.History?.Enabled ?? true,
                     CountMissing = _config.History?.CountMissing ?? true,
+                    CheckPartialDownloads = _config.History?.CheckPartialDownloads ?? true,
                     IncludeCrArtists = _config.History?.IncludeCrArtists ?? false,
                     RemoveMissingEpisodes = _config.History?.RemoveMissingEpisodes ?? true,
                     AddSpecials = _config.History?.AddSpecials ?? true,
@@ -195,6 +197,7 @@ public class ConfigController : ControllerBase
                 Proxy = new
                 {
                     Enabled = _config.Proxy?.Enabled ?? false,
+                    AllTraffic = _config.Proxy?.AllTraffic ?? true,
                     Socks = _config.Proxy?.Socks ?? false,
                     Host = _config.Proxy?.Host ?? "",
                     Port = _config.Proxy?.Port ?? 0,
@@ -219,7 +222,14 @@ public class ConfigController : ControllerBase
                     Custom = _config.Calendar?.Custom ?? false,
                     HideDubs = _config.Calendar?.HideDubs ?? false,
                     ShowUpcomingEpisodes = _config.Calendar?.ShowUpcomingEpisodes ?? false,
-                    UpdateHistory = _config.Calendar?.UpdateHistory ?? false
+                    UpdateHistory = _config.Calendar?.UpdateHistory ?? false,
+                    ShowHistoryMark = _config.Calendar?.ShowHistoryMark ?? true
+                },
+                AddDownload = new
+                {
+                    SearchAddToHistory = _config.AddDownload?.SearchAddToHistory ?? true,
+                    SingleEpisodeInstantAdd = _config.AddDownload?.SingleEpisodeInstantAdd ?? true,
+                    DefaultSearchEnabled = _config.AddDownload?.DefaultSearchEnabled ?? false
                 },
                 Appearance = new
                 {
@@ -389,7 +399,8 @@ public class ConfigController : ControllerBase
             if (dl.DownloadFirstAvailableDub.HasValue) _config.Download.DownloadFirstAvailableDub = dl.DownloadFirstAvailableDub.Value;
             if (dl.DlVideoOnce.HasValue) _config.Download.DlVideoOnce = dl.DlVideoOnce.Value;
             if (dl.KeepDubsSeparate.HasValue) _config.Download.KeepDubsSeparate = dl.KeepDubsSeparate.Value;
-            if (dl.DubDownloadDelaySeconds.HasValue) _config.Download.DubDownloadDelaySeconds = dl.DubDownloadDelaySeconds.Value;
+            if (dl.DownloadDelaySeconds.HasValue) _config.Download.DownloadDelaySeconds = dl.DownloadDelaySeconds.Value;
+            if (dl.DownloadDelayUseDubBased.HasValue) _config.Download.DownloadDelayUseDubBased = dl.DownloadDelayUseDubBased.Value;
             if (dl.CooldownDelaySeconds.HasValue) _config.Download.CooldownDelaySeconds = dl.CooldownDelaySeconds.Value;
             if (!string.IsNullOrEmpty(dl.HardSubLang)) _config.Download.HardSubLang = dl.HardSubLang;
             if (dl.HardSubRawFallback.HasValue) _config.Download.HardSubRawFallback = dl.HardSubRawFallback.Value;
@@ -462,6 +473,7 @@ public class ConfigController : ControllerBase
             var h = request.History;
             if (h.Enabled.HasValue) _config.History.Enabled = h.Enabled.Value;
             if (h.CountMissing.HasValue) _config.History.CountMissing = h.CountMissing.Value;
+            if (h.CheckPartialDownloads.HasValue) _config.History.CheckPartialDownloads = h.CheckPartialDownloads.Value;
             if (h.IncludeCrArtists.HasValue) _config.History.IncludeCrArtists = h.IncludeCrArtists.Value;
             if (h.RemoveMissingEpisodes.HasValue) _config.History.RemoveMissingEpisodes = h.RemoveMissingEpisodes.Value;
             if (h.AddSpecials.HasValue) _config.History.AddSpecials = h.AddSpecials.Value;
@@ -514,6 +526,7 @@ public class ConfigController : ControllerBase
         {
             var p = request.Proxy;
             if (p.Enabled.HasValue) _config.Proxy.Enabled = p.Enabled.Value;
+            if (p.AllTraffic.HasValue) _config.Proxy.AllTraffic = p.AllTraffic.Value;
             if (p.Socks.HasValue) _config.Proxy.Socks = p.Socks.Value;
             if (p.Host != null) _config.Proxy.Host = p.Host;
             if (p.Port.HasValue) _config.Proxy.Port = p.Port.Value;
@@ -543,6 +556,15 @@ public class ConfigController : ControllerBase
             if (c.HideDubs.HasValue) _config.Calendar.HideDubs = c.HideDubs.Value;
             if (c.ShowUpcomingEpisodes.HasValue) _config.Calendar.ShowUpcomingEpisodes = c.ShowUpcomingEpisodes.Value;
             if (c.UpdateHistory.HasValue) _config.Calendar.UpdateHistory = c.UpdateHistory.Value;
+            if (c.ShowHistoryMark.HasValue) _config.Calendar.ShowHistoryMark = c.ShowHistoryMark.Value;
+        }
+
+        if (request.AddDownload != null)
+        {
+            var ad = request.AddDownload;
+            if (ad.SearchAddToHistory.HasValue) _config.AddDownload.SearchAddToHistory = ad.SearchAddToHistory.Value;
+            if (ad.SingleEpisodeInstantAdd.HasValue) _config.AddDownload.SingleEpisodeInstantAdd = ad.SingleEpisodeInstantAdd.Value;
+            if (ad.DefaultSearchEnabled.HasValue) _config.AddDownload.DefaultSearchEnabled = ad.DefaultSearchEnabled.Value;
         }
 
         if (request.Appearance != null)
@@ -575,6 +597,7 @@ public class ConfigUpdateRequest
     public ProxyUpdateConfig? Proxy { get; set; }
     public FlareSolverrUpdateConfig? FlareSolverr { get; set; }
     public CalendarUpdateConfig? Calendar { get; set; }
+    public AddDownloadUpdateConfig? AddDownload { get; set; }
     public AppearanceUpdateConfig? Appearance { get; set; }
     public GeneralUpdateConfig? General { get; set; }
     public DateTime? TrackedSeriesReleaseLastCheckUtc { get; set; }
@@ -612,7 +635,8 @@ public class DownloadUpdateConfig
     public bool? DownloadFirstAvailableDub { get; set; }
     public bool? DlVideoOnce { get; set; }
     public bool? KeepDubsSeparate { get; set; }
-    public int? DubDownloadDelaySeconds { get; set; }
+    public int? DownloadDelaySeconds { get; set; }
+    public bool? DownloadDelayUseDubBased { get; set; }
     public int? CooldownDelaySeconds { get; set; }
     public string? HardSubLang { get; set; }
     public bool? HardSubRawFallback { get; set; }
@@ -683,6 +707,7 @@ public class HistoryUpdateConfig
 {
     public bool? Enabled { get; set; }
     public bool? CountMissing { get; set; }
+    public bool? CheckPartialDownloads { get; set; }
     public bool? IncludeCrArtists { get; set; }
     public bool? RemoveMissingEpisodes { get; set; }
     public bool? AddSpecials { get; set; }
@@ -728,6 +753,7 @@ public class SonarrUpdateConfig
 public class ProxyUpdateConfig
 {
     public bool? Enabled { get; set; }
+    public bool? AllTraffic { get; set; }
     public bool? Socks { get; set; }
     public string? Host { get; set; }
     public int? Port { get; set; }
@@ -755,6 +781,14 @@ public class CalendarUpdateConfig
     public bool? HideDubs { get; set; }
     public bool? ShowUpcomingEpisodes { get; set; }
     public bool? UpdateHistory { get; set; }
+    public bool? ShowHistoryMark { get; set; }
+}
+
+public class AddDownloadUpdateConfig
+{
+    public bool? SearchAddToHistory { get; set; }
+    public bool? SingleEpisodeInstantAdd { get; set; }
+    public bool? DefaultSearchEnabled { get; set; }
 }
 
 public class AppearanceUpdateConfig

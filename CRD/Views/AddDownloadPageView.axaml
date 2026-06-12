@@ -30,8 +30,17 @@
 
         <StackPanel Grid.Row="0" Orientation="Vertical">
 
-            <TextBox x:Name="SearchBar" Watermark="Enter series or episode url" Text="{Binding UrlInput}" Margin="10"
-                     VerticalAlignment="Top" />
+            <Grid Margin="10" ColumnDefinitions="*,Auto">
+                <TextBox x:Name="SearchBar" Grid.Column="0" Watermark="{Binding SearchWatermark}" Text="{Binding UrlInput}"
+                         VerticalAlignment="Top" />
+
+                <ToggleButton x:Name="AddDownloadSettings" Grid.Column="1" Margin="8 0 0 0" HorizontalContentAlignment="Stretch">
+                    <controls:SymbolIcon Symbol="Settings" FontSize="18" />
+                    <ToolTip.Tip>
+                        <TextBlock Text="Add download settings" FontSize="15" />
+                    </ToolTip.Tip>
+                </ToggleButton>
+            </Grid>
 
             <Popup IsLightDismissEnabled="True"
                    MaxWidth="{Binding Bounds.Width, ElementName=SearchBar}"
@@ -113,6 +122,81 @@
                         </ListBox.ItemTemplate>
 
                     </ListBox>
+                </Border>
+            </Popup>
+
+            <Popup IsLightDismissEnabled="True"
+                   MaxWidth="360"
+                   MaxHeight="600"
+                   IsOpen="{Binding IsChecked, ElementName=AddDownloadSettings, Mode=TwoWay}"
+                   Placement="Bottom"
+                   PlacementTarget="{Binding ElementName=AddDownloadSettings}">
+                <Border BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="12"
+                        Background="{DynamicResource ComboBoxDropDownBackground}">
+                    <StackPanel Width="320" Spacing="8">
+                        
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                            <TextBlock Grid.Column="0" Text="Add searched series to history" VerticalAlignment="Center" />
+                            <controls:SymbolIcon Grid.Column="1"
+                                                 Symbol="Help"
+                                                 FontSize="14"
+                                                 Opacity="0.72"
+                                                 Margin="8 0 10 0"
+                                                 VerticalAlignment="Center">
+                                <ToolTip.Tip>
+                                    <TextBlock Text="Listing episodes from this page updates History when global History is enabled."
+                                               FontSize="13"
+                                               TextWrapping="Wrap"
+                                               MaxWidth="280" />
+                                </ToolTip.Tip>
+                            </controls:SymbolIcon>
+                            <CheckBox Grid.Column="2"
+                                      IsChecked="{Binding AddSearchResultsToHistory}"
+                                      VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                            <TextBlock Grid.Column="0" Text="Single episode URLs" VerticalAlignment="Center" />
+                            <controls:SymbolIcon Grid.Column="1"
+                                                 Symbol="Help"
+                                                 FontSize="14"
+                                                 Opacity="0.72"
+                                                 Margin="8 0 10 0"
+                                                 VerticalAlignment="Center">
+                                <ToolTip.Tip>
+                                    <TextBlock Text="Add episode URLs directly, or disable this to show a selectable episode card first."
+                                               FontSize="13"
+                                               TextWrapping="Wrap"
+                                               MaxWidth="280" />
+                                </ToolTip.Tip>
+                            </controls:SymbolIcon>
+                            <CheckBox Grid.Column="2"
+                                      IsChecked="{Binding SingleEpisodeInstantAdd}"
+                                      VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                            <TextBlock Grid.Column="0" Text="Default search mode" VerticalAlignment="Center" />
+                            <controls:SymbolIcon Grid.Column="1"
+                                                 Symbol="Help"
+                                                 FontSize="14"
+                                                 Opacity="0.72"
+                                                 Margin="8 0 10 0"
+                                                 VerticalAlignment="Center">
+                                <ToolTip.Tip>
+                                    <TextBlock Text="Open this page in title search mode instead of URL mode."
+                                               FontSize="13"
+                                               TextWrapping="Wrap"
+                                               MaxWidth="280" />
+                                </ToolTip.Tip>
+                            </controls:SymbolIcon>
+                            <CheckBox Grid.Column="2"
+                                      IsChecked="{Binding DefaultSearchEnabled}"
+                                      VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
                 </Border>
             </Popup>
 

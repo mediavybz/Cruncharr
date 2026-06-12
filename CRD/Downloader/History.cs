@@ -449,18 +449,20 @@ public class History{
     public void SetAsDownloaded(string? seriesId, string? seasonId, string episodeId, IEnumerable<string?>? downloadedDubs = null, IEnumerable<string?>? downloadedSoftSubs = null){
         var historySeries = crunInstance.HistoryList.FirstOrDefault(series => series.SeriesId == seriesId);
 
-        if (historySeries != null){
-            var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
+        if (historySeries == null){
+            return;
+        }
 
-            if (historySeason != null){
-                var historyEpisode = historySeason.EpisodesList.Find(e => e.EpisodeId == episodeId);
+        var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
 
-                if (historyEpisode != null){
-                    historyEpisode.SetDownloadedMedia(NormalizeLocales(downloadedDubs), NormalizeLocales(downloadedSoftSubs));
+        if (historySeason != null){
+            var historyEpisode = historySeason.EpisodesList.Find(e => e.EpisodeId == episodeId);
 
-                    historySeason.UpdateDownloaded();
-                    return;
-                }
+            if (historyEpisode != null){
+                historyEpisode.SetDownloadedMedia(NormalizeLocales(downloadedDubs), NormalizeLocales(downloadedSoftSubs));
+
+                historySeason.UpdateDownloaded();
+                return;
             }
         }
 
@@ -1160,7 +1162,32 @@ public class NumericStringPropertyComparer : IComparer<HistoryEpisode>{
             return xDouble.CompareTo(yDouble);
         }
 
+        if (TryParseEpisodeSortNumber(x?.Episode, out xDouble) &&
+            TryParseEpisodeSortNumber(y?.Episode, out yDouble)){
+            int numericCompare = xDouble.CompareTo(yDouble);
+            if (numericCompare != 0){
+                return numericCompare;
+            }
+        }
+
         // Fall back to string comparison if not parseable as doubles
         return string.Compare(x?.Episode, y?.Episode, StringComparison.Ordinal);
+    }
+
+    private static bool TryParseEpisodeSortNumber(string? episode, out double episodeNumber){
+        return double.TryParse(episode, NumberStyles.Any, CultureInfo.InvariantCulture, out episodeNumber) ||
+               TryParseEpisodeRangeStart(episode, out episodeNumber);
+    }
+
+    private static bool TryParseEpisodeRangeStart(string? episode, out double episodeNumber){
+        episodeNumber = 0;
+        if (string.IsNullOrWhiteSpace(episode)){
+            return false;
+        }
+
+        string[] parts = episode.Split('-', 2, StringSplitOptions.TrimEntries);
+        return parts.Length == 2 &&
+               double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out episodeNumber) &&
+               double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out _);
     }
 }

@@ -39,6 +39,12 @@
                     </controls:SettingsExpanderItem.Footer>
                 </controls:SettingsExpanderItem>
 
+                <controls:SettingsExpanderItem Content="History Check Partial Downloads" Description="Downloaded episodes missing selected dubs/subs are marked orange and counted again when the missing media becomes available">
+                    <controls:SettingsExpanderItem.Footer>
+                        <CheckBox IsChecked="{Binding HistoryCheckPartialDownloads}"> </CheckBox>
+                    </controls:SettingsExpanderItem.Footer>
+                </controls:SettingsExpanderItem>
+
                 <controls:SettingsExpanderItem Content="History Include CR Artists" Description="Add Crunchyroll artists (music) to the history">
                     <controls:SettingsExpanderItem.Footer>
                         <CheckBox IsChecked="{Binding HistoryIncludeCrArtists}"> </CheckBox>
@@ -543,6 +549,12 @@
                 <controls:SettingsExpanderItem Content="Use Proxy">
                     <controls:SettingsExpanderItem.Footer>
                         <CheckBox IsChecked="{Binding ProxyEnabled}"> </CheckBox>
+                    </controls:SettingsExpanderItem.Footer>
+                </controls:SettingsExpanderItem>
+
+                <controls:SettingsExpanderItem Content="Proxy All Traffic">
+                    <controls:SettingsExpanderItem.Footer>
+                        <CheckBox IsChecked="{Binding ProxyAllTraffic}"> </CheckBox>
                     </controls:SettingsExpanderItem.Footer>
                 </controls:SettingsExpanderItem>
 

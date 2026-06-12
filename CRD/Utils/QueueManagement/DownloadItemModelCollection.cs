@@ -31,18 +31,22 @@ public sealed class DownloadItemModelCollection{
         items.Clear();
     }
 
+    public void AddOrRefresh(CrunchyEpMeta queueItem){
+        if (models.TryGetValue(queueItem, out var existingModel)){
+            existingModel.Refresh();
+            return;
+        }
+
+        var newModel = new DownloadItemModel(queueItem);
+        models.Add(queueItem, newModel);
+        items.Add(newModel);
+
+        _ = newModel.LoadImage();
+    }
+
     public void SyncFromQueue(IEnumerable<CrunchyEpMeta> queueItems){
         foreach (var queueItem in queueItems){
-            if (models.TryGetValue(queueItem, out var existingModel)){
-                existingModel.Refresh();
-                continue;
-            }
-
-            var newModel = new DownloadItemModel(queueItem);
-            models.Add(queueItem, newModel);
-            items.Add(newModel);
-
-            _ = newModel.LoadImage();
+            AddOrRefresh(queueItem);
         }
     }
 }

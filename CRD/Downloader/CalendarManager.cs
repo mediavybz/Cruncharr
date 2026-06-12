@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using CRD.Downloader.Crunchyroll;
 using CRD.Downloader.Crunchyroll.Utils;
 using CRD.Utils;
@@ -25,6 +26,10 @@ public class CalendarManager{
     #region Calendar Variables
 
     private Dictionary<string, CalendarWeek> calendar = new();
+    private DateTime? anilistUpcomingLoadedDate;
+    private static readonly Regex GenericSeasonLabelRegex = new(
+        @"^(?<word>\p{L}+(?:[\p{L}\p{Mn}'\.\- ]*\p{L})?)\s+(?<n>\d+)$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private Dictionary<string, string> calendarLanguage = new(){
         { "en-us", "https://www.crunchyroll.com/simulcastcalendar" },
@@ -67,6 +72,7 @@ public class CalendarManager{
 
     public async Task<CalendarWeek> GetCalendarForDate(string weeksMondayDate, bool forceUpdate){
         if (!forceUpdate && calendar.TryGetValue(weeksMondayDate, out var forDate)){
+            RefreshHistoryStatuses(forDate);
             return forDate;
         }
 
@@ -197,6 +203,7 @@ public class CalendarManager{
         }
 
         calendar[weeksMondayDate] = week;
+        RefreshHistoryStatuses(week);
 
 
         return week;
@@ -204,14 +211,14 @@ public class CalendarManager{
 
 
     public async Task<CalendarWeek> BuildCustomCalendar(DateTime calTargetDate, bool forceUpdate){
-        if (!forceUpdate && calendar.TryGetValue("C" + calTargetDate.ToString("yyyy-MM-dd"), out var forDate)){
+        var crunInstance = CrunchyrollManager.Instance;
+        var crunOptions = crunInstance.CrunOptions;
+        var calendarKey = "C" + calTargetDate.ToString("yyyy-MM-dd");
+
+        if (!forceUpdate && calendar.TryGetValue(calendarKey, out var forDate)){
+            RefreshHistoryStatuses(forDate);
             return forDate;
         }
-
-        if (CrunchyrollManager.Instance.CrunOptions.CalendarShowUpcomingEpisodes){
-            await LoadAnilistUpcoming();
-        }
-
 
         CalendarWeek week = new CalendarWeek();
         week.CalendarDays = new List<CalendarDay>();
@@ -233,20 +240,34 @@ public class CalendarManager{
         var firstDayOfWeek = week.CalendarDays.First().DateTime;
         week.FirstDayOfWeek = firstDayOfWeek;
 
-        var newEpisodesBase = await CrunchyrollManager.Instance.CrEpisode.GetNewEpisodes(CrunchyrollManager.Instance.CrunOptions.HistoryLang, 2000, null, true);
+        var calendarDaysByDate = week.CalendarDays.ToDictionary(day => day.DateTime.Date);
+        var episodeMergeIndexByDate = week.CalendarDays.ToDictionary(
+            day => day.DateTime.Date,
+            _ => new Dictionary<(string? CrSeriesID, Locale? AudioLocale), CalendarEpisode>());
+
+        Task anilistUpcomingTask = crunOptions.CalendarShowUpcomingEpisodes
+            ? LoadAnilistUpcoming()
+            : Task.CompletedTask;
+        Task<CrBrowseEpisodeBase?> newEpisodesTask = crunInstance.CrEpisode.GetNewEpisodes(crunOptions.HistoryLang, 2000, firstDayOfWeek, true);
+
+        await Task.WhenAll(anilistUpcomingTask, newEpisodesTask);
+
+        var newEpisodesBase = await newEpisodesTask;
 
         if (newEpisodesBase is{ Data.Count: > 0 }){
             var newEpisodes = newEpisodesBase.Data ?? [];
 
-            if (CrunchyrollManager.Instance.CrunOptions.UpdateHistoryFromCalendar){
-                try{
-                    await CrunchyrollManager.Instance.History.UpdateWithEpisode(newEpisodes);
-                    CfgManager.UpdateHistoryFile();
-                } catch (Exception e){
-                    Console.Error.WriteLine("Failed to update History from calendar");
-                }
+            if (crunOptions.UpdateHistoryFromCalendar){
+                QueueHistoryUpdateFromCalendar(newEpisodes);
             }
-            
+
+            DateTime now = DateTime.Now;
+            DateTime nowDate = now.Date;
+            DateTime oneYearFromNow = now.AddYears(1);
+            var dubFilter = crunOptions.CalendarDubFilter;
+            bool hasDubFilter = !string.IsNullOrEmpty(dubFilter) && dubFilter != "none";
+            string? historyLang = crunOptions.HistoryLang;
+
             //EpisodeAirDate
             foreach (var crBrowseEpisode in newEpisodes){
                 bool filtered = false;
@@ -257,9 +278,6 @@ public class CalendarManager{
                 DateTime premiumAvailableStart = crBrowseEpisode.EpisodeMetadata.PremiumAvailableDate.Kind == DateTimeKind.Utc
                     ? crBrowseEpisode.EpisodeMetadata.PremiumAvailableDate.ToLocalTime()
                     : crBrowseEpisode.EpisodeMetadata.PremiumAvailableDate;
-
-                DateTime now = DateTime.Now;
-                DateTime oneYearFromNow = now.AddYears(1);
 
                 DateTime targetDate;
 
@@ -279,53 +297,52 @@ public class CalendarManager{
                 }
 
 
-                var dubFilter = CrunchyrollManager.Instance.CrunOptions.CalendarDubFilter;
-
-                if (CrunchyrollManager.Instance.CrunOptions.CalendarHideDubs && crBrowseEpisode.EpisodeMetadata.SeasonTitle != null &&
+                if (crunOptions.CalendarHideDubs && crBrowseEpisode.EpisodeMetadata.SeasonTitle != null &&
                     (crBrowseEpisode.EpisodeMetadata.SeasonTitle.EndsWith("Dub)") || crBrowseEpisode.EpisodeMetadata.SeasonTitle.EndsWith("Audio)")) &&
-                    (string.IsNullOrEmpty(dubFilter) || dubFilter == "none" || (crBrowseEpisode.EpisodeMetadata.AudioLocale != null && crBrowseEpisode.EpisodeMetadata.AudioLocale.GetEnumMemberValue() != dubFilter))){
+                    (!hasDubFilter || (crBrowseEpisode.EpisodeMetadata.AudioLocale != null && crBrowseEpisode.EpisodeMetadata.AudioLocale.GetEnumMemberValue() != dubFilter))){
                     //|| crBrowseEpisode.EpisodeMetadata.AudioLocale != Locale.JaJp
                     filtered = true;
                 }
 
 
-                if (!string.IsNullOrEmpty(dubFilter) && dubFilter != "none"){
+                if (hasDubFilter){
                     if (crBrowseEpisode.EpisodeMetadata.AudioLocale != null && crBrowseEpisode.EpisodeMetadata.AudioLocale.GetEnumMemberValue() != dubFilter){
                         filtered = true;
                     }
                 }
 
-                var calendarDay = (from day in week.CalendarDays
-                    where day.DateTime != DateTime.MinValue && day.DateTime.Date == targetDate.Date
-                    select day).FirstOrDefault();
-
-                if (calendarDay != null){
+                if (calendarDaysByDate.TryGetValue(targetDate.Date, out var calendarDay)){
                     CalendarEpisode calEpisode = new CalendarEpisode();
 
                     string? seasonTitle = string.IsNullOrEmpty(crBrowseEpisode.EpisodeMetadata.SeasonTitle)
                         ? crBrowseEpisode.EpisodeMetadata.SeriesTitle
-                        : LooksLikeGenericSeasonLabel(crBrowseEpisode.EpisodeMetadata.SeasonTitle, crBrowseEpisode.EpisodeMetadata.SeasonNumber)
+                        : LooksLikeGenericSeasonLabel(crBrowseEpisode.EpisodeMetadata.SeasonTitle)
                             ? $"{crBrowseEpisode.EpisodeMetadata.SeriesTitle} {crBrowseEpisode.EpisodeMetadata.SeasonTitle}"
                             : crBrowseEpisode.EpisodeMetadata.SeasonTitle;
 
                     calEpisode.DateTime = targetDate;
-                    calEpisode.HasPassed = DateTime.Now > targetDate;
+                    calEpisode.HasPassed = now > targetDate;
                     calEpisode.EpisodeName = crBrowseEpisode.Title;
-                    calEpisode.SeriesUrl = $"https://www.crunchyroll.com/{CrunchyrollManager.Instance.CrunOptions.HistoryLang}/series/" + crBrowseEpisode.EpisodeMetadata.SeriesId;
-                    calEpisode.EpisodeUrl = $"https://www.crunchyroll.com/{CrunchyrollManager.Instance.CrunOptions.HistoryLang}/watch/{crBrowseEpisode.Id}/";
+                    calEpisode.SeriesUrl = $"https://www.crunchyroll.com/{historyLang}/series/" + crBrowseEpisode.EpisodeMetadata.SeriesId;
+                    calEpisode.EpisodeUrl = $"https://www.crunchyroll.com/{historyLang}/watch/{crBrowseEpisode.Id}/";
                     calEpisode.ThumbnailUrl = crBrowseEpisode.Images.Thumbnail?.FirstOrDefault()?.FirstOrDefault()?.Source ?? ""; //https://www.crunchyroll.com/i/coming_soon_beta_thumb.jpg
                     calEpisode.IsPremiumOnly = crBrowseEpisode.EpisodeMetadata.IsPremiumOnly;
                     calEpisode.IsPremiere = crBrowseEpisode.EpisodeMetadata.Episode == "1";
                     calEpisode.SeasonName = seasonTitle;
                     calEpisode.EpisodeNumber = crBrowseEpisode.EpisodeMetadata.Episode;
                     calEpisode.CrSeriesID = crBrowseEpisode.EpisodeMetadata.SeriesId;
+                    calEpisode.CrSeasonID = crBrowseEpisode.EpisodeMetadata.SeasonId;
+                    calEpisode.CrEpisodeID = crBrowseEpisode.Id;
                     calEpisode.FilteredOut = filtered;
                     calEpisode.AudioLocale = crBrowseEpisode.EpisodeMetadata.AudioLocale;
+                    calEpisode.Versions = crBrowseEpisode.EpisodeMetadata.versions;
+                    ExtractVersionGuids(calEpisode);
+                    ApplyHistoryStatus(calEpisode);
 
-                    var existingEpisode = calendarDay.CalendarEpisodes
-                        .FirstOrDefault(e => e.CrSeriesID == calEpisode.CrSeriesID && e.AudioLocale == calEpisode.AudioLocale);
+                    var episodeMergeKey = (calEpisode.CrSeriesID, calEpisode.AudioLocale);
+                    var episodeMergeIndex = episodeMergeIndexByDate[calendarDay.DateTime.Date];
 
-                    if (existingEpisode != null){
+                    if (episodeMergeIndex.TryGetValue(episodeMergeKey, out var existingEpisode)){
                         if (!int.TryParse(existingEpisode.EpisodeNumber, out _)){
                             existingEpisode.EpisodeNumber = "...";
                         } else{
@@ -354,17 +371,18 @@ public class CalendarManager{
                         }
 
                         existingEpisode.CalendarEpisodes.Add(calEpisode);
+                        ApplyMergedHistoryStatus(existingEpisode);
                     } else{
                         calendarDay.CalendarEpisodes.Add(calEpisode);
+                        episodeMergeIndex[episodeMergeKey] = calEpisode;
                     }
                 }
             }
 
-            if (CrunchyrollManager.Instance.CrunOptions.CalendarShowUpcomingEpisodes){
+            if (crunOptions.CalendarShowUpcomingEpisodes){
                 foreach (var calendarDay in week.CalendarDays){
-                    if (calendarDay.DateTime.Date >= DateTime.Now.Date){
-                        if (ProgramManager.Instance.AnilistUpcoming.ContainsKey(calendarDay.DateTime.ToString("yyyy-MM-dd"))){
-                            var list = ProgramManager.Instance.AnilistUpcoming[calendarDay.DateTime.ToString("yyyy-MM-dd")];
+                    if (calendarDay.DateTime.Date >= nowDate){
+                        if (ProgramManager.Instance.AnilistUpcoming.TryGetValue(calendarDay.DateTime.ToString("yyyy-MM-dd"), out var list)){
 
                             foreach (var calendarEpisode in list.Where(calendarEpisodeAnilist => calendarDay.DateTime.Date.Day == calendarEpisodeAnilist.DateTime.Date.Day)
                                          .Where(calendarEpisodeAnilist =>
@@ -396,10 +414,166 @@ public class CalendarManager{
         //     if (day.CalendarEpisodes != null) day.CalendarEpisodes = day.CalendarEpisodes.OrderBy(e => e.DateTime).ToList();
         // }
 
-        calendar["C" + calTargetDate.ToString("yyyy-MM-dd")] = week;
+        calendar[calendarKey] = week;
+        RefreshHistoryStatuses(week);
 
 
         return week;
+    }
+
+    private static void QueueHistoryUpdateFromCalendar(List<CrBrowseEpisode> newEpisodes){
+        Dispatcher.UIThread.Post(async () => {
+            try{
+                await CrunchyrollManager.Instance.History.UpdateWithEpisode(newEpisodes);
+                CfgManager.UpdateHistoryFile();
+            } catch (Exception){
+                Console.Error.WriteLine("Failed to update History from calendar");
+            }
+        }, DispatcherPriority.Background);
+    }
+
+    private static void ExtractVersionGuids(CalendarEpisode calEpisode){
+        calEpisode.VersionGuids = calEpisode.Versions?
+            .Select(version => version.Guid)
+            .Where(guid => !string.IsNullOrWhiteSpace(guid))
+            .Select(guid => guid!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+
+        var originalVersion = calEpisode.Versions?
+            .FirstOrDefault(version => version.Original);
+
+        calEpisode.OriginalEpisodeGuid = originalVersion?.Guid;
+        calEpisode.OriginalSeasonGuid = originalVersion?.SeasonGuid;
+    }
+
+    private static void RefreshHistoryStatuses(CalendarWeek week){
+        if (week.CalendarDays == null){
+            return;
+        }
+
+        foreach (var calendarEpisode in week.CalendarDays.SelectMany(day => day.CalendarEpisodes)){
+            RefreshHistoryStatus(calendarEpisode);
+        }
+    }
+
+    private static void RefreshHistoryStatus(CalendarEpisode calendarEpisode){
+        foreach (var childEpisode in calendarEpisode.CalendarEpisodes){
+            ApplyHistoryStatus(childEpisode);
+        }
+
+        ApplyHistoryStatus(calendarEpisode);
+
+        if (calendarEpisode.CalendarEpisodes.Count > 0){
+            ApplyMergedHistoryStatus(calendarEpisode);
+        }
+    }
+
+    private static void ApplyHistoryStatus(CalendarEpisode calEpisode){
+        calEpisode.ShowHistoryMark = CrunchyrollManager.Instance.CrunOptions.CalendarShowHistoryMark;
+        calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.None;
+        calEpisode.IsInHistory = false;
+
+        if (!CrunchyrollManager.Instance.CrunOptions.History || string.IsNullOrWhiteSpace(calEpisode.CrSeriesID)){
+            return;
+        }
+
+        var historySeries = CrunchyrollManager.Instance.HistoryList
+            .FirstOrDefault(series => string.Equals(series.SeriesId, calEpisode.CrSeriesID, StringComparison.OrdinalIgnoreCase));
+
+        if (historySeries == null){
+            return;
+        }
+
+        calEpisode.IsInHistory = true;
+
+        var historyMatch = FindHistoryMatch(historySeries, calEpisode);
+        if (historyMatch.HistoryEpisode == null){
+            calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.NotDownloaded;
+            return;
+        }
+
+        if (!historyMatch.HistoryEpisode.WasDownloaded){
+            calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.NotDownloaded;
+            return;
+        }
+
+        if (CrunchyrollManager.Instance.CrunOptions.HistoryCheckPartialDownloads){
+            var requestedDubs = HistorySeries.GetEffectiveDubLang(historySeries, historyMatch.HistorySeason);
+            var requestedSoftSubs = HistorySeries.GetEffectiveSoftSubs(historySeries, historyMatch.HistorySeason, historyMatch.HistoryEpisode);
+            calEpisode.HistoryDownloadState = historyMatch.HistoryEpisode.IsPartiallyDownloaded(requestedDubs, requestedSoftSubs)
+                ? CalendarHistoryDownloadState.PartlyDownloaded
+                : CalendarHistoryDownloadState.Downloaded;
+        } else{
+            calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.Downloaded;
+        }
+    }
+
+    private static (HistorySeason? HistorySeason, HistoryEpisode? HistoryEpisode) FindHistoryMatch(
+        HistorySeries historySeries,
+        CalendarEpisode calEpisode){
+        var candidateSeasonIds = new[]{
+                calEpisode.OriginalSeasonGuid,
+                calEpisode.CrSeasonID
+            }
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var candidateEpisodeIds = new List<string>();
+        if (!string.IsNullOrWhiteSpace(calEpisode.OriginalEpisodeGuid)){
+            candidateEpisodeIds.Add(calEpisode.OriginalEpisodeGuid);
+        }
+
+        candidateEpisodeIds.AddRange(calEpisode.VersionGuids);
+
+        if (!string.IsNullOrWhiteSpace(calEpisode.CrEpisodeID)){
+            candidateEpisodeIds.Add(calEpisode.CrEpisodeID);
+        }
+
+        candidateEpisodeIds = candidateEpisodeIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var historySeason in historySeries.Seasons
+                     .Where(historySeason => candidateSeasonIds.Count == 0 || candidateSeasonIds.Contains(historySeason.SeasonId ?? string.Empty, StringComparer.OrdinalIgnoreCase))){
+            var historyEpisode = historySeason.EpisodesList
+                .FirstOrDefault(episode => candidateEpisodeIds.Contains(episode.EpisodeId ?? string.Empty, StringComparer.OrdinalIgnoreCase));
+
+            if (historyEpisode != null){
+                return (historySeason, historyEpisode);
+            }
+        }
+
+        foreach (var historySeason in historySeries.Seasons){
+            var historyEpisode = historySeason.EpisodesList
+                .FirstOrDefault(episode => candidateEpisodeIds.Contains(episode.EpisodeId ?? string.Empty, StringComparer.OrdinalIgnoreCase));
+
+            if (historyEpisode != null){
+                return (historySeason, historyEpisode);
+            }
+        }
+
+        return (null, null);
+    }
+
+    private static void ApplyMergedHistoryStatus(CalendarEpisode calendarEpisode){
+        var episodes = new[]{ calendarEpisode }
+            .Concat(calendarEpisode.CalendarEpisodes)
+            .Where(episode => episode.IsInHistory)
+            .ToList();
+
+        calendarEpisode.IsInHistory = episodes.Count > 0;
+
+        if (episodes.Count == 0){
+            calendarEpisode.HistoryDownloadState = CalendarHistoryDownloadState.None;
+        } else if (episodes.Any(episode => episode.HistoryDownloadState == CalendarHistoryDownloadState.PartlyDownloaded) ||
+                   episodes.Select(episode => episode.HistoryDownloadState).Distinct().Count() > 1){
+            calendarEpisode.HistoryDownloadState = CalendarHistoryDownloadState.PartlyDownloaded;
+        } else{
+            calendarEpisode.HistoryDownloadState = episodes[0].HistoryDownloadState;
+        }
     }
 
 
@@ -408,7 +582,8 @@ public class CalendarManager{
 
         string formattedDate = today.ToString("yyyy-MM-dd");
 
-        if (ProgramManager.Instance.AnilistUpcoming.ContainsKey(formattedDate)){
+        if (anilistUpcomingLoadedDate == today || ProgramManager.Instance.AnilistUpcoming.ContainsKey(formattedDate)){
+            anilistUpcomingLoadedDate = today;
             return;
         }
 
@@ -447,9 +622,14 @@ public class CalendarManager{
                 return;
             }
 
-            AniListResponseCalendar currentResponse = Helpers.Deserialize<AniListResponseCalendar>(
+            AniListResponseCalendar? currentResponse = Helpers.Deserialize<AniListResponseCalendar>(
                 response.ResponseContent, CrunchyrollManager.Instance.SettingsJsonSerializerSettings
-            ) ?? new AniListResponseCalendar();
+            );
+
+            if (currentResponse?.Data?.Page == null){
+                Console.Error.WriteLine("Anilist response could not be parsed for upcoming calendar episodes");
+                return;
+            }
 
 
             aniListResponse ??= currentResponse;
@@ -539,6 +719,8 @@ public class CalendarManager{
 
             value.Add(calendarEpisode);
         }
+
+        anilistUpcomingLoadedDate = today;
     }
 
     private static void AdjustReleaseTimeToHistory(CalendarEpisode calEp, string crunchyrollId){
@@ -580,22 +762,20 @@ public class CalendarManager{
         }
     }
 
-    private bool LooksLikeGenericSeasonLabel(string? seasonTitle, double? seasonNo){
-        if (string.IsNullOrWhiteSpace(seasonTitle)) return true;
+    private bool LooksLikeGenericSeasonLabel(string? seasonTitle){
+        if (string.IsNullOrWhiteSpace(seasonTitle))
+            return true;
 
         var t = seasonTitle.Trim();
 
-        var m = Regex.Match(t, @"^(?<word>\p{L}+(?:[\p{L}\p{Mn}'\.\- ]*\p{L})?)\s+(?<n>\d+)$",
-            RegexOptions.CultureInvariant);
+        var m = GenericSeasonLabelRegex.Match(t);
 
-        if (!m.Success) return false;
+        if (!m.Success)
+            return false;
 
-        if (seasonNo.HasValue &&
-            double.TryParse(m.Groups["n"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n)){
-            return n == seasonNo.Value;
-        }
+        var word = m.Groups["word"].Value.Trim();
 
-        return true;
+        return word.Equals("Season", StringComparison.OrdinalIgnoreCase);
     }
 
     #region Query

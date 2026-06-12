@@ -7,6 +7,9 @@ namespace CRD.Utils.Structs.Crunchyroll;
 public class StreamError{
     [JsonPropertyName("error")]
     public string? Error{ get; set; }
+    
+    [JsonPropertyName("reason")]
+    public string? Reason{ get; set; }
 
     [JsonPropertyName("activeStreams")]
     public List<ActiveStream> ActiveStreams{ get; set; } = new ();

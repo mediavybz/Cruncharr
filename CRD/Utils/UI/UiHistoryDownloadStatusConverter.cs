@@ -22,9 +22,12 @@ public class UiHistoryDownloadStatusConverter : IMultiValueConverter{
             return isTooltip ? "Mark as downloaded" : Brushes.Gray;
         }
 
-        var requestedDubs = HistorySeries.GetEffectiveDubLang(series, season);
-        var requestedSoftSubs = HistorySeries.GetEffectiveSoftSubs(series, season, episode);
-        var isPartial = episode.IsPartiallyDownloaded(requestedDubs, requestedSoftSubs);
+        var isPartial = false;
+        if (CrunchyrollManager.Instance.CrunOptions.HistoryCheckPartialDownloads){
+            var requestedDubs = HistorySeries.GetEffectiveDubLang(series, season);
+            var requestedSoftSubs = HistorySeries.GetEffectiveSoftSubs(series, season, episode);
+            isPartial = episode.IsPartiallyDownloaded(requestedDubs, requestedSoftSubs);
+        }
 
         if (isTooltip){
             return BuildTooltip(episode, isPartial);

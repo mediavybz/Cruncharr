@@ -180,6 +180,10 @@ public class HistoryEpisode : INotifyPropertyChanged{
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DownloadedSoftSubs)));
     }
 
+    public void RefreshDownloadState(){
+        NotifyDownloadStateChanged();
+    }
+
     private void NotifyAvailableMediaChanged(){
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HistoryEpisodeAvailableDubLang)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HistoryEpisodeAvailableSoftSubs)));
@@ -187,9 +191,17 @@ public class HistoryEpisode : INotifyPropertyChanged{
 
     public void SetDownloadedMedia(List<string> downloadedDubs, List<string> downloadedSoftSubs){
         WasDownloaded = true;
-        DownloadedDubLang = downloadedDubs.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        DownloadedSoftSubs = downloadedSoftSubs.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        DownloadedDubLang = MergeDownloadedLocales(DownloadedDubLang, downloadedDubs);
+        DownloadedSoftSubs = MergeDownloadedLocales(DownloadedSoftSubs, downloadedSoftSubs);
         NotifyDownloadStateChanged();
+    }
+
+    private static List<string> MergeDownloadedLocales(IEnumerable<string> existingLocales, IEnumerable<string> newLocales){
+        return existingLocales
+            .Concat(newLocales)
+            .Where(locale => !string.IsNullOrWhiteSpace(locale))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public void UpdateAvailableMedia(List<string> availableDubs, List<string> availableSoftSubs){

@@ -5,67 +5,73 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using CRD.Downloader;
 using CRD.Downloader.Crunchyroll;
 using CRD.Utils;
+using CRD.Utils.Files;
 using CRD.Utils.Structs;
 using CRD.Utils.Structs.Crunchyroll.Music;
 using CRD.Views;
 using ReactiveUI;
 
-// ReSharper disable InconsistentNaming
-
 namespace CRD.ViewModels;
 
 public partial class AddDownloadPageViewModel : ViewModelBase{
     [ObservableProperty]
-    private string _urlInput = "";
+    private string urlInput = "";
 
     [ObservableProperty]
-    private string _buttonText = "Enter Url";
+    private string buttonText = "Enter Url";
 
     [ObservableProperty]
-    private string _buttonTextSelectSeason = "Select Season";
+    private string buttonTextSelectSeason = "Select Season";
 
     [ObservableProperty]
-    private bool _addAllEpisodes;
+    private bool addAllEpisodes;
 
     [ObservableProperty]
-    private bool _buttonEnabled;
+    private bool buttonEnabled;
 
     [ObservableProperty]
-    private bool _allButtonEnabled;
+    private bool allButtonEnabled;
 
     [ObservableProperty]
-    private bool _showLoading;
+    private bool showLoading;
 
     [ObservableProperty]
-    private bool _searchEnabled;
+    private bool searchEnabled;
 
     [ObservableProperty]
-    private bool _searchVisible = true;
+    private bool defaultSearchEnabled;
 
     [ObservableProperty]
-    private bool _slectSeasonVisible;
+    private bool addSearchResultsToHistory = true;
 
     [ObservableProperty]
-    private bool _searchPopupVisible;
+    private bool singleEpisodeInstantAdd = true;
+
+    [ObservableProperty]
+    private bool searchVisible = true;
+
+    [ObservableProperty]
+    private bool slectSeasonVisible;
+
+    [ObservableProperty]
+    private bool searchPopupVisible;
 
     public ObservableCollection<ItemModel> Items{ get; set; } = new();
     public ObservableCollection<CrBrowseSeries> SearchItems{ get; set; } = new();
     public ObservableCollection<ItemModel> SelectedItems{ get; set; } = new();
 
     [ObservableProperty]
-    public CrBrowseSeries _selectedSearchItem;
+    private CrBrowseSeries selectedSearchItem;
 
     [ObservableProperty]
-    public ComboBoxItem _currentSelectedSeason;
+    private ComboBoxItem currentSelectedSeason;
 
     public ObservableCollection<ComboBoxItem> SeasonList{ get; set; } = new();
 
@@ -79,8 +85,22 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
 
     private bool CurrentSeasonFullySelected;
 
+    private string currentSingleEpisodeId = "";
+    private string currentSingleEpisodeLocale = "";
+    private bool settingsLoaded;
+
+    public string SearchWatermark => SearchEnabled
+        ? "Search for a series title"
+        : "Enter series or episode URL";
+
     public AddDownloadPageViewModel(){
+        var options = CrunchyrollManager.Instance.CrunOptions;
+        AddSearchResultsToHistory = options.AddDownloadSearchAddToHistory;
+        SingleEpisodeInstantAdd = options.AddDownloadSingleEpisodeInstantAdd;
+        DefaultSearchEnabled = options.AddDownloadDefaultSearchEnabled;
+        SearchEnabled = DefaultSearchEnabled;
         SelectedItems.CollectionChanged += OnSelectedItemsChanged;
+        settingsLoaded = true;
     }
 
     private async Task UpdateSearch(string value){
@@ -168,6 +188,31 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
     partial void OnSearchEnabledChanged(bool value){
         ButtonText = SearchEnabled ? "Select Searched Series" : "Enter Url";
         ButtonEnabled = false;
+        RaisePropertyChanged(nameof(SearchWatermark));
+    }
+
+    partial void OnDefaultSearchEnabledChanged(bool value){
+        UpdateAddDownloadSettings();
+    }
+
+    partial void OnAddSearchResultsToHistoryChanged(bool value){
+        UpdateAddDownloadSettings();
+    }
+
+    partial void OnSingleEpisodeInstantAddChanged(bool value){
+        UpdateAddDownloadSettings();
+    }
+
+    private void UpdateAddDownloadSettings(){
+        if (!settingsLoaded){
+            return;
+        }
+
+        var options = CrunchyrollManager.Instance.CrunOptions;
+        options.AddDownloadSearchAddToHistory = AddSearchResultsToHistory;
+        options.AddDownloadSingleEpisodeInstantAdd = SingleEpisodeInstantAdd;
+        options.AddDownloadDefaultSearchEnabled = DefaultSearchEnabled;
+        CfgManager.WriteCrSettings();
     }
 
     #region OnButtonPress
@@ -179,6 +224,10 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
 
             if (currentMusicVideoList != null){
                 AddSelectedMusicVideosToQueue();
+            }
+
+            if (!string.IsNullOrEmpty(currentSingleEpisodeId)){
+                await AddSelectedSingleEpisodeToQueue();
             }
 
             if (currentSeriesList != null){
@@ -243,6 +292,8 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
 
     private void ResetState(){
         currentMusicVideoList = null;
+        currentSingleEpisodeId = "";
+        currentSingleEpisodeLocale = "";
         UrlInput = "";
         selectedEpisodes.Clear();
         SelectedItems.Clear();
@@ -252,7 +303,8 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
         episodesBySeason.Clear();
         AllButtonEnabled = false;
         AddAllEpisodes = false;
-        ButtonText = "Enter Url";
+        SearchEnabled = DefaultSearchEnabled;
+        ButtonText = SearchEnabled ? "Select Searched Series" : "Enter Url";
         ButtonEnabled = false;
         SearchVisible = true;
         SlectSeasonVisible = false;
@@ -268,8 +320,8 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
 
         var matchResult = ExtractLocaleAndIdFromUrl();
 
-        if (matchResult is ({ } locale, { } id)){
-            switch (GetUrlType()){
+        if (matchResult is ({ } locale, { } id, { } urlType)){
+            switch (urlType){
                 case CrunchyUrlType.Artist:
                     await HandleArtistUrlAsync(locale, id);
                     break;
@@ -280,7 +332,7 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
                     HandleConcertUrl(id);
                     break;
                 case CrunchyUrlType.Episode:
-                    HandleEpisodeUrl(locale, id);
+                    await HandleEpisodeUrlAsync(locale, id);
                     break;
                 case CrunchyUrlType.Series:
                     await HandleSeriesUrlAsync(locale, id);
@@ -292,23 +344,69 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
         }
     }
 
-    private (string locale, string id)? ExtractLocaleAndIdFromUrl(){
-        var match = Regex.Match(UrlInput, @"^(?:https?:\/\/[^/]+)?(?:\/([a-z]{2}))?\/(?:[^/]+\/)?(artist|watch|series)(?:\/(musicvideo|concert))?\/([^/]+)(?:\/[^/]*)?$");
+    private (string locale, string id, CrunchyUrlType urlType)? ExtractLocaleAndIdFromUrl(){
+        return TryExtractCrunchyUrlParts(UrlInput);
+    }
 
-        return match.Success
-            ? (match.Groups[1].Value ?? "", match.Groups[4].Value)
-            : null;
+    internal static (string locale, string id, CrunchyUrlType urlType)? TryExtractCrunchyUrlParts(string? urlInput){
+        if (string.IsNullOrWhiteSpace(urlInput)){
+            return null;
+        }
+
+        var input = urlInput.Trim();
+        var path = Uri.TryCreate(input, UriKind.Absolute, out var uri)
+            ? uri.AbsolutePath
+            : input.Split(['?', '#'], 2)[0];
+
+        var segments = path
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        var typeIndex = segments.FindIndex(IsCrunchyUrlTypeSegment);
+        if (typeIndex < 0){
+            return null;
+        }
+
+        var typeSegment = segments[typeIndex];
+        var idIndex = typeIndex + 1;
+        var urlType = typeSegment switch{
+            "artist" => CrunchyUrlType.Artist,
+            "series" => CrunchyUrlType.Series,
+            "watch" when idIndex < segments.Count && segments[idIndex] == "musicvideo" => CrunchyUrlType.MusicVideo,
+            "watch" when idIndex < segments.Count && segments[idIndex] == "concert" => CrunchyUrlType.Concert,
+            "watch" => CrunchyUrlType.Episode,
+            _ => CrunchyUrlType.Unknown,
+        };
+
+        if (urlType is CrunchyUrlType.MusicVideo or CrunchyUrlType.Concert){
+            idIndex++;
+        }
+
+        if (idIndex >= segments.Count || string.IsNullOrWhiteSpace(segments[idIndex])){
+            return null;
+        }
+
+        var locale = typeIndex > 0 && IsLocaleSegment(segments[0])
+            ? segments[0]
+            : "";
+
+        return (locale, segments[idIndex], urlType);
     }
 
     private CrunchyUrlType GetUrlType(){
-        return UrlInput switch{
-            _ when UrlInput.Contains("/artist/") => CrunchyUrlType.Artist,
-            _ when UrlInput.Contains("/watch/musicvideo/") => CrunchyUrlType.MusicVideo,
-            _ when UrlInput.Contains("/watch/concert/") => CrunchyUrlType.Concert,
-            _ when UrlInput.Contains("/watch/") => CrunchyUrlType.Episode,
-            _ when UrlInput.Contains("/series/") => CrunchyUrlType.Series,
-            _ => CrunchyUrlType.Unknown,
-        };
+        return TryExtractCrunchyUrlParts(UrlInput)?.urlType ?? CrunchyUrlType.Unknown;
+    }
+
+    private static bool IsCrunchyUrlTypeSegment(string segment){
+        return segment is "artist" or "watch" or "series";
+    }
+
+    private static bool IsLocaleSegment(string segment){
+        return segment.Length == 2 && segment.All(char.IsAsciiLetterLower)
+               || segment.Length == 5
+               && segment[..2].All(char.IsAsciiLetterLower)
+               && segment[2] == '-'
+               && segment[3..].All(char.IsAsciiLetterUpper);
     }
 
     private async Task HandleArtistUrlAsync(string locale, string id){
@@ -336,10 +434,88 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
         ResetState();
     }
 
-    private void HandleEpisodeUrl(string locale, string id){
-        _ = CrunchyrollManager.Instance.CrQueue.CrAddEpisodeToQueue(
-            id, DetermineLocale(locale),
-            CrunchyrollManager.Instance.CrunOptions.DubLang, true);
+    private async Task HandleEpisodeUrlAsync(string locale, string id){
+        var resolvedLocale = DetermineLocale(locale);
+        if (SingleEpisodeInstantAdd){
+            _ = CrunchyrollManager.Instance.CrQueue.CrAddEpisodeToQueue(
+                id, resolvedLocale,
+                CrunchyrollManager.Instance.CrunOptions.DubLang, AddSearchResultsToHistory);
+            ResetState();
+            return;
+        }
+
+        await ShowSingleEpisodeForSelectionAsync(id, resolvedLocale);
+    }
+
+    private async Task ShowSingleEpisodeForSelectionAsync(string id, string locale){
+        SetLoadingState(true);
+
+        var episode = await CrunchyrollManager.Instance.CrEpisode.ParseEpisodeById(id, locale);
+        CrunchyRollEpisodeData? episodeData = null;
+        if (episode != null){
+            episodeData = await CrunchyrollManager.Instance.CrEpisode.EpisodeData(episode, AddSearchResultsToHistory);
+        }
+
+        SetLoadingState(false);
+
+        if (episode == null || episodeData?.EpisodeAndLanguages.Variants.Count == 0){
+            MessageBus.Current.SendMessage(new ToastMessage("Failed to get episode", ToastType.Error, 2));
+            return;
+        }
+
+        currentSingleEpisodeId = id;
+        currentSingleEpisodeLocale = locale;
+        currentSeriesList = null;
+        currentMusicVideoList = null;
+        Items.Clear();
+        SelectedItems.Clear();
+        selectedEpisodes.Clear();
+        SeasonList.Clear();
+        episodesBySeason.Clear();
+
+        var baseEpisode = episodeData.EpisodeAndLanguages.Variants.First().Item;
+        var availableAudios = episodeData.EpisodeAndLanguages.Variants
+            .Select(variant => variant.Lang.CrLocale)
+            .Distinct()
+            .ToList();
+
+        var season = "S" + baseEpisode.GetSeasonNum();
+        var episodeNumber = episodeData.Key.StartsWith("E") || episodeData.Key.StartsWith("SP")
+            ? episodeData.Key
+            : "E" + episodeData.Key;
+        var duration = TimeSpan.FromMilliseconds(baseEpisode.DurationMs);
+        var itemModel = new ItemModel(
+            baseEpisode.Id,
+            baseEpisode.GetImageUrl(),
+            baseEpisode.Description,
+            $"{(int)duration.TotalMinutes}:{duration.Seconds:D2}",
+            baseEpisode.GetEpisodeTitle(),
+            season,
+            episodeNumber,
+            episodeData.Key.StartsWith('E') ? episodeData.Key[1..] : episodeData.Key,
+            availableAudios,
+            baseEpisode.EpisodeType);
+
+        episodesBySeason[season] = [itemModel];
+        SeasonList.Add(new ComboBoxItem{ Content = season });
+        CurrentSelectedSeason = SeasonList.First();
+        AllButtonEnabled = false;
+        AddAllEpisodes = false;
+        SearchVisible = false;
+        SlectSeasonVisible = false;
+        ButtonText = "Select Episode";
+        ButtonEnabled = false;
+    }
+
+    private async Task AddSelectedSingleEpisodeToQueue(){
+        if (AddAllEpisodes || SelectedItems.Count > 0 || selectedEpisodes.Count > 0){
+            await CrunchyrollManager.Instance.CrQueue.CrAddEpisodeToQueue(
+                currentSingleEpisodeId,
+                currentSingleEpisodeLocale,
+                CrunchyrollManager.Instance.CrunOptions.DubLang,
+                AddSearchResultsToHistory);
+        }
+
         ResetState();
     }
 
@@ -348,7 +524,7 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
 
         var list = await CrunchyrollManager.Instance.CrSeries.ListSeriesId(
             id, DetermineLocale(locale),
-            new CrunchyMultiDownload(CrunchyrollManager.Instance.CrunOptions.DubLang, true), true);
+            new CrunchyMultiDownload(CrunchyrollManager.Instance.CrunOptions.DubLang, true), true, AddSearchResultsToHistory);
 
         if (CrunchyrollManager.Instance.CrunOptions.SearchFetchFeaturedMusic){
             var musicList = await CrunchyrollManager.Instance.CrMusic.ParseFeaturedMusicVideoByIdAsync(id, DetermineLocale(locale), true);
@@ -409,8 +585,10 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
     }
 
     private void PopulateEpisodesBySeason(){
+        var seasonKeys = BuildSeasonGroupKeys(currentSeriesList?.List ?? Enumerable.Empty<Episode>());
+
         foreach (var episode in currentSeriesList?.List ?? Enumerable.Empty<Episode>()){
-            var seasonKey = "S" + episode.Season;
+            var seasonKey = seasonKeys[episode];
             var itemModel = new ItemModel(
                 episode.Id, episode.Img, episode.Description, episode.Time, episode.Name, seasonKey,
                 episode.EpisodeNum.StartsWith("SP") ? episode.EpisodeNum : "E" + episode.EpisodeNum,
@@ -427,6 +605,28 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
         if (SeasonList.Count > 0){
             CurrentSelectedSeason = SeasonList.First();
         }
+    }
+
+    private static Dictionary<Episode, string> BuildSeasonGroupKeys(IEnumerable<Episode> episodes){
+        var episodeList = episodes.ToList();
+        var seasonIdIndexesBySeason = episodeList
+            .GroupBy(episode => episode.Season)
+            .ToDictionary(
+                seasonGroup => seasonGroup.Key,
+                seasonGroup => seasonGroup
+                    .Select(episode => episode.Id)
+                    .Distinct()
+                    .Select((seasonId, index) => new{ seasonId, index })
+                    .ToDictionary(item => item.seasonId, item => item.index + 1));
+
+        return episodeList.ToDictionary(episode => episode, episode => {
+            var baseSeasonKey = "S" + episode.Season;
+            var seasonIdIndexes = seasonIdIndexesBySeason[episode.Season];
+
+            return seasonIdIndexes.Count > 1
+                ? $"{baseSeasonKey} ({seasonIdIndexes[episode.Id]})"
+                : baseSeasonKey;
+        });
     }
 
     private string DetermineLocale(string locale){
@@ -555,8 +755,7 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
         SearchVisible = true;
         SlectSeasonVisible = false;
         ShowLoading = false;
-        SearchEnabled = false; // disable and enable for button text
-        SearchEnabled = true;
+        ButtonText = SearchEnabled ? "Select Searched Series" : "Enter Url";
     }
 
     private void UpdateUiForSearchSelection(){
@@ -577,7 +776,7 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
         return await CrunchyrollManager.Instance.CrSeries.ListSeriesId(
             seriesId,
             locale,
-            new CrunchyMultiDownload(CrunchyrollManager.Instance.CrunOptions.DubLang, true), true);
+            new CrunchyMultiDownload(CrunchyrollManager.Instance.CrunOptions.DubLang, true), true, AddSearchResultsToHistory);
     }
 
     private async Task SearchPopulateEpisodesBySeason(string seriesId){
@@ -594,8 +793,10 @@ public partial class AddDownloadPageViewModel : ViewModelBase{
         GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
         GC.Collect();
 
+        var seasonKeys = BuildSeasonGroupKeys(currentSeriesList.List);
+
         foreach (var episode in currentSeriesList.List){
-            var seasonKey = "S" + episode.Season;
+            var seasonKey = seasonKeys[episode];
             var episodeModel = new ItemModel(
                 episode.Id,
                 episode.Img,

@@ -107,6 +107,11 @@ MAINTENANCE NOTES:
             --glass-bg: rgba(18, 18, 22, 0.62);
             --glass-border: rgba(255, 255, 255, 0.09);
             --glass-blur: 12px;
+            /* Ambient page bloom + card translucency (overridden per theme) */
+            --bloom:
+                radial-gradient(1200px 600px at 78% -8%, rgba(244, 117, 33, 0.10), transparent 60%),
+                radial-gradient(1000px 700px at -10% 110%, rgba(58, 120, 255, 0.06), transparent 55%);
+            --card-blur: 0px;
 
             /* --- Spacing scale (4px base) --- */
             --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
@@ -180,6 +185,40 @@ MAINTENANCE NOTES:
             --shadow-md: 0 8px 24px rgba(16,24,40,0.10);
             --shadow-lg: 0 20px 48px rgba(16,24,40,0.14);
             --shadow-glow: 0 8px 24px rgba(232, 93, 4, 0.20);
+            --bloom: none;
+            --card-blur: 0px;
+        }
+
+        /* AMOLED - pure-black surfaces for OLED screens */
+        [data-theme="amoled"] {
+            --bg-primary: #000000;
+            --bg-secondary: #000000;
+            --bg-tertiary: #0c0c0d;
+            --bg-card: #070708;
+            --bg-hover: #161618;
+            --surface-border: rgba(255, 255, 255, 0.07);
+            --border-color: rgba(255, 255, 255, 0.09);
+            --sidebar-bg: linear-gradient(180deg, #000000, #000000);
+            --bloom: none;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.6);
+            --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.65);
+            --shadow-lg: 0 28px 64px rgba(0, 0, 0, 0.75);
+        }
+
+        /* Cinematic - glassy translucent panels + a richer ambient bloom */
+        [data-theme="cinematic"] {
+            --bg-primary: #0b0b0f;
+            --bg-secondary: #101016;
+            --bg-tertiary: #16161e;
+            --bg-card: rgba(22, 22, 30, 0.55);
+            --bg-hover: rgba(40, 40, 52, 0.6);
+            --surface-border: rgba(255, 255, 255, 0.10);
+            --glass-bg: rgba(22, 22, 30, 0.5);
+            --card-blur: 14px;
+            --sidebar-bg: linear-gradient(180deg, rgba(18,18,26,0.72), rgba(10,10,16,0.85));
+            --bloom:
+                radial-gradient(1100px 620px at 80% -10%, rgba(244, 117, 33, 0.16), transparent 60%),
+                radial-gradient(1000px 760px at -12% 112%, rgba(108, 92, 231, 0.12), transparent 58%);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -191,16 +230,11 @@ MAINTENANCE NOTES:
             -webkit-tap-highlight-color: transparent;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
-            /* Cinematic layered background: deep black with warm orange + cool bloom */
+            /* Ambient bloom is theme-controlled via the --bloom token */
             background-color: var(--bg-primary);
-            background-image:
-                radial-gradient(1200px 600px at 78% -8%, rgba(244, 117, 33, 0.10), transparent 60%),
-                radial-gradient(1000px 700px at -10% 110%, rgba(58, 120, 255, 0.06), transparent 55%);
+            background-image: var(--bloom);
             background-attachment: fixed;
         }
-
-        /* Light theme: flat bright base, no cinematic bloom */
-        [data-theme="light"] body { background-image: none; }
 
         /* Entrance + interaction animations */
         @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
@@ -853,6 +887,8 @@ MAINTENANCE NOTES:
 
         .settings-section {
             background: var(--bg-card);
+            backdrop-filter: blur(var(--card-blur));
+            -webkit-backdrop-filter: blur(var(--card-blur));
             border: 1px solid var(--surface-border);
             border-radius: var(--radius);
             margin-bottom: 16px;
@@ -1120,6 +1156,19 @@ MAINTENANCE NOTES:
             background: var(--bg-hover);
             border-color: var(--accent-orange);
         }
+        .season-dub-bar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: var(--space-2);
+            padding: var(--space-3) var(--space-4);
+            margin-bottom: var(--space-3);
+            background: var(--bg-card);
+            border: 1px solid var(--surface-border);
+            border-radius: var(--radius-sm);
+        }
+        .season-dub-label { font-weight: var(--fw-semibold); font-size: var(--text-sm); color: var(--text-secondary); margin-right: var(--space-2); }
+        .season-dub-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
         .dub-option.selected {
             background: var(--accent-soft);
             border-color: var(--accent-orange);
@@ -1402,9 +1451,11 @@ MAINTENANCE NOTES:
         }
         .nav-item.active .nav-icon { color: var(--accent-orange); }
 
-        /* Cards: solid dark surfaces, lift on hover (glass reserved for overlays) */
+        /* Cards: surface honors --card-blur (0 normally, glass in the Cinematic theme) */
         .card {
             background: var(--bg-card);
+            backdrop-filter: blur(var(--card-blur));
+            -webkit-backdrop-filter: blur(var(--card-blur));
             border: 1px solid var(--surface-border);
             border-radius: var(--radius);
             box-shadow: var(--shadow-sm);
@@ -2502,7 +2553,36 @@ MAINTENANCE NOTES:
                 return;
             }
 
-            list.innerHTML = episodes.map(ep => {
+            // Season-level language bar: pick a language once and apply it to every
+            // episode that offers it (toggles off if already applied to all).
+            const seasonLocaleNames = new Map();
+            const seasonLocaleEps = new Map();
+            episodes.forEach(ep => {
+                const d = addDownloadSeriesData[ep.e];
+                if (!d || !d.variants) return;
+                d.variants.forEach(v => {
+                    const loc = v.lang?.crLocale || v.item?.audioLocale;
+                    if (!loc) return;
+                    if (!seasonLocaleNames.has(loc)) seasonLocaleNames.set(loc, v.lang?.name || loc);
+                    if (!seasonLocaleEps.has(loc)) seasonLocaleEps.set(loc, new Set());
+                    seasonLocaleEps.get(loc).add(ep.e);
+                });
+            });
+            let seasonDubBarHtml = '';
+            if (seasonLocaleNames.size > 0 && episodes.length > 1) {
+                const chips = Array.from(seasonLocaleNames.entries()).map(([loc, name]) => {
+                    const eps = Array.from(seasonLocaleEps.get(loc) || []);
+                    const allOn = eps.length > 0 && eps.every(k => selectedEpisodeDubs.get(k)?.has(loc));
+                    return `<div class="dub-option ${allOn ? 'selected' : ''}" onclick="applySeasonDub('${escapeJsString(loc)}')">${escapeHtml(name)}</div>`;
+                }).join('');
+                seasonDubBarHtml = `
+                    <div class="season-dub-bar">
+                        <span class="season-dub-label">Apply language to all episodes</span>
+                        <div class="season-dub-chips">${chips}</div>
+                    </div>`;
+            }
+
+            list.innerHTML = seasonDubBarHtml + episodes.map(ep => {
                 const epKey = ep.e;
                 const isSelected = selectedEpisodes.has(epKey);
                 const epData = addDownloadSeriesData[epKey];
@@ -2525,10 +2605,9 @@ MAINTENANCE NOTES:
                         const isSelected = selectedDubs.has(locale);
                         const premiumClass = info.isPremium ? 'premium' : '';
                         return `
-                            <label class="dub-option ${isSelected ? 'selected' : ''} ${premiumClass}" onclick="event.stopPropagation(); toggleDubSelection('${escapeJsString(epKey)}', '${escapeJsString(locale)}')">
-                                <input type="checkbox" ${isSelected ? 'checked' : ''}>
+                            <div class="dub-option ${isSelected ? 'selected' : ''} ${premiumClass}" onclick="event.stopPropagation(); toggleDubSelection('${escapeJsString(epKey)}', '${escapeJsString(locale)}')">
                                 ${escapeHtml(info.name)}
-                            </label>
+                            </div>
                         `;
                     }).join('');
                 }
@@ -2592,6 +2671,33 @@ MAINTENANCE NOTES:
                     selectedEpisodes.add(epKey);
                 }
             }
+            renderAddEpisodesMultiDub();
+        }
+
+        // Apply (or remove) one dub language across every visible episode that offers it.
+        function applySeasonDub(locale) {
+            const seasonId = document.getElementById('season-dropdown')?.value;
+            const episodes = seasonId
+                ? addDownloadEpisodeList.filter(ep => ep.id === seasonId)
+                : addDownloadEpisodeList;
+            const epsWith = episodes.filter(ep => {
+                const d = addDownloadSeriesData[ep.e];
+                return d?.variants?.some(v => (v.lang?.crLocale || v.item?.audioLocale) === locale);
+            });
+            if (epsWith.length === 0) return;
+            const allOn = epsWith.every(ep => selectedEpisodeDubs.get(ep.e)?.has(locale));
+            epsWith.forEach(ep => {
+                const set = selectedEpisodeDubs.get(ep.e) || new Set();
+                if (allOn) {
+                    set.delete(locale);
+                    if (set.size === 0) { selectedEpisodeDubs.delete(ep.e); selectedEpisodes.delete(ep.e); }
+                    else selectedEpisodeDubs.set(ep.e, set);
+                } else {
+                    set.add(locale);
+                    selectedEpisodeDubs.set(ep.e, set);
+                    selectedEpisodes.add(ep.e);
+                }
+            });
             renderAddEpisodesMultiDub();
         }
 
@@ -4357,7 +4463,7 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Appearance Settings</span><span class="settings-section-desc">Customize the UI</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}" style="width:300px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity ?? 0.5)}" min="0" max="1" step="0.1" style="width:100px;"></div>
@@ -4397,21 +4503,24 @@ MAINTENANCE NOTES:
             }
         }
 
+        // Named themes -> data-theme attribute. "Dark" is the default :root (no attr).
+        const THEME_ATTR = { 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic' };
         function applyTheme() {
-            const theme = config?.appearance?.theme || 'System';
-            const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            const isDark = theme === 'Dark' || (theme === 'System' && systemDark);
-            
-            if (isDark) {
-                document.documentElement.removeAttribute('data-theme');
-            } else {
-                document.documentElement.setAttribute('data-theme', 'light');
+            let theme = config?.appearance?.theme || 'System';
+            if (theme === 'System') {
+                theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Dark' : 'Light';
             }
-            
-            // Apply accent color if set
+            const attr = THEME_ATTR[theme];
+            if (attr) {
+                document.documentElement.setAttribute('data-theme', attr);
+            } else {
+                document.documentElement.removeAttribute('data-theme'); // Dark = default
+            }
+
+            // Apply custom accent color if set
             const accentColor = config?.appearance?.accentColor;
             if (accentColor) {
-                document.documentElement.style.setProperty('--accent-orange', accentColor);
+                document.documentElement.style.setProperty('--accent', accentColor);
             }
         }
         

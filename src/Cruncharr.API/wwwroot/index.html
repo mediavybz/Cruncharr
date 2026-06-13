@@ -61,6 +61,9 @@ MAINTENANCE NOTES:
     <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
     <style>
         /* WinUI 3 / Fluent Design Dark Theme - Ported from Crunchy-Downloader */
         /* Original uses FluentAvalonia with WinUI 3 system colors */
@@ -86,12 +89,13 @@ MAINTENANCE NOTES:
             --cr-warning: #ffab00;
             --cr-info: #00b0ff;
             
-            /* Cinematic dark design system */
-            --bg-primary: #08080a;
-            --bg-secondary: #0e0e12;
-            --bg-tertiary: #16161c;
-            --bg-hover: #1e1e26;
-            --bg-card: #121217;
+            /* Cinematic dark design system (#0A0A0A–#1A1A1A surfaces) */
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #0f0f10;
+            --bg-tertiary: #1a1a1c;
+            --bg-hover: #222226;
+            --bg-card: #151517;
+            --surface-border: rgba(255, 255, 255, 0.06);
             --text-primary: #f6f7f9;
             --text-secondary: #b8bcc6;
             --text-muted: #7c818d;
@@ -108,7 +112,7 @@ MAINTENANCE NOTES:
             --glass-bg: rgba(20, 20, 26, 0.55);
             --glass-border: rgba(255, 255, 255, 0.09);
             --glass-blur: 18px;
-            --sidebar-bg: linear-gradient(180deg, rgba(18,18,24,0.78), rgba(10,10,14,0.88));
+            --sidebar-bg: linear-gradient(180deg, #101011, #0a0a0b);
             /* Soft layered shadows */
             --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.40);
             --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.45);
@@ -140,9 +144,10 @@ MAINTENANCE NOTES:
             --accent-soft: rgba(232, 93, 4, 0.12);
             --accent-glow: rgba(232, 93, 4, 0.28);
             --border-color: #e3e6ea;
+            --surface-border: #e7eaee;
             --glass-bg: rgba(255, 255, 255, 0.72);
             --glass-border: rgba(16, 24, 40, 0.08);
-            --sidebar-bg: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(248,249,251,0.96));
+            --sidebar-bg: linear-gradient(180deg, #ffffff, #f7f8fa);
             --shadow-sm: 0 1px 2px rgba(16,24,40,0.06);
             --shadow-md: 0 8px 24px rgba(16,24,40,0.10);
             --shadow-lg: 0 20px 48px rgba(16,24,40,0.14);
@@ -176,13 +181,11 @@ MAINTENANCE NOTES:
 
         .app-container { display: flex; height: 100vh; }
 
-        /* Sidebar - glass panel */
+        /* Sidebar - solid dark surface */
         .sidebar {
             width: var(--sidebar-width);
             background: var(--sidebar-bg);
-            backdrop-filter: blur(var(--glass-blur));
-            -webkit-backdrop-filter: blur(var(--glass-blur));
-            border-right: 1px solid var(--glass-border);
+            border-right: 1px solid var(--surface-border);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
@@ -810,14 +813,12 @@ MAINTENANCE NOTES:
         .settings-tab.active { color: var(--accent-orange); border-bottom-color: var(--accent-orange); }
 
         .settings-section {
-            background: var(--glass-bg);
-            backdrop-filter: blur(var(--glass-blur));
-            -webkit-backdrop-filter: blur(var(--glass-blur));
-            border: 1px solid var(--glass-border);
+            background: var(--bg-card);
+            border: 1px solid var(--surface-border);
             border-radius: var(--radius);
             margin-bottom: 16px;
             overflow: hidden;
-            box-shadow: var(--shadow-md);
+            box-shadow: var(--shadow-sm);
         }
 
         .settings-section-header {
@@ -1351,6 +1352,10 @@ MAINTENANCE NOTES:
         /* Sidebar nav: floating pill with glow on active */
         .nav-item { transition: background var(--transition), color var(--transition), transform var(--transition); }
         .nav-item:hover { transform: translateX(3px); }
+        .nav-item:hover .nav-icon { color: var(--accent-orange); }
+
+        /* Monochrome icons highlight orange on hover */
+        .btn-icon:hover, .toolbar-btn:hover .nav-icon { color: var(--accent-orange); }
         .nav-item.active {
             background: linear-gradient(135deg, rgba(255,106,0,0.22), rgba(255,106,0,0.05));
             color: var(--accent-orange);
@@ -1358,17 +1363,15 @@ MAINTENANCE NOTES:
         }
         .nav-item.active .nav-icon { color: var(--accent-orange); }
 
-        /* Cards: glassmorphism + hover elevation */
+        /* Cards: solid dark surfaces, lift on hover (glass reserved for overlays) */
         .card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(var(--glass-blur));
-            -webkit-backdrop-filter: blur(var(--glass-blur));
-            border: 1px solid var(--glass-border);
+            background: var(--bg-card);
+            border: 1px solid var(--surface-border);
             border-radius: var(--radius);
-            box-shadow: var(--shadow-md);
+            box-shadow: var(--shadow-sm);
             transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
         }
-        .card:hover { transform: translateY(-3px) scale(1.01); box-shadow: var(--shadow-lg); border-color: rgba(255,255,255,0.16); }
+        .card:hover { transform: translateY(-6px); box-shadow: var(--shadow-lg); border-color: rgba(255,255,255,0.12); }
 
         /* Buttons: rounder, focus ring, primary glow */
         .header-btn, .btn-icon, .toolbar-btn {

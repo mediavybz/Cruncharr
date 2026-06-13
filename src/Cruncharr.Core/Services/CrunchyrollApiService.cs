@@ -269,8 +269,12 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     // stop early once pages no longer contain episodes inside the requested calendar week
     public async Task<CrBrowseEpisodeBase?> GetNewEpisodesAsync(string? crLocale, int requestAmount, DateTime? firstWeekDay, bool forcedLang = false, CancellationToken cancellationToken = default)
     {
-        if (!await EnsureAuthenticatedAsync(true, cancellationToken))
+        // Browse works with an anonymous/guest token (upstream uses CrAuthGuest here).
+        // IsAuthenticated requires a logged-in account, so don't gate on it - any
+        // access token is enough.
+        if (!await EnsureTokenAsync(cancellationToken))
         {
+            _logger?.LogError("Cannot fetch new episodes: no Crunchyroll access token available");
             return null;
         }
 
@@ -1171,6 +1175,18 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         return true;
     }
 
+    // Anonymous-capable endpoints (browse/new episodes) only need an access token,
+    // not a logged-in account. AuthenticateAsync returns false in anonymous mode
+    // even when the guest token was obtained successfully.
+    private async Task<bool> EnsureTokenAsync(CancellationToken cancellationToken)
+    {
+        if (_authService.Token?.access_token == null)
+        {
+            await _authService.AuthenticateAsync(true, cancellationToken);
+        }
+        return _authService.Token?.access_token != null;
+    }
+
     private static string ExtractIdFromUrl(string input)
     {
         if (input.StartsWith("http"))
@@ -1828,9 +1844,9 @@ public class CrBrowseEpisodeMetaData
     [JsonProperty("eligible_region")]
     public string? EligibleRegion { get; set; }
     [JsonProperty("available_date")]
-    public DateTime AvailableDate { get; set; }
+    public DateTime? AvailableDate { get; set; }
     [JsonProperty("premium_date")]
-    public DateTime PremiumDate { get; set; }
+    public DateTime? PremiumDate { get; set; }
     [JsonProperty("available_offline")]
     public bool AvailableOffline { get; set; }
     [JsonProperty("closed_captions_available")]

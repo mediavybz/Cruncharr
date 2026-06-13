@@ -240,6 +240,10 @@ public class CalendarService : ICalendarService
         // Get new episodes from API ([PT] upstream: pass week start so paging can stop early)
         var newEpisodes = await GetNewEpisodesFromApiAsync(language, week.FirstDayOfWeek);
 
+        // Don't poison the cache with an empty week when the API fetch failed
+        // (e.g. auth not ready yet right after startup)
+        var fetchSucceeded = newEpisodes != null;
+
         if (newEpisodes != null && newEpisodes.Count > 0)
         {
             foreach (var episode in newEpisodes)
@@ -315,12 +319,15 @@ public class CalendarService : ICalendarService
             }
         }
 
-        _calendarCache[cacheKey] = week;
+        if (fetchSucceeded)
+        {
+            _calendarCache[cacheKey] = week;
+        }
         await RefreshHistoryStatusesAsync(week);
         return week;
     }
 
-    private async Task<List<CalendarEpisode>> GetNewEpisodesFromApiAsync(string language, DateTime? firstWeekDay = null)
+    private async Task<List<CalendarEpisode>?> GetNewEpisodesFromApiAsync(string language, DateTime? firstWeekDay = null)
     {
         try
         {
@@ -328,7 +335,13 @@ public class CalendarService : ICalendarService
 
             var newEpisodesBase = await _apiService.GetNewEpisodesAsync(language, 2000, firstWeekDay, true);
 
-            if (newEpisodesBase?.Data == null || newEpisodesBase.Data.Count == 0)
+            if (newEpisodesBase == null)
+            {
+                // Request failed (auth/network) - distinguish from "no episodes"
+                return null;
+            }
+
+            if (newEpisodesBase.Data == null || newEpisodesBase.Data.Count == 0)
             {
                 return new List<CalendarEpisode>();
             }
@@ -402,7 +415,7 @@ public class CalendarService : ICalendarService
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to fetch new episodes for calendar");
-            return new List<CalendarEpisode>();
+            return null;
         }
     }
 

@@ -910,7 +910,7 @@ public class DownloadService : IDownloadService
                         try
                         {
                             _logger?.LogInformation("Syncing dub timing for {Dub}: base={Base}, sync={Sync}", dubLocale, baseVideoPath, syncVideoPath);
-                            var delay = await _videoSyncer.ProcessVideo(baseVideoPath, syncVideoPath, tempDir, ffmpegPath);
+                            var delay = await _videoSyncer.ProcessVideo(baseVideoPath, syncVideoPath, tempDir, ffmpegPath, config.Download.SyncHwAccel);
 
                             if (delay.offSet <= -100)
                             {

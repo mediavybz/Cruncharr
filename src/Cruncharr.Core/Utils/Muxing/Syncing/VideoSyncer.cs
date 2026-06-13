@@ -10,7 +10,7 @@ namespace Cruncharr.Core.Utils.Muxing.Syncing;
 
 public interface IVideoSyncer
 {
-    Task<(double offSet, double startOffset, double endOffset, double lengthDiff)> ProcessVideo(string baseVideoPath, string compareVideoPath, string tempDir, string ffmpegPath);
+    Task<(double offSet, double startOffset, double endOffset, double lengthDiff)> ProcessVideo(string baseVideoPath, string compareVideoPath, string tempDir, string ffmpegPath, string? hwAccel = null);
 }
 
 public class VideoSyncer : IVideoSyncer
@@ -24,7 +24,7 @@ public class VideoSyncer : IVideoSyncer
         _logger = logger;
     }
 
-    public async Task<(double offSet, double startOffset, double endOffset, double lengthDiff)> ProcessVideo(string baseVideoPath, string compareVideoPath, string tempDir, string ffmpegPath)
+    public async Task<(double offSet, double startOffset, double endOffset, double lengthDiff)> ProcessVideo(string baseVideoPath, string compareVideoPath, string tempDir, string ffmpegPath, string? hwAccel = null)
     {
         string baseFramesDir, baseFramesDirEnd;
         string compareFramesDir, compareFramesDirEnd;
@@ -55,8 +55,8 @@ public class VideoSyncer : IVideoSyncer
 
         try
         {
-            var extractFramesBaseStart = await _syncingService.ExtractFrames(baseVideoPath, baseFramesDir, 0, 120, ffmpegPath);
-            var extractFramesCompareStart = await _syncingService.ExtractFrames(compareVideoPath, compareFramesDir, 0, 120, ffmpegPath);
+            var extractFramesBaseStart = await _syncingService.ExtractFrames(baseVideoPath, baseFramesDir, 0, 120, ffmpegPath, hwAccel);
+            var extractFramesCompareStart = await _syncingService.ExtractFrames(compareVideoPath, compareFramesDir, 0, 120, ffmpegPath, hwAccel);
 
             TimeSpan? baseVideoDurationTimeSpan = await GetMediaDurationAsync(ffmpegPath, baseVideoPath);
             TimeSpan? compareVideoDurationTimeSpan = await GetMediaDurationAsync(ffmpegPath, compareVideoPath);
@@ -72,8 +72,8 @@ public class VideoSyncer : IVideoSyncer
             baseEndWindowOffset = Math.Max(0, baseVideoDurationTimeSpan.Value.TotalSeconds - baseEndWindowDuration);
             compareEndWindowOffset = Math.Max(0, compareVideoDurationTimeSpan.Value.TotalSeconds - compareEndWindowDuration);
 
-            var extractFramesBaseEnd = await _syncingService.ExtractFrames(baseVideoPath, baseFramesDirEnd, baseEndWindowOffset, baseEndWindowDuration, ffmpegPath);
-            var extractFramesCompareEnd = await _syncingService.ExtractFrames(compareVideoPath, compareFramesDirEnd, compareEndWindowOffset, compareEndWindowDuration, ffmpegPath);
+            var extractFramesBaseEnd = await _syncingService.ExtractFrames(baseVideoPath, baseFramesDirEnd, baseEndWindowOffset, baseEndWindowDuration, ffmpegPath, hwAccel);
+            var extractFramesCompareEnd = await _syncingService.ExtractFrames(compareVideoPath, compareFramesDirEnd, compareEndWindowOffset, compareEndWindowDuration, ffmpegPath, hwAccel);
 
             if (!extractFramesBaseStart.IsOk || !extractFramesCompareStart.IsOk || !extractFramesBaseEnd.IsOk || !extractFramesCompareEnd.IsOk)
             {

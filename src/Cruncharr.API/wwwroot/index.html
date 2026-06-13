@@ -4221,6 +4221,30 @@ MAINTENANCE NOTES:
             document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
             if (evt && evt.target) evt.target.classList.add('active');
             renderSettingsTab();
+            populateHwAccels();
+        }
+
+        // Populate the Sync HW Accel dropdown with the accelerators ffmpeg supports and
+        // the GPU devices actually passed into the container. No-op unless the select is
+        // on the current tab.
+        async function populateHwAccels() {
+            const sel = document.getElementById('setting-sync-hwaccel');
+            if (!sel) return;
+            const saved = sel.dataset.saved || sel.value || 'none';
+            try {
+                const res = await fetch('/api/v1/hardware/accelerators');
+                if (!res.ok) return;
+                const opts = await res.json();
+                if (!Array.isArray(opts) || opts.length === 0) return;
+                // Ensure the saved value is present even if not detected anymore
+                if (saved && saved !== 'none' && !opts.some(o => o.value === saved)) {
+                    opts.push({ value: saved, label: saved + ' (saved)', deviceFound: false });
+                }
+                sel.innerHTML = opts.map(o => {
+                    const tag = (o.value !== 'none' && o.deviceFound === false) ? ' — not detected' : '';
+                    return `<option value="${escapeHtmlAttribute(o.value)}" ${o.value === saved ? 'selected' : ''}>${escapeHtml(o.label)}${tag}</option>`;
+                }).join('');
+            } catch (e) { /* keep the single saved option on failure */ }
         }
 
         // Helper: read stream endpoint property (backend may return PascalCase or camelCase)
@@ -4397,7 +4421,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Episode description Language</div></div><select class="form-select" id="setting-desc-lang" style="min-width:150px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.descriptionLang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Sync Timings</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sync-timing" ${dl.syncTiming?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Sync Full Quality Fallback</div><div class="setting-desc">Use full quality if sync fails</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sync-fallback" ${dl.syncTimingFullQualityFallback?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Sync HW Accel</div><div class="setting-desc">Hardware acceleration for sync</div></div><input type="text" class="form-input" id="setting-sync-hwaccel" value="${escapeHtmlAttribute(dl.syncHwAccel||'')}" style="width:150px;" placeholder="none"></div>
+                                <div class="setting-row"><div><div class="setting-label">Sync HW Accel</div><div class="setting-desc">Hardware acceleration for sync (GPUs the container can access)</div></div><select class="form-select" id="setting-sync-hwaccel" data-saved="${escapeHtmlAttribute(dl.syncHwAccel||'none')}" style="min-width:240px;"><option value="${escapeHtmlAttribute(dl.syncHwAccel||'none')}">${escapeHtml(dl.syncHwAccel||'none')}</option></select></div>
                             </div>
                         </div>
                         <div class="settings-section">

@@ -15,7 +15,7 @@ namespace Cruncharr.Core.Utils.Muxing.Syncing;
 
 public interface ISyncingService
 {
-    Task<(bool IsOk, int ErrorCode, double frameRate)> ExtractFrames(string videoPath, string outputDir, double offset, double duration, string ffmpegPath);
+    Task<(bool IsOk, int ErrorCode, double frameRate)> ExtractFrames(string videoPath, string outputDir, double offset, double duration, string ffmpegPath, string? hwAccel = null);
     double ExtractFrameRate(string ffmpegOutput);
     (double ssim, double pixelDiff) ComputeSSIM(string imagePath1, string imagePath2, int targetWidth, int targetHeight);
     float[] GetPixelsArray(string imagePath, int targetWidth = 256, int targetHeight = 144);
@@ -33,10 +33,14 @@ public class SyncingService : ISyncingService
         _logger = logger;
     }
 
-    public async Task<(bool IsOk, int ErrorCode, double frameRate)> ExtractFrames(string videoPath, string outputDir, double offset, double duration, string ffmpegPath)
+    public async Task<(bool IsOk, int ErrorCode, double frameRate)> ExtractFrames(string videoPath, string outputDir, double offset, double duration, string ffmpegPath, string? hwAccel = null)
     {
+        // Optional hardware-accelerated decode for the sync frame extraction.
+        var hw = !string.IsNullOrWhiteSpace(hwAccel) && !hwAccel.Equals("none", StringComparison.OrdinalIgnoreCase)
+            ? $"-hwaccel {hwAccel} "
+            : "";
         var arguments =
-            $"-ss {offset} -t {duration} -i \"{videoPath}\" -vf \"select='gt(scene,0.1)',showinfo\" -vsync vfr -frame_pts true \"{outputDir}/frame%05d.jpg\"";
+            $"{hw}-ss {offset} -t {duration} -i \"{videoPath}\" -vf \"select='gt(scene,0.1)',showinfo\" -vsync vfr -frame_pts true \"{outputDir}/frame%05d.jpg\"";
 
         var output = "";
 

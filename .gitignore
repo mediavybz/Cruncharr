@@ -77,3 +77,6 @@ cruncharr-image.tar
 
 # Local UI screenshot/debug artifacts
 shots/
+
+# Local third-party tool binaries (ffmpeg etc.) - not used by the Linux image
+tools/

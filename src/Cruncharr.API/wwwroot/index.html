@@ -308,7 +308,6 @@ MAINTENANCE NOTES:
 
         .sidebar-header {
             padding: 20px;
-            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             gap: 10px;
@@ -326,7 +325,7 @@ MAINTENANCE NOTES:
             color: #000;
         }
 
-        .sidebar-title { font-size: 1.2em; font-weight: 600; }
+        .sidebar-title { font-size: 1.55em; font-weight: 700; letter-spacing: -0.01em; }
 
         .sidebar-nav { flex: 1; padding: 10px 0; }
 
@@ -354,10 +353,40 @@ MAINTENANCE NOTES:
 
         .sidebar-footer {
             padding: 15px 20px;
-            border-top: 1px solid var(--border-color);
             font-size: 0.8em;
             color: var(--text-muted);
         }
+
+        /* Top-right profile chip */
+        .topbar-profile {
+            position: fixed;
+            top: 16px;
+            right: 24px;
+            z-index: 40;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 14px 6px 6px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-full);
+            cursor: pointer;
+            box-shadow: var(--shadow-sm);
+            transition: transform var(--transition), border-color var(--transition);
+        }
+        .topbar-profile:hover { transform: translateY(-1px); border-color: var(--accent-orange); }
+        .topbar-profile-avatar {
+            width: 30px; height: 30px; border-radius: 50%;
+            overflow: hidden; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--bg-tertiary); color: var(--text-secondary); font-size: 16px;
+        }
+        .topbar-profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .topbar-profile-name { font-size: 0.9em; font-weight: 600; color: var(--text-primary); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .topbar-profile.hidden { display: none; }
+        @media (max-width: 768px) { .topbar-profile { top: 8px; right: 10px; } .topbar-profile-name { display: none; } }
 
         .nav-section-title {
             padding: 8px 20px;
@@ -1982,6 +2011,10 @@ MAINTENANCE NOTES:
 </head>
 <body>
     <div class="app-container">
+        <div class="topbar-profile hidden" id="topbar-profile" onclick="navigateTo('account')" title="Account">
+            <div class="topbar-profile-avatar" id="topbar-profile-avatar"><span>&#128100;</span></div>
+            <div class="topbar-profile-name" id="topbar-profile-name">Not logged in</div>
+        </div>
         <aside class="sidebar">
             <div class="sidebar-header">
                 <img src="/favicon.png" alt="Cruncharr" style="width:32px;height:32px;">
@@ -2120,6 +2153,7 @@ MAINTENANCE NOTES:
             startPolling();
             setupNavigation();
             setupMultiSelectDropdowns();
+            updateTopbarProfile();
         });
 
         function setupMultiSelectDropdowns() {
@@ -3792,6 +3826,7 @@ MAINTENANCE NOTES:
                 const res = await fetch('/api/v1/auth/status');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 authStatus = await res.json();
+                updateTopbarProfile();
                 const nameEl = document.getElementById('account-name');
                 const subEl = document.getElementById('account-subscription');
                 const avatarEl = document.getElementById('account-avatar');
@@ -3803,7 +3838,7 @@ MAINTENANCE NOTES:
                 if (authStatus.isAuthenticated) {
                     if (nameEl) nameEl.textContent = authStatus.username || 'User';
                     if (subEl) subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free';
-                    if (avatarEl) avatarEl.innerHTML = authStatus.avatar && isSafeUrl(authStatus.avatar) ? `<img src="${escapeHtml(authStatus.avatar)}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">` : '<span>&#128100;</span>';
+                    if (avatarEl) { const au = resolveAvatarUrl(authStatus.avatar); avatarEl.innerHTML = au && isSafeUrl(au) ? `<img src="${escapeHtml(au)}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">` : '<span>&#128100;</span>'; }
                     if (loginBtn) loginBtn.style.display = 'none';
                     if (logoutBtn) logoutBtn.style.display = 'inline-block';
                     
@@ -6113,7 +6148,41 @@ MAINTENANCE NOTES:
                 el.style.color = isConnected ? 'var(--accent-green)' : 'var(--accent-red)';
             }
         }
-        
+
+        // Resolve a Crunchyroll avatar (bare filename -> full URL; pass through real URLs)
+        function resolveAvatarUrl(avatar) {
+            if (!avatar) return null;
+            if (/^https?:\/\//i.test(avatar)) return avatar;
+            return 'https://static.crunchyroll.com/assets/avatar/170x170/' + avatar;
+        }
+
+        // Top-right profile chip: show the logged-in account icon + username
+        async function updateTopbarProfile() {
+            const chip = document.getElementById('topbar-profile');
+            const nameEl = document.getElementById('topbar-profile-name');
+            const avatarEl = document.getElementById('topbar-profile-avatar');
+            if (!chip) return;
+            try {
+                const res = await fetch('/api/v1/auth/status');
+                if (!res.ok) throw new Error('status');
+                const s = await res.json();
+                if (s.isAuthenticated && s.username && s.username !== '???') {
+                    chip.classList.remove('hidden');
+                    if (nameEl) nameEl.textContent = s.username;
+                    const url = resolveAvatarUrl(s.avatar);
+                    if (avatarEl) {
+                        avatarEl.innerHTML = url && isSafeUrl(url)
+                            ? `<img src="${escapeHtml(url)}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">`
+                            : '<span>&#128100;</span>';
+                    }
+                } else {
+                    chip.classList.add('hidden');
+                }
+            } catch (e) {
+                chip.classList.add('hidden');
+            }
+        }
+
         function startQueuePollingFallback() {
             if (window._queuePollInterval) clearInterval(window._queuePollInterval);
             window._queuePollInterval = setInterval(() => {

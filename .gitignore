@@ -72,3 +72,6 @@ upstream_src/
 
 # Binary image exports
 cruncharr-image.tar
+
+# Local UI screenshot/debug artifacts
+shots/

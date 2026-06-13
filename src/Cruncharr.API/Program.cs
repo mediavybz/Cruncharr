@@ -114,9 +114,21 @@ public class Program
         app.UseAuthorization();
         app.MapControllers();
 
-        // Serve static files for web UI
+        // Serve static files for web UI. Force HTML to always revalidate: without an
+        // explicit Cache-Control browsers apply heuristic caching and can serve a stale
+        // index.html for hours after an update (UI appears "frozen"/half-modernized).
+        // no-cache keeps the ETag (cheap 304s) but never serves stale markup.
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            OnPrepareResponse = ctx =>
+            {
+                if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+                {
+                    ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+                }
+            }
+        });
 
         // Ensure config directory exists
         var configDir = Path.GetDirectoryName(configPath);

@@ -2392,15 +2392,19 @@ public class DownloadService : IDownloadService
         _logger?.LogInformation("MUX DEBUG: OnlyVid.Count={OnlyVid}, OnlyAudio.Count={OnlyAudio}, Subtitles.Count={Subs}",
             mergerOptions.OnlyVid.Count, mergerOptions.OnlyAudio.Count, mergerOptions.Subtitles.Count);
 
-        // Map subtitles
+        // Map subtitles. A subtitle whose locale matches a downloaded audio (dub) locale
+        // is a "signs/forced" track: the dialogue is dubbed, so that subtitle only renders
+        // on-screen text. Flagging it lets SignsSubsAsForced / DefaultSubSigns work (they
+        // were previously inert because every sub was muxed with Signs=false).
         foreach (var (path, lang) in subtitles)
         {
+            bool isSigns = audioTracks.Any(a => string.Equals(a.Lang, lang, StringComparison.OrdinalIgnoreCase));
             mergerOptions.Subtitles.Add(new SubtitleInput
             {
                 File = path,
                 Language = Languages.FindLang(lang),
                 ClosedCaption = false,
-                Signs = false
+                Signs = isSigns
             });
         }
 

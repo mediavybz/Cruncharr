@@ -586,6 +586,7 @@ MAINTENANCE NOTES:
         .calendar-history-mark.mark-none { display: none; }
 
         .calendar-episode-time { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px; }
+        .calendar-episode-locale { font-size: 0.7em; color: var(--text-muted); margin-top: 2px; }
 
         .calendar-episode-thumb {
             width: 100%;
@@ -2528,18 +2529,9 @@ MAINTENANCE NOTES:
                     <button class="header-btn" onclick="changeWeek(-1)">&#9664; Prev</button>
                     <div style="display:flex; gap:10px; align-items:center;">
                         <button class="header-btn" onclick="fetchCalendar(true)">&#128260; Refresh</button>
-                        <select class="form-select" id="calendar-lang" style="min-width:150px;" onchange="onCalendarLanguageChange(this.value)">
-                            <option value="en-us">English</option>
-                            <option value="es">Spanish</option>
-                            <option value="es-es">Spanish (Spain)</option>
-                            <option value="pt-br">Portuguese (Brazil)</option>
-                            <option value="pt-pt">Portuguese (Portugal)</option>
-                            <option value="fr">French</option>
-                            <option value="de">German</option>
-                            <option value="it">Italian</option>
-                            <option value="ru">Russian</option>
-                            <option value="ar">Arabic</option>
-                            <option value="hi">Hindi</option>
+                        <select class="form-select" id="calendar-dub-filter" style="min-width:170px;" onchange="onCalendarDubFilterChange(this.value)" title="Filter by audio (dub) language">
+                            <option value="none">All Languages</option>
+                            ${LANG_OPTIONS.map(o=>`<option value="${o.value}">${o.label}</option>`).join('')}
                         </select>
                     </div>
                     <button class="header-btn" onclick="changeWeek(1)">Next &#9654;</button>
@@ -2548,29 +2540,29 @@ MAINTENANCE NOTES:
                     <div class="loading"><div class="spinner"></div>Loading calendar...</div>
                 </div>
             `;
-            // Set initial language from config
-            const langSelect = document.getElementById('calendar-lang');
-            if (langSelect && config?.calendar?.language) {
-                const configLang = config.calendar.language.toLowerCase();
-                const option = langSelect.querySelector(`option[value="${configLang}"]`);
-                if (option) langSelect.value = configLang;
+            // Set initial dub filter from config (legacy values like "dubbed"/"subbed" fall back to All)
+            const filterSelect = document.getElementById('calendar-dub-filter');
+            if (filterSelect && config?.calendar?.dubFilter) {
+                const configFilter = config.calendar.dubFilter;
+                const option = filterSelect.querySelector(`option[value="${configFilter}"]`);
+                if (option) filterSelect.value = configFilter;
             }
             fetchCalendar();
         }
 
-        async function onCalendarLanguageChange(language) {
+        async function onCalendarDubFilterChange(dubFilter) {
             // Save to config
             try {
                 await fetch('/api/v1/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ calendar: { language: language } })
+                    body: JSON.stringify({ calendar: { dubFilter: dubFilter } })
                 });
                 // Update local config
                 if (!config.calendar) config.calendar = {};
-                config.calendar.language = language;
+                config.calendar.dubFilter = dubFilter;
             } catch (e) {
-                console.warn('Failed to save calendar language:', e);
+                console.warn('Failed to save calendar dub filter:', e);
             }
             fetchCalendar();
         }
@@ -2590,15 +2582,19 @@ MAINTENANCE NOTES:
                 const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
                 const monday = new Date(now);
                 monday.setDate(now.getDate() - daysSinceMonday + (calendarWeekOffset * 7));
-                const year = monday.getFullYear();
-                const month = String(monday.getMonth() + 1).padStart(2, '0');
-                const day = String(monday.getDate()).padStart(2, '0');
-                const dateStr = `${year}-${month}-${day}`;
-                
-                const langSelect = document.getElementById('calendar-lang');
-                const language = langSelect ? langSelect.value : 'en-us';
-                
-                const res = await fetch(`/api/v1/calendar?date=${dateStr}&language=${language}${forceUpdate ? '&forceUpdate=true' : ''}`);
+
+                const filterSel = document.getElementById('calendar-dub-filter');
+                const dubFilter = filterSel ? filterSel.value : (config?.calendar?.dubFilter || 'none');
+                const metaLang = config?.history?.lang || 'en-US';
+
+                // Custom (API-based) calendar: reliable per-episode audio locale, so the
+                // dub filter actually works. The backend builds the 7 days ending at the
+                // given date, so pass the Sunday of the displayed week.
+                const sunday = new Date(monday);
+                sunday.setDate(monday.getDate() + 6);
+                const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
+
+                const res = await fetch(`/api/v1/calendar/custom?date=${sundayStr}&language=${encodeURIComponent(metaLang)}&dubFilter=${encodeURIComponent(dubFilter)}${forceUpdate ? '&forceUpdate=true' : ''}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const grid = document.getElementById('calendar-grid');
@@ -2643,6 +2639,7 @@ MAINTENANCE NOTES:
                                             <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
                                         </div>
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
+                                        ${ep.audioLocale ? `<div class="calendar-episode-locale">${escapeHtml(ep.audioLocale)}</div>` : ''}
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
                                         ${ep.hasAired ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}')">Download</button>` : ''}
                                     </div>
@@ -4012,7 +4009,7 @@ MAINTENANCE NOTES:
                             <div class="settings-section-header"><span class="settings-section-title">Calendar Settings</span><span class="settings-section-desc">Calendar display options</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Calendar Language</div></div><select class="form-select" id="setting-cal-lang" style="min-width:150px;">${CALENDAR_LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(cal.language||'').toLowerCase()===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Dub Filter</div></div><select class="form-select" id="setting-cal-dub-filter" style="min-width:150px;"><option value="none" ${cal.dubFilter==='none'?'selected':''}>None</option><option value="dubbed" ${cal.dubFilter==='dubbed'?'selected':''}>Dubbed Only</option><option value="subbed" ${cal.dubFilter==='subbed'?'selected':''}>Subbed Only</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Dub Filter</div><div class="setting-desc">Only show episodes with this audio language</div></div><select class="form-select" id="setting-cal-dub-filter" style="min-width:170px;"><option value="none" ${(!cal.dubFilter||cal.dubFilter==='none'||cal.dubFilter==='dubbed'||cal.dubFilter==='subbed')?'selected':''}>All Languages</option>${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${cal.dubFilter===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Hide Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-hide-dubs" ${cal.hideDubs?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Show History Marks</div><div class="setting-desc">Mark calendar episodes that are in your history</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cal-history-mark" ${cal.showHistoryMark!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>

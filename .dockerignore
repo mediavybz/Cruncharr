@@ -3,6 +3,19 @@
 .vs
 _builds
 
+# Build outputs (the image restores/builds fresh)
+**/bin/
+**/obj/
+
+# Local-only data and dev artifacts - never needed by the image
+tools/
+shots/
+config/
+downloads/
+widevine/
+*.log
+cruncharr-image.tar
+
 CRD/*
 !CRD/Assets/
 !CRD/Assets/**

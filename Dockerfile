@@ -50,7 +50,8 @@ RUN apk add --no-cache \
     ffmpeg \
     mkvtoolnix \
     curl \
-    unzip
+    unzip \
+    su-exec
 
 # Build mp4decrypt (Bento4) from source for Widevine decryption
 RUN apk add --no-cache --virtual .build-deps \
@@ -84,12 +85,11 @@ RUN chmod +x ./docker-entrypoint.sh
 # Copy web UI
 COPY --from=build /app/publish/wwwroot ./wwwroot
 
-# Create non-root user for security
+# Create default non-root user (uid 1000). The container starts as root so the
+# entrypoint can chown the mounted volumes to PUID/PGID, then drops privileges
+# with su-exec. This makes host bind-mounts work regardless of their ownership.
 RUN adduser -D -u 1000 cruncharr && \
     chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app
-
-# Switch to non-root user
-USER cruncharr
 
 # Set environment
 ENV ASPNETCORE_URLS=http://+:8585

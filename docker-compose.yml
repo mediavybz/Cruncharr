@@ -33,6 +33,12 @@ services:
       # /app/fonts - built-in subtitle fonts (included in image)
       # /app/video - internal workspace
     environment:
+      # User/group the app runs as. Set these to match the owner of ./config and
+      # ./downloads on the host (run `id` to find yours) so the container can write
+      # settings and download files. Defaults to 1000:1000.
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+
       # Crunchyroll credentials (optional - can also be in config file)
       - CRUNCHYROLL_EMAIL=${CRUNCHYROLL_EMAIL:-}
       - CRUNCHYROLL_PASSWORD=${CRUNCHYROLL_PASSWORD:-}

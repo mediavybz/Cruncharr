@@ -322,6 +322,10 @@ public class QueueController : ControllerBase
                 broadcastService.Unsubscribe(clientId);
             }
         }
+        catch (OperationCanceledException)
+        {
+            // Client closed the SSE connection (navigation/refresh) - expected, not an error.
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "SSE queue updates failed");

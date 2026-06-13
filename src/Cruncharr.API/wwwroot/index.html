@@ -2191,6 +2191,9 @@ MAINTENANCE NOTES:
         }
 
         function loadPage(page) {
+            // Keep the top-right profile chip in sync (auth may not have been ready on
+            // first load); cheap local call, refreshes on every navigation.
+            if (typeof updateTopbarProfile === 'function') updateTopbarProfile();
             // Clear history polling when navigating away from history page
             if (currentPage === 'history' && page !== 'history' && historyIntervalId) {
                 clearInterval(historyIntervalId);

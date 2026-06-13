@@ -1,3 +1,4 @@
+using Cruncharr.API.Diagnostics;
 using Cruncharr.API.Services;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
@@ -13,6 +14,12 @@ public class Program
     public static async Task Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+
+        // Capture recent logs in memory so the diagnostics API can surface them
+        // (download failures etc.) without shell access to the container.
+        var logStore = new InMemoryLogStore();
+        builder.Services.AddSingleton(logStore);
+        builder.Logging.AddProvider(new InMemoryLoggerProvider(logStore));
 
         // Add services to the container
         builder.Services.AddControllers()

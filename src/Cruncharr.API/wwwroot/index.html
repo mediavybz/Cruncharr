@@ -1281,6 +1281,136 @@ MAINTENANCE NOTES:
         }
 
         /* Mobile Responsive - Comprehensive */
+        /* ================== MODERN UI POLISH ================== */
+
+        /* Slim custom scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--cr-gray-700); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--cr-gray-600); }
+        * { scrollbar-width: thin; scrollbar-color: var(--cr-gray-700) transparent; }
+
+        /* Respect reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+        }
+
+        /* Header: translucent with blur */
+        .header {
+            background: color-mix(in srgb, var(--bg-secondary) 85%, transparent);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        /* Sidebar nav: smoother active state */
+        .nav-item { border-radius: 0 8px 8px 0; margin-right: 8px; transition: background 0.2s, color 0.2s, border-color 0.2s; }
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(255, 94, 0, 0.14), transparent 80%);
+        }
+
+        /* Cards: softer corners + hover lift */
+        .card {
+            border-radius: 12px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .card:hover { border-color: var(--cr-gray-600); }
+
+        /* Buttons: rounder, focus ring, primary glow */
+        .header-btn, .btn-icon, .toolbar-btn {
+            border-radius: 8px;
+            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+        }
+        .header-btn:active, .btn-icon:active, .toolbar-btn:active { transform: scale(0.97); }
+        .header-btn.primary {
+            background: linear-gradient(135deg, var(--cr-orange), var(--cr-orange-classic));
+        }
+        .header-btn.primary:hover {
+            background: linear-gradient(135deg, #ff7a2e, var(--cr-orange));
+            box-shadow: 0 2px 12px rgba(255, 94, 0, 0.35);
+        }
+        .header-btn:focus-visible, .btn-icon:focus-visible, .toolbar-btn:focus-visible,
+        .form-input:focus-visible, .form-select:focus-visible, .settings-tab:focus-visible {
+            outline: 2px solid var(--accent-orange);
+            outline-offset: 2px;
+        }
+
+        /* Inputs: rounder + accent focus */
+        .form-input, .form-select {
+            border-radius: 8px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .form-input:focus, .form-select:focus {
+            border-color: var(--accent-orange);
+            box-shadow: 0 0 0 3px rgba(255, 94, 0, 0.15);
+        }
+        .header-search { border-radius: 10px; transition: border-color 0.2s, box-shadow 0.2s; }
+        .header-search:focus-within {
+            border-color: var(--accent-orange);
+            box-shadow: 0 0 0 3px rgba(255, 94, 0, 0.12);
+        }
+
+        /* Toggle switch: white knob when on */
+        .toggle-slider::after { background: var(--cr-gray-300); }
+        .toggle-switch input:checked + .toggle-slider::after { background: #ffffff; }
+
+        /* Progress bar: gradient fill */
+        .progress-container { border-radius: 6px; overflow: hidden; }
+        .progress-bar {
+            background: linear-gradient(90deg, var(--cr-orange-classic), var(--cr-orange));
+            border-radius: 6px;
+            transition: width 0.4s ease;
+        }
+
+        /* Download / episode rows: hover lift */
+        .download-item, .episode-multi-dub {
+            border-radius: 12px;
+            transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+        }
+        .download-item:hover, .episode-multi-dub:hover {
+            border-color: var(--cr-gray-600);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+        }
+
+        /* Poster cards: zoom + shadow on hover */
+        .history-poster {
+            border-radius: 12px;
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .history-poster:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+        .history-poster-img { overflow: hidden; }
+        .history-poster-img img { transition: transform 0.3s ease; }
+        .history-poster:hover .history-poster-img img { transform: scale(1.05); }
+
+        /* Calendar polish */
+        .calendar-day { border-radius: 12px; }
+        .calendar-episode { transition: background 0.2s, transform 0.15s, box-shadow 0.2s; }
+        .calendar-episode:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Settings tabs: pill style */
+        .settings-tab { border-radius: 999px; transition: background 0.2s, color 0.2s; }
+
+        /* Modal: blur backdrop + softer card */
+        .modal { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+        .modal-content { border-radius: 14px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5); }
+
+        /* Toast + dropdown + search popup: depth */
+        .toast { border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+        .dropdown-menu, .search-popup { border-radius: 10px; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45); overflow: hidden; }
+
+        /* History table: row hover + scroll safety */
+        .history-table { overflow-x: auto; border-radius: 12px; }
+        .history-table tbody tr { transition: background 0.15s; }
+        .history-table tbody tr:hover { background: var(--bg-hover); }
+
+        /* ================== END MODERN UI POLISH ================== */
+
         @media (max-width: 768px) {
             :root { --sidebar-width: 0px; }
             
@@ -1309,13 +1439,19 @@ MAINTENANCE NOTES:
             .sidebar-nav {
                 display: flex;
                 flex-direction: row;
-                justify-content: space-around;
+                justify-content: flex-start;
                 align-items: center;
                 padding: 0;
                 flex: 1;
                 width: 100%;
+                /* 9 nav items don't fit a phone width - allow horizontal scroll */
+                overflow-x: auto;
+                overflow-y: hidden;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
             }
-            
+            .sidebar-nav::-webkit-scrollbar { display: none; }
+
             .nav-item {
                 flex-direction: column;
                 padding: 6px 8px;
@@ -1323,11 +1459,14 @@ MAINTENANCE NOTES:
                 font-size: 0.65em;
                 border-left: none;
                 border-top: 3px solid transparent;
-                flex: 1;
+                border-radius: 0;
+                margin-right: 0;
+                flex: 1 0 auto;
+                min-width: 64px;
                 justify-content: center;
                 text-align: center;
-                min-width: 0;
             }
+            .nav-item.active { background: transparent; }
             
             .nav-item.active {
                 border-left-color: transparent;
@@ -1469,10 +1608,46 @@ MAINTENANCE NOTES:
                 align-items: flex-start;
                 gap: 6px;
             }
-            
+
             .setting-label {
                 font-size: 0.85em;
             }
+
+            /* Inline width:300px etc. on settings inputs overflow small screens */
+            .setting-row .form-input,
+            .setting-row .form-select,
+            .settings-section-body .form-input,
+            .settings-section-body .form-select,
+            .settings-section-body textarea {
+                width: 100% !important;
+                max-width: 100%;
+            }
+
+            /* Add Download: stack episode rows */
+            .episode-multi-dub {
+                flex-direction: column;
+                gap: 10px;
+                padding: 12px;
+            }
+            .episode-multi-dub .episode-thumb {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 16/9;
+            }
+            .season-selector { flex-wrap: wrap; }
+            .season-selector > div { margin-left: 0 !important; width: 100%; }
+            .season-selector .form-select { width: 100%; }
+
+            /* History toolbar: wrap buttons */
+            .history-toolbar { flex-wrap: wrap; gap: 6px; }
+            .toolbar-btn { padding: 6px 10px; font-size: 0.8em; }
+
+            /* History table: horizontal scroll instead of squeeze */
+            .history-table table { min-width: 640px; }
+
+            /* Calendar controls: wrap on narrow screens */
+            .calendar-controls { flex-wrap: wrap; gap: 8px; }
+            .calendar-controls > div { flex-wrap: wrap; }
             
             /* Queue Stats */
             .stats-grid {
@@ -2525,7 +2700,7 @@ MAINTENANCE NOTES:
             container.innerHTML = `
                 <div class="page-title">Calendar</div>
                 <div class="page-subtitle">Upcoming episode releases</div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <div class="calendar-controls" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                     <button class="header-btn" onclick="changeWeek(-1)">&#9664; Prev</button>
                     <div style="display:flex; gap:10px; align-items:center;">
                         <button class="header-btn" onclick="fetchCalendar(true)">&#128260; Refresh</button>

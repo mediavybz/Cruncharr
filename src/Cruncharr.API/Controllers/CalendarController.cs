@@ -70,7 +70,8 @@ public class CalendarController : ControllerBase
     public async Task<ActionResult<CalendarWeekResponse>> GetCustomCalendar(
         [FromQuery] string? date = null,
         [FromQuery] string language = "en-us",
-        [FromQuery] bool forceUpdate = false)
+        [FromQuery] bool forceUpdate = false,
+        [FromQuery] string? dubFilter = null)
     {
         try
         {
@@ -85,7 +86,9 @@ public class CalendarController : ControllerBase
             }
 
             var week = await _calendarService.GetCustomCalendarAsync(targetDate, language, forceUpdate);
-            var response = MapToResponse(week, language);
+            // Query param overrides the configured calendar dub filter
+            var effectiveDubFilter = dubFilter ?? _config.Calendar?.DubFilter;
+            var response = MapCustomToResponse(week, effectiveDubFilter, _config.Calendar?.HideDubs ?? false);
             return Ok(response);
         }
         catch (Exception ex)
@@ -133,6 +136,55 @@ public class CalendarController : ControllerBase
         };
     }
 
+    // Custom (API-based) calendar: filter by actual episode audio locale instead of
+    // season-name keyword matching - mirrors upstream CalendarManager dub filtering
+    private CalendarWeekResponse MapCustomToResponse(CalendarWeek week, string? dubFilter, bool hideDubs)
+    {
+        return new CalendarWeekResponse
+        {
+            StartDate = week.FirstDayOfWeek,
+            Days = week.CalendarDays?.Select(day => new CalendarDayResponse
+            {
+                Date = day.DateTime,
+                DayName = day.DayName ?? day.DateTime.ToString("dddd"),
+                Episodes = day.CalendarEpisodes
+                    .Where(e => !e.FilteredOut)
+                    .Where(e => IncludeCustomEpisode(e, dubFilter, hideDubs))
+                    .Select(MapEpisodeToResponse)
+                    .ToList()
+            }).ToList() ?? new List<CalendarDayResponse>()
+        };
+    }
+
+    private static bool IncludeCustomEpisode(CalendarEpisode episode, string? dubFilter, bool hideDubs)
+    {
+        bool hasFilter = !string.IsNullOrEmpty(dubFilter) &&
+                         !string.Equals(dubFilter, "none", StringComparison.OrdinalIgnoreCase);
+
+        bool MatchesFilter(CalendarEpisode ep) =>
+            string.Equals(ep.AudioLocale, dubFilter, StringComparison.OrdinalIgnoreCase);
+
+        // AniList upcoming entries carry no audio locale - upstream shows them regardless
+        if (episode.AnilistEpisode)
+        {
+            return true;
+        }
+
+        if (hasFilter && !MatchesFilter(episode) && !episode.CalendarEpisodes.Any(MatchesFilter))
+        {
+            return false;
+        }
+
+        if (hideDubs && episode.SeasonName != null &&
+            (episode.SeasonName.EndsWith("Dub)") || episode.SeasonName.EndsWith("Audio)")) &&
+            (!hasFilter || !MatchesFilter(episode)))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private static CalendarEpisodeResponse MapEpisodeToResponse(CalendarEpisode episode)
     {
         // Extract episode ID from EpisodeUrl
@@ -166,6 +218,7 @@ public class CalendarController : ControllerBase
             IsPremiere = episode.IsPremiere,
             ThumbnailUrl = episode.ThumbnailUrl,
             HasAired = episode.HasPassed ?? false,
+            AudioLocale = episode.AudioLocale,
             // [PT] Upstream calendar history marks
             IsInHistory = episode.IsInHistory,
             ShowHistoryMark = episode.ShowHistoryMark,
@@ -200,6 +253,7 @@ public class CalendarEpisodeResponse
     public bool IsPremiere { get; set; }
     public string? ThumbnailUrl { get; set; }
     public bool HasAired { get; set; }
+    public string? AudioLocale { get; set; }
     public bool IsInHistory { get; set; }
     public bool ShowHistoryMark { get; set; }
     public string HistoryDownloadState { get; set; } = "None";

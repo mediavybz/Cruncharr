@@ -1292,6 +1292,19 @@ public class DownloadService : IDownloadService
                         if (string.IsNullOrEmpty(mergedData.AudioUrl)) mergedData.AudioUrl = data.AudioUrl;
                         if (string.IsNullOrEmpty(mergedData.Pssh)) mergedData.Pssh = data.Pssh;
                     }
+
+                    // [PT] Upstream parity (ProcessPlaybackResponseAsync -> DeAuthVideo):
+                    // release the active-stream session as soon as the play response is
+                    // read. The play token is only a concurrency lock - the manifest, DRM
+                    // license and CDN segments don't need it. Each /play endpoint we hit
+                    // (primary, secondary, fallback) opens its own session, so deauth every
+                    // one. Without this each download leaks an active stream and CR quickly
+                    // returns TOO_MANY_ACTIVE_STREAMS / rate-limits playback - even though
+                    // the website streams fine because it manages its own session.
+                    if (!string.IsNullOrEmpty(data.VideoToken))
+                    {
+                        await DeAuthVideoAsync(episodeId, data.VideoToken);
+                    }
                 }
                 continue;
             }

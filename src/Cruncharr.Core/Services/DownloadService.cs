@@ -384,13 +384,72 @@ public class DownloadService : IDownloadService
             if (playbackData.VideoUrl != null && (playbackData.VideoUrl.Contains(".mpd") || playbackData.VideoUrl.Contains("/dash/")))
             {
                 progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 30, Doing = "Downloading DASH streams..." });
-                var (videoPath, audioPaths) = await DownloadDashTracksAsync(playbackData.VideoUrl, tempDir, config, progress, 30, 80, cancellationToken, playbackData.VideoToken, mediaId, episode.SelectedDubs);
-                if (videoPath != null && !config.Download.NoVideo) downloadedFiles.Add(videoPath);
+                var (videoPath, audioPaths) = await DownloadDashTracksAsync(playbackData.VideoUrl, tempDir, config, progress, 30, 78, cancellationToken, playbackData.VideoToken, mediaId, episode.SelectedDubs);
+                if (videoPath != null && !config.Download.NoVideo)
+                {
+                    downloadedFiles.Add(videoPath);
+                    videoLocales[videoPath] = episode.AudioLocale;
+                }
                 foreach (var (path, _) in audioPaths)
                 {
                     downloadedFiles.Add(path);
                 }
                 audioTrackLanguages = audioPaths;
+
+                // [PT] Multi-dub for DASH: Crunchyroll's per-version manifest only contains
+                // that version's audio, so each additional selected dub must be fetched from
+                // its own version's playback (the HLS branch below does the equivalent). Without
+                // this, selecting e.g. English + Japanese only ever downloaded the primary dub.
+                var dashSelectedDubs = episode.SelectedDubs?.Count > 0
+                    ? episode.SelectedDubs
+                    : config.Download.DubLanguages;
+                if (!config.Download.NoAudio && episode.Versions != null && episode.Versions.Count > 1 &&
+                    (config.Download.DownloadMultipleDubs || dashSelectedDubs.Count > 1))
+                {
+                    var primaryLocale = episode.AudioLocale;
+                    var extraDubs = dashSelectedDubs
+                        .Where(d => !string.IsNullOrEmpty(d) && !string.Equals(d, primaryLocale, StringComparison.OrdinalIgnoreCase))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Where(d => !audioTrackLanguages.Any(a => string.Equals(a.Lang, d, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+
+                    foreach (var dub in extraDubs)
+                    {
+                        var dubVersion = episode.Versions.FirstOrDefault(v =>
+                            string.Equals(v.AudioLocale, dub, StringComparison.OrdinalIgnoreCase));
+                        if (dubVersion == null) continue;
+
+                        var dubGuid = dubVersion.Guid;
+                        if (!string.IsNullOrEmpty(dubGuid) && dubGuid.Contains(':')) dubGuid = dubGuid.Split(':')[1];
+                        if (string.IsNullOrEmpty(dubGuid)) continue;
+
+                        try
+                        {
+                            progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 78, Doing = $"Downloading audio ({dub})..." });
+                            var dubPlayback = await GetPlaybackDataAsync(dubGuid, true, cancellationToken);
+                            if (dubPlayback?.VideoUrl != null &&
+                                (dubPlayback.VideoUrl.Contains(".mpd") || dubPlayback.VideoUrl.Contains("/dash/")))
+                            {
+                                var (_, dubAudioPaths) = await DownloadDashTracksAsync(dubPlayback.VideoUrl, tempDir, config, progress, 78, 80, cancellationToken, dubPlayback.VideoToken, dubGuid, new List<string> { dub }, audioOnly: true);
+                                foreach (var ap in dubAudioPaths)
+                                {
+                                    downloadedFiles.Add(ap.Path);
+                                    audioTrackLanguages.Add(ap);
+                                    _logger?.LogInformation("Downloaded additional DASH dub audio: {Dub} -> {Path}", dub, ap.Path);
+                                }
+                            }
+
+                            if (config.Download.DownloadDelayUseDubBased && config.Download.DownloadDelaySeconds > 0)
+                            {
+                                await Task.Delay(TimeSpan.FromSeconds(config.Download.DownloadDelaySeconds), cancellationToken);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogWarning(ex, "Failed to download additional DASH dub: {Dub}", dub);
+                        }
+                    }
+                }
             }
             else
             {
@@ -1672,7 +1731,7 @@ public class DownloadService : IDownloadService
         }
     }
 
-    private async Task<(string? VideoPath, List<(string Path, string Lang)> AudioPaths)> DownloadDashTracksAsync(string manifestUrl, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null, string? mediaGuid = null, List<string>? selectedDubs = null)
+    private async Task<(string? VideoPath, List<(string Path, string Lang)> AudioPaths)> DownloadDashTracksAsync(string manifestUrl, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null, string? mediaGuid = null, List<string>? selectedDubs = null, bool audioOnly = false)
     {
         // Download manifest with auth headers
         var manifestRequest = new HttpRequestMessage(HttpMethod.Get, manifestUrl);
@@ -1755,8 +1814,9 @@ public class DownloadService : IDownloadService
         string? videoPath = null;
         var audioPaths = new List<(string Path, string Lang)>();
 
-        // Download video using HlsDownloader (qma approach)
-        if (chosenVideo != null)
+        // Download video using HlsDownloader (qma approach). Skipped for additional
+        // dubs (audioOnly): the video is downloaded once from the primary version.
+        if (chosenVideo != null && !audioOnly)
         {
             var videoOutput = chosenVideo.pssh != null
                 ? Path.Combine(tempDir, "video.enc.m4s")

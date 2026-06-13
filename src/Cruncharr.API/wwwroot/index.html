@@ -100,34 +100,34 @@ MAINTENANCE NOTES:
             --accent-green: var(--cr-success);
             --accent-red: var(--cr-error);
             --accent-yellow: var(--cr-warning);
-            --border-color: var(--cr-gray-700);
+            --accent-soft: rgba(255, 94, 0, 0.16);
+            --border-color: #313131;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+            --shadow-md: 0 4px 14px rgba(0,0,0,0.35);
             --sidebar-width: 220px;
             --header-height: 60px;
         }
 
         [data-theme="light"] {
-            --cr-hero-bg: #f5f5f5;
-            --cr-dark: #ffffff;
-            --cr-charcoal: #f0f0f0;
-            --cr-gray-900: #e8e8e8;
-            --cr-gray-800: #dddddd;
-            --cr-gray-700: #cccccc;
-            --cr-gray-600: #999999;
-            --cr-gray-500: #777777;
-            --cr-gray-400: #555555;
-            --cr-gray-300: #333333;
-            --cr-gray-200: #222222;
-            --cr-gray-100: #111111;
-            --cr-white: #000000;
-            --bg-primary: var(--cr-hero-bg);
-            --bg-secondary: var(--cr-charcoal);
-            --bg-tertiary: var(--cr-gray-900);
-            --bg-hover: var(--cr-gray-800);
-            --bg-card: var(--cr-dark);
-            --text-primary: #1a1a1a;
-            --text-secondary: var(--cr-gray-400);
-            --text-muted: var(--cr-gray-600);
-            --border-color: var(--cr-gray-700);
+            /* Clean *arr-stack light palette: off-white page, white surfaces,
+               subtle borders, high-contrast text. */
+            --bg-primary: #f4f5f7;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #eceef1;
+            --bg-hover: #e6e9ee;
+            --bg-card: #ffffff;
+            --text-primary: #1b1f24;
+            --text-secondary: #5c636e;
+            --text-muted: #8b929d;
+            --accent-orange: #e85d04;
+            --accent-blue: #0277bd;
+            --accent-green: #2e7d32;
+            --accent-red: #c62828;
+            --accent-yellow: #f59e0b;
+            --accent-soft: rgba(232, 93, 4, 0.12);
+            --border-color: #e3e6ea;
+            --shadow-sm: 0 1px 2px rgba(16,24,40,0.06);
+            --shadow-md: 0 4px 16px rgba(16,24,40,0.10);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -179,19 +179,24 @@ MAINTENANCE NOTES:
         .nav-item {
             display: flex;
             align-items: center;
-            padding: 12px 20px;
+            margin: 2px 12px;
+            padding: 10px 14px;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: background 0.15s, color 0.15s;
             gap: 12px;
             color: var(--text-secondary);
             text-decoration: none;
-            border-left: 3px solid transparent;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.95em;
         }
 
         .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-        .nav-item.active { background: var(--bg-tertiary); color: var(--accent-orange); border-left-color: var(--accent-orange); }
+        .nav-item.active { background: var(--accent-soft); color: var(--accent-orange); }
+        .nav-item.active .nav-icon { color: var(--accent-orange); }
 
-        .nav-icon { width: 20px; text-align: center; }
+        .nav-icon { width: 20px; text-align: center; display: flex; align-items: center; justify-content: center; }
+        .nav-icon svg { width: 18px; height: 18px; }
 
         .sidebar-footer {
             padding: 15px 20px;
@@ -1825,12 +1830,6 @@ MAINTENANCE NOTES:
         </aside>
 
         <main class="main-content">
-            <header class="header">
-                <div class="header-actions">
-                    <!-- Actions moved to specific tabs -->
-                </div>
-            </header>
-
             <div class="content" id="content"></div>
         </main>
     </div>
@@ -1895,7 +1894,7 @@ MAINTENANCE NOTES:
                 if (res.ok) {
                     const data = await res.json();
                     const el = document.getElementById('version-info');
-                    if (el && data.version) el.textContent = 'v' + data.version;
+                    if (el && data.version) el.textContent = 'v' + String(data.version).split('+')[0];
                 }
             } catch (e) { /* ignore */ }
             // Restore last visited page or default to downloads

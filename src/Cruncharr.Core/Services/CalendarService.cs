@@ -685,7 +685,10 @@ public class CalendarService : ICalendarService
             return;
         }
 
-        var todayMidnight = new DateTimeOffset(DateTime.Now.Date, TimeSpan.Zero);
+        // Use UTC midnight: new DateTimeOffset(localDate, TimeSpan.Zero) throws on any
+        // non-UTC host because the local date's offset != zero. The value only feeds the
+        // AniList airingAt window (UTC unix seconds), so UTC is the correct basis anyway.
+        var todayMidnight = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
         var todayMidnightUnix = todayMidnight.ToUnixTimeSeconds();
         var sevenDaysLaterUnix = todayMidnight.AddDays(8).ToUnixTimeSeconds();
 

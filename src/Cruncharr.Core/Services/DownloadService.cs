@@ -427,6 +427,26 @@ public class DownloadService : IDownloadService
                         {
                             progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 78, Doing = $"Downloading audio ({dub})..." });
                             var dubPlayback = await GetPlaybackDataAsync(dubGuid, true, cancellationToken);
+
+                            // Merge this version's subtitles into the pool. The primary
+                            // playback is often a dub whose (TV) endpoint omits most subs,
+                            // while the original/sub version carries the full set - so union
+                            // subtitles across every fetched version before downloading them.
+                            if (dubPlayback?.Subtitles != null && dubPlayback.Subtitles.Count > 0)
+                            {
+                                playbackData.Subtitles ??= new List<SubtitleInfo>();
+                                var existingSubLangs = new HashSet<string>(
+                                    playbackData.Subtitles.Where(s => s.Lang != null).Select(s => s.Lang!),
+                                    StringComparer.OrdinalIgnoreCase);
+                                foreach (var s in dubPlayback.Subtitles)
+                                {
+                                    if (!string.IsNullOrEmpty(s.Lang) && existingSubLangs.Add(s.Lang))
+                                    {
+                                        playbackData.Subtitles.Add(s);
+                                    }
+                                }
+                            }
+
                             if (dubPlayback?.VideoUrl != null &&
                                 (dubPlayback.VideoUrl.Contains(".mpd") || dubPlayback.VideoUrl.Contains("/dash/")))
                             {
@@ -2441,19 +2461,34 @@ public class DownloadService : IDownloadService
 
         var merger = new Merger(mergerOptions);
 
-        // Try mkvmerge first, fallback to ffmpeg
         var mkvmergePath = FindExecutable("mkvmerge");
         var ffmpegPath = FindExecutable("ffmpeg");
 
+        // MP4 output MUST go through ffmpeg: mkvmerge only writes Matroska, so using it
+        // for a .mp4 target produced an MKV stream in a .mp4 file (unplayable as MP4, and
+        // ASS subtitles can't live in MP4). MKV output prefers mkvmerge, ffmpeg fallback.
         bool success = false;
-        if (mkvmergePath != null)
+        if (config.Download.MuxMp4)
         {
-            success = await merger.Merge("mkvmerge", mkvmergePath, cancellationToken);
+            if (ffmpegPath != null)
+            {
+                success = await merger.Merge("ffmpeg", ffmpegPath, cancellationToken);
+            }
+            else
+            {
+                _logger?.LogWarning("MuxMp4 is enabled but ffmpeg was not found; cannot mux to MP4.");
+            }
         }
-
-        if (!success && ffmpegPath != null)
+        else
         {
-            success = await merger.Merge("ffmpeg", ffmpegPath, cancellationToken);
+            if (mkvmergePath != null)
+            {
+                success = await merger.Merge("mkvmerge", mkvmergePath, cancellationToken);
+            }
+            if (!success && ffmpegPath != null)
+            {
+                success = await merger.Merge("ffmpeg", ffmpegPath, cancellationToken);
+            }
         }
 
         if (!success)

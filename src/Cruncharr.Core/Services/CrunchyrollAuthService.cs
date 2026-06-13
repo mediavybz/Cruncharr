@@ -1069,7 +1069,9 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
         else
         {
-            _logger?.LogError("Failed to get multi-profile: {Error}", error);
+            // Non-fatal: some accounts/regions don't expose the multi-profile endpoint
+            // (often 403). The app continues with the single active profile.
+            _logger?.LogWarning("Multi-profile unavailable (continuing with single profile): {Error}", error);
         }
     }
 

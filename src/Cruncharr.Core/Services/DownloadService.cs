@@ -367,10 +367,13 @@ public class DownloadService : IDownloadService
             File.Delete(outputPath);
         }
 
-        // Download streams
-        var tempDir = config.Download.UseTempFolder
-            ? Path.Combine(config.Download.TempDirectory, Guid.NewGuid().ToString())
-            : outputDir;
+        // Download streams. Always use a unique per-download working directory for the
+        // intermediate segment/audio/sub files. Previously, with UseTempFolder=false the
+        // temp files went straight into the output dir with FIXED names (video.enc.m4s,
+        // audio_<lang>.m4s, ...), so two concurrent downloads (SimultaneousDownloads>1)
+        // collided and corrupted each other. The final muxed file still lands in outputDir.
+        var tempBase = config.Download.UseTempFolder ? config.Download.TempDirectory : outputDir;
+        var tempDir = Path.Combine(tempBase, ".crtmp-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1166,8 +1169,8 @@ public class DownloadService : IDownloadService
         }
         finally
         {
-            // Cleanup temp files
-            if (config.Download.UseTempFolder)
+            // Cleanup the per-download temp working directory (unless NoCleanup is set)
+            if (!config.Download.NoCleanup)
             {
                 try
                 {
@@ -1175,26 +1178,6 @@ public class DownloadService : IDownloadService
                     {
                         Directory.Delete(tempDir, true);
                     }
-                }
-                catch
-                {
-                    // Ignore cleanup errors
-                }
-            }
-            else
-            {
-                // Clean up individual temp files in output dir
-                try
-                {
-                    foreach (var file in Directory.GetFiles(tempDir, "*.m4s")) File.Delete(file);
-                    foreach (var file in Directory.GetFiles(tempDir, "*.mp4")) File.Delete(file);
-                    foreach (var file in Directory.GetFiles(tempDir, "*.m4a")) File.Delete(file);
-                    foreach (var file in Directory.GetFiles(tempDir, "*.ass")) File.Delete(file);
-                    foreach (var file in Directory.GetFiles(tempDir, "*.vtt")) File.Delete(file);
-                    foreach (var file in Directory.GetFiles(tempDir, "*.resume")) File.Delete(file);
-                    foreach (var file in Directory.GetFiles(tempDir, "*.new.resume")) File.Delete(file);
-                    foreach (var file in Directory.GetFiles(tempDir, "cover.*")) File.Delete(file);
-                    foreach (var file in Directory.GetFiles(tempDir, "chapters.*")) File.Delete(file);
                 }
                 catch
                 {

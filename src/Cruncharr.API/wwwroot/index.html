@@ -2816,7 +2816,7 @@ MAINTENANCE NOTES:
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
                                         ${ep.audioLocale ? `<div class="calendar-episode-locale">${escapeHtml(ep.audioLocale)}</div>` : ''}
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
-                                        ${ep.hasAired ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}')">Download</button>` : ''}
+                                        ${ep.hasAired ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(ep.audioLocale || '')}')">Download</button>` : ''}
                                     </div>
                                     `;
                                 }).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
@@ -2837,12 +2837,23 @@ MAINTENANCE NOTES:
             }
         }
 
-        async function addEpisodeToQueue(episodeId) {
+        async function addEpisodeToQueue(episodeId, seriesTitle = '', episodeNumber = '', thumbnailUrl = '', audioLocale = '') {
             try {
+                // Forward the metadata the calendar already has so the queue item shows a
+                // real name + thumbnail instead of the "Episode <id>" backend fallback.
+                const payload = { episodeId };
+                if (seriesTitle) {
+                    payload.seriesTitle = seriesTitle;
+                    payload.title = episodeNumber ? `${seriesTitle} — E${episodeNumber}` : seriesTitle;
+                }
+                const epNum = parseInt(episodeNumber, 10);
+                if (Number.isFinite(epNum)) payload.episodeNumber = epNum;
+                if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
+                if (audioLocale) { payload.locale = audioLocale; payload.audioLocale = audioLocale; }
                 const res = await fetch('/api/v1/queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ episodeId })
+                    body: JSON.stringify(payload)
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added to queue', 'success');

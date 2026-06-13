@@ -21,6 +21,13 @@ public class Program
         builder.Services.AddSingleton(logStore);
         builder.Logging.AddProvider(new InMemoryLoggerProvider(logStore));
 
+        // Many download utilities (HLS segment downloader, MPD parser) log via
+        // Console.Write* instead of ILogger. Tee the console into the log store so
+        // their errors are visible through /api/v1/diagnostics/logs. stderr is
+        // captured in full; stdout only for problem-looking lines (avoids spam).
+        Console.SetError(new ConsoleTeeWriter(Console.Error, logStore, "Console.Error", "Warning", captureAll: true));
+        Console.SetOut(new ConsoleTeeWriter(Console.Out, logStore, "Console.Out", "Information", captureAll: false));
+
         // Add services to the container
         builder.Services.AddControllers()
             .AddNewtonsoftJson(options =>

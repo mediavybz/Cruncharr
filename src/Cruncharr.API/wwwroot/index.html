@@ -221,6 +221,57 @@ MAINTENANCE NOTES:
                 radial-gradient(1000px 760px at -12% 112%, rgba(108, 92, 231, 0.12), transparent 58%);
         }
 
+        /* Nebula - slate-graphite dashboard with an indigo->purple aurora accent
+           (Seerr-inspired). Non-destructive: overrides tokens only. */
+        [data-theme="nebula"] {
+            /* Accent: indigo-600 -> purple-600. The primary-button gradient is
+               built from --accent -> --accent-bright, so it becomes indigo->purple. */
+            --accent: #4f46e5;
+            --accent-bright: #9333ea;
+            --accent-orange: var(--accent);
+            --accent-orange-bright: var(--accent-bright);
+            --accent-soft: rgba(99, 102, 241, 0.18);
+            --accent-softer: rgba(147, 51, 234, 0.10);
+            --accent-glow: rgba(99, 102, 241, 0.40);
+
+            --bg-primary: #111827;   /* gray-900 */
+            --bg-secondary: #1f2937; /* gray-800 */
+            --bg-tertiary: #273244;
+            --bg-card: #1f2937;
+            --bg-hover: #374151;     /* gray-700 */
+            --surface-border: #374151;
+            --border-color: #374151;
+            --sidebar-bg: linear-gradient(180deg, #1f2937, #111827);
+
+            --text-primary: #ffffff;
+            --text-secondary: #e5e7eb; /* gray-200 */
+            --text-muted: #9ca3af;     /* gray-400 */
+
+            --accent-blue: #6366f1;   --info-soft: rgba(99, 102, 241, 0.16);
+            --accent-green: #34d399;  --success-soft: rgba(52, 211, 153, 0.16);
+            --accent-red: #f87171;    --error-soft: rgba(248, 113, 113, 0.16);
+            --accent-yellow: #fbbf24; --warning-soft: rgba(251, 191, 36, 0.16);
+            --premium-soft: var(--accent-soft);
+
+            --glass-bg: rgba(31, 41, 55, 0.90); /* gray-800/90 (mobile-nav style) */
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-blur: 12px;
+            --card-blur: 0px;
+
+            --bloom:
+                radial-gradient(1100px 600px at 82% -10%, rgba(147, 51, 234, 0.14), transparent 60%),
+                radial-gradient(1000px 700px at -10% 112%, rgba(79, 70, 229, 0.12), transparent 58%);
+            --shadow-glow: 0 8px 30px rgba(99, 102, 241, 0.30);
+        }
+        /* Seerr signature: active nav uses the full vivid indigo->purple gradient
+           (scoped to Nebula so other themes' nav pills are untouched). */
+        [data-theme="nebula"] .nav-item.active {
+            background: linear-gradient(to right, var(--accent), var(--accent-bright));
+            color: #fff;
+            box-shadow: 0 6px 18px rgba(99, 102, 241, 0.28);
+        }
+        [data-theme="nebula"] .nav-item.active .nav-icon { color: #fff; }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
@@ -4463,7 +4514,7 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Appearance Settings</span><span class="settings-section-desc">Customize the UI</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Nebula" ${a.theme==='Nebula'?'selected':''}>Nebula</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}" style="width:300px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity ?? 0.5)}" min="0" max="1" step="0.1" style="width:100px;"></div>
@@ -4504,7 +4555,7 @@ MAINTENANCE NOTES:
         }
 
         // Named themes -> data-theme attribute. "Dark" is the default :root (no attr).
-        const THEME_ATTR = { 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic' };
+        const THEME_ATTR = { 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula' };
         function applyTheme() {
             let theme = config?.appearance?.theme || 'System';
             if (theme === 'System') {

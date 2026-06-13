@@ -633,6 +633,17 @@ MAINTENANCE NOTES:
 
         .calendar-episode-time { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px; }
         .calendar-episode-locale { font-size: 0.7em; color: var(--text-muted); margin-top: 2px; }
+        .calendar-episode-langs { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+        .cal-lang {
+            font-size: 0.62em;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            padding: 1px 5px;
+            border-radius: 5px;
+            background: var(--accent-soft);
+            color: var(--accent-orange);
+            white-space: nowrap;
+        }
 
         .calendar-episode-thumb {
             width: 100%;
@@ -2788,6 +2799,39 @@ MAINTENANCE NOTES:
             fetchCalendar();
         }
 
+        // Collapse per-language duplicates of the same episode into one entry whose
+        // audioLocales lists every dub it ships in (used for the "All Languages" view).
+        const CAL_LOCALE_ORDER = ['ja-JP'];
+        function consolidateCalendarEpisodes(episodes) {
+            const groups = new Map();
+            const order = [];
+            for (const ep of episodes) {
+                const key = `${ep.seriesId || ep.seriesTitle || ep.seasonName || ''}|${ep.episodeNumber || ''}`;
+                if (!groups.has(key)) {
+                    // Clone so we don't mutate the source; start the locale list
+                    const base = Object.assign({}, ep);
+                    base.audioLocales = [];
+                    groups.set(key, base);
+                    order.push(key);
+                }
+                const g = groups.get(key);
+                if (ep.audioLocale && !g.audioLocales.includes(ep.audioLocale)) {
+                    g.audioLocales.push(ep.audioLocale);
+                }
+                // Prefer a thumbnail/airDate from any variant that has one
+                if (!g.thumbnailUrl && ep.thumbnailUrl) g.thumbnailUrl = ep.thumbnailUrl;
+                if (ep.isInHistory) { g.isInHistory = true; g.showHistoryMark = ep.showHistoryMark; g.historyDownloadState = ep.historyDownloadState; }
+            }
+            for (const g of groups.values()) {
+                g.audioLocales.sort((a, b) => {
+                    const ia = CAL_LOCALE_ORDER.indexOf(a), ib = CAL_LOCALE_ORDER.indexOf(b);
+                    if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+                    return a.localeCompare(b);
+                });
+            }
+            return order.map(k => groups.get(k));
+        }
+
         async function onCalendarDubFilterChange(dubFilter) {
             // Save to config
             try {
@@ -2847,11 +2891,16 @@ MAINTENANCE NOTES:
                 }
 
                 const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+                // "All Languages" -> collapse the per-language duplicates of the same
+                // episode into one card listing every audio locale it ships in. A specific
+                // language is already filtered server-side, so render those as-is.
+                const isAllLangs = !dubFilter || dubFilter === 'none';
                 grid.className = 'calendar-grid';
                 grid.innerHTML = data.days.map((day, idx) => {
                     const date = day.date ? new Date(day.date) : null;
                     const dayName = day.dayName || (date && !isNaN(date.getTime()) ? dayNames[date.getDay()] : 'Day');
                     const dateDisplay = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
+                    const dayEpisodes = isAllLangs ? consolidateCalendarEpisodes(day.episodes || []) : (day.episodes || []);
                     return `
                         <div class="calendar-day">
                             <div class="calendar-day-header">
@@ -2859,7 +2908,7 @@ MAINTENANCE NOTES:
                                 <div class="calendar-day-name">${escapeHtml(dayName)}</div>
                             </div>
                             <div class="calendar-day-content">
-                                ${day.episodes && day.episodes.length > 0 ? day.episodes.map(ep => {
+                                ${dayEpisodes.length > 0 ? dayEpisodes.map(ep => {
                                     const epDate = ep.airDate ? new Date(ep.airDate) : null;
                                     const timeDisplay = epDate && !isNaN(epDate.getTime()) ? epDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
                                     const historyMark = ep.isInHistory && ep.showHistoryMark
@@ -2877,7 +2926,9 @@ MAINTENANCE NOTES:
                                             <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
                                         </div>
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
-                                        ${ep.audioLocale ? `<div class="calendar-episode-locale">${escapeHtml(ep.audioLocale)}</div>` : ''}
+                                        ${(ep.audioLocales && ep.audioLocales.length > 0)
+                                            ? `<div class="calendar-episode-langs">${ep.audioLocales.map(l => `<span class="cal-lang">${escapeHtml(l)}</span>`).join('')}</div>`
+                                            : (ep.audioLocale ? `<div class="calendar-episode-locale">${escapeHtml(ep.audioLocale)}</div>` : '')}
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
                                         ${ep.hasAired ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(ep.audioLocale || '')}')">Download</button>` : ''}
                                     </div>

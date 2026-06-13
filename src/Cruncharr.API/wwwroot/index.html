@@ -65,62 +65,81 @@ MAINTENANCE NOTES:
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
     <style>
-        /* WinUI 3 / Fluent Design Dark Theme - Ported from Crunchy-Downloader */
-        /* Original uses FluentAvalonia with WinUI 3 system colors */
+        /* ============================================================
+           CRUNCHARR DESIGN TOKENS
+           Premium streaming-platform dark theme. Every color, space,
+           radius, shadow, motion and type value lives here so components
+           never hardcode. Light theme below overrides only what differs.
+           ============================================================ */
         :root {
-            /* Crunchyroll Theme - Dark Mode (Default) */
-            --cr-orange: #ff5e00;
-            --cr-orange-classic: #F47521;
-            --cr-hero-bg: #151515;
-            --cr-dark: #0a0a0a;
-            --cr-charcoal: #1f1f1f;
-            --cr-gray-900: #232323;
-            --cr-gray-800: #2a2a2a;
-            --cr-gray-700: #3a3a3a;
-            --cr-gray-600: #555555;
-            --cr-gray-500: #777777;
-            --cr-gray-400: #999999;
-            --cr-gray-300: #bbbbbb;
-            --cr-gray-200: #dddddd;
-            --cr-gray-100: #eeeeee;
-            --cr-white: #ffffff;
-            --cr-success: #00c853;
-            --cr-error: #ff1744;
-            --cr-warning: #ffab00;
-            --cr-info: #00b0ff;
-            
-            /* Cinematic dark design system (#0A0A0A–#1A1A1A surfaces) */
+            /* --- Brand / accent (Crunchyroll orange) --- */
+            --accent: #F47521;
+            --accent-bright: #ff9145;
+            --accent-orange: var(--accent);             /* back-compat alias */
+            --accent-orange-bright: var(--accent-bright);
+            --accent-soft: rgba(244, 117, 33, 0.15);
+            --accent-softer: rgba(244, 117, 33, 0.08);
+            --accent-glow: rgba(244, 117, 33, 0.40);
+
+            /* --- Surfaces (#0A0A0A–#181818) --- */
             --bg-primary: #0a0a0a;
-            --bg-secondary: #0f0f10;
-            --bg-tertiary: #1a1a1c;
-            --bg-hover: #222226;
-            --bg-card: #151517;
+            --bg-secondary: #101012;
+            --bg-tertiary: #161618;
+            --bg-card: #141416;
+            --bg-hover: #1f1f23;
             --surface-border: rgba(255, 255, 255, 0.06);
-            --text-primary: #f6f7f9;
-            --text-secondary: #b8bcc6;
-            --text-muted: #7c818d;
-            --accent-orange: #ff6a00;
-            --accent-orange-bright: #ff8a3d;
-            --accent-blue: #3aa0ff;
-            --accent-green: #2ee27a;
-            --accent-red: #ff4d57;
-            --accent-yellow: #ffb020;
-            --accent-soft: rgba(255, 106, 0, 0.15);
-            --accent-glow: rgba(255, 106, 0, 0.45);
             --border-color: rgba(255, 255, 255, 0.08);
-            /* Glassmorphism */
-            --glass-bg: rgba(20, 20, 26, 0.55);
+            --sidebar-bg: linear-gradient(180deg, #111113, #0a0a0b);
+
+            /* --- Text (WCAG AA+ on near-black) --- */
+            --text-primary: #f5f6f8;
+            --text-secondary: #bcc0ca;
+            --text-muted: #898e98;
+
+            /* --- Status + soft fills (no component should hardcode these) --- */
+            --accent-blue: #4aa8ff;   --info-soft: rgba(74, 168, 255, 0.16);
+            --accent-green: #36d399;  --success-soft: rgba(54, 211, 153, 0.16);
+            --accent-red: #ff5a63;    --error-soft: rgba(255, 90, 99, 0.16);
+            --accent-yellow: #ffb020; --warning-soft: rgba(255, 176, 32, 0.16);
+            --premium-soft: var(--accent-soft);
+
+            /* --- Glass (backdrop blur 8–16px) --- */
+            --glass-bg: rgba(18, 18, 22, 0.62);
             --glass-border: rgba(255, 255, 255, 0.09);
-            --glass-blur: 18px;
-            --sidebar-bg: linear-gradient(180deg, #101011, #0a0a0b);
-            /* Soft layered shadows */
+            --glass-blur: 12px;
+
+            /* --- Spacing scale (4px base) --- */
+            --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+            --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+
+            /* --- Radius scale --- */
+            --radius-xs: 6px; --radius-sm: 10px; --radius-md: 14px;
+            --radius-lg: 18px; --radius-xl: 24px; --radius-full: 999px;
+            --radius: var(--radius-md);                 /* back-compat */
+
+            /* --- Shadow scale --- */
             --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.40);
             --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.45);
             --shadow-lg: 0 28px 64px rgba(0, 0, 0, 0.55);
-            --shadow-glow: 0 8px 30px rgba(255, 106, 0, 0.25);
-            --radius: 16px;
-            --radius-sm: 10px;
-            --transition: 250ms cubic-bezier(0.22, 1, 0.36, 1);
+            --shadow-xl: 0 40px 90px rgba(0, 0, 0, 0.6);
+            --shadow-glow: 0 8px 30px rgba(244, 117, 33, 0.30);
+
+            /* --- Typography scale --- */
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            --text-xs: 0.72rem; --text-sm: 0.85rem; --text-base: 0.95rem;
+            --text-md: 1.05rem; --text-lg: 1.25rem; --text-xl: 1.6rem;
+            --text-2xl: 2.1rem; --text-3xl: 2.6rem;
+            --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700; --fw-black: 800;
+
+            /* --- Motion (200–350ms, ease-out, no bounce) --- */
+            --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+            --dur-fast: 200ms; --dur-base: 250ms; --dur-slow: 350ms;
+            --transition: var(--dur-base) var(--ease-out);  /* back-compat */
+
+            /* --- Legacy CR aliases (still referenced by a few rules) --- */
+            --cr-orange: var(--accent); --cr-orange-classic: var(--accent);
+            --cr-gray-700: #2a2a2e; --cr-gray-600: #3a3a40; --cr-gray-300: #c9ccd4;
+
             --sidebar-width: 232px;
             --header-height: 64px;
         }
@@ -135,14 +154,23 @@ MAINTENANCE NOTES:
             --bg-card: #ffffff;
             --text-primary: #1b1f24;
             --text-secondary: #5c636e;
-            --text-muted: #8b929d;
-            --accent-orange: #e85d04;
+            --text-muted: #767d88;
+            --accent: #d9600f;
+            --accent-bright: #e8730f;
+            --accent-orange: var(--accent);
+            --accent-orange-bright: var(--accent-bright);
             --accent-blue: #0277bd;
             --accent-green: #2e7d32;
             --accent-red: #c62828;
-            --accent-yellow: #f59e0b;
-            --accent-soft: rgba(232, 93, 4, 0.12);
-            --accent-glow: rgba(232, 93, 4, 0.28);
+            --accent-yellow: #b7791f;
+            --accent-soft: rgba(244, 117, 33, 0.12);
+            --accent-softer: rgba(244, 117, 33, 0.06);
+            --accent-glow: rgba(244, 117, 33, 0.22);
+            --info-soft: rgba(2, 119, 189, 0.12);
+            --success-soft: rgba(46, 125, 50, 0.12);
+            --error-soft: rgba(198, 40, 40, 0.12);
+            --warning-soft: rgba(183, 121, 31, 0.14);
+            --premium-soft: var(--accent-soft);
             --border-color: #e3e6ea;
             --surface-border: #e7eaee;
             --glass-bg: rgba(255, 255, 255, 0.72);
@@ -157,7 +185,7 @@ MAINTENANCE NOTES:
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-family: var(--font-sans);
             color: var(--text-primary);
             overflow: hidden;
             -webkit-tap-highlight-color: transparent;
@@ -166,7 +194,7 @@ MAINTENANCE NOTES:
             /* Cinematic layered background: deep black with warm orange + cool bloom */
             background-color: var(--bg-primary);
             background-image:
-                radial-gradient(1200px 600px at 78% -8%, rgba(255, 106, 0, 0.10), transparent 60%),
+                radial-gradient(1200px 600px at 78% -8%, rgba(244, 117, 33, 0.10), transparent 60%),
                 radial-gradient(1000px 700px at -10% 110%, rgba(58, 120, 255, 0.06), transparent 55%);
             background-attachment: fixed;
         }
@@ -305,14 +333,14 @@ MAINTENANCE NOTES:
 
         .header-btn:hover { background: var(--bg-hover); }
         .header-btn.primary { background: var(--accent-orange); color: #000; border: none; font-weight: 600; }
-        .header-btn.primary:hover { background: #ff8c42; }
+        .header-btn.primary:hover { background: var(--accent-bright); }
         .header-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* Content Area */
         .content { flex: 1; overflow-y: auto; padding: 32px 36px; animation: fadeSlideUp 0.45s var(--transition); }
 
-        .page-title { font-size: 2.1rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 6px; }
-        .page-subtitle { color: var(--text-secondary); font-size: 0.98rem; margin-bottom: 28px; }
+        .page-title { font-size: var(--text-2xl); font-weight: var(--fw-black); letter-spacing: -0.02em; margin-bottom: var(--space-1); color: var(--text-primary); }
+        .page-subtitle { color: var(--text-secondary); font-size: var(--text-base); margin-bottom: var(--space-6); }
 
         /* Cards */
         .card {
@@ -385,8 +413,8 @@ MAINTENANCE NOTES:
         }
 
         .btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
-        .btn-icon.danger:hover { background: rgba(231, 76, 60, 0.2); color: var(--accent-red); border-color: var(--accent-red); }
-        .btn-icon.success:hover { background: rgba(78, 204, 163, 0.2); color: var(--accent-green); border-color: var(--accent-green); }
+        .btn-icon.danger:hover { background: var(--error-soft); color: var(--accent-red); border-color: var(--accent-red); }
+        .btn-icon.success:hover { background: var(--success-soft); color: var(--accent-green); border-color: var(--accent-green); }
 
         /* Progress Bars */
         .progress-container {
@@ -415,12 +443,12 @@ MAINTENANCE NOTES:
             gap: 5px;
         }
 
-        .badge-queued { background: rgba(93, 173, 226, 0.2); color: var(--accent-blue); }
-        .badge-downloading { background: rgba(244, 117, 33, 0.2); color: var(--accent-orange); }
-        .badge-done { background: rgba(78, 204, 163, 0.2); color: var(--accent-green); }
-        .badge-error { background: rgba(231, 76, 60, 0.2); color: var(--accent-red); }
-        .badge-retry { background: rgba(243, 156, 18, 0.2); color: var(--accent-yellow); }
-        .badge-premium { background: rgba(244, 117, 33, 0.2); color: var(--accent-orange); }
+        .badge-queued { background: var(--info-soft); color: var(--accent-blue); }
+        .badge-downloading { background: var(--accent-soft); color: var(--accent-orange); }
+        .badge-done { background: var(--success-soft); color: var(--accent-green); }
+        .badge-error { background: var(--error-soft); color: var(--accent-red); }
+        .badge-retry { background: var(--warning-soft); color: var(--accent-yellow); }
+        .badge-premium { background: var(--accent-soft); color: var(--accent-orange); }
 
         /* Download Item */
         .download-item {
@@ -614,7 +642,7 @@ MAINTENANCE NOTES:
         }
 
         .calendar-episode:hover { background: var(--bg-hover); }
-        .calendar-episode.premiere { background: rgba(244, 117, 33, 0.15); }
+        .calendar-episode.premiere { background: var(--accent-soft); }
 
         /* Calendar history marks (upstream parity) */
         .calendar-history-mark {
@@ -626,9 +654,9 @@ MAINTENANCE NOTES:
             border-radius: 50%;
             z-index: 1;
         }
-        .calendar-history-mark.mark-downloaded { background: #21a556; }
-        .calendar-history-mark.mark-partlydownloaded { background: #f78c25; }
-        .calendar-history-mark.mark-notdownloaded { background: #888888; }
+        .calendar-history-mark.mark-downloaded { background: var(--accent-green); }
+        .calendar-history-mark.mark-partlydownloaded { background: var(--accent-yellow); }
+        .calendar-history-mark.mark-notdownloaded { background: var(--text-muted); }
         .calendar-history-mark.mark-none { display: none; }
 
         .calendar-episode-time { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px; }
@@ -1093,7 +1121,7 @@ MAINTENANCE NOTES:
             border-color: var(--accent-orange);
         }
         .dub-option.selected {
-            background: rgba(244, 117, 33, 0.2);
+            background: var(--accent-soft);
             border-color: var(--accent-orange);
             color: var(--accent-orange);
         }
@@ -1144,7 +1172,7 @@ MAINTENANCE NOTES:
             color: var(--text-secondary);
         }
         .dub-lang-badge.selected {
-            background: rgba(244, 117, 33, 0.2);
+            background: var(--accent-soft);
             border-color: var(--accent-orange);
             color: var(--accent-orange);
         }
@@ -1328,12 +1356,12 @@ MAINTENANCE NOTES:
             color: var(--text-secondary);
         }
         .lang-badge.selected {
-            background: rgba(244, 117, 33, 0.2);
+            background: var(--accent-soft);
             border-color: var(--accent-orange);
             color: var(--accent-orange);
         }
         .lang-badge.downloaded {
-            background: rgba(78, 204, 163, 0.2);
+            background: var(--success-soft);
             border-color: var(--accent-green);
             color: var(--accent-green);
         }
@@ -1368,9 +1396,9 @@ MAINTENANCE NOTES:
         /* Monochrome icons highlight orange on hover */
         .btn-icon:hover, .toolbar-btn:hover .nav-icon { color: var(--accent-orange); }
         .nav-item.active {
-            background: linear-gradient(135deg, rgba(255,106,0,0.22), rgba(255,106,0,0.05));
+            background: linear-gradient(135deg, var(--accent-soft), var(--accent-softer));
             color: var(--accent-orange);
-            box-shadow: inset 0 0 0 1px rgba(255,106,0,0.28), 0 6px 18px rgba(255,106,0,0.12);
+            box-shadow: inset 0 0 0 1px var(--accent-glow), 0 6px 18px var(--accent-soft);
         }
         .nav-item.active .nav-icon { color: var(--accent-orange); }
 
@@ -1397,7 +1425,7 @@ MAINTENANCE NOTES:
             box-shadow: var(--shadow-glow);
         }
         .header-btn.primary:hover {
-            box-shadow: 0 12px 34px rgba(255, 106, 0, 0.5);
+            box-shadow: 0 12px 34px var(--accent-glow);
             transform: translateY(-1px) scale(1.02);
         }
         .header-btn:focus-visible, .btn-icon:focus-visible, .toolbar-btn:focus-visible,
@@ -1413,12 +1441,12 @@ MAINTENANCE NOTES:
         }
         .form-input:focus, .form-select:focus {
             border-color: var(--accent-orange);
-            box-shadow: 0 0 0 3px var(--accent-soft), 0 6px 20px rgba(255, 106, 0, 0.15);
+            box-shadow: 0 0 0 3px var(--accent-soft), 0 6px 20px var(--accent-soft);
         }
         .header-search { border-radius: 10px; transition: border-color 0.2s, box-shadow 0.2s; }
         .header-search:focus-within {
             border-color: var(--accent-orange);
-            box-shadow: 0 0 0 3px rgba(255, 94, 0, 0.12);
+            box-shadow: 0 0 0 3px var(--accent-soft);
         }
 
         /* Toggle switch: white knob when on */

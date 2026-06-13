@@ -32,6 +32,14 @@ services:
       # /app/presets - built-in ffmpeg presets (included in image)
       # /app/fonts - built-in subtitle fonts (included in image)
       # /app/video - internal workspace
+
+    # GPU passthrough for hardware-accelerated sync (Intel/AMD via VAAPI/QSV).
+    # Uncomment to expose the render node so it appears in Settings -> Sync HW Accel.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:            # match the host 'render'/'video' group so the device is writable
+    #   - "video"
+    #   - "render"
     environment:
       # User/group the app runs as. Set these to match the owner of ./config and
       # ./downloads on the host (run `id` to find yours) so the container can write

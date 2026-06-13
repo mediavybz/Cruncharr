@@ -457,38 +457,12 @@ public class DownloadService : IDownloadService
                     _logger?.LogInformation("NoAudio enabled, skipping audio download");
                 }
 
-                // [PT] Ported from upstream: Auto-generate AD track from primary audio if DownloadDescriptionAudio is enabled
-                // and no separate AD version exists in episode versions
-                if (!config.Download.NoAudio && config.Download.DownloadDescriptionAudio &&
-                    episode.Versions != null && episode.AudioLocale != "")
-                {
-                    var hasAdVersion = episode.Versions.Any(v =>
-                        v.Roles?.Contains("description", StringComparer.OrdinalIgnoreCase) == true);
-
-                    if (!hasAdVersion && audioTrackLanguages.Count > 0)
-                    {
-                        var primaryAudio = audioTrackLanguages.FirstOrDefault(a =>
-                            string.Equals(a.Lang, episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
-
-                        if (primaryAudio.Path != null && File.Exists(primaryAudio.Path))
-                        {
-                            var adLocale = episode.AudioLocale;
-                            var adPath = Path.Combine(tempDir, $"audio_{(adLocale ?? "unknown").Replace("-", "").ToLower()}_ad.m4a");
-
-                            try
-                            {
-                                File.Copy(primaryAudio.Path, adPath, true);
-                                downloadedFiles.Add(adPath);
-                                audioTrackLanguages.Add((adPath, adLocale ?? "unknown"));
-                                _logger?.LogInformation("Auto-generated AD track from primary audio: {Locale} -> {Path}", adLocale, adPath);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger?.LogWarning(ex, "Failed to auto-generate AD track from primary audio");
-                            }
-                        }
-                    }
-                }
+                // Audio description (AD) is a separate real stream, not a copy of the
+                // primary audio. Upstream fetches it via the play endpoint with
+                // ?audioRole=description; we download the real AD version below (see the
+                // DownloadDescriptionAudio block). Fabricating an AD track by copying the
+                // primary audio produced a duplicate track mislabeled as AD, so it was
+                // removed.
 
                 // Download additional dubs if configured (skip if NoAudio is enabled)
                 // Note: Video is only downloaded once (DlVideoOnce optimization). Additional dubs reuse the same video stream.

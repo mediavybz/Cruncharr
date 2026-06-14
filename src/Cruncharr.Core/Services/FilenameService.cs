@@ -33,6 +33,8 @@ public class FilenameService : IFilenameService
 
         // Upstream variables
         variables.Add(new Variable("title", episode.Title, true));
+        // Aliases so the names documented in the UI resolve.
+        variables.Add(new Variable("episodeTitle", episode.Title, true));
 
         // Episode: try to parse as double for fractional episodes (e.g., 12.5), fallback to int
         object episodeValue;
@@ -87,6 +89,7 @@ public class FilenameService : IFilenameService
             variables.Add(new Variable("audioLanguage", options.AudioLanguage, false));
         }
         variables.Add(new Variable("id", episode.Id, false));
+        variables.Add(new Variable("episodeId", episode.Id, false));
         variables.Add(new Variable("guid", episode.Guid, false));
         variables.Add(new Variable("seriesId", episode.SeriesId ?? string.Empty, false));
         variables.Add(new Variable("seasonId", episode.SeasonId ?? string.Empty, false));

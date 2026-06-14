@@ -4450,6 +4450,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Download AD for Selected Dubs</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-ad" ${dl.downloadDescriptionAudio?'checked':''}><span class="toggle-slider"></span></label></div>
 
                                 <div class="setting-row"><div><div class="setting-label">Download Multiple Dubs</div><div class="setting-desc">Download all selected dubs per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-multi-dub" ${dl.downloadMultipleDubs?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download First Available Dub</div><div class="setting-desc">Only download the first available dub by priority instead of all selected</div></div><label class="toggle-switch"><input type="checkbox" id="setting-first-dub" ${dl.downloadFirstAvailableDub?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                         <div class="settings-section">
@@ -4472,6 +4473,12 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">CC as hearing impaired in mkv</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-hi" ${dl.ccSubsMuxingFlag?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Convert CC VTT to ASS</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cc-convert" ${dl.convertVttToAss?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">CC Font</div></div><input type="text" class="form-input" id="setting-cc-font" value="${escapeHtmlAttribute(dl.ccSubsFont||'Trebuchet MS')}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Include Signs Subtitles</div><div class="setting-desc">Download signs/forced-only subtitle tracks</div></div><label class="toggle-switch"><input type="checkbox" id="setting-include-signs" ${dl.includeSignsSubs?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Include CC Subtitles</div><div class="setting-desc">Download Closed Caption tracks</div></div><label class="toggle-switch"><input type="checkbox" id="setting-include-cc" ${dl.includeCcSubs?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Download Duplicate Subs</div><div class="setting-desc">Allow the same subtitle to be downloaded per dub</div></div><label class="toggle-switch"><input type="checkbox" id="setting-subs-dup" ${dl.subsDownloadDuplicate?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Fix CCC Subtitles</div><div class="setting-desc">Clean up Closed Caption Converter output</div></div><label class="toggle-switch"><input type="checkbox" id="setting-fix-ccc" ${dl.fixCccSubtitles?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Skip Subtitles</div><div class="setting-desc">Do not download any subtitles</div></div><label class="toggle-switch"><input type="checkbox" id="setting-skip-subs" ${dl.skipSubs?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">CC Tag</div></div><input type="text" class="form-input" id="setting-cc-tag" value="${escapeHtmlAttribute(dl.ccTag||'CC')}" style="width:120px;"></div>
                             </div>
                         </div>
                     `;
@@ -4631,6 +4638,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">API Key</div></div><input type="text" class="form-input" id="setting-sonarr-apikey" value="${escapeHtmlAttribute(s.apiKey||'')}" style="width:250px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-ssl" ${s.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input" id="setting-sonarr-urlbase" value="${escapeHtmlAttribute(s.urlBase||'')}" style="width:200px;"></div>
+                                <div class="setting-row"><div><div class="setting-label">Use Sonarr Numbering</div><div class="setting-desc">Use Sonarr's season/episode numbers in filenames</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-numbering" ${s.useSonarrNumbering?'checked':''}><span class="toggle-slider"></span></label></div>
 
                             </div>
                         </div>
@@ -4837,6 +4845,8 @@ MAINTENANCE NOTES:
                     if (dlAd !== undefined) dl.downloadDescriptionAudio = dlAd;
                     const dlMulti = getFieldValue('setting-download-multi-dub', 'bool');
                     if (dlMulti !== undefined) dl.downloadMultipleDubs = dlMulti;
+                    const firstDub = getFieldValue('setting-first-dub', 'bool');
+                    if (firstDub !== undefined) dl.downloadFirstAvailableDub = firstDub;
                     const hardSub = getFieldValue('setting-hard-sub');
                     if (hardSub !== undefined && hardSub !== '') dl.hardSubLang = hardSub;
                     const hardFallback = getFieldValue('setting-hard-fallback', 'bool');
@@ -4853,7 +4863,19 @@ MAINTENANCE NOTES:
                     if (ccConvert !== undefined) dl.convertVttToAss = ccConvert;
                     const ccFont = getFieldValue('setting-cc-font');
                     if (ccFont !== undefined) dl.ccSubsFont = ccFont;
-                    
+                    const includeSigns = getFieldValue('setting-include-signs', 'bool');
+                    if (includeSigns !== undefined) dl.includeSignsSubs = includeSigns;
+                    const includeCc = getFieldValue('setting-include-cc', 'bool');
+                    if (includeCc !== undefined) dl.includeCcSubs = includeCc;
+                    const subsDup = getFieldValue('setting-subs-dup', 'bool');
+                    if (subsDup !== undefined) dl.subsDownloadDuplicate = subsDup;
+                    const fixCcc = getFieldValue('setting-fix-ccc', 'bool');
+                    if (fixCcc !== undefined) dl.fixCccSubtitles = fixCcc;
+                    const skipSubs = getFieldValue('setting-skip-subs', 'bool');
+                    if (skipSubs !== undefined) dl.skipSubs = skipSubs;
+                    const ccTag = getFieldValue('setting-cc-tag');
+                    if (ccTag !== undefined && ccTag !== '') dl.ccTag = ccTag;
+
                     if (Object.keys(cr).length) newConfig.crunchyroll = cr;
                     if (Object.keys(dl).length) newConfig.download = dl;
                     break;
@@ -4895,10 +4917,8 @@ MAINTENANCE NOTES:
                     if (newMethod !== undefined) dl.downloadMethodeNew = newMethod;
                     const replaceExisting = getFieldValue('setting-replace-existing', 'bool');
                     if (replaceExisting !== undefined) dl.replaceExistingFiles = replaceExisting;
-                    const earlyStart = getFieldValue('setting-early-start', 'bool');
-                    if (earlyStart !== undefined) dl.downloadAllowEarlyStart = earlyStart;
-                    const skipMissing = getFieldValue('setting-skip-missing', 'bool');
-                    if (skipMissing !== undefined) dl.downloadOnlyWithAllSelectedDubSub = skipMissing;
+                    // (Allow Early Start / Skip Missing Languages live on the Queue tab as
+                    // setting-queue-early-start / setting-queue-skip-missing.)
                     const defaultVideo = getFieldValue('setting-default-video');
                     if (defaultVideo !== undefined) dl.defaultVideo = defaultVideo;
                     
@@ -5089,7 +5109,8 @@ MAINTENANCE NOTES:
                         host: document.getElementById('setting-sonarr-host')?.value || null,
                         port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
                         useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
-                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null
+                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null,
+                        useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
                     };
                     // GET /config returns the placeholder "[configured]" instead of the real key -
                     // only send the key if the user actually typed a new one

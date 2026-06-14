@@ -120,6 +120,10 @@ public class CruncharrConfig
                 var json = Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
                 File.WriteAllText(configPath, json);
             }
+            // Config holds credentials (CR password, proxy password, Sonarr API key) in
+            // plaintext; restrict to owner read/write so other users on a shared /config
+            // mount cannot read them.
+            Cruncharr.Core.Utils.SecureFile.Restrict(configPath);
             return true;
         }
         catch (Exception ex)

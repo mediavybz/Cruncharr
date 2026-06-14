@@ -67,7 +67,7 @@ public class Program
         builder.Services.AddSingleton<IDownloadService, DownloadService>();
         builder.Services.AddSingleton<IHistoryService, HistoryService>();
         builder.Services.AddSingleton<IQueuePersistenceService>(sp =>
-            new QueuePersistenceService(config.Queue.QueueFilePath, sp.GetService<ILogger<QueuePersistenceService>>()));
+            new QueuePersistenceService(config.Queue.QueueFilePath, sp.GetService<ILogger<QueuePersistenceService>>(), config));
         builder.Services.AddSingleton<ICalendarService, CalendarService>();
         builder.Services.AddSingleton<IQueueService, QueueService>();
         builder.Services.AddSingleton<QueueBroadcastService>();

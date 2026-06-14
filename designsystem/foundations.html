@@ -1,0 +1,93 @@
+<!-- @dsCard group="Foundations" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cruncharr — Foundations</title>
+<style>
+  :root{
+    --accent:#F47521; --accent-bright:#ff9145; --accent-soft:rgba(244,117,33,.15);
+    --bg-primary:#0a0a0a; --bg-secondary:#101012; --bg-tertiary:#161618; --bg-card:#141416; --bg-hover:#1f1f23;
+    --border-color:rgba(255,255,255,.08);
+    --text-primary:#f5f6f8; --text-secondary:#bcc0ca; --text-muted:#898e98;
+    --accent-blue:#4aa8ff; --accent-green:#36d399; --accent-red:#ff5a63; --accent-yellow:#ffb020;
+    --radius-sm:10px; --radius-md:14px; --radius-lg:18px;
+    --shadow-sm:0 2px 8px rgba(0,0,0,.40); --shadow-md:0 12px 32px rgba(0,0,0,.45);
+    --font-sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-sans);padding:32px}
+  h1{font-weight:800;font-size:1.6rem;margin:0 0 4px}
+  .sub{color:var(--text-muted);margin:0 0 28px}
+  h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-secondary);margin:28px 0 12px}
+  .row{display:flex;flex-wrap:wrap;gap:14px}
+  .swatch{width:120px;border:1px solid var(--border-color);border-radius:var(--radius-md);overflow:hidden;background:var(--bg-card)}
+  .swatch .chip{height:64px}
+  .swatch .lbl{padding:8px 10px;font-size:.72rem}
+  .swatch .lbl b{display:block;color:var(--text-primary)}
+  .swatch .lbl span{color:var(--text-muted)}
+  .type span{display:block;margin:6px 0}
+  .scale{display:flex;gap:10px;align-items:flex-end}
+  .scale div{background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;width:40px;text-align:center;font-size:.65rem;color:var(--text-secondary);padding-bottom:4px}
+  .rad{display:flex;gap:14px}
+  .rad div{width:72px;height:72px;background:var(--bg-tertiary);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--text-muted)}
+  .shadow{display:flex;gap:24px}
+  .shadow div{width:120px;height:72px;background:var(--bg-card);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--text-muted)}
+</style>
+</head>
+<body>
+  <h1>Cruncharr Design System</h1>
+  <p class="sub">Foundations — the tokens every component references. Brand accent is Crunchyroll orange on a near-black surface stack.</p>
+
+  <h2>Brand &amp; status colors</h2>
+  <div class="row">
+    <div class="swatch"><div class="chip" style="background:#F47521"></div><div class="lbl"><b>Accent</b><span>#F47521</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#ff9145"></div><div class="lbl"><b>Accent bright</b><span>#ff9145</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#4aa8ff"></div><div class="lbl"><b>Info</b><span>#4aa8ff</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#36d399"></div><div class="lbl"><b>Success</b><span>#36d399</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#ff5a63"></div><div class="lbl"><b>Error</b><span>#ff5a63</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#ffb020"></div><div class="lbl"><b>Warning</b><span>#ffb020</span></div></div>
+  </div>
+
+  <h2>Surfaces</h2>
+  <div class="row">
+    <div class="swatch"><div class="chip" style="background:#0a0a0a"></div><div class="lbl"><b>bg-primary</b><span>#0a0a0a</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#101012"></div><div class="lbl"><b>bg-secondary</b><span>#101012</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#161618"></div><div class="lbl"><b>bg-tertiary</b><span>#161618</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#141416"></div><div class="lbl"><b>bg-card</b><span>#141416</span></div></div>
+    <div class="swatch"><div class="chip" style="background:#1f1f23"></div><div class="lbl"><b>bg-hover</b><span>#1f1f23</span></div></div>
+  </div>
+
+  <h2>Type scale</h2>
+  <div class="type">
+    <span style="font-size:2.6rem;font-weight:800">Display 2.6rem / 800</span>
+    <span style="font-size:1.6rem;font-weight:700">Heading 1.6rem / 700</span>
+    <span style="font-size:1.25rem;font-weight:600">Subhead 1.25rem / 600</span>
+    <span style="font-size:.95rem">Body 0.95rem / 400</span>
+    <span style="font-size:.85rem;color:var(--text-secondary)">Small 0.85rem secondary</span>
+    <span style="font-size:.72rem;color:var(--text-muted)">Caption 0.72rem muted</span>
+  </div>
+
+  <h2>Spacing (4px base)</h2>
+  <div class="scale">
+    <div style="height:4px">1</div><div style="height:8px">2</div><div style="height:12px">3</div>
+    <div style="height:16px">4</div><div style="height:20px">5</div><div style="height:24px">6</div>
+    <div style="height:32px">8</div><div style="height:40px">10</div>
+  </div>
+
+  <h2>Radius</h2>
+  <div class="rad">
+    <div style="border-radius:6px">xs 6</div><div style="border-radius:10px">sm 10</div>
+    <div style="border-radius:14px">md 14</div><div style="border-radius:18px">lg 18</div>
+    <div style="border-radius:24px">xl 24</div>
+  </div>
+
+  <h2>Shadow</h2>
+  <div class="shadow">
+    <div style="box-shadow:0 2px 8px rgba(0,0,0,.40)">sm</div>
+    <div style="box-shadow:0 12px 32px rgba(0,0,0,.45)">md</div>
+    <div style="box-shadow:0 8px 30px rgba(244,117,33,.30)">glow</div>
+  </div>
+</body>
+</html>

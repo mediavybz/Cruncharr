@@ -1,0 +1,77 @@
+<!-- @dsCard group="Navigation" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cruncharr — Navigation</title>
+<style>
+  :root{
+    --accent:#F47521; --accent-soft:rgba(244,117,33,.15);
+    --bg-primary:#0a0a0a; --bg-secondary:#101012; --bg-hover:#1f1f23;
+    --border-color:rgba(255,255,255,.08);
+    --text-primary:#f5f6f8; --text-secondary:#bcc0ca; --text-muted:#898e98;
+    --font-sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#070707;color:var(--text-primary);font-family:var(--font-sans);padding:32px}
+  h1{font-weight:800;font-size:1.4rem;margin:0 0 4px}
+  .sub{color:var(--text-muted);margin:0 0 24px;max-width:560px}
+  h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-secondary);margin:24px 0 12px}
+  .stage{display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start}
+  /* desktop sidebar */
+  .sidebar{width:232px;background:linear-gradient(180deg,#111113,#0a0a0b);border:1px solid var(--border-color);border-radius:14px;padding:12px 10px}
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .item{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;color:var(--text-secondary);font-size:.9rem;font-weight:500}
+  .item .dot{width:18px;height:18px;border-radius:5px;background:currentColor;opacity:.55}
+  .item.active{background:var(--accent-soft);color:var(--accent)}
+  .item.active .dot{opacity:1}
+  /* mobile bottom bar */
+  .phone{width:300px;border:1px solid var(--border-color);border-radius:22px;overflow:hidden;background:var(--bg-primary)}
+  .phone .body{height:120px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:.8rem}
+  .bar{display:flex;border-top:1px solid var(--border-color);background:var(--bg-secondary)}
+  .cell{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;font-size:.6rem;color:var(--text-muted);border-top:3px solid transparent}
+  .cell .dot{width:18px;height:18px;border-radius:5px;background:currentColor;opacity:.6}
+  .cell.active{color:var(--accent);border-top-color:var(--accent)}
+  .cell.active .dot{opacity:1}
+  .note{color:var(--text-muted);font-size:.78rem;margin-top:8px}
+</style>
+</head>
+<body>
+  <h1>Navigation</h1>
+  <p class="sub">Desktop uses a full sidebar with a soft-pill active state. On phones it collapses to a 5-item bottom bar plus a “More” sheet for secondary destinations — bottom bars stay ≤6 cells so labels never truncate.</p>
+
+  <div class="stage">
+    <div>
+      <h2>Desktop sidebar</h2>
+      <div class="sidebar">
+        <div class="nav">
+          <div class="item active"><span class="dot"></span>Downloads</div>
+          <div class="item"><span class="dot"></span>Add Download</div>
+          <div class="item"><span class="dot"></span>Calendar</div>
+          <div class="item"><span class="dot"></span>Seasons</div>
+          <div class="item"><span class="dot"></span>History</div>
+          <div class="item"><span class="dot"></span>Browse</div>
+          <div class="item"><span class="dot"></span>Seasonal</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h2>Mobile bottom bar</h2>
+      <div class="phone">
+        <div class="body">Content</div>
+        <div class="bar">
+          <div class="cell active"><span class="dot"></span>Downloads</div>
+          <div class="cell"><span class="dot"></span>Add</div>
+          <div class="cell"><span class="dot"></span>Calendar</div>
+          <div class="cell"><span class="dot"></span>History</div>
+          <div class="cell"><span class="dot"></span>Settings</div>
+          <div class="cell"><span class="dot"></span>More</div>
+        </div>
+      </div>
+      <p class="note">“More” opens a bottom sheet: Seasons · Browse · Seasonal · Account.</p>
+    </div>
+  </div>
+</body>
+</html>

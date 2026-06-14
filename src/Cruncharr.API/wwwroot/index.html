@@ -391,9 +391,32 @@ MAINTENANCE NOTES:
         .nav-icon svg { width: 18px; height: 18px; }
 
         .sidebar-footer {
-            padding: 15px 20px;
+            padding: 14px 16px;
             font-size: 0.8em;
             color: var(--text-muted);
+        }
+        /* Rounded version/status pill (Seerr-style "Stable 3.3.0" badge). */
+        .version-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-full);
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: var(--text-secondary);
+            cursor: default;
+        }
+        .version-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            flex: 0 0 auto;
+            background: var(--accent-green);
+            box-shadow: 0 0 6px var(--accent-green);
         }
 
         /* Top-right profile chip */
@@ -2137,8 +2160,10 @@ MAINTENANCE NOTES:
                 </a>
             </div>
             <div class="sidebar-footer">
-                <div id="version-info">v0.2.0-beta.11</div>
-                <div id="connection-status" style="color: var(--accent-green);">Connected</div>
+                <div class="version-pill" title="Connected">
+                    <span class="version-dot" id="connection-status"></span>
+                    <span id="version-info">v0.2.0-beta.11</span>
+                </div>
             </div>
         </aside>
 
@@ -4891,7 +4916,7 @@ MAINTENANCE NOTES:
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Appearance Settings</span><span class="settings-section-desc">Customize the UI</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Nebula" ${a.theme==='Nebula'?'selected':''}>Nebula</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select" id="setting-theme" style="min-width:150px;" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Seerr" ${a.theme==='Seerr'||a.theme==='Nebula'?'selected':''}>Seerr</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}" style="width:80px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}" style="width:300px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity ?? 0.5)}" min="0" max="1" step="0.1" style="width:100px;"></div>
@@ -4932,7 +4957,7 @@ MAINTENANCE NOTES:
         }
 
         // Named themes -> data-theme attribute. "Dark" is the default :root (no attr).
-        const THEME_ATTR = { 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula' };
+        const THEME_ATTR = { 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'nebula' };
         function applyTheme() {
             let theme = config?.appearance?.theme || 'System';
             if (theme === 'System') {
@@ -6537,8 +6562,11 @@ MAINTENANCE NOTES:
         function updateConnectionStatus(isConnected) {
             const el = document.getElementById('connection-status');
             if (el) {
-                el.textContent = isConnected ? 'Connected' : 'Disconnected';
-                el.style.color = isConnected ? 'var(--accent-green)' : 'var(--accent-red)';
+                // connection-status is now the status dot inside the version pill.
+                el.style.background = isConnected ? 'var(--accent-green)' : 'var(--accent-red)';
+                el.style.boxShadow = isConnected ? '0 0 6px var(--accent-green)' : '0 0 6px var(--accent-red)';
+                const pill = el.closest('.version-pill');
+                if (pill) pill.title = isConnected ? 'Connected' : 'Disconnected';
             }
         }
 

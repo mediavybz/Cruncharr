@@ -983,12 +983,34 @@ MAINTENANCE NOTES:
         .account-subscription { font-size: 1.2em; color: var(--text-secondary); margin-bottom: 25px; }
 
         /* Settings Tabs */
+        /* Two labeled categories (Application vs Crunchyroll), mirroring upstream's
+           split between app-level settings and content/Crunchyroll settings. */
         .settings-tabs {
             display: flex;
-            flex-wrap: wrap; /* 13 tabs overflow ~1440px; wrap instead of cutting them off */
-            gap: 0;
+            flex-direction: column;
+            gap: 8px;
             border-bottom: 1px solid var(--border-color);
             margin-bottom: 20px;
+            padding-bottom: 4px;
+        }
+        .settings-cat {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .settings-cat-label {
+            flex: 0 0 auto;
+            min-width: 104px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+        }
+        .settings-cat-tabs {
+            display: flex;
+            flex-wrap: wrap;
         }
 
         .settings-tab {
@@ -1880,10 +1902,12 @@ MAINTENANCE NOTES:
             
             /* Settings */
             .settings-tabs {
-                flex-wrap: wrap;
                 gap: 4px;
             }
-            
+            .settings-cat { gap: 4px; }
+            /* Category label on its own line above its tabs on phones. */
+            .settings-cat-label { min-width: 100%; margin-top: 2px; }
+
             .settings-tab {
                 padding: 6px 10px;
                 font-size: 0.8em;
@@ -4298,19 +4322,29 @@ MAINTENANCE NOTES:
                 <div class="page-title">Settings</div>
                 <div class="page-subtitle">Configure Cruncharr</div>
                 <div class="settings-tabs">
-                    <button class="settings-tab ${settingsTab === 'general' ? 'active' : ''}" onclick="setSettingsTab('general', event)">General</button>
-                    <button class="settings-tab ${settingsTab === 'crunchyroll' ? 'active' : ''}" onclick="setSettingsTab('crunchyroll', event)">Crunchyroll</button>
-                    <button class="settings-tab ${settingsTab === 'download' ? 'active' : ''}" onclick="setSettingsTab('download', event)">Download</button>
-                    <button class="settings-tab ${settingsTab === 'filename' ? 'active' : ''}" onclick="setSettingsTab('filename', event)">Filename</button>
-                    <button class="settings-tab ${settingsTab === 'muxing' ? 'active' : ''}" onclick="setSettingsTab('muxing', event)">Muxing</button>
-                    <button class="settings-tab ${settingsTab === 'queue' ? 'active' : ''}" onclick="setSettingsTab('queue', event)">Queue</button>
-                    <button class="settings-tab ${settingsTab === 'history' ? 'active' : ''}" onclick="setSettingsTab('history', event)">History</button>
-                    <button class="settings-tab ${settingsTab === 'sonarr' ? 'active' : ''}" onclick="setSettingsTab('sonarr', event)">Sonarr</button>
-                    <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications', event)">Notifications</button>
-                    <button class="settings-tab ${settingsTab === 'proxy' ? 'active' : ''}" onclick="setSettingsTab('proxy', event)">Proxy</button>
-                    <button class="settings-tab ${settingsTab === 'flaresolverr' ? 'active' : ''}" onclick="setSettingsTab('flaresolverr', event)">FlareSolverr</button>
-                    <button class="settings-tab ${settingsTab === 'calendar' ? 'active' : ''}" onclick="setSettingsTab('calendar', event)">Calendar</button>
-                    <button class="settings-tab ${settingsTab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance', event)">Appearance</button>
+                    <div class="settings-cat">
+                        <span class="settings-cat-label" title="Settings that affect how the app itself runs and integrates">Application</span>
+                        <div class="settings-cat-tabs">
+                            <button class="settings-tab ${settingsTab === 'general' ? 'active' : ''}" onclick="setSettingsTab('general', event)">General</button>
+                            <button class="settings-tab ${settingsTab === 'download' ? 'active' : ''}" onclick="setSettingsTab('download', event)">Download</button>
+                            <button class="settings-tab ${settingsTab === 'queue' ? 'active' : ''}" onclick="setSettingsTab('queue', event)">Queue</button>
+                            <button class="settings-tab ${settingsTab === 'history' ? 'active' : ''}" onclick="setSettingsTab('history', event)">History</button>
+                            <button class="settings-tab ${settingsTab === 'sonarr' ? 'active' : ''}" onclick="setSettingsTab('sonarr', event)">Sonarr</button>
+                            <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications', event)">Notifications</button>
+                            <button class="settings-tab ${settingsTab === 'proxy' ? 'active' : ''}" onclick="setSettingsTab('proxy', event)">Proxy</button>
+                            <button class="settings-tab ${settingsTab === 'flaresolverr' ? 'active' : ''}" onclick="setSettingsTab('flaresolverr', event)">FlareSolverr</button>
+                            <button class="settings-tab ${settingsTab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance', event)">Appearance</button>
+                        </div>
+                    </div>
+                    <div class="settings-cat">
+                        <span class="settings-cat-label" title="Settings that affect what is fetched from Crunchyroll and how the downloaded files are built">Crunchyroll</span>
+                        <div class="settings-cat-tabs">
+                            <button class="settings-tab ${settingsTab === 'crunchyroll' ? 'active' : ''}" onclick="setSettingsTab('crunchyroll', event)">Account &amp; Languages</button>
+                            <button class="settings-tab ${settingsTab === 'filename' ? 'active' : ''}" onclick="setSettingsTab('filename', event)">Filename</button>
+                            <button class="settings-tab ${settingsTab === 'muxing' ? 'active' : ''}" onclick="setSettingsTab('muxing', event)">Muxing</button>
+                            <button class="settings-tab ${settingsTab === 'calendar' ? 'active' : ''}" onclick="setSettingsTab('calendar', event)">Calendar</button>
+                        </div>
+                    </div>
                 </div>
                 <div id="settings-content">
                     <div class="loading"><div class="spinner"></div>Loading settings...</div>

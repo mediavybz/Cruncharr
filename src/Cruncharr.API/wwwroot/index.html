@@ -4236,14 +4236,13 @@ MAINTENANCE NOTES:
                 if (!res.ok) return;
                 const opts = await res.json();
                 if (!Array.isArray(opts) || opts.length === 0) return;
-                // Ensure the saved value is present even if not detected anymore
+                // Keep the saved value selectable even if that GPU is no longer present
                 if (saved && saved !== 'none' && !opts.some(o => o.value === saved)) {
-                    opts.push({ value: saved, label: saved + ' (saved)', deviceFound: false });
+                    opts.push({ value: saved, label: saved + ' (saved — not currently available)' });
                 }
-                sel.innerHTML = opts.map(o => {
-                    const tag = (o.value !== 'none' && o.deviceFound === false) ? ' — not detected' : '';
-                    return `<option value="${escapeHtmlAttribute(o.value)}" ${o.value === saved ? 'selected' : ''}>${escapeHtml(o.label)}${tag}</option>`;
-                }).join('');
+                sel.innerHTML = opts.map(o =>
+                    `<option value="${escapeHtmlAttribute(o.value)}" ${o.value === saved ? 'selected' : ''}>${escapeHtml(o.label)}</option>`
+                ).join('');
             } catch (e) { /* keep the single saved option on failure */ }
         }
 

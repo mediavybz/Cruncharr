@@ -47,33 +47,36 @@ public class HardwareController : ControllerBase
 
             var methods = await GetFfmpegHwAccelsAsync();
 
-            // Map each ffmpeg-supported method to a friendly label + device availability
+            // Only surface methods whose underlying device is actually present in the
+            // container. Methods ffmpeg supports but with no matching device passed in are
+            // omitted entirely, so the dropdown lists only GPUs available right now.
             foreach (var m in methods)
             {
+                bool found;
+                string label;
+                string? device = null;
                 switch (m)
                 {
-                    case "vaapi":
-                        options.Add(new HwAccelOption { Value = "vaapi", Label = LabelFor("VAAPI — Intel/AMD", firstRender), DeviceFound = firstRender != null, Device = firstRender });
-                        break;
-                    case "qsv":
-                        options.Add(new HwAccelOption { Value = "qsv", Label = LabelFor("Intel QuickSync (QSV)", firstRender), DeviceFound = firstRender != null, Device = firstRender });
-                        break;
-                    case "vdpau":
-                        options.Add(new HwAccelOption { Value = "vdpau", Label = LabelFor("VDPAU", firstRender), DeviceFound = firstRender != null, Device = firstRender });
-                        break;
-                    case "drm":
-                        options.Add(new HwAccelOption { Value = "drm", Label = LabelFor("DRM", firstRender), DeviceFound = firstRender != null, Device = firstRender });
-                        break;
-                    case "vulkan":
-                        options.Add(new HwAccelOption { Value = "vulkan", Label = LabelFor("Vulkan", firstRender), DeviceFound = firstRender != null, Device = firstRender });
-                        break;
-                    case "cuda":
-                    case "nvdec":
-                        options.Add(new HwAccelOption { Value = m, Label = m == "cuda" ? "NVIDIA CUDA" + (hasNvidia ? "" : " (no NVIDIA device detected)") : "NVIDIA NVDEC" + (hasNvidia ? "" : " (no NVIDIA device detected)"), DeviceFound = hasNvidia });
-                        break;
-                    default:
-                        options.Add(new HwAccelOption { Value = m, Label = m.ToUpperInvariant(), DeviceFound = false });
-                        break;
+                    case "vaapi": found = firstRender != null; device = firstRender; label = "Intel / AMD (VAAPI)"; break;
+                    case "qsv":   found = firstRender != null; device = firstRender; label = "Intel QuickSync (QSV)"; break;
+                    case "vdpau": found = firstRender != null; device = firstRender; label = "VDPAU"; break;
+                    case "drm":   found = firstRender != null; device = firstRender; label = "DRM"; break;
+                    case "amf":   found = firstRender != null; device = firstRender; label = "AMD (AMF)"; break;
+                    case "vulkan": found = firstRender != null || hasNvidia; label = "Vulkan"; break;
+                    case "opencl": found = firstRender != null || hasNvidia; label = "OpenCL"; break;
+                    case "cuda":  found = hasNvidia; label = "NVIDIA (CUDA)"; break;
+                    case "nvdec": found = hasNvidia; label = "NVIDIA (NVDEC)"; break;
+                    default:      found = false; label = m.ToUpperInvariant(); break;
+                }
+                if (found)
+                {
+                    options.Add(new HwAccelOption
+                    {
+                        Value = m,
+                        Label = device != null ? $"{label} ({device})" : label,
+                        DeviceFound = true,
+                        Device = device
+                    });
                 }
             }
         }
@@ -84,9 +87,6 @@ public class HardwareController : ControllerBase
 
         return Ok(options);
     }
-
-    private static string LabelFor(string name, string? device) =>
-        device != null ? $"{name} ({device})" : $"{name} (no /dev/dri device passed in)";
 
     private async Task<List<string>> GetFfmpegHwAccelsAsync()
     {

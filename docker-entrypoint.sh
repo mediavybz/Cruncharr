@@ -27,7 +27,16 @@ if [ "$(id -u)" = "0" ]; then
     chown -R "${PUID}:${PGID}" /config /tmp/cruncharr 2>/dev/null || true
 
     echo "[Cruncharr] Directory setup complete. Starting API as ${PUID}:${PGID}..."
-    exec su-exec "${PUID}:${PGID}" ./cruncharr-api "$@"
+    # Drop privileges with whichever helper the base image ships (gosu on Debian,
+    # su-exec on Alpine).
+    if command -v gosu >/dev/null 2>&1; then
+        exec gosu "${PUID}:${PGID}" ./cruncharr-api "$@"
+    elif command -v su-exec >/dev/null 2>&1; then
+        exec su-exec "${PUID}:${PGID}" ./cruncharr-api "$@"
+    else
+        echo "[Cruncharr] WARNING: no gosu/su-exec found; running as root."
+        exec ./cruncharr-api "$@"
+    fi
 else
     # Already running as a non-root user (e.g. compose `user:` override). Just run;
     # the mounts must already be writable by this user.

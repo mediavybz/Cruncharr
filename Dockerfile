@@ -1,5 +1,5 @@
-# Build stage
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
+# Build stage (glibc SDK so the self-contained app matches the Debian runtime base)
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 ARG TARGETARCH
 
@@ -15,59 +15,42 @@ RUN dotnet restore src/Cruncharr.API/Cruncharr.API.csproj \
 # Copy source code
 COPY src/ src/
 
-# Build and publish API (self-contained trimmed single-file)
-# TARGETARCH=amd64 -> linux-musl-x64, TARGETARCH=arm64 -> linux-musl-arm64
-RUN if [ "$TARGETARCH" = "amd64" ]; then RID=linux-musl-x64; elif [ "$TARGETARCH" = "arm64" ]; then RID=linux-musl-arm64; else RID=linux-musl-$TARGETARCH; fi \
+# Build and publish API + CLI (self-contained trimmed single-file, glibc RID)
+# TARGETARCH=amd64 -> linux-x64, arm64 -> linux-arm64
+RUN if [ "$TARGETARCH" = "amd64" ]; then RID=linux-x64; elif [ "$TARGETARCH" = "arm64" ]; then RID=linux-arm64; else RID=linux-$TARGETARCH; fi \
     && echo "Building for $RID" \
     && dotnet publish src/Cruncharr.API/Cruncharr.API.csproj -c Release -o /app/publish \
-    --self-contained true \
-    --runtime $RID \
-    /p:PublishSingleFile=true \
-    /p:PublishTrimmed=true \
-    /p:TrimMode=partial \
-    /p:InvariantGlobalization=true
-
-# Build and publish CLI
-RUN if [ "$TARGETARCH" = "amd64" ]; then RID=linux-musl-x64; elif [ "$TARGETARCH" = "arm64" ]; then RID=linux-musl-arm64; else RID=linux-musl-$TARGETARCH; fi \
-    && echo "Building CLI for $RID" \
+       --self-contained true --runtime $RID \
+       /p:PublishSingleFile=true /p:PublishTrimmed=true /p:TrimMode=partial /p:InvariantGlobalization=true \
     && dotnet publish src/Cruncharr.CLI/Cruncharr.CLI.csproj -c Release -o /app/cli \
-    --self-contained true \
-    --runtime $RID \
-    /p:PublishSingleFile=true \
-    /p:PublishTrimmed=true \
-    /p:TrimMode=partial \
-    /p:InvariantGlobalization=true
+       --self-contained true --runtime $RID \
+       /p:PublishSingleFile=true /p:PublishTrimmed=true /p:TrimMode=partial /p:InvariantGlobalization=true
 
-# Runtime stage
-FROM alpine:3.21
+# Runtime stage (Debian glibc - runs the BtbN full-GPU ffmpeg build)
+FROM debian:bookworm-slim
+ARG TARGETARCH
 
-# Install runtime dependencies
-# Note: icu-libs removed via InvariantGlobalization=true
-RUN apk add --no-cache \
-    ca-certificates \
-    libstdc++ \
-    libgcc \
-    ffmpeg \
-    mkvtoolnix \
-    curl \
-    unzip \
-    su-exec
-
-# Build mp4decrypt (Bento4) from source for Widevine decryption
-RUN apk add --no-cache --virtual .build-deps \
-    cmake \
-    make \
-    g++ \
-    git \
+# Runtime deps + a full-GPU ffmpeg (NVENC/CUDA/VAAPI/QSV/Vulkan) from BtbN static
+# builds, plus mp4decrypt (Bento4) built from source. Build-only deps are purged
+# afterwards to keep the image lean.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl xz-utils mkvtoolnix gosu \
+        cmake make g++ git \
+    && if [ "$TARGETARCH" = "arm64" ]; then FF=linuxarm64; else FF=linux64; fi \
+    && echo "Fetching BtbN ffmpeg ($FF, full GPU support)" \
+    && curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${FF}-gpl.tar.xz" -o /tmp/ffmpeg.tar.xz \
+    && mkdir -p /tmp/ff && tar -xf /tmp/ffmpeg.tar.xz -C /tmp/ff --strip-components=1 \
+    && cp /tmp/ff/bin/ffmpeg /tmp/ff/bin/ffprobe /usr/local/bin/ \
+    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
+    && rm -rf /tmp/ff /tmp/ffmpeg.tar.xz \
     && git clone --depth 1 https://github.com/axiomatic-systems/Bento4.git /tmp/bento4 \
-    && cd /tmp/bento4 \
-    && mkdir build && cd build \
+    && cd /tmp/bento4 && mkdir build && cd build \
     && cmake .. -DCMAKE_BUILD_TYPE=Release \
-    && make -j$(nproc) \
-    && cp /tmp/bento4/build/mp4decrypt /usr/local/bin/ \
-    && chmod +x /usr/local/bin/mp4decrypt \
+    && make -j"$(nproc)" \
+    && cp /tmp/bento4/build/mp4decrypt /usr/local/bin/ && chmod +x /usr/local/bin/mp4decrypt \
     && rm -rf /tmp/bento4 \
-    && apk del .build-deps
+    && apt-get purge -y cmake make g++ git && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create directories (matching original app structure)
 RUN mkdir -p /downloads /config /tools /widevine /tmp/cruncharr /app/presets /app/fonts /app/video
@@ -85,10 +68,9 @@ RUN chmod +x ./docker-entrypoint.sh
 # Copy web UI
 COPY --from=build /app/publish/wwwroot ./wwwroot
 
-# Create default non-root user (uid 1000). The container starts as root so the
-# entrypoint can chown the mounted volumes to PUID/PGID, then drops privileges
-# with su-exec. This makes host bind-mounts work regardless of their ownership.
-RUN adduser -D -u 1000 cruncharr && \
+# Default non-root user (uid 1000). Container starts as root so the entrypoint can
+# chown the mounted volumes to PUID/PGID, then drops privileges with gosu.
+RUN useradd -u 1000 -m -s /bin/sh cruncharr && \
     chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app
 
 # Set environment
@@ -102,12 +84,11 @@ ENV PATH="/app:/tools:/usr/local/bin:${PATH}"
 EXPOSE 8585
 
 # Volumes - only user-facing directories
-# Internal directories (/tmp/cruncharr, /app/presets, /app/fonts, /app/video) stay inside container
 VOLUME ["/downloads", "/config", "/tools", "/widevine"]
 
-# Health check using busybox wget (avoids curl ~5MB)
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget -qO- http://localhost:8585/api/v1/health || exit 1
+    CMD curl -fsS http://localhost:8585/api/v1/health || exit 1
 
 # Entrypoint script creates directories then starts API
 ENTRYPOINT ["./docker-entrypoint.sh"]

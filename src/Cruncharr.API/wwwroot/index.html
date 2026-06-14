@@ -1631,6 +1631,9 @@ MAINTENANCE NOTES:
             border-radius: 6px;
             transition: width 0.4s ease;
         }
+        /* Completed reads as done (green), errored as red - not in-progress orange. */
+        .progress-bar.complete { background: var(--accent-green); }
+        .progress-bar.error { background: var(--accent-red); }
 
         /* Download / episode rows: hover lift */
         .download-item, .episode-multi-dub {
@@ -2516,6 +2519,7 @@ MAINTENANCE NOTES:
                     const isError = state === 'error';
                     const isDownloading = state === 'downloading';
                     const isPaused = state === 'paused';
+                    const isDone = state === 'done';
                     return `
                         <div class="download-item">
                             <div class="download-thumb">
@@ -2538,7 +2542,7 @@ MAINTENANCE NOTES:
                                     </div>
                                 </div>
                                 <div class="progress-container">
-                                    <div class="progress-bar" style="width: ${item.downloadProgress?.percent || 0}%"></div>
+                                    <div class="progress-bar ${isDone ? 'complete' : ''} ${isError ? 'error' : ''}" style="width: ${isDone ? 100 : (item.downloadProgress?.percent || 0)}%"></div>
                                 </div>
                                 <div class="download-footer">
                                     <span>${getDoingText(item.downloadProgress)}</span>

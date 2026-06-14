@@ -37,47 +37,37 @@ public class HardwareController : ControllerBase
 
         try
         {
-            // Devices passed into the container (GPU passthrough)
-            var renderNodes = Directory.Exists("/dev/dri")
-                ? Directory.GetFiles("/dev/dri").Where(f => Path.GetFileName(f).StartsWith("renderD", StringComparison.Ordinal)).OrderBy(f => f).ToList()
-                : new List<string>();
-            var firstRender = renderNodes.FirstOrDefault();
-            bool hasNvidia = System.IO.File.Exists("/dev/nvidia0")
-                || (Directory.Exists("/dev") && Directory.GetFiles("/dev").Any(f => Path.GetFileName(f).StartsWith("nvidia", StringComparison.Ordinal)));
+            // Detect the ACTUAL GPU(s) passed into the container by reading the PCI vendor
+            // of each /dev/dri render node (/sys/class/drm/<node>/device/vendor), plus any
+            // NVIDIA device. This is what lets us show only the accelerators the connected
+            // hardware supports (e.g. an Intel card offers VAAPI + QSV, never AMD's AMF).
+            var gpus = DetectGpus();
+            var intel = gpus.FirstOrDefault(g => g.Vendor == "intel");
+            var amd = gpus.FirstOrDefault(g => g.Vendor == "amd");
+            var nvidia = gpus.FirstOrDefault(g => g.Vendor == "nvidia");
+            // A render node whose vendor we couldn't read: VAAPI still works generically.
+            var unknownRender = gpus.FirstOrDefault(g => g.Vendor == "unknown" && g.Device.StartsWith("/dev/dri", StringComparison.Ordinal));
 
-            var methods = await GetFfmpegHwAccelsAsync();
+            bool hasIntel = intel.Device != null;
+            bool hasAmd = amd.Device != null;
+            bool hasNvidia = nvidia.Device != null;
+            bool anyVaapi = hasIntel || hasAmd || unknownRender.Device != null;
+            var vaapiDevice = intel.Device ?? amd.Device ?? unknownRender.Device;
 
-            // Only surface methods whose underlying device is actually present in the
-            // container. Methods ffmpeg supports but with no matching device passed in are
-            // omitted entirely, so the dropdown lists only GPUs available right now.
-            foreach (var m in methods)
+            var methods = (await GetFfmpegHwAccelsAsync()).ToHashSet();
+
+            void Add(string value, string label, string? device) =>
+                options.Add(new HwAccelOption { Value = value, Label = device != null ? $"{label} ({device})" : label, DeviceFound = true, Device = device });
+
+            // Per-vendor, only when ffmpeg supports the method AND the matching GPU exists.
+            if (methods.Contains("cuda") && hasNvidia) Add("cuda", "NVIDIA (CUDA)", nvidia.Device);
+            else if (methods.Contains("nvdec") && hasNvidia) Add("nvdec", "NVIDIA (NVDEC)", nvidia.Device);
+            if (methods.Contains("qsv") && hasIntel) Add("qsv", "Intel QuickSync (QSV)", intel.Device);
+            if (methods.Contains("amf") && hasAmd) Add("amf", "AMD (AMF)", amd.Device);
+            if (methods.Contains("vaapi") && anyVaapi)
             {
-                bool found;
-                string label;
-                string? device = null;
-                switch (m)
-                {
-                    case "vaapi": found = firstRender != null; device = firstRender; label = "Intel / AMD (VAAPI)"; break;
-                    case "qsv":   found = firstRender != null; device = firstRender; label = "Intel QuickSync (QSV)"; break;
-                    case "vdpau": found = firstRender != null; device = firstRender; label = "VDPAU"; break;
-                    case "drm":   found = firstRender != null; device = firstRender; label = "DRM"; break;
-                    case "amf":   found = firstRender != null; device = firstRender; label = "AMD (AMF)"; break;
-                    case "vulkan": found = firstRender != null || hasNvidia; label = "Vulkan"; break;
-                    case "opencl": found = firstRender != null || hasNvidia; label = "OpenCL"; break;
-                    case "cuda":  found = hasNvidia; label = "NVIDIA (CUDA)"; break;
-                    case "nvdec": found = hasNvidia; label = "NVIDIA (NVDEC)"; break;
-                    default:      found = false; label = m.ToUpperInvariant(); break;
-                }
-                if (found)
-                {
-                    options.Add(new HwAccelOption
-                    {
-                        Value = m,
-                        Label = device != null ? $"{label} ({device})" : label,
-                        DeviceFound = true,
-                        Device = device
-                    });
-                }
+                var vendorName = hasIntel ? "Intel" : hasAmd ? "AMD" : "Intel/AMD";
+                Add("vaapi", $"{vendorName} (VAAPI)", vaapiDevice);
             }
         }
         catch (Exception ex)
@@ -86,6 +76,59 @@ public class HardwareController : ControllerBase
         }
 
         return Ok(options);
+    }
+
+    // Enumerate GPUs actually present in the container: each /dev/dri render node tagged
+    // with its PCI vendor (from /sys/class/drm/<node>/device/vendor), plus any NVIDIA
+    // device. Vendor IDs: Intel 0x8086, AMD 0x1002, NVIDIA 0x10de.
+    private List<(string Vendor, string Device)> DetectGpus()
+    {
+        var gpus = new List<(string Vendor, string Device)>();
+        try
+        {
+            if (Directory.Exists("/dev/dri"))
+            {
+                foreach (var node in Directory.GetFiles("/dev/dri")
+                             .Where(f => Path.GetFileName(f).StartsWith("renderD", StringComparison.Ordinal))
+                             .OrderBy(f => f))
+                {
+                    var name = Path.GetFileName(node);
+                    var vendor = "unknown";
+                    try
+                    {
+                        var vendorFile = $"/sys/class/drm/{name}/device/vendor";
+                        if (System.IO.File.Exists(vendorFile))
+                        {
+                            var id = (System.IO.File.ReadAllText(vendorFile).Trim()).ToLowerInvariant();
+                            vendor = id switch
+                            {
+                                "0x8086" => "intel",
+                                "0x1002" => "amd",
+                                "0x10de" => "nvidia",
+                                _ => "unknown"
+                            };
+                        }
+                    }
+                    catch { /* vendor unreadable - leave as unknown */ }
+                    gpus.Add((vendor, node));
+                }
+            }
+
+            // NVIDIA's proprietary driver exposes /dev/nvidia0 (etc.) rather than a DRM node.
+            bool nvDev = System.IO.File.Exists("/dev/nvidia0")
+                || (Directory.Exists("/dev") && Directory.GetFiles("/dev")
+                        .Select(Path.GetFileName)
+                        .Any(n => n != null && n.StartsWith("nvidia", StringComparison.Ordinal) && n.Length > 6 && char.IsDigit(n[^1])));
+            if (nvDev && !gpus.Any(g => g.Vendor == "nvidia"))
+            {
+                gpus.Add(("nvidia", System.IO.File.Exists("/dev/nvidia0") ? "/dev/nvidia0" : "/dev/nvidia"));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GPU detection failed");
+        }
+        return gpus;
     }
 
     private async Task<List<string>> GetFfmpegHwAccelsAsync()

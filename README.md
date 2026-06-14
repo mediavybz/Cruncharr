@@ -67,6 +67,44 @@ docker-compose up -d
 | `/downloads` | Downloaded videos | Yes |
 | `/widevine` | Widevine CDM files (device_private_key.pem, device_client_id_blob.bin) | For premium content |
 
+## Hardware Acceleration (GPU)
+
+The image ships a full-GPU **ffmpeg** build (NVIDIA NVENC/CUDA, Intel QSV, AMD
+VAAPI/AMF, Vulkan). It is used by the **Sync HW Accel** option
+(Settings → Muxing). The dropdown lists **only the GPUs currently available to
+the container** — if you don't pass a GPU in, only "None (CPU)" appears.
+
+**Intel / AMD (VAAPI, QSV, AMF)** — pass the render device:
+
+```yaml
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "video"
+      - "render"
+```
+
+**NVIDIA (NVENC/CUDA)** — requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+on the host:
+
+```yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+After (re)creating the container, open **Settings → Muxing → Sync HW Accel** and
+the detected GPU(s) will be listed (e.g. `NVIDIA (CUDA)` or
+`Intel / AMD (VAAPI) (/dev/dri/renderD128)`).
+
+> The runtime image is Debian-based; ffmpeg is a BtbN GPL build. NVIDIA encode
+> needs the host driver injected by the NVIDIA Container Toolkit — the image
+> alone does not bundle the driver.
+
 ## Configuration
 
 ### Config File
@@ -136,6 +174,8 @@ The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 - **Stream Endpoints**: Configurable device endpoints (Android TV, Web, Console) with working defaults
 - **Languages**: Select audio dubs and subtitle languages (default: Japanese audio, English subs)
 - **Muxing**: Automatic muxing with ffmpeg/mkvtoolnix, MP4/MP3 output options
+- **Hardware acceleration**: Full-GPU ffmpeg (NVENC/CUDA, QSV, VAAPI/AMF, Vulkan); GPU picker for sync that lists only the devices passed into the container
+- **Themes**: Multiple selectable UI themes (Dark, Light, Cinematic, AMOLED, Nebula) with a centralized design-token system
 - **Settings**: Full settings panel with download, queue, history, notifications, and appearance options
 - **Notifications**: Webhook support for completion/failure events
 

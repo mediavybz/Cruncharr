@@ -1151,7 +1151,7 @@ public class DownloadService : IDownloadService
                             await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupOutputPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
 
                             // Post-process encoding for this group if configured
-                            if (!string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
+                            if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                             {
                                 progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = $"Encoding {locale}..." });
                                 await EncodeOutputAsync(groupOutputPath, config.Download.EncodingPreset, cancellationToken);
@@ -1165,7 +1165,7 @@ public class DownloadService : IDownloadService
                 }
 
                 // Post-process encoding if configured (for non-separate mode)
-                if (!config.Download.KeepDubsSeparate && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
+                if (config.Download.EncodeEnabled && !config.Download.KeepDubsSeparate && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                 {
                     progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
                     await EncodeOutputAsync(outputPath, config.Download.EncodingPreset, cancellationToken);
@@ -1340,9 +1340,10 @@ public class DownloadService : IDownloadService
             var request = HttpClientWrapper.CreateRequest(endpoint, HttpMethod.Get, true, token.access_token);
             request.Headers.Add("User-Agent", userAgent);
 
-            _logger?.LogInformation("[PLAYBACK REQUEST] Endpoint={Endpoint}, TokenPrefix={TokenPrefix}, UserAgent={UserAgent}",
+            // Do NOT log any portion of the access token: diagnostics logs are exposed
+            // unauthenticated via /api/v1/diagnostics/logs.
+            _logger?.LogInformation("[PLAYBACK REQUEST] Endpoint={Endpoint}, UserAgent={UserAgent}",
                 endpoint,
-                token.access_token?[..Math.Min(20, token.access_token.Length)] + "...",
                 userAgent);
 
             var (isOk, content, error, headers) = await _httpClient.SendRequestWithHeadersAsync(request);
@@ -2724,17 +2725,34 @@ public class DownloadService : IDownloadService
         }
 
         var tempOutput = inputPath + ".encoding.mkv";
-        var args = new List<string>{
+        var args = new List<string>
+        {
+            "-nostdin",
+            "-hide_banner",
             "-y",
             "-i", inputPath,
-            "-c:v", preset.Codec ?? "libx264",
-            "-crf", preset.Crf.ToString(),
-            "-vf", $"scale={preset.Resolution}",
-            "-r", preset.FrameRate ?? "24000/1001"
         };
 
-        args.AddRange(preset.AdditionalParameters);
-        args.Add(tempOutput); ;
+        if (!string.IsNullOrWhiteSpace(preset.Codec))
+        {
+            args.Add("-c:v");
+            args.Add(preset.Codec!);
+            // Quality flag depends on the codec (CRF for software, -cq/-global_quality/-rc
+            // for the various hardware encoders); mirrors upstream Helpers.GetQualityOption.
+            args.AddRange(GetEncodeQualityOption(preset));
+            args.Add("-vf");
+            args.Add($"scale={preset.Resolution},fps={preset.FrameRate}");
+        }
+
+        // AdditionalParameters (e.g. "-map 0", which maps EVERY stream so all audio/sub
+        // tracks survive the re-encode) are stored as single strings that may hold several
+        // whitespace-separated tokens. ffmpeg needs each token as its own argv element, so
+        // split first — passing "-map 0" as one element makes ffmpeg read the option name as
+        // "map 0" and bail with "Unrecognized option" (mirrors upstream SplitArguments).
+        foreach (var param in preset.AdditionalParameters)
+            args.AddRange(SplitArguments(param));
+
+        args.Add(tempOutput);
 
         await RunProcessAsync(ffmpegPath, args, cancellationToken);
 
@@ -2744,6 +2762,45 @@ public class DownloadService : IDownloadService
             File.Move(tempOutput, inputPath);
             _logger?.LogInformation("Encoded output to {Path} with preset {Preset}", inputPath, presetName);
         }
+        else
+        {
+            _logger?.LogWarning("Encoding produced no output for {Path} with preset {Preset}; keeping muxed file", inputPath, presetName);
+        }
+    }
+
+    // Codec-aware quality option (mirrors upstream Helpers.GetQualityOption).
+    private static IEnumerable<string> GetEncodeQualityOption(VideoPreset preset)
+    {
+        if (preset.Crf == -1) return Array.Empty<string>();
+        var q = preset.Crf.ToString();
+        return preset.Codec switch
+        {
+            "h264_nvenc" or "hevc_nvenc" => preset.Crf is >= 0 and <= 51 ? new[] { "-cq", q } : Array.Empty<string>(),
+            "h264_qsv" or "hevc_qsv" => preset.Crf is >= 1 and <= 51 ? new[] { "-global_quality", q } : Array.Empty<string>(),
+            "h264_amf" => preset.Crf is >= 0 and <= 51 ? new[] { "-rc", "cqp", "-qp_i", q, "-qp_p", q, "-qp_b", q } : Array.Empty<string>(),
+            "hevc_amf" => preset.Crf is >= 0 and <= 51 ? new[] { "-rc", "cqp", "-qp_i", q, "-qp_p", q } : Array.Empty<string>(),
+            _ => preset.Crf >= 0 ? new[] { "-crf", q } : Array.Empty<string>()
+        };
+    }
+
+    // Split a single parameter string into ffmpeg argv tokens, honoring double quotes
+    // (mirrors upstream Helpers.SplitArguments).
+    private static IEnumerable<string> SplitArguments(string commandLine)
+    {
+        var args = new List<string>();
+        var current = new System.Text.StringBuilder();
+        bool inQuotes = false;
+        foreach (char c in commandLine)
+        {
+            if (c == '"') { inQuotes = !inQuotes; continue; }
+            if (char.IsWhiteSpace(c) && !inQuotes)
+            {
+                if (current.Length > 0) { args.Add(current.ToString()); current.Clear(); }
+            }
+            else current.Append(c);
+        }
+        if (current.Length > 0) args.Add(current.ToString());
+        return args;
     }
 
     private string? FindExecutable(string name)

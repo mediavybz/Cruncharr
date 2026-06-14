@@ -30,7 +30,92 @@ public class ConfigController : ControllerBase
     {
         try
         {
-            return Ok(new
+            return Ok(BuildConfigDto(_config));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get config");
+            return StatusCode(500, new { Error = "Failed to get config", Message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get the factory-default configuration (the values a reset restores).
+    /// </summary>
+    [HttpGet("defaults")]
+    public ActionResult GetDefaults()
+    {
+        try
+        {
+            return Ok(BuildConfigDto(new CruncharrConfig()));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get default config");
+            return StatusCode(500, new { Error = "Failed to get default config", Message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Reset every setting to its default. Crunchyroll login (email/password),
+    /// the saved stream endpoints, and the token file path are preserved so the
+    /// user is not logged out.
+    /// </summary>
+    [HttpPost("reset")]
+    public IActionResult ResetConfig()
+    {
+        try
+        {
+            lock (_configLock)
+            {
+                var email = _config.Crunchyroll?.Email ?? "";
+                var password = _config.Crunchyroll?.Password ?? "";
+                var ep1 = _config.Crunchyroll?.StreamEndpoint;
+                var ep2 = _config.Crunchyroll?.StreamEndpointSecondary;
+                var tokenPath = _config.TokenFilePath;
+
+                var fresh = new CruncharrConfig();
+                _config.Crunchyroll = fresh.Crunchyroll;
+                _config.Crunchyroll.Email = email;
+                _config.Crunchyroll.Password = password;
+                if (ep1 != null) _config.Crunchyroll.StreamEndpoint = ep1;
+                if (ep2 != null) _config.Crunchyroll.StreamEndpointSecondary = ep2;
+                _config.Download = fresh.Download;
+                _config.History = fresh.History;
+                _config.HistoryPageProperties = fresh.HistoryPageProperties;
+                _config.SeasonsPageProperties = fresh.SeasonsPageProperties;
+                _config.Queue = fresh.Queue;
+                _config.Notifications = fresh.Notifications;
+                _config.Sonarr = fresh.Sonarr;
+                _config.Proxy = fresh.Proxy;
+                _config.FlareSolverr = fresh.FlareSolverr;
+                _config.Calendar = fresh.Calendar;
+                _config.Appearance = fresh.Appearance;
+                _config.AddDownload = fresh.AddDownload;
+                _config.LogMode = fresh.LogMode;
+                _config.RemoveFinishedDownload = fresh.RemoveFinishedDownload;
+                _config.TokenFilePath = tokenPath;
+
+                var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+                configPath = ValidatePath(configPath, "ConfigPath");
+                _config.Save(configPath);
+                _logger.LogInformation("Configuration reset to defaults (login preserved), saved to {Path}", configPath);
+            }
+            return Ok(new { Success = true, Message = "Settings reset to default" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to reset configuration");
+            return StatusCode(500, new { Success = false, Message = ex.Message });
+        }
+    }
+
+    // Builds the sanitized config DTO returned by GET /config and GET /config/defaults.
+    // The parameter is named _config so it shadows the instance field, letting the
+    // (unchanged) initializer below read either the live config or a fresh default one.
+    private object BuildConfigDto(CruncharrConfig _config)
+    {
+        return new
             {
                 Crunchyroll = new
                 {
@@ -245,13 +330,7 @@ public class ConfigController : ControllerBase
                     RemoveFinishedDownload = _config.RemoveFinishedDownload,
                     TokenFilePath = _config.TokenFilePath ?? ""
                 }
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get config");
-            return StatusCode(500, new { Error = "Failed to get config", Message = ex.Message });
-        }
+            };
     }
 
     /// <summary>

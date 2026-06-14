@@ -111,6 +111,48 @@ public class Program
             app.UseHttpsRedirection();
         }
         app.UseCors("AllowSpecific");
+
+        // Optional API-key gate. Off by default (no env var) so existing setups keep
+        // working. When CRUNCHARR_API_KEY is set, every /api/* call must present the key
+        // via the X-Api-Key header, an Authorization: Bearer <key>, or ?apiKey=. Health
+        // checks and CORS preflight are exempt so the Docker healthcheck and browser
+        // still function. This makes the container safe to expose on a shared network.
+        var requiredApiKey = Environment.GetEnvironmentVariable("CRUNCHARR_API_KEY");
+        if (!string.IsNullOrWhiteSpace(requiredApiKey))
+        {
+            var requiredKeyBytes = System.Text.Encoding.UTF8.GetBytes(requiredApiKey);
+            app.Use(async (ctx, next) =>
+            {
+                var path = ctx.Request.Path.Value ?? "";
+                var isApi = path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase);
+                var isHealth = path.StartsWith("/api/v1/health", StringComparison.OrdinalIgnoreCase);
+                if (isApi && !isHealth && !HttpMethods.IsOptions(ctx.Request.Method))
+                {
+                    var provided = ctx.Request.Headers["X-Api-Key"].FirstOrDefault();
+                    if (string.IsNullOrEmpty(provided))
+                    {
+                        var auth = ctx.Request.Headers["Authorization"].FirstOrDefault();
+                        if (auth != null && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                            provided = auth.Substring("Bearer ".Length).Trim();
+                    }
+                    if (string.IsNullOrEmpty(provided))
+                        provided = ctx.Request.Query["apiKey"].FirstOrDefault();
+
+                    var providedBytes = System.Text.Encoding.UTF8.GetBytes(provided ?? "");
+                    var ok = providedBytes.Length == requiredKeyBytes.Length &&
+                             System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(providedBytes, requiredKeyBytes);
+                    if (!ok)
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        ctx.Response.Headers["WWW-Authenticate"] = "ApiKey";
+                        await ctx.Response.WriteAsJsonAsync(new { error = "Unauthorized", message = "A valid API key is required (X-Api-Key header)." });
+                        return;
+                    }
+                }
+                await next();
+            });
+        }
+
         app.UseAuthorization();
         app.MapControllers();
 

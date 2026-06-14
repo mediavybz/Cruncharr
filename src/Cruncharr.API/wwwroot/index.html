@@ -2086,6 +2086,35 @@ MAINTENANCE NOTES:
     <div class="toast-container" id="toast-container"></div>
 
     <script>
+        // API-key support. If the server is started with CRUNCHARR_API_KEY set, every
+        // /api/* call must carry the key. We attach it from localStorage and, on a 401,
+        // prompt for it once and reload. When no key is configured server-side, nothing
+        // here changes behavior.
+        (function () {
+            const KEY = 'cruncharrApiKey';
+            const realFetch = window.fetch.bind(window);
+            window.fetch = function (input, init) {
+                init = init || {};
+                const url = typeof input === 'string' ? input : (input && input.url) || '';
+                const isApi = url.indexOf('/api/') !== -1;
+                if (isApi) {
+                    const k = localStorage.getItem(KEY);
+                    if (k) {
+                        const headers = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+                        if (!headers.has('X-Api-Key')) headers.set('X-Api-Key', k);
+                        init.headers = headers;
+                    }
+                }
+                return realFetch(input, init).then(function (res) {
+                    if (res && res.status === 401 && isApi) {
+                        const entered = prompt('This Cruncharr server requires an API key. Enter it:');
+                        if (entered) { localStorage.setItem(KEY, entered); location.reload(); }
+                    }
+                    return res;
+                });
+            };
+        })();
+
         let currentPage = 'downloads';
         let queueData = [];
         let historyData = [];
@@ -4193,8 +4222,10 @@ MAINTENANCE NOTES:
                 <div id="settings-content">
                     <div class="loading"><div class="spinner"></div>Loading settings...</div>
                 </div>
-                <div style="margin-top:20px;">
+                <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap;">
                     <button class="header-btn primary" onclick="saveSettings()">Save Settings</button>
+                    <button class="header-btn" onclick="resetCurrentTab()" title="Reset only the settings on this tab to their defaults">Reset Tab to Default</button>
+                    <button class="header-btn" onclick="resetAllSettings()" title="Reset every setting to default (keeps you logged in)" style="margin-left:auto; color:var(--accent-orange);">Reset ALL Settings</button>
                 </div>
             `;
             fetchConfig().then(() => renderSettingsTab());
@@ -5210,6 +5241,44 @@ MAINTENANCE NOTES:
                 }
                 else showToast('Failed to save settings', 'error');
             } catch (e) { showToast('Error saving settings', 'error'); }
+        }
+
+        // Reset just the current settings tab to its defaults. We load the factory
+        // defaults, drop them into the in-memory config, re-render this tab, then call
+        // saveSettings() - which only collects+POSTs THIS tab's fields, so the server
+        // merge leaves every other tab untouched. Finally reload the real config.
+        async function resetCurrentTab() {
+            const tabName = settingsTab;
+            if (!confirm('Reset the "' + tabName + '" tab to default settings?')) return;
+            try {
+                const res = await fetch('/api/v1/config/defaults');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                config = await res.json();
+                renderSettingsTab();
+                await saveSettings();
+                await fetchConfig();
+                renderSettingsTab();
+                showToast('"' + tabName + '" tab reset to default', 'success');
+            } catch (e) {
+                console.error('Reset tab failed:', e);
+                showToast('Failed to reset tab', 'error');
+            }
+        }
+
+        // Reset every setting to default. The backend preserves Crunchyroll login,
+        // saved stream endpoints, and the token path so the user stays logged in.
+        async function resetAllSettings() {
+            if (!confirm('Reset ALL settings to default?\n\nYour Crunchyroll login is kept, but every other setting reverts. This cannot be undone.')) return;
+            try {
+                const res = await fetch('/api/v1/config/reset', { method: 'POST' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                await fetchConfig();
+                renderSettingsTab();
+                showToast('All settings reset to default', 'success');
+            } catch (e) {
+                console.error('Reset all failed:', e);
+                showToast('Failed to reset settings', 'error');
+            }
         }
 
         async function testWebhook() {

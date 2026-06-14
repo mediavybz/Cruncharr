@@ -1307,6 +1307,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 var tokenFile = GetTokenFilePath();
                 Directory.CreateDirectory(Path.GetDirectoryName(tokenFile)!);
                 File.WriteAllText(tokenFile, JsonConvert.SerializeObject(Token, Formatting.Indented));
+                Cruncharr.Core.Utils.SecureFile.Restrict(tokenFile);
                 _logger?.LogDebug("Saved token to {Path}", tokenFile);
             }
         }

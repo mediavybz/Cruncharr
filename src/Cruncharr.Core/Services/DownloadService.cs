@@ -164,7 +164,10 @@ public class DownloadService : IDownloadService
                 ? episode.SelectedDubs
                 : config.Download.DubLanguages;
 
+            // DownloadFirstAvailableDub: ignore the AudioLocale shortcut and pick strictly
+            // by requested priority so we end up with the first *available* requested dub.
             if (currentVersion == null ||
+                config.Download.DownloadFirstAvailableDub ||
                 (dubLangs.Count > 0 && !dubLangs.Any(d => d.Equals(episode.AudioLocale, StringComparison.OrdinalIgnoreCase))))
             {
 
@@ -244,7 +247,7 @@ public class DownloadService : IDownloadService
 
         // Get playback data (use beta API)
         progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 20, Doing = "Fetching playback data..." });
-        var playbackData = await GetPlaybackDataAsync(mediaGuid, true, cancellationToken);
+        var playbackData = await GetPlaybackDataAsync(mediaGuid, true, cancellationToken, config);
         if (playbackData == null)
         {
             return new DownloadResult { Success = false, ErrorMessage = "Failed to fetch playback data" };
@@ -340,6 +343,7 @@ public class DownloadService : IDownloadService
             AudioLanguage = config.Download.DefaultAudio,
             SonarrSeries = sonarrSeries,
             SonarrEpisode = sonarrEpisode,
+            UseSonarrNumbering = config.Sonarr.UseSonarrNumbering,
             SelectedDubs = episode.SelectedDubs?.Count > 0
                 ? episode.SelectedDubs
                 : config.Download.DubLanguages
@@ -406,7 +410,10 @@ public class DownloadService : IDownloadService
                 var dashSelectedDubs = episode.SelectedDubs?.Count > 0
                     ? episode.SelectedDubs
                     : config.Download.DubLanguages;
-                if (!config.Download.NoAudio && episode.Versions != null && episode.Versions.Count > 1 &&
+                // DownloadFirstAvailableDub limits the result to a single (first-available) dub,
+                // so skip downloading any additional dubs when it is enabled.
+                if (!config.Download.NoAudio && !config.Download.DownloadFirstAvailableDub &&
+                    episode.Versions != null && episode.Versions.Count > 1 &&
                     (config.Download.DownloadMultipleDubs || dashSelectedDubs.Count > 1))
                 {
                     var primaryLocale = episode.AudioLocale;
@@ -429,7 +436,7 @@ public class DownloadService : IDownloadService
                         try
                         {
                             progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 78, Doing = $"Downloading audio ({dub})..." });
-                            var dubPlayback = await GetPlaybackDataAsync(dubGuid, true, cancellationToken);
+                            var dubPlayback = await GetPlaybackDataAsync(dubGuid, true, cancellationToken, config);
 
                             // Merge this version's subtitles into the pool. The primary
                             // playback is often a dub whose (TV) endpoint omits most subs,
@@ -438,12 +445,14 @@ public class DownloadService : IDownloadService
                             if (dubPlayback?.Subtitles != null && dubPlayback.Subtitles.Count > 0)
                             {
                                 playbackData.Subtitles ??= new List<SubtitleInfo>();
+                                // Key on lang+CC so a Closed Caption track is not deduped away
+                                // by a regular subtitle that shares the same locale.
                                 var existingSubLangs = new HashSet<string>(
-                                    playbackData.Subtitles.Where(s => s.Lang != null).Select(s => s.Lang!),
+                                    playbackData.Subtitles.Where(s => s.Lang != null).Select(s => $"{s.Lang}|{s.IsCC}"),
                                     StringComparer.OrdinalIgnoreCase);
                                 foreach (var s in dubPlayback.Subtitles)
                                 {
-                                    if (!string.IsNullOrEmpty(s.Lang) && existingSubLangs.Add(s.Lang))
+                                    if (!string.IsNullOrEmpty(s.Lang) && existingSubLangs.Add($"{s.Lang}|{s.IsCC}"))
                                     {
                                         playbackData.Subtitles.Add(s);
                                     }
@@ -548,7 +557,8 @@ public class DownloadService : IDownloadService
 
                 // Download additional dubs if configured (skip if NoAudio is enabled)
                 // Note: Video is only downloaded once (DlVideoOnce optimization). Additional dubs reuse the same video stream.
-                if (!config.Download.NoAudio && config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1)
+                if (!config.Download.NoAudio && !config.Download.DownloadFirstAvailableDub &&
+                    config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1)
                 {
                     var primaryLocale = episode.AudioLocale;
                     // Use episode's SelectedDubs if set, otherwise fall back to config
@@ -583,7 +593,7 @@ public class DownloadService : IDownloadService
 
                         try
                         {
-                            var dubPlayback = await GetPlaybackDataAsync(dubMediaGuid, true, cancellationToken);
+                            var dubPlayback = await GetPlaybackDataAsync(dubMediaGuid, true, cancellationToken, config);
 
                             // Download sync video for timing comparison if SyncTiming is enabled
                             if (config.Download.SyncTiming && config.Download.DlVideoOnce && dubPlayback?.VideoUrl != null)
@@ -677,7 +687,7 @@ public class DownloadService : IDownloadService
 
                                 try
                                 {
-                                    var adPlayback = await GetPlaybackDataAsync(adMediaGuid, true, cancellationToken);
+                                    var adPlayback = await GetPlaybackDataAsync(adMediaGuid, true, cancellationToken, config);
                                     if (adPlayback?.AudioUrl != null)
                                     {
                                         progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 67, Doing = $"Downloading audio description ({adLocale})..." });
@@ -718,11 +728,21 @@ public class DownloadService : IDownloadService
                 }
             }
 
-            // Download subtitles
-            var subtitleFiles = new List<(string Path, string Lang)>();
+            // Download subtitles. Carries CC/Signs flags so include filters, dedup, the
+            // muxing CC flag and Signs-as-forced all work (ported from upstream
+            // CrunchyrollManager.DownloadSubtitles + SubtitleUtils).
+            var subtitleFiles = new List<(string Path, string Lang, bool Cc, bool Signs)>();
             if (!config.Download.SkipSubs && playbackData.Subtitles != null && playbackData.Subtitles.Count > 0)
             {
                 progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 80, Doing = "Downloading subtitles..." });
+                // Locales of the dubs we actually downloaded — a subtitle whose locale
+                // matches a dub (and is not CC) is a "signs/forced" track.
+                var dubLocales = new HashSet<string>(
+                    audioTrackLanguages.Select(a => a.Lang),
+                    StringComparer.OrdinalIgnoreCase);
+                // Track (lang|cc|signs) we already wrote to honor SubsDownloadDuplicate.
+                var downloadedSubKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var sub in playbackData.Subtitles)
                 {
                     var langCode = (sub.Lang ?? "unknown").Replace("-", "").ToLower();
@@ -731,35 +751,58 @@ public class DownloadService : IDownloadService
                                          (sub.Lang != null && subLangs.Contains(sub.Lang)) ||
                                          subLangs.Contains(langCode);
 
-                    if (shouldDownload && !string.IsNullOrEmpty(sub.Url))
-                    {
-                        var ext = sub.Format?.ToLower() == "ass" ? "ass" : "vtt";
-                        var subPath = Path.Combine(tempDir, $"sub_{sub.Lang}.{ext}");
+                    if (!shouldDownload || string.IsNullOrEmpty(sub.Url))
+                        continue;
 
-                        try
+                    var isCc = sub.IsCC;
+                    var isSigns = !isCc && sub.Lang != null && dubLocales.Contains(sub.Lang);
+
+                    // Include filters (upstream: skip signs unless IncludeSignsSubs, CC unless IncludeCcSubs).
+                    if ((!config.Download.IncludeSignsSubs && isSigns) || (!config.Download.IncludeCcSubs && isCc))
+                        continue;
+
+                    // Duplicate suppression: same lang+cc+signs already written → skip unless allowed.
+                    var dupKey = $"{sub.Lang}|{isCc}|{isSigns}";
+                    if (downloadedSubKeys.Contains(dupKey) && !config.Download.SubsDownloadDuplicate)
+                        continue;
+
+                    var ext = sub.Format?.ToLower() == "ass" ? "ass" : "vtt";
+                    var tag = (isCc ? "_cc" : "") + (isSigns ? "_signs" : "");
+                    var subPath = Path.Combine(tempDir, $"sub_{sub.Lang}{tag}.{ext}");
+
+                    try
+                    {
+                        var subRequest = new HttpRequestMessage(HttpMethod.Get, sub.Url);
+                        var (subOk, subContent, _) = await _httpClient.SendRequestAsync(subRequest);
+                        if (subOk && !string.IsNullOrEmpty(subContent))
                         {
-                            var subRequest = new HttpRequestMessage(HttpMethod.Get, sub.Url);
-                            var (subOk, subContent, _) = await _httpClient.SendRequestAsync(subRequest);
-                            if (subOk && !string.IsNullOrEmpty(subContent))
+                            var crLocale = Languages.FindLang(sub.Lang ?? "unknown").CrLocale;
+                            if (sub.Format?.ToLower() == "ass")
                             {
-                                if (sub.Format?.ToLower() == "vtt" && config.Download.ConvertVttToAss)
-                                {
-                                    // Convert VTT to ASS
-                                    subPath = Path.ChangeExtension(subPath, ".ass");
-                                    var assContent = ConvertVttToAss(subContent, sub.Lang ?? "unknown");
-                                    await File.WriteAllTextAsync(subPath, assContent, cancellationToken);
-                                }
-                                else
-                                {
-                                    await File.WriteAllTextAsync(subPath, subContent, cancellationToken);
-                                }
-                                subtitleFiles.Add((subPath, sub.Lang ?? "unknown"));
+                                // Clean ASS + apply ScaledBorderAndShadow / FixCccSubtitles.
+                                subContent = SubtitleUtils.CleanAssAndEnsureScriptInfo(
+                                    subContent, config.Download.FixCccSubtitles, config.Download.SubsAddScaledBorder, crLocale);
+                                await File.WriteAllTextAsync(subPath, subContent, cancellationToken);
                             }
+                            else if (config.Download.ConvertVttToAss)
+                            {
+                                // Convert VTT to ASS honoring CcSubsFont + ScaledBorderAndShadow.
+                                subPath = Path.ChangeExtension(subPath, ".ass");
+                                var assContent = ConvertVttToAss(
+                                    subContent, sub.Lang ?? "unknown", config.Download.CcSubsFont, config.Download.SubsAddScaledBorder);
+                                await File.WriteAllTextAsync(subPath, assContent, cancellationToken);
+                            }
+                            else
+                            {
+                                await File.WriteAllTextAsync(subPath, subContent, cancellationToken);
+                            }
+                            subtitleFiles.Add((subPath, sub.Lang ?? "unknown", isCc, isSigns));
+                            downloadedSubKeys.Add(dupKey);
                         }
-                        catch (Exception ex)
-                        {
-                            _logger?.LogWarning(ex, "Failed to download subtitle {Lang}", sub.Lang);
-                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Failed to download subtitle {Lang} (cc={Cc}, signs={Signs})", sub.Lang, isCc, isSigns);
                     }
                 }
             }
@@ -799,31 +842,52 @@ public class DownloadService : IDownloadService
 
             // Generate description XML if enabled
             string? descriptionPath = null;
-            if (config.Download.IncludeVideoDescription && !string.IsNullOrEmpty(episode.Description) && !config.Download.SkipMuxing)
+            if (config.Download.IncludeVideoDescription && !config.Download.SkipMuxing)
             {
-                descriptionPath = Path.Combine(tempDir, "description.xml");
-                try
+                // DescriptionLang: re-fetch the episode metadata in the configured language
+                // so the muxed description matches it (upstream re-parses by MediaId).
+                var descriptionText = episode.Description ?? string.Empty;
+                var descLang = config.Download.DescriptionLang;
+                if (!string.IsNullOrEmpty(descLang) && !string.IsNullOrEmpty(mediaId))
                 {
-                    using var writer = XmlWriter.Create(descriptionPath);
-                    writer.WriteStartDocument();
-                    writer.WriteStartElement("Tags");
-                    writer.WriteStartElement("Tag");
-                    writer.WriteStartElement("Targets");
-                    writer.WriteElementString("TargetTypeValue", "50");
-                    writer.WriteEndElement(); // Targets
-                    writer.WriteStartElement("Simple");
-                    writer.WriteElementString("Name", "DESCRIPTION");
-                    writer.WriteElementString("String", episode.Description);
-                    writer.WriteEndElement(); // Simple
-                    writer.WriteEndElement(); // Tag
-                    writer.WriteEndElement(); // Tags
-                    writer.WriteEndDocument();
-                    _logger?.LogInformation("Generated description XML: {Path}", descriptionPath);
+                    try
+                    {
+                        var localized = await _api.ParseEpisodeByIdAsync(mediaId, descLang, false, cancellationToken);
+                        if (!string.IsNullOrEmpty(localized?.Description))
+                            descriptionText = localized!.Description;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Failed to fetch description in {Lang}, using default", descLang);
+                    }
                 }
-                catch (Exception ex)
+
+                if (!string.IsNullOrEmpty(descriptionText))
                 {
-                    _logger?.LogWarning(ex, "Failed to generate description XML");
-                    descriptionPath = null;
+                    descriptionPath = Path.Combine(tempDir, "description.xml");
+                    try
+                    {
+                        using var writer = XmlWriter.Create(descriptionPath);
+                        writer.WriteStartDocument();
+                        writer.WriteStartElement("Tags");
+                        writer.WriteStartElement("Tag");
+                        writer.WriteStartElement("Targets");
+                        writer.WriteElementString("TargetTypeValue", "50");
+                        writer.WriteEndElement(); // Targets
+                        writer.WriteStartElement("Simple");
+                        writer.WriteElementString("Name", "DESCRIPTION");
+                        writer.WriteElementString("String", descriptionText);
+                        writer.WriteEndElement(); // Simple
+                        writer.WriteEndElement(); // Tag
+                        writer.WriteEndElement(); // Tags
+                        writer.WriteEndDocument();
+                        _logger?.LogInformation("Generated description XML: {Path}", descriptionPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Failed to generate description XML");
+                        descriptionPath = null;
+                    }
                 }
             }
 
@@ -835,7 +899,7 @@ public class DownloadService : IDownloadService
                 {
                     progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 81, Doing = "Extracting fonts..." });
                     var allFontNames = new List<string>();
-                    foreach (var (subPath, _) in subtitleFiles.Where(s => s.Path.EndsWith(".ass", StringComparison.OrdinalIgnoreCase)))
+                    foreach (var (subPath, _, _, _) in subtitleFiles.Where(s => s.Path.EndsWith(".ass", StringComparison.OrdinalIgnoreCase)))
                     {
                         var assContent = await File.ReadAllTextAsync(subPath, cancellationToken);
                         var fonts = _fontService.ExtractFontsFromAss(assContent, config.Download.MuxTypesettingFonts);
@@ -1015,6 +1079,9 @@ public class DownloadService : IDownloadService
                             NumberPadding = config.Download.LeadingNumbers,
                             Quality = actualHeight.Value.ToString(),
                             AudioLanguage = config.Download.DefaultAudio,
+                            SonarrSeries = sonarrSeries,
+                            SonarrEpisode = sonarrEpisode,
+                            UseSonarrNumbering = config.Sonarr.UseSonarrNumbering,
                             SelectedDubs = episode.SelectedDubs?.Count > 0
                                 ? episode.SelectedDubs
                                 : config.Download.DubLanguages
@@ -1215,7 +1282,7 @@ public class DownloadService : IDownloadService
         };
     }
 
-    private async Task<PlaybackData?> GetPlaybackDataAsync(string episodeId, bool useBetaApi, CancellationToken cancellationToken, int retryAttempt = 0)
+    private async Task<PlaybackData?> GetPlaybackDataAsync(string episodeId, bool useBetaApi, CancellationToken cancellationToken, CruncharrConfig? config = null, int retryAttempt = 0)
     {
         var token = _auth.Token;
         if (token?.access_token == null)
@@ -1266,7 +1333,7 @@ public class DownloadService : IDownloadService
 
         PlaybackData? mergedData = null;
         bool rateLimited = false;
-        int retryDelaySeconds = GetRetryDelaySeconds(retryAttempt);
+        int retryDelaySeconds = GetRetryDelaySeconds(retryAttempt, config);
 
         foreach (var (endpoint, userAgent, settings) in endpoints)
         {
@@ -1362,7 +1429,7 @@ public class DownloadService : IDownloadService
                     {
                         _logger?.LogInformation("Retrying playback request after de-auth (attempt {Attempt}/{Max})", retryAttempt + 1, maxRetries);
                         await Task.Delay(2000, cancellationToken);
-                        return await GetPlaybackDataAsync(episodeId, useBetaApi, cancellationToken, retryAttempt + 1);
+                        return await GetPlaybackDataAsync(episodeId, useBetaApi, cancellationToken, config, retryAttempt + 1);
                     }
                     throw new DownloadException("Too many active streams. Close open Crunchyroll tabs in your browser and try again.", DownloadErrorType.TooManyActiveStreams);
                 }
@@ -1375,7 +1442,7 @@ public class DownloadService : IDownloadService
                 if (streamError?.IsPlaybackRateLimitError() == true)
                 {
                     rateLimited = true;
-                    retryDelaySeconds = GetRetryDelaySeconds(retryAttempt);
+                    retryDelaySeconds = GetRetryDelaySeconds(retryAttempt, config);
                     if (headers.TryGetValue("retry-after", out var retryAfter) && int.TryParse(retryAfter, out var parsedRetryAfter))
                     {
                         retryDelaySeconds = parsedRetryAfter;
@@ -1438,16 +1505,21 @@ public class DownloadService : IDownloadService
         {
             _logger?.LogWarning("Playback API rate limited on all endpoints. Retrying in {Delay}s...", retryDelaySeconds);
             await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), cancellationToken);
-            return await GetPlaybackDataAsync(episodeId, useBetaApi, cancellationToken, retryAttempt + 1);
+            return await GetPlaybackDataAsync(episodeId, useBetaApi, cancellationToken, config, retryAttempt + 1);
         }
 
         throw new DownloadException("Failed to get playback data from all endpoints. The content may not be available in your region.", DownloadErrorType.NetworkError);
     }
 
-    private static int GetRetryDelaySeconds(int retryAttempt)
+    // Exponential backoff for playback rate-limit retries (upstream Helpers.GetRetryDelaySeconds):
+    // base * 2^attempt, capped at the configured max.
+    private static int GetRetryDelaySeconds(int retryAttempt, CruncharrConfig? config)
     {
-        // Exponential backoff: 5s, 15s, 45s
-        return (int)(5 * Math.Pow(3, retryAttempt));
+        int baseDelay = Math.Max(1, config?.Download.PlaybackRateLimitRetryDelaySeconds ?? 30);
+        int maxDelay = Math.Max(baseDelay, config?.Download.RetryMaxDelaySeconds ?? 3600);
+        int attempt = Math.Max(0, retryAttempt);
+        double delay = baseDelay * Math.Pow(2, attempt);
+        return (int)Math.Min(maxDelay, delay);
     }
 
     private (bool Success, string? ErrorMessage) SelectStreamWithHardsub(PlaybackData playback, CruncharrConfig config)
@@ -1580,7 +1652,26 @@ public class DownloadService : IDownloadService
                     {
                         Lang = sub.Key,
                         Url = sub.Value.Url ?? "",
-                        Format = sub.Value.Format ?? "vtt"
+                        Format = sub.Value.Format ?? "vtt",
+                        IsCC = false
+                    });
+                }
+            }
+
+            // [PT] Extract Closed Captions (upstream maps pbData.Meta.Captions as isCC=true).
+            // Previously dropped entirely, so IncludeCcSubs could never surface a CC track.
+            if (playStream.Captions != null)
+            {
+                playback.Subtitles ??= new List<SubtitleInfo>();
+                foreach (var cap in playStream.Captions)
+                {
+                    var capLang = cap.Value.Language ?? cap.Key;
+                    playback.Subtitles.Add(new SubtitleInfo
+                    {
+                        Lang = capLang,
+                        Url = cap.Value.Url ?? "",
+                        Format = cap.Value.Format ?? "vtt",
+                        IsCC = true
                     });
                 }
             }
@@ -2323,7 +2414,7 @@ public class DownloadService : IDownloadService
     private static string FormatKey(byte[] keyBytes) =>
         BitConverter.ToString(keyBytes).Replace("-", "").ToLower();
 
-    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null, string? descriptionPath = null)
+    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang, bool Cc, bool Signs)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null, string? descriptionPath = null)
     {
         var mergerOptions = new MergerOptions
         {
@@ -2392,19 +2483,17 @@ public class DownloadService : IDownloadService
         _logger?.LogInformation("MUX DEBUG: OnlyVid.Count={OnlyVid}, OnlyAudio.Count={OnlyAudio}, Subtitles.Count={Subs}",
             mergerOptions.OnlyVid.Count, mergerOptions.OnlyAudio.Count, mergerOptions.Subtitles.Count);
 
-        // Map subtitles. A subtitle whose locale matches a downloaded audio (dub) locale
-        // is a "signs/forced" track: the dialogue is dubbed, so that subtitle only renders
-        // on-screen text. Flagging it lets SignsSubsAsForced / DefaultSubSigns work (they
-        // were previously inert because every sub was muxed with Signs=false).
-        foreach (var (path, lang) in subtitles)
+        // Map subtitles. CC and Signs flags are determined at download time and carried
+        // here so SignsSubsAsForced / DefaultSubSigns / the CC muxing flag all work
+        // (every sub was previously muxed with Cc=false, Signs=false).
+        foreach (var (path, lang, cc, signs) in subtitles)
         {
-            bool isSigns = audioTracks.Any(a => string.Equals(a.Lang, lang, StringComparison.OrdinalIgnoreCase));
             mergerOptions.Subtitles.Add(new SubtitleInput
             {
                 File = path,
                 Language = Languages.FindLang(lang),
-                ClosedCaption = false,
-                Signs = isSigns
+                ClosedCaption = cc,
+                Signs = signs
             });
         }
 
@@ -2762,7 +2851,7 @@ public class DownloadService : IDownloadService
 
             // Get playback data
             progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 0, Doing = $"Fetching playback data for fallback ({locale})..." });
-            var playbackData = await GetPlaybackDataAsync(mediaGuid, true, cancellationToken);
+            var playbackData = await GetPlaybackDataAsync(mediaGuid, true, cancellationToken, config);
             if (playbackData?.VideoUrl == null)
             {
                 _logger?.LogWarning("No video URL in playback data for fallback ({Locale})", locale);
@@ -2804,7 +2893,7 @@ public class DownloadService : IDownloadService
         }
     }
 
-    private static string ConvertVttToAss(string vttContent, string language)
+    private static string ConvertVttToAss(string vttContent, string language, string? ccFont = null, string? scaledBorder = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("[Script Info]");
@@ -2813,11 +2902,15 @@ public class DownloadService : IDownloadService
         sb.AppendLine("WrapStyle: 0");
         sb.AppendLine("PlayResX: 640");
         sb.AppendLine("PlayResY: 360");
-        sb.AppendLine("ScaledBorderAndShadow: yes");
+        sb.AppendLine("Timer: 0.0");
+        // Only emit ScaledBorderAndShadow when configured (DontAdd => omit), matching upstream.
+        var scaledLine = SubtitleUtils.NormalizeScaledBorder(scaledBorder);
+        if (scaledLine != null)
+            sb.AppendLine(scaledLine);
         sb.AppendLine();
         sb.AppendLine("[V4+ Styles]");
-        sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
-        sb.AppendLine("Style: Default, Arial, 20, \u0026H00FFFFFF, \u0026H000000FF, \u0026H00000000, \u0026H00000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 2, 10, 10, 10, 1");
+        sb.AppendLine("Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,Strikeout,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding");
+        sb.AppendLine($"Style: Default,{(string.IsNullOrWhiteSpace(ccFont) ? "Trebuchet MS" : ccFont)},24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,2,0010,0010,0018,1");
         sb.AppendLine();
         sb.AppendLine("[Events]");
         sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
@@ -2877,4 +2970,6 @@ public class SubtitleInfo
     public string Lang { get; set; } = "";
     public string Url { get; set; } = "";
     public string Format { get; set; } = "vtt";
+    // Closed Caption track (from playStream.Captions, not Subtitles).
+    public bool IsCC { get; set; } = false;
 }

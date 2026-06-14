@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using Cruncharr.Core.Models;
+using Cruncharr.Core.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Cruncharr.Core.Services;
@@ -18,11 +19,16 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
     private readonly object _syncLock = new();
     private Timer? _saveTimer;
     private readonly ILogger<QueuePersistenceService>? _logger;
+    private readonly CruncharrConfig? _config;
 
-    public QueuePersistenceService(string queueFilePath, ILogger<QueuePersistenceService>? logger = null)
+    // When false (PersistQueue disabled), load/save are no-ops (upstream QueuePersistenceManager).
+    private bool PersistEnabled => _config?.Queue.PersistQueue ?? true;
+
+    public QueuePersistenceService(string queueFilePath, ILogger<QueuePersistenceService>? logger = null, CruncharrConfig? config = null)
     {
         _queueFilePath = queueFilePath ?? throw new ArgumentNullException(nameof(queueFilePath));
         _logger = logger;
+        _config = config;
         var dir = Path.GetDirectoryName(_queueFilePath);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
         {
@@ -48,6 +54,9 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
     public List<QueueItem>? LoadQueue()
     {
+        if (!PersistEnabled)
+            return null;
+
         if (!File.Exists(_queueFilePath))
             return null;
 
@@ -86,6 +95,10 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
     private void PersistQueue(List<QueueItem> queue)
     {
+        // PersistQueue disabled: do not write a snapshot to disk.
+        if (!PersistEnabled)
+            return;
+
         if (queue.Count == 0)
         {
             DeleteQueue();

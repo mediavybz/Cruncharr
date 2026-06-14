@@ -21,6 +21,9 @@ public class FilenameOptions
     public SonarrEpisode? SonarrEpisode { get; set; }
     public List<string>? Overrides { get; set; }
     public List<string>? SelectedDubs { get; set; }
+    // When true and SonarrEpisode is set, the {episode}/{season} variables use Sonarr's
+    // numbering instead of Crunchyroll's (upstream UseSonarrNumbering).
+    public bool UseSonarrNumbering { get; set; }
 }
 
 public class FilenameService : IFilenameService
@@ -36,9 +39,16 @@ public class FilenameService : IFilenameService
         // Aliases so the names documented in the UI resolve.
         variables.Add(new Variable("episodeTitle", episode.Title, true));
 
+        // UseSonarrNumbering: override CR's episode/season with Sonarr's matched numbers.
+        bool useSonarrNumbering = options.UseSonarrNumbering && options.SonarrEpisode != null;
+
         // Episode: try to parse as double for fractional episodes (e.g., 12.5), fallback to int
         object episodeValue;
-        if (!string.IsNullOrEmpty(episode.Episode) && double.TryParse(episode.Episode, NumberStyles.Any, CultureInfo.InvariantCulture, out var epDouble))
+        if (useSonarrNumbering)
+        {
+            episodeValue = (double)options.SonarrEpisode!.EpisodeNumber;
+        }
+        else if (!string.IsNullOrEmpty(episode.Episode) && double.TryParse(episode.Episode, NumberStyles.Any, CultureInfo.InvariantCulture, out var epDouble))
         {
             episodeValue = Math.Round(epDouble, 1);
         }
@@ -50,7 +60,7 @@ public class FilenameService : IFilenameService
 
         variables.Add(new Variable("seriesTitle", episode.SeriesTitle, true));
         variables.Add(new Variable("seasonTitle", episode.SeasonTitle ?? string.Empty, true));
-        variables.Add(new Variable("season", (double)episode.SeasonNumber, false));
+        variables.Add(new Variable("season", useSonarrNumbering ? (double)options.SonarrEpisode!.SeasonNumber : (double)episode.SeasonNumber, false));
         variables.Add(new Variable("dubs", string.Join(", ", options.SelectedDubs ?? new List<string>()), true));
 
         // Sonarr variables (ported from upstream FileNameManager)

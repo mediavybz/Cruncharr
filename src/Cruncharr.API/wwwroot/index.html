@@ -4202,18 +4202,168 @@ MAINTENANCE NOTES:
 
         async function loadEncodingPresets() {
             const select = document.getElementById('setting-encode-preset');
-            if (!select || select.dataset.loaded) return;
+            if (!select) return;
             try {
                 const res = await fetch('/api/v1/encoding/presets');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const presets = await res.json();
-                const currentValue = select.value;
-                select.innerHTML = '<option value="">None</option>' + 
+                const currentValue = select.value || (config?.download?.encodingPreset || '');
+                select.innerHTML = '<option value="">None</option>' +
                     (presets || []).map(p => `<option value="${escapeHtmlAttribute(p)}" ${p === currentValue ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('');
-                select.dataset.loaded = 'true';
             } catch (e) {
                 console.error('Failed to load encoding presets:', e);
             }
+        }
+
+        // ===== Encoding preset editor (ports upstream "Edit Preset" dialog) =====
+        const PRESET_RESOLUTIONS = [
+            ['3840:2160','4K exact (3840:2160)'],['-2:2160','4K keep AR (-2:2160)'],
+            ['3440:1440','UWQHD exact (3440:1440)'],['2560:1440','1440p exact (2560:1440)'],
+            ['-2:1440','1440p keep AR (-2:1440)'],['2560:1080','UW FHD exact (2560:1080)'],
+            ['2160:1080','2:1 exact (2160:1080)'],['1920:1080','1080p exact (1920:1080)'],
+            ['-2:1080','1080p keep AR (-2:1080)'],['1920:800','Cinema exact (1920:800)'],
+            ['1600:900','900p exact (1600:900)'],['1366:768','768p exact (1366:768)'],
+            ['1280:960','SXGA exact (1280:960)'],['1280:720','720p exact (1280:720)'],
+            ['-2:720','720p keep AR (-2:720)'],['1024:576','576p exact (1024:576)'],
+            ['-2:576','576p keep AR (-2:576)'],['960:540','540p exact (960:540)'],
+            ['-2:540','540p keep AR (-2:540)'],['854:480','480p exact (854:480)'],
+            ['-2:480','480p keep AR (-2:480)'],['800:600','SVGA exact (800:600)'],
+            ['768:432','432p exact (768:432)'],['-2:432','432p keep AR (-2:432)'],
+            ['720:480','NTSC exact (720:480)'],['704:576','PAL exact (704:576)'],
+            ['640:360','360p exact (640:360)'],['-2:360','360p keep AR (-2:360)'],
+            ['426:240','240p exact (426:240)'],['-2:240','240p keep AR (-2:240)'],
+        ];
+
+        async function openPresetEditor() {
+            const title = document.getElementById('modal-title');
+            const body = document.getElementById('modal-body');
+            const footer = document.getElementById('modal-footer');
+            const modal = document.getElementById('modal');
+            if (!title || !body || !footer || !modal) return;
+            title.textContent = 'Encoding Presets';
+            const resOpts = PRESET_RESOLUTIONS.map(([v, d]) => `<option value="${escapeHtmlAttribute(v)}">${escapeHtml(d)}</option>`).join('');
+            body.innerHTML = `
+                <div style="display:flex; gap:18px; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:200px;">
+                        <div style="font-weight:600; margin-bottom:8px;">Custom Presets</div>
+                        <div id="preset-list" style="display:flex; flex-direction:column; gap:6px;"><div style="color:var(--text-muted);">Loading…</div></div>
+                    </div>
+                    <div style="flex:2; min-width:320px; display:flex; flex-direction:column; gap:6px;">
+                        <input type="hidden" id="pe-original">
+                        <label class="form-label">Enter Preset Name</label>
+                        <input class="form-input" id="pe-name" placeholder="H.265 1080p" oninput="updatePresetCmd()">
+                        <label class="form-label" style="margin-top:6px;">Enter Codec</label>
+                        <input class="form-input" id="pe-codec" placeholder="libx265" oninput="updatePresetCmd()">
+                        <div class="setting-desc">Leave empty to provide the encoding options through Additional Parameters only.</div>
+                        <label class="form-label" style="margin-top:6px;">Select Resolution</label>
+                        <select class="form-select" id="pe-res" onchange="updatePresetCmd()">${resOpts}</select>
+                        <label class="form-label" style="margin-top:6px;">Enter Frame Rate</label>
+                        <input class="form-input" id="pe-fps" placeholder="24000/1001" oninput="updatePresetCmd()">
+                        <label class="form-label" style="margin-top:6px;">Enter CRF (0-51) - (cq, global_quality, qp)</label>
+                        <input class="form-input" id="pe-crf" type="number" min="0" max="51" value="28" oninput="updatePresetCmd()">
+                        <label class="form-label" style="margin-top:6px;">Additional Parameters</label>
+                        <textarea class="form-input" id="pe-params" rows="3" placeholder="-map 0" oninput="updatePresetCmd()">-map 0</textarea>
+                        <div class="setting-desc">One parameter (or flag + value) per line.</div>
+                        <label class="form-label" style="margin-top:6px;">Generated FFmpeg Command</label>
+                        <div id="pe-cmd" style="font-family:monospace; font-size:0.8em; background:var(--bg-tertiary); border:1px solid var(--surface-border); border-radius:var(--radius-sm); padding:8px; word-break:break-all; color:var(--text-secondary);"></div>
+                    </div>
+                </div>`;
+            footer.innerHTML = `
+                <button class="header-btn" type="button" onclick="presetEditorReset()">New</button>
+                <button class="header-btn primary" type="button" onclick="savePresetEditor()">Save Preset</button>
+                <button class="header-btn" type="button" onclick="closeModal()">Close</button>`;
+            modal.classList.add('active');
+            document.getElementById('pe-res').value = '1920:1080';
+            updatePresetCmd();
+            await refreshPresetList();
+        }
+
+        function presetEditorReset() {
+            ['pe-original','pe-name','pe-codec','pe-fps'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            const crf = document.getElementById('pe-crf'); if (crf) crf.value = '28';
+            const params = document.getElementById('pe-params'); if (params) params.value = '-map 0';
+            const res = document.getElementById('pe-res'); if (res) res.value = '1920:1080';
+            updatePresetCmd();
+        }
+
+        function updatePresetCmd() {
+            const el = document.getElementById('pe-cmd');
+            if (!el) return;
+            const codec = document.getElementById('pe-codec')?.value.trim();
+            const res = document.getElementById('pe-res')?.value;
+            const fps = document.getElementById('pe-fps')?.value.trim();
+            const crf = document.getElementById('pe-crf')?.value.trim();
+            const params = (document.getElementById('pe-params')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+            let parts = ['ffmpeg', '-i', '"input.mkv"'];
+            if (codec) parts.push('-c:v', codec);
+            if (crf !== '' && crf !== undefined) parts.push('-crf', crf);
+            if (res) parts.push('-vf', `scale=${res}`);
+            if (fps) parts.push('-r', fps);
+            parts.push(...params);
+            parts.push('"output.mkv"');
+            el.textContent = parts.join(' ');
+        }
+
+        async function refreshPresetList() {
+            const list = document.getElementById('preset-list');
+            if (!list) return;
+            try {
+                const res = await fetch('/api/v1/encoding/presets/all');
+                const all = await res.json();
+                const custom = (all || []).filter(p => !p.builtIn);
+                if (custom.length === 0) { list.innerHTML = '<div style="color:var(--text-muted); font-size:0.85em;">No custom presets yet.</div>'; return; }
+                list.innerHTML = custom.map(p => `
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; background:var(--bg-tertiary); border-radius:var(--radius-sm);">
+                        <span style="cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" onclick='loadPresetIntoForm(${JSON.stringify(p)})'>${escapeHtml(p.presetName)}</span>
+                        <button class="btn-icon danger" title="Delete" onclick="deletePresetEditor('${escapeJsString(p.presetName)}')">&#128465;</button>
+                    </div>`).join('');
+            } catch (e) { list.innerHTML = '<div style="color:var(--accent-red); font-size:0.85em;">Failed to load presets</div>'; }
+        }
+
+        function loadPresetIntoForm(p) {
+            document.getElementById('pe-original').value = p.presetName || '';
+            document.getElementById('pe-name').value = p.presetName || '';
+            document.getElementById('pe-codec').value = p.codec || '';
+            document.getElementById('pe-fps').value = p.frameRate || '';
+            document.getElementById('pe-crf').value = (p.crf ?? 28);
+            document.getElementById('pe-params').value = (p.additionalParameters || []).join('\n');
+            const res = document.getElementById('pe-res');
+            if (res) res.value = p.resolution || '1920:1080';
+            updatePresetCmd();
+        }
+
+        async function savePresetEditor() {
+            const name = document.getElementById('pe-name')?.value.trim();
+            if (!name) { showToast('Preset name required', 'error'); return; }
+            const crf = parseInt(document.getElementById('pe-crf')?.value, 10);
+            if (isNaN(crf) || crf < 0 || crf > 51) { showToast('CRF must be 0–51', 'error'); return; }
+            const preset = {
+                presetName: name,
+                codec: document.getElementById('pe-codec')?.value.trim() || '',
+                resolution: document.getElementById('pe-res')?.value || '',
+                frameRate: document.getElementById('pe-fps')?.value.trim() || '',
+                crf: crf,
+                additionalParameters: (document.getElementById('pe-params')?.value || '').split('\n').map(s => s.trim()).filter(Boolean)
+            };
+            try {
+                const res = await fetch('/api/v1/encoding/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset) });
+                if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
+                showToast('Preset saved', 'success');
+                document.getElementById('pe-original').value = name;
+                await refreshPresetList();
+                await loadEncodingPresets();
+            } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
+        }
+
+        async function deletePresetEditor(name) {
+            try {
+                const res = await fetch('/api/v1/encoding/presets/' + encodeURIComponent(name), { method: 'DELETE' });
+                if (!res.ok && res.status !== 204) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
+                showToast('Preset deleted', 'success');
+                if (document.getElementById('pe-original')?.value === name) presetEditorReset();
+                await refreshPresetList();
+                await loadEncodingPresets();
+            } catch (e) { showToast('Delete failed: ' + e.message, 'error'); }
         }
 
         function setSettingsTab(tab, evt) {
@@ -4431,7 +4581,7 @@ MAINTENANCE NOTES:
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
                                 ${renderListInput('setting-ffmpeg', dl.ffmpegOptions, '-option')}
                                 <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><select class="form-select" id="setting-encode-preset" style="min-width:200px;" onfocus="loadEncodingPresets()"><option value="">${dl.encodingPreset || 'None'}</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><div style="display:flex; gap:8px; align-items:center;"><select class="form-select" id="setting-encode-preset" style="min-width:200px;" onfocus="loadEncodingPresets()"><option value="">${dl.encodingPreset || 'None'}</option></select><button class="header-btn" type="button" onclick="openPresetEditor()">Manage Presets</button></div></div>
                             </div>
                         </div>
                     `;

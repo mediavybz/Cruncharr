@@ -191,4 +191,40 @@ public class EncodingController : ControllerBase
             return StatusCode(500, new { Error = "Failed to get preset", Message = ex.Message });
         }
     }
+
+    // Full preset objects, each flagged built-in vs custom (for the preset editor).
+    [HttpGet("presets/all")]
+    public ActionResult GetAllPresets()
+    {
+        var all = _encodingService.GetPresets()
+            .Select(p => new { p.PresetName, p.Codec, p.Resolution, p.FrameRate, p.Crf, p.AdditionalParameters, builtIn = _encodingService.IsBuiltIn(p.PresetName ?? "") })
+            .ToList();
+        return Ok(all);
+    }
+
+    // Create or update a custom preset (built-in names are rejected).
+    [HttpPost("presets")]
+    public ActionResult AddPreset([FromBody] VideoPreset preset)
+    {
+        if (preset == null || string.IsNullOrWhiteSpace(preset.PresetName))
+            return BadRequest(new { Error = "PresetName is required" });
+        if (_encodingService.IsBuiltIn(preset.PresetName))
+            return BadRequest(new { Error = "Cannot overwrite a built-in preset" });
+        if (preset.Crf < 0 || preset.Crf > 51)
+            return BadRequest(new { Error = "CRF must be between 0 and 51" });
+        return _encodingService.AddPreset(preset)
+            ? Ok(new { Message = "Preset saved", preset.PresetName })
+            : StatusCode(500, new { Error = "Failed to save preset" });
+    }
+
+    // Delete a custom preset (built-ins cannot be deleted).
+    [HttpDelete("presets/{presetName}")]
+    public ActionResult DeletePreset(string presetName)
+    {
+        if (_encodingService.IsBuiltIn(presetName))
+            return BadRequest(new { Error = "Built-in presets cannot be deleted" });
+        return _encodingService.RemovePreset(presetName)
+            ? NoContent()
+            : NotFound(new { Error = "Custom preset not found" });
+    }
 }

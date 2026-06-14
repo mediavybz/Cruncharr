@@ -1,19 +1,26 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 
 namespace Cruncharr.Core.Services;
 
 public interface IEncodingService
 {
     List<VideoPreset> GetPresets();
+    List<VideoPreset> GetCustomPresets();
     VideoPreset? GetPreset(string presetName);
-    void AddPreset(VideoPreset preset);
+    bool IsBuiltIn(string presetName);
+    bool AddPreset(VideoPreset preset);
+    bool RemovePreset(string presetName);
 }
 
 public class EncodingService : IEncodingService
 {
-    private static readonly List<VideoPreset> _presets = new(){
+    // Built-in presets (mirrors upstream FfmpegEncoding.presets - the first 15).
+    private static readonly List<VideoPreset> _builtIn = new(){
         new(){ PresetName = "AV1 1080p24", Codec = "libaom-av1", Resolution = "1920:1080", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },
         new(){ PresetName = "AV1 720p24", Codec = "libaom-av1", Resolution = "1280:720", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },
         new(){ PresetName = "AV1 480p24", Codec = "libaom-av1", Resolution = "854:480", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },
@@ -31,29 +38,103 @@ public class EncodingService : IEncodingService
         new(){ PresetName = "H.264 240p24", Codec = "libx264", Resolution = "426:240", FrameRate = "24000/1001", Crf = 23, AdditionalParameters ={ "-map 0" } },
     };
 
-    public List<VideoPreset> GetPresets() => _presets;
+    // User-created presets, persisted as JSON files (mirrors upstream's
+    // PathENCODING_PRESETS_DIR; loaded at startup, written on add).
+    private readonly List<VideoPreset> _custom = new();
+    private readonly object _lock = new();
+    private readonly string _presetsDir;
+    private readonly ILogger<EncodingService>? _logger;
+
+    public EncodingService(ILogger<EncodingService>? logger = null)
+    {
+        _logger = logger;
+        var cfgPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+        _presetsDir = Path.Combine(Path.GetDirectoryName(cfgPath) ?? ".", "encoding-presets");
+        LoadCustomPresets();
+    }
+
+    private void LoadCustomPresets()
+    {
+        try
+        {
+            if (!Directory.Exists(_presetsDir)) return;
+            foreach (var file in Directory.GetFiles(_presetsDir, "*.json"))
+            {
+                try
+                {
+                    var p = JsonConvert.DeserializeObject<VideoPreset>(File.ReadAllText(file));
+                    if (p != null && !string.IsNullOrWhiteSpace(p.PresetName)
+                        && !_builtIn.Any(b => b.PresetName == p.PresetName)
+                        && !_custom.Any(c => c.PresetName == p.PresetName))
+                    {
+                        _custom.Add(p);
+                    }
+                }
+                catch (Exception ex) { _logger?.LogWarning(ex, "Skipping invalid preset file {File}", file); }
+            }
+        }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Failed to load custom encoding presets"); }
+    }
+
+    public List<VideoPreset> GetPresets() { lock (_lock) return _builtIn.Concat(_custom).ToList(); }
+
+    public List<VideoPreset> GetCustomPresets() { lock (_lock) return _custom.ToList(); }
+
+    public bool IsBuiltIn(string presetName) => _builtIn.Any(p => p.PresetName == presetName);
 
     public VideoPreset? GetPreset(string presetName)
     {
-        var preset = _presets.FirstOrDefault(x => x.PresetName == presetName);
-        if (preset != null)
+        lock (_lock)
         {
-            return preset;
+            return _builtIn.Concat(_custom).FirstOrDefault(x => x.PresetName == presetName);
         }
-
-        Console.Error.WriteLine($"Preset {presetName} not found.");
-        return null;
     }
 
-    public void AddPreset(VideoPreset preset)
+    public bool AddPreset(VideoPreset preset)
     {
-        if (_presets.Exists(x => x.PresetName == preset.PresetName))
+        if (preset == null || string.IsNullOrWhiteSpace(preset.PresetName)) return false;
+        if (IsBuiltIn(preset.PresetName!))
         {
-            Console.Error.WriteLine($"Preset {preset.PresetName} already exists.");
-            return;
+            _logger?.LogWarning("Cannot overwrite built-in preset {Name}", preset.PresetName);
+            return false;
         }
+        lock (_lock)
+        {
+            _custom.RemoveAll(c => c.PresetName == preset.PresetName); // upsert
+            _custom.Add(preset);
+        }
+        try
+        {
+            Directory.CreateDirectory(_presetsDir);
+            File.WriteAllText(Path.Combine(_presetsDir, SanitizeFileName(preset.PresetName!) + ".json"),
+                JsonConvert.SerializeObject(preset, Formatting.Indented));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to persist preset {Name}", preset.PresetName);
+            return false;
+        }
+    }
 
-        _presets.Add(preset);
+    public bool RemovePreset(string presetName)
+    {
+        if (IsBuiltIn(presetName)) return false; // built-ins are not removable
+        bool removed;
+        lock (_lock) { removed = _custom.RemoveAll(c => c.PresetName == presetName) > 0; }
+        try
+        {
+            var f = Path.Combine(_presetsDir, SanitizeFileName(presetName) + ".json");
+            if (File.Exists(f)) File.Delete(f);
+        }
+        catch (Exception ex) { _logger?.LogWarning(ex, "Failed to delete preset file {Name}", presetName); }
+        return removed;
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return name;
     }
 }
 

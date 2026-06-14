@@ -20,4 +20,5 @@ public static class ApiUrls
     public static string Playback => "https://cr-play-service.prd.crunchyrollsvc.com/v3";
     public static readonly string WidevineLicenceUrl = "https://www.crunchyroll.com/license/v1/license/widevine";
     public static readonly string FirefoxUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0";
+    public static readonly string Anilist = "https://graphql.anilist.co";
 }

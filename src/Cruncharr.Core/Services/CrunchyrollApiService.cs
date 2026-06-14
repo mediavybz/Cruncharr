@@ -1,4 +1,6 @@
 using System.Collections.Specialized;
+using System.Net.Http;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Web;
 using Cruncharr.Core.Models;
@@ -1230,19 +1232,43 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         var imageList = images[type];
         if (imageList == null || imageList.Count == 0) return null;
 
-        // Try to get the best quality (usually the last one or one with height 360/720)
+        // CR stores each image as an array of size variants ordered small -> large.
+        // Pick the highest-resolution variant (by width) instead of img[0], which is
+        // the SMALLEST and produced blurry posters/thumbnails.
+        string? best = null;
+        int bestWidth = -1;
         foreach (var img in imageList)
         {
-            if (img != null && img.Count > 0)
+            if (img == null) continue;
+            foreach (var variant in img)
             {
-                var url = ExtractImageSource(img[0]);
-                if (!string.IsNullOrEmpty(url))
+                var (url, width) = ExtractImageSourceAndWidth(variant);
+                if (!string.IsNullOrEmpty(url) && width >= bestWidth)
                 {
-                    return url;
+                    best = url;
+                    bestWidth = width;
                 }
             }
         }
-        return null;
+        return best;
+    }
+
+    private static (string? source, int width) ExtractImageSourceAndWidth(object? imageObj)
+    {
+        var url = ExtractImageSource(imageObj);
+        int width = 0;
+        try
+        {
+            JObject? jObj = imageObj as JObject;
+            if (jObj == null)
+            {
+                var json = imageObj?.ToString();
+                if (!string.IsNullOrEmpty(json) && json.StartsWith("{")) jObj = JObject.Parse(json);
+            }
+            if (jObj != null) width = jObj["width"]?.ToObject<int>() ?? 0;
+        }
+        catch { /* width stays 0 */ }
+        return (url, width);
     }
 
     private static string? ExtractImageSource(object? imageObj)
@@ -1349,10 +1375,105 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     }
 
     // Ported from upstream CrSeries.GetSeasonalSeries
+    private static readonly HttpClient _anilistClient = new HttpClient();
+    private const string AnilistSeasonQuery =
+        "query($season: MediaSeason, $year: Int, $page: Int){ Page(page:$page){ pageInfo{ hasNextPage } " +
+        "media(season:$season, seasonYear:$year, type:ANIME, isAdult:false, sort:TITLE_ENGLISH){ " +
+        "id title{ romaji english native } episodes description coverImage{ extraLarge } externalLinks{ site url } } } }";
+
+    /// <summary>
+    /// Seasonal anime lineup. Mirrors upstream: the full season is pulled from AniList
+    /// (complete list + high-res covers), filtered to titles that link to Crunchyroll,
+    /// then merged with Crunchyroll's own seasonal_tag browse to catch anything AniList
+    /// didn't link. CR-catalogued titles AniList missed are still included.
+    /// </summary>
     public async Task<List<SeriesInfo>> GetSeasonalSeriesAsync(string season, string year, string? crLocale = null, CancellationToken cancellationToken = default)
     {
         _logger?.LogInformation("Getting seasonal series: {Season} {Year}", season, year);
 
+        var bySeries = new Dictionary<string, SeriesInfo>(StringComparer.Ordinal); // keyed by CR series id
+        int.TryParse(year, out var yearInt);
+
+        // 1) AniList - complete seasonal lineup with high-res covers, CR-linked only.
+        try
+        {
+            int page = 1;
+            bool hasNext;
+            do
+            {
+                var payload = JsonConvert.SerializeObject(new
+                {
+                    query = AnilistSeasonQuery,
+                    variables = new { season = season.ToUpperInvariant(), year = yearInt, page }
+                });
+                using var req = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Anilist)
+                {
+                    Content = new StringContent(payload, Encoding.UTF8, "application/json")
+                };
+                using var resp = await _anilistClient.SendAsync(req, cancellationToken);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger?.LogWarning("AniList seasonal request failed: {Status}", resp.StatusCode);
+                    break;
+                }
+                var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+                var pageNode = JObject.Parse(body)["data"]?["Page"];
+                hasNext = pageNode?["pageInfo"]?["hasNextPage"]?.ToObject<bool>() ?? false;
+                foreach (var m in pageNode?["media"] as JArray ?? new JArray())
+                {
+                    var crLink = (m["externalLinks"] as JArray)?.FirstOrDefault(l =>
+                        string.Equals(l["site"]?.ToString(), "Crunchyroll", StringComparison.OrdinalIgnoreCase));
+                    var url = crLink?["url"]?.ToString();
+                    if (string.IsNullOrEmpty(url)) continue;
+                    var match = Regex.Match(url, @"series/([^/?#]+)");
+                    if (!match.Success) continue;
+                    var crId = match.Groups[1].Value;
+
+                    var title = m["title"]?["english"]?.ToString();
+                    if (string.IsNullOrEmpty(title)) title = m["title"]?["romaji"]?.ToString();
+                    if (string.IsNullOrEmpty(title)) title = m["title"]?["native"]?.ToString();
+                    var cover = m["coverImage"]?["extraLarge"]?.ToString();
+
+                    bySeries[crId] = new SeriesInfo
+                    {
+                        Id = crId,
+                        Title = title ?? "",
+                        Description = StripHtmlTags(m["description"]?.ToString()),
+                        CoverArtUrl = cover,
+                        ThumbnailUrl = cover,
+                        EpisodeCount = m["episodes"]?.ToObject<int?>(),
+                        OnCrunchyroll = true
+                    };
+                }
+                page++;
+            } while (hasNext && page <= 6);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "AniList seasonal fetch failed for {Season} {Year}", season, year);
+        }
+
+        // 2) Crunchyroll seasonal_tag browse - add CR titles AniList didn't link.
+        foreach (var cr in await GetSeasonalFromCrunchyrollAsync(season, year, crLocale, cancellationToken))
+        {
+            if (!bySeries.ContainsKey(cr.Id))
+            {
+                cr.OnCrunchyroll = true;
+                bySeries[cr.Id] = cr;
+            }
+        }
+
+        return bySeries.Values.OrderBy(s => s.Title, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static string? StripHtmlTags(string? html)
+    {
+        if (string.IsNullOrEmpty(html)) return html;
+        return Regex.Replace(html, "<.*?>", string.Empty).Trim();
+    }
+
+    private async Task<List<SeriesInfo>> GetSeasonalFromCrunchyrollAsync(string season, string year, string? crLocale, CancellationToken cancellationToken)
+    {
         if (!await EnsureAuthenticatedAsync(true, cancellationToken))
         {
             return new List<SeriesInfo>();
@@ -1360,9 +1481,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         var queryParams = new NameValueCollection{
             { "seasonal_tag", $"{season.ToLower()}-{year}" },
-            { "n", "100" }
+            { "n", "200" }
         };
-
         if (!string.IsNullOrEmpty(crLocale))
         {
             queryParams["locale"] = crLocale;
@@ -1378,7 +1498,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         if (!isOk)
         {
-            _logger?.LogError("GetSeasonalSeries request failed: {Error}", error);
+            _logger?.LogError("GetSeasonalSeries (CR) request failed: {Error}", error);
             return new List<SeriesInfo>();
         }
 
@@ -1399,7 +1519,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to parse GetSeasonalSeries results");
+            _logger?.LogError(ex, "Failed to parse GetSeasonalSeries (CR) results");
             return new List<SeriesInfo>();
         }
     }

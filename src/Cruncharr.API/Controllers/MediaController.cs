@@ -161,7 +161,9 @@ public class EncodingController : ControllerBase
     {
         try
         {
-            var presets = _encodingService.GetPresets();
+            // The settings dropdown stores the preset NAME, so return names (not the full
+            // VideoPreset objects, which the UI was rendering as "[object Object]").
+            var presets = _encodingService.GetPresets().Select(p => p.PresetName).ToList();
             return Ok(presets);
         }
         catch (Exception ex)

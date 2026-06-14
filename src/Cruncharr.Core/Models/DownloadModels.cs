@@ -118,6 +118,9 @@ public class SeriesInfo
     public string? ThumbnailUrl { get; set; }
     public List<string> Images { get; set; } = new();
     public List<SeasonInfo> Seasons { get; set; } = new();
+    // Seasonal-browse extras (AniList-backed lineup).
+    public int? EpisodeCount { get; set; }
+    public bool OnCrunchyroll { get; set; }
 }
 
 public class SeasonInfo

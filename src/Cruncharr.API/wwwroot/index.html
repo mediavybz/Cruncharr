@@ -1036,6 +1036,33 @@ MAINTENANCE NOTES:
             flex-wrap: wrap;
         }
 
+        /* Seasonal page: Fall/Winter/Spring/Summer pill tabs. */
+        .season-tabs {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .season-tab {
+            padding: 8px 20px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border-radius: var(--radius-full);
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            font-family: inherit;
+            transition: background var(--transition), color var(--transition), border-color var(--transition);
+        }
+        .season-tab:hover { color: var(--text-primary); }
+        .season-tab.active {
+            background: var(--accent-soft);
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
         .settings-tab {
             padding: 12px 24px;
             background: transparent;
@@ -3590,46 +3617,48 @@ MAINTENANCE NOTES:
         }
 
         // ================== SEASONAL ==================
-        function renderSeasonal(container) {
-            container.innerHTML = `
-                <div class="page-title">Seasonal Anime</div>
-                <div class="page-subtitle">Browse anime by season</div>
-                <div style="display:flex; gap:10px; margin-bottom:20px; align-items:center;">
-                    <select class="form-select" id="season-select" style="width:150px;">
-                        <option value="winter">Winter</option>
-                        <option value="spring">Spring</option>
-                        <option value="summer">Summer</option>
-                        <option value="fall">Fall</option>
-                    </select>
-                    <select class="form-select" id="season-year-select" style="width:100px;">
-                        ${Array.from({length: 5}, (_, i) => {
-                            const year = new Date().getFullYear() - i;
-                            return `<option value="${year}" ${i === 0 ? 'selected' : ''}>${year}</option>`;
-                        }).join('')}
-                    </select>
-                    <button class="header-btn primary" onclick="fetchSeasonalSeries()">Browse</button>
-                </div>
-                <div id="seasonal-content">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">&#127774;</div>
-                        <div class="empty-state-title">Select a season</div>
-                        <div>Choose a season and year to browse anime</div>
-                    </div>
-                </div>
-            `;
+        let seasonalSeason = null, seasonalYear = null;
+        // Map current month to the anime season (Winter Dec-Feb, Spring Mar-May, etc.).
+        function currentAnimeSeason() {
+            const m = new Date().getMonth();
+            if (m === 11 || m <= 1) return 'winter';
+            if (m <= 4) return 'spring';
+            if (m <= 7) return 'summer';
+            return 'fall';
         }
 
-        async function fetchSeasonalSeries() {
-            const season = document.getElementById('season-select')?.value;
-            const year = document.getElementById('season-year-select')?.value;
-            if (!season || !year) return;
+        function renderSeasonal(container) {
+            if (!seasonalSeason) { seasonalSeason = currentAnimeSeason(); seasonalYear = new Date().getFullYear(); }
+            const seasons = [['winter','Winter'],['spring','Spring'],['summer','Summer'],['fall','Fall']];
+            const thisYear = new Date().getFullYear();
+            container.innerHTML = `
+                <div class="page-title">Seasonal Anime</div>
+                <div class="page-subtitle">The season's lineup from AniList, matched to Crunchyroll</div>
+                <div class="season-tabs" id="season-tabs">
+                    ${seasons.map(([v,l]) => `<button class="season-tab ${seasonalSeason===v?'active':''}" data-season="${v}" onclick="selectSeasonTab('${v}')">${l}</button>`).join('')}
+                    <select class="form-select" id="season-year-select" style="margin-left:auto; width:110px;" onchange="selectSeasonYear(this.value)">
+                        ${Array.from({length: 6}, (_, i) => { const y = thisYear + 1 - i; return `<option value="${y}" ${y===seasonalYear?'selected':''}>${y}</option>`; }).join('')}
+                    </select>
+                </div>
+                <div id="seasonal-content"></div>
+            `;
+            fetchSeasonalSeries();
+        }
 
+        function selectSeasonTab(s) {
+            seasonalSeason = s;
+            document.querySelectorAll('#season-tabs .season-tab').forEach(t => t.classList.toggle('active', t.dataset.season === s));
+            fetchSeasonalSeries();
+        }
+        function selectSeasonYear(y) { seasonalYear = parseInt(y, 10); fetchSeasonalSeries(); }
+
+        async function fetchSeasonalSeries() {
             const content = document.getElementById('seasonal-content');
-            if (!content) return;
+            if (!content || !seasonalSeason || !seasonalYear) return;
             content.innerHTML = '<div class="loading"><div class="spinner"></div>Loading seasonal anime...</div>';
 
             try {
-                const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(season)}&year=${encodeURIComponent(year)}`);
+                const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(seasonalSeason)}&year=${encodeURIComponent(seasonalYear)}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 renderSeasonalContent(data || []);
@@ -3650,20 +3679,22 @@ MAINTENANCE NOTES:
                     <div class="empty-state">
                         <div class="empty-state-icon">&#128270;</div>
                         <div class="empty-state-title">No seasonal anime found</div>
+                        <div>Try another season or year</div>
                     </div>`;
                 return;
             }
 
             content.innerHTML = `
+                <div class="history-poster-meta" style="margin-bottom:12px;">${series.length} titles</div>
                 <div class="history-poster-grid">
                     ${series.map(s => `
                         <div class="history-poster" onclick="selectBrowseResult('${escapeJsString(s.id)}')" style="cursor: pointer;">
                             <div class="history-poster-img">
-                                ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" loading="lazy" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             </div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
-                                <div class="history-poster-meta">${s.seasons?.length || 0} season(s)</div>
+                                <div class="history-poster-meta">${s.episodeCount ? `${s.episodeCount} ep` : 'On Crunchyroll'}</div>
                             </div>
                         </div>
                     `).join('')}
@@ -4374,13 +4405,26 @@ MAINTENANCE NOTES:
                 <div id="settings-content">
                     <div class="loading"><div class="spinner"></div>Loading settings...</div>
                 </div>
-                <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap;">
-                    <button class="header-btn primary" onclick="saveSettings()">Save Settings</button>
+                <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                    <span class="setting-desc" id="autosave-hint">Changes are saved automatically</span>
                     <button class="header-btn" onclick="resetCurrentTab()" title="Reset only the settings on this tab to their defaults">Reset Tab to Default</button>
                     <button class="header-btn" onclick="resetAllSettings()" title="Reset every setting to default (keeps you logged in)" style="margin-left:auto; color:var(--accent-orange);">Reset ALL Settings</button>
                 </div>
             `;
-            fetchConfig().then(() => renderSettingsTab());
+            fetchConfig().then(() => { renderSettingsTab(); attachSettingsAutoSave(); });
+        }
+
+        // Auto-save: any change to a control in the settings panel persists the current
+        // tab (debounced). Replaces the old explicit "Save Settings" button. The listener
+        // lives on the #settings-content container, which survives tab switches.
+        function attachSettingsAutoSave() {
+            const el = document.getElementById('settings-content');
+            if (!el || el._autosaveBound) return;
+            el._autosaveBound = true;
+            el.addEventListener('change', () => {
+                clearTimeout(window._settingsSaveTimer);
+                window._settingsSaveTimer = setTimeout(() => { saveSettings(); }, 250);
+            });
         }
 
         async function loadEncodingPresets() {

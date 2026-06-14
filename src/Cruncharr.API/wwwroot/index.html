@@ -348,6 +348,45 @@ MAINTENANCE NOTES:
         .nav-item.active { background: var(--accent-soft); color: var(--accent-orange); }
         .nav-item.active .nav-icon { color: var(--accent-orange); }
 
+        /* "More" is a mobile-only bottom-bar affordance; hidden on the desktop sidebar. */
+        .nav-more { display: none; }
+
+        /* Mobile "More" bottom sheet (holds the secondary nav items). */
+        .more-sheet-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1100;
+            background: rgba(0,0,0,0.5);
+            align-items: flex-end;
+        }
+        .more-sheet-overlay.open { display: flex; }
+        .more-sheet {
+            width: 100%;
+            background: var(--bg-secondary);
+            border-top-left-radius: var(--radius-lg, 16px);
+            border-top-right-radius: var(--radius-lg, 16px);
+            border-top: 1px solid var(--border-color);
+            padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+            box-shadow: var(--shadow-lg, 0 -8px 24px rgba(0,0,0,0.4));
+            animation: fadeSlideUp 220ms var(--ease-out, ease);
+        }
+        .more-sheet-handle {
+            width: 40px; height: 4px; border-radius: 999px;
+            background: var(--border-color);
+            margin: 6px auto 12px;
+        }
+        .more-sheet-item {
+            display: flex; align-items: center; gap: 14px;
+            padding: 14px 12px;
+            color: var(--text-primary);
+            text-decoration: none;
+            border-radius: var(--radius, 10px);
+            font-size: 1rem;
+        }
+        .more-sheet-item:active { background: var(--bg-hover); }
+        .more-sheet-item .nav-icon { width: 22px; color: var(--text-secondary); }
+
         .nav-icon { width: 20px; text-align: center; display: flex; align-items: center; justify-content: center; }
         .nav-icon svg { width: 18px; height: 18px; }
 
@@ -946,6 +985,7 @@ MAINTENANCE NOTES:
         /* Settings Tabs */
         .settings-tabs {
             display: flex;
+            flex-wrap: wrap; /* 13 tabs overflow ~1440px; wrap instead of cutting them off */
             gap: 0;
             border-bottom: 1px solid var(--border-color);
             margin-bottom: 20px;
@@ -1670,26 +1710,30 @@ MAINTENANCE NOTES:
                 background: var(--bg-secondary);
                 overflow: visible;
             }
-            
+
+            /* Flatten both nav wrappers so all bottom-bar cells are direct flex
+               children of .sidebar and distribute evenly (5 primary + More). */
+            .sidebar-nav, .sidebar-system { display: contents; }
+            .nav-secondary { display: none !important; }
+            .nav-more { display: flex !important; }
+
+            /* "Add Download" is too wide for a phone cell - show "Add". Note the
+               em unit can't be used on ::after here because the span's font-size is
+               zeroed to hide the original text (0.85em of 0 = 0). */
+            .nav-item[data-page="add-download"] > span:last-child { font-size: 0; line-height: 0; }
+            .nav-item[data-page="add-download"] > span:last-child::after {
+                content: "Add";
+                font-size: 0.55rem;
+                line-height: 1.1;
+            }
+
             .sidebar-header { display: none; }
             .sidebar-footer { display: none; }
             .nav-section-title { display: none; }
             
-            .sidebar-nav {
-                display: flex;
-                flex-direction: row;
-                justify-content: flex-start;
-                align-items: center;
-                padding: 0;
-                flex: 1;
-                width: 100%;
-                /* 9 nav items don't fit a phone width - allow horizontal scroll */
-                overflow-x: auto;
-                overflow-y: hidden;
-                -webkit-overflow-scrolling: touch;
-                scrollbar-width: none;
-            }
-            .sidebar-nav::-webkit-scrollbar { display: none; }
+            /* .sidebar-nav + .sidebar-system are display:contents (above) so their
+               nav-items are direct flex children of .sidebar and split the bar
+               evenly - no horizontal scroll, no cut-off items. */
 
             .nav-item {
                 flex-direction: column;
@@ -2033,7 +2077,7 @@ MAINTENANCE NOTES:
                     <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
                     <span>Calendar</span>
                 </a>
-                <a href="#" class="nav-item" data-page="seasons">
+                <a href="#" class="nav-item nav-secondary" data-page="seasons">
                     <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
                     <span>Seasons</span>
                 </a>
@@ -2041,24 +2085,28 @@ MAINTENANCE NOTES:
                     <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>
                     <span>History</span>
                 </a>
-                <a href="#" class="nav-item" data-page="browse">
+                <a href="#" class="nav-item nav-secondary" data-page="browse">
                     <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></span>
                     <span>Browse</span>
                 </a>
-                <a href="#" class="nav-item" data-page="seasonal">
+                <a href="#" class="nav-item nav-secondary" data-page="seasonal">
                     <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg></span>
                     <span>Seasonal</span>
                 </a>
             </nav>
-            <div>
+            <div class="sidebar-system">
                 <div class="nav-section-title">System</div>
-                <a href="#" class="nav-item" data-page="account">
+                <a href="#" class="nav-item nav-secondary" data-page="account">
                     <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
                     <span>Account</span>
                 </a>
                 <a href="#" class="nav-item" data-page="settings">
                     <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
                     <span>Settings</span>
+                </a>
+                <a href="#" class="nav-item nav-more" onclick="toggleMoreSheet(event)">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></span>
+                    <span>More</span>
                 </a>
             </div>
             <div class="sidebar-footer">
@@ -2080,6 +2128,28 @@ MAINTENANCE NOTES:
             </div>
             <div class="modal-body" id="modal-body"></div>
             <div class="modal-footer" id="modal-footer"></div>
+        </div>
+    </div>
+
+    <div class="more-sheet-overlay" id="more-sheet" onclick="if(event.target===this)closeMoreSheet()">
+        <div class="more-sheet" role="menu" aria-label="More navigation">
+            <div class="more-sheet-handle"></div>
+            <a href="#" class="more-sheet-item" onclick="navigateTo('seasons');closeMoreSheet();return false;">
+                <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+                <span>Seasons</span>
+            </a>
+            <a href="#" class="more-sheet-item" onclick="navigateTo('browse');closeMoreSheet();return false;">
+                <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></span>
+                <span>Browse</span>
+            </a>
+            <a href="#" class="more-sheet-item" onclick="navigateTo('seasonal');closeMoreSheet();return false;">
+                <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg></span>
+                <span>Seasonal</span>
+            </a>
+            <a href="#" class="more-sheet-item" onclick="navigateTo('account');closeMoreSheet();return false;">
+                <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+                <span>Account</span>
+            </a>
         </div>
     </div>
 
@@ -2203,10 +2273,11 @@ MAINTENANCE NOTES:
 
         function setupNavigation() {
             document.querySelectorAll('.nav-item').forEach(item => {
+                // The "More" button has its own onclick (opens the sheet) and no page.
+                if (!item.dataset.page) return;
                 item.addEventListener('click', (e) => {
                     e.preventDefault();
-                    const page = item.dataset.page;
-                    navigateTo(page);
+                    navigateTo(item.dataset.page);
                 });
             });
         }
@@ -2217,6 +2288,24 @@ MAINTENANCE NOTES:
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
             const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
             if (navItem) navItem.classList.add('active');
+            // On mobile, secondary pages live behind "More"; keep that cell lit so the
+            // bottom bar still shows where you are.
+            else {
+                const more = document.querySelector('.nav-more');
+                if (more) more.classList.add('active');
+            }
+            closeMoreSheet();
+        }
+
+        // Mobile "More" bottom sheet (Seasons / Browse / Seasonal / Account).
+        function toggleMoreSheet(event) {
+            if (event) event.preventDefault();
+            const sheet = document.getElementById('more-sheet');
+            if (sheet) sheet.classList.toggle('open');
+        }
+        function closeMoreSheet() {
+            const sheet = document.getElementById('more-sheet');
+            if (sheet) sheet.classList.remove('open');
         }
 
         function loadPage(page) {

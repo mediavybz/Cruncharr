@@ -27,7 +27,7 @@ public interface ICrunchyrollAuthService
     Task LogoutAsync();
     Task<bool> RefreshTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task GetMultiProfileAsync(bool useBetaApi, CancellationToken cancellationToken = default);
-    Task<bool> ChangeProfileAsync(string profileId, bool useBetaApi, CancellationToken cancellationToken = default);
+    Task<bool> ChangeProfileAsync(string profileId, bool useBetaApi, string? pin = null, CancellationToken cancellationToken = default);
     Task AuthAnonymousAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task AuthAnonymousFoxyAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task<bool> CheckStreamEndpointUpdateAsync(CancellationToken cancellationToken = default);
@@ -484,7 +484,29 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         // other endpoints use the SSO authorization-code (PKCE) flow
         if (StreamEndpoint.Endpoint.StartsWith("tv", StringComparison.OrdinalIgnoreCase))
         {
-            return await LoginPasswordGrantAsync(email, password, useBetaApi, cancellationToken);
+            try
+            {
+                return await LoginPasswordGrantAsync(email, password, useBetaApi, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Crunchyroll has deactivated the TV password-grant clients (client_inactive)
+                // and the mobile client rejects the password grant (unsupported_grant_type).
+                // Fall back to the SSO authorization-code (PKCE) flow, which mirrors the
+                // current web/app login and does not rely on the password grant. This only
+                // runs once the password grant has already failed, so it cannot regress a
+                // previously working login.
+                _logger?.LogWarning(ex, "TV password grant failed; falling back to SSO code flow");
+
+                // The PKCE flow uses the configured client_id. The TV client is deactivated,
+                // so prefer the (confirmed-active) mobile client for the code exchange.
+                if (!string.IsNullOrEmpty(StreamEndpointSecondary.Authorization))
+                {
+                    StreamEndpoint.Authorization = StreamEndpointSecondary.Authorization;
+                    StreamEndpoint.UserAgent = StreamEndpointSecondary.UserAgent;
+                }
+                return await LoginWithCodeFlowAsync(email, password, useBetaApi, cancellationToken);
+            }
         }
 
         try
@@ -789,36 +811,60 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         {
             _logger?.LogError("Login failed: HTTP Error={Error}, Response={Response}", error, content);
 
-            // If client is inactive, try to update auth credentials and retry once
+            // If the primary (TV) client is inactive, fall back to the secondary
+            // (mobile/android) client, which uses a different client_id that may still
+            // be active. The hosted credential update is also attempted in case Crunchyroll
+            // re-publishes data.json.
             if (content?.Contains("client_inactive") == true || content?.Contains("invalid_client") == true)
             {
-                _logger?.LogWarning("Auth client inactive, attempting to fetch updated credentials...");
-                var updated = await UpdateAuthCredentialsAsync(cancellationToken);
+                _logger?.LogWarning("Primary (TV) auth client inactive; attempting credential update + secondary-client fallback...");
+                await UpdateAuthCredentialsAsync(cancellationToken);
 
-                if (updated)
+                // Use the secondary (mobile) client token if it differs from the dead primary.
+                var fallbackAuth = !string.IsNullOrEmpty(StreamEndpointSecondary.Authorization)
+                    ? StreamEndpointSecondary.Authorization
+                    : StreamEndpoint.Authorization;
+
+                if (!string.IsNullOrEmpty(fallbackAuth))
                 {
-                    _logger?.LogInformation("Auth credentials updated, retrying login...");
-                    // Retry login with updated credentials
-                    crunchyAuthHeaders["Authorization"] = StreamEndpoint.Authorization ?? string.Empty;
-                    crunchyAuthHeaders["User-Agent"] = StreamEndpoint.UserAgent;
-
-                    request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
+                    // IMPORTANT: build a NEW request body. FormUrlEncodedContent is consumed
+                    // by the first SendAsync and cannot be reused - reusing it throws
+                    // "An error occurred while sending the request" and masks the real cause.
+                    var retryFormData = new Dictionary<string, string>
                     {
-                        Content = requestContent
+                        { "username", email },
+                        { "password", password },
+                        { "grant_type", "password" },
+                        { "scope", "offline_access" },
+                        { "device_id", uuid },
+                        { "device_type", StreamEndpointSecondary.Device_type ?? StreamEndpoint.Device_type }
                     };
-
-                    foreach (var header in crunchyAuthHeaders)
+                    if (!string.IsNullOrEmpty(StreamEndpointSecondary.Device_name))
                     {
-                        request.Headers.Add(header.Key, header.Value);
+                        retryFormData["device_name"] = StreamEndpointSecondary.Device_name;
                     }
 
-                    var (retryIsOk, retryContent, retryError) = await _httpClient.SendRequestAsync(request, suppressError: false, attachCookies: false);
+                    var retryRequest = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
+                    {
+                        Content = new FormUrlEncodedContent(retryFormData)
+                    };
+                    retryRequest.Headers.Add("Authorization", fallbackAuth);
+                    retryRequest.Headers.Add("User-Agent", StreamEndpointSecondary.UserAgent ?? StreamEndpoint.UserAgent);
+
+                    _logger?.LogInformation("Retrying login with secondary (mobile) client...");
+                    var (retryIsOk, retryContent, retryError) = await _httpClient.SendRequestAsync(retryRequest, suppressError: false, attachCookies: false);
 
                     if (retryIsOk)
                     {
                         JsonTokenToFileAndVariable(retryContent, uuid);
-                        _logger?.LogInformation("Login successful after auth update");
+                        _logger?.LogInformation("Login successful with secondary (mobile) client");
                         isOk = true;
+                        // Keep using the working client for the rest of this session
+                        // (profile switches/refresh must use the same client_id).
+                        StreamEndpoint.Authorization = StreamEndpointSecondary.Authorization ?? string.Empty;
+                        StreamEndpoint.UserAgent = StreamEndpointSecondary.UserAgent ?? string.Empty;
+                        StreamEndpoint.Device_type = StreamEndpointSecondary.Device_type ?? string.Empty;
+                        StreamEndpoint.Device_name = StreamEndpointSecondary.Device_name ?? string.Empty;
                     }
                     else
                     {
@@ -1075,7 +1121,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
     }
 
-    public async Task<bool> ChangeProfileAsync(string profileId, bool useBetaApi, CancellationToken cancellationToken = default)
+    public async Task<bool> ChangeProfileAsync(string profileId, bool useBetaApi, string? pin = null, CancellationToken cancellationToken = default)
     {
         if (Token?.access_token == null && Token?.refresh_token == null ||
             Token?.access_token != null && Token?.refresh_token == null)
@@ -1110,6 +1156,12 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             { "device_id", uuid },
             { "device_type", StreamEndpoint.Device_type }
         };
+
+        // PIN-protected profiles require the account PIN to switch into them.
+        if (!string.IsNullOrWhiteSpace(pin))
+        {
+            formData["profile_pin"] = pin.Trim();
+        }
 
         if (!string.IsNullOrEmpty(StreamEndpoint.Device_name))
         {

@@ -4053,9 +4053,6 @@ MAINTENANCE NOTES:
                             <div id="profile-list"></div>
                         </div>
                     </div>
-                    <div id="client-token-section" style="width:100%; max-width:400px; margin-top:15px;">
-                        <button class="header-btn" onclick="showClientToken()">Show Client Token</button>
-                    </div>
                 </div>
             `;
             fetchAuthStatus();
@@ -4097,9 +4094,9 @@ MAINTENANCE NOTES:
                                         <div style="font-size:0.8em; color:var(--text-secondary);">${escapeHtml(p.username || '')}</div>
                                     </div>
                                 </div>
-                                ${p.isSelected 
+                                ${p.isSelected
                                     ? '<span style="color:var(--accent-orange); font-size:0.85em; font-weight:600;">Active</span>'
-                                    : `<button class="btn-icon" onclick="switchProfile('${escapeJsString(p.profileId || '')}')" ${(!p.canSwitch || !p.profileId) ? 'disabled' : ''}>Switch</button>`
+                                    : `<button class="btn-icon" onclick="switchProfile('${escapeJsString(p.profileId || '')}', ${p.isPinProtected ? 'true' : 'false'})" ${(!p.canSwitch || !p.profileId) ? 'disabled' : ''}>${p.isPinProtected ? '&#128274; ' : ''}Switch</button>`
                                 }
                             </div>
                         `).join('');
@@ -4117,13 +4114,20 @@ MAINTENANCE NOTES:
             } catch (e) { console.error('Auth status failed:', e); }
         }
 
-        async function switchProfile(profileId) {
+        async function switchProfile(profileId, isPinProtected) {
             try {
+                let pin = null;
+                if (isPinProtected) {
+                    pin = prompt('This profile is protected. Enter its PIN:');
+                    if (pin === null) return; // user cancelled
+                    pin = pin.trim();
+                    if (!pin) { showToast('PIN is required for this profile', 'error'); return; }
+                }
                 showToast('Switching profile...', 'info');
                 const res = await fetch('/api/v1/auth/profiles/switch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ profileId })
+                    body: JSON.stringify(pin ? { profileId, pin } : { profileId })
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
@@ -4135,37 +4139,6 @@ MAINTENANCE NOTES:
                 }
             } catch (e) {
                 showToast('Profile switch error: ' + e.message, 'error');
-            }
-        }
-
-        async function showClientToken() {
-            try {
-                const res = await fetch('/api/v1/auth/client-token');
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                if (res.ok && data.token) {
-                    const modalTitle = document.getElementById('modal-title');
-                    const modalBody = document.getElementById('modal-body');
-                    const modalFooter = document.getElementById('modal-footer');
-                    const modalEl = document.getElementById('modal');
-                    if (modalTitle) modalTitle.textContent = 'Client Token';
-                    if (modalBody) modalBody.innerHTML = `
-                        <div style="background:var(--bg-tertiary); padding:15px; border-radius:6px; font-family:monospace; font-size:0.85em; word-break:break-all; border:1px solid var(--border-color);">
-                            ${escapeHtml(data.token)}
-                        </div>
-                        <div style="margin-top:10px; font-size:0.85em; color:var(--text-secondary);">
-                            This token is used for anonymous authentication requests.
-                        </div>
-                    `;
-                    if (modalFooter) modalFooter.innerHTML = `
-                        <button class="header-btn" onclick="closeModal()">Close</button>
-                    `;
-                    if (modalEl) modalEl.classList.add('active');
-                } else {
-                    showToast('Failed to fetch client token', 'error');
-                }
-            } catch (e) {
-                showToast('Error fetching client token', 'error');
             }
         }
 
@@ -4292,7 +4265,7 @@ MAINTENANCE NOTES:
                     const firstAvailable = status.multiProfile.find(p => p.canSwitch && p.profileId);
                     if (firstAvailable) {
                         showToast(`Auto-selecting profile: ${firstAvailable.profileName || firstAvailable.username || 'Default'}`, 'info');
-                        await switchProfile(firstAvailable.profileId);
+                        await switchProfile(firstAvailable.profileId, firstAvailable.isPinProtected);
                     }
                 }
             } catch (e) {

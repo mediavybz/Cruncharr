@@ -125,7 +125,7 @@ public class AuthController : ControllerBase
                 return BadRequest(new { Success = false, Message = "Profile ID is required" });
             }
 
-            var success = await _auth.ChangeProfileAsync(request.ProfileId, false);
+            var success = await _auth.ChangeProfileAsync(request.ProfileId, false, request.Pin);
             if (success)
             {
                 return Ok(new { Success = true, Message = "Profile switched successfully" });
@@ -309,6 +309,7 @@ public class ProfileDto
 public class SwitchProfileRequest
 {
     public string ProfileId { get; set; } = "";
+    public string? Pin { get; set; }
 }
 
 public class LoginRequest

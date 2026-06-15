@@ -2255,7 +2255,13 @@ MAINTENANCE NOTES:
                     }
                 }
                 return realFetch(input, init).then(function (res) {
-                    if (res && res.status === 401 && isApi) {
+                    // Only treat a 401 as an API-key challenge when the server explicitly
+                    // says so via "WWW-Authenticate: ApiKey" (set by the backend key gate).
+                    // A failed Crunchyroll login also returns 401 but without this header,
+                    // and must surface its real error to the caller instead of triggering
+                    // a misleading "server requires an API key" prompt.
+                    const challenge = res && res.headers ? (res.headers.get('WWW-Authenticate') || '') : '';
+                    if (res && res.status === 401 && isApi && /apikey/i.test(challenge)) {
                         const entered = prompt('This Cruncharr server requires an API key. Enter it:');
                         if (entered) { localStorage.setItem(KEY, entered); location.reload(); }
                     }

@@ -1,32 +1,13 @@
-# Build stage (glibc SDK so the self-contained app matches the Debian runtime base)
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
-ARG TARGETARCH
-
-# Copy project files
-COPY src/Cruncharr.Core/Cruncharr.Core.csproj src/Cruncharr.Core/
-COPY src/Cruncharr.CLI/Cruncharr.CLI.csproj src/Cruncharr.CLI/
-COPY src/Cruncharr.API/Cruncharr.API.csproj src/Cruncharr.API/
-
-# Restore dependencies
-RUN dotnet restore src/Cruncharr.API/Cruncharr.API.csproj \
-    && dotnet restore src/Cruncharr.CLI/Cruncharr.CLI.csproj
-
-# Copy source code
-COPY src/ src/
-
-# Build and publish API + CLI (self-contained trimmed single-file, glibc RID)
-# TARGETARCH=amd64 -> linux-x64, arm64 -> linux-arm64
-RUN if [ "$TARGETARCH" = "amd64" ]; then RID=linux-x64; elif [ "$TARGETARCH" = "arm64" ]; then RID=linux-arm64; else RID=linux-$TARGETARCH; fi \
-    && echo "Building for $RID" \
-    && dotnet publish src/Cruncharr.API/Cruncharr.API.csproj -c Release -o /app/publish \
-       --self-contained true --runtime $RID \
-       /p:PublishSingleFile=true /p:PublishTrimmed=true /p:TrimMode=partial /p:InvariantGlobalization=true \
-    && dotnet publish src/Cruncharr.CLI/Cruncharr.CLI.csproj -c Release -o /app/cli \
-       --self-contained true --runtime $RID \
-       /p:PublishSingleFile=true /p:PublishTrimmed=true /p:TrimMode=partial /p:InvariantGlobalization=true
-
-# Runtime stage (Debian glibc - runs the BtbN full-GPU ffmpeg build)
+# Runtime-only image. The .NET app is published on the host (self-contained,
+# single-file, trimmed) into docker-build/<arch>/ and copied in per-architecture.
+# This avoids pulling the MCR .NET SDK base image at build time (which has been
+# rate-limiting/refusing anonymous pulls); only the Debian runtime base is needed.
+#
+# Before building, publish the binaries on the host:
+#   dotnet publish src/Cruncharr.API/Cruncharr.API.csproj -c Release -r linux-x64 \
+#     --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=true \
+#     -p:TrimMode=partial -p:InvariantGlobalization=true -o docker-build/amd64/publish
+#   (repeat for the CLI and for linux-arm64 -> docker-build/arm64/)
 FROM debian:bookworm-slim
 ARG TARGETARCH
 
@@ -55,10 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create directories (matching original app structure)
 RUN mkdir -p /downloads /config /tools /widevine /tmp/cruncharr /app/presets /app/fonts /app/video
 
-# Copy published applications
+# Copy host-published applications for the target architecture
 WORKDIR /app
-COPY --from=build /app/publish/Cruncharr.API ./cruncharr-api
-COPY --from=build /app/cli/cruncharr /usr/local/bin/
+COPY docker-build/${TARGETARCH}/publish/Cruncharr.API ./cruncharr-api
+COPY docker-build/${TARGETARCH}/cli/cruncharr /usr/local/bin/
 RUN chmod +x cruncharr-api && chmod +x /usr/local/bin/cruncharr
 
 # Copy entrypoint script
@@ -66,7 +47,7 @@ COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
 
 # Copy web UI
-COPY --from=build /app/publish/wwwroot ./wwwroot
+COPY docker-build/${TARGETARCH}/publish/wwwroot ./wwwroot
 
 # Default non-root user (uid 1000). Container starts as root so the entrypoint can
 # chown the mounted volumes to PUID/PGID, then drops privileges with gosu.

@@ -4923,8 +4923,6 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Queue Finished</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-queue-finished" ${n.notifyQueueFinished?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Finished</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-download-finished" ${n.notifyDownloadFinished?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Failed</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-download-failed" ${n.notifyDownloadFailed?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Tracked Series Released</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-tracked-released" ${n.notifyTrackedSeriesReleased?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Login Expired</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-login-expired" ${n.notifyLoginExpired?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Update Available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-notify-update-available" ${n.notifyUpdateAvailable?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
@@ -5394,8 +5392,6 @@ MAINTENANCE NOTES:
                         notifyQueueFinished: document.getElementById('setting-notify-queue-finished')?.checked || false,
                         notifyDownloadFinished: document.getElementById('setting-notify-download-finished')?.checked || false,
                         notifyDownloadFailed: document.getElementById('setting-notify-download-failed')?.checked || false,
-                        notifyTrackedSeriesReleased: document.getElementById('setting-notify-tracked-released')?.checked || false,
-                        notifyLoginExpired: document.getElementById('setting-notify-login-expired')?.checked || false,
                         notifyUpdateAvailable: document.getElementById('setting-notify-update-available')?.checked || false
                     };
                     break;

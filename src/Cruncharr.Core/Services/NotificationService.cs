@@ -31,7 +31,7 @@ public class NotificationService : INotificationService
     {
         if (!config.Notifications.WebhookEnabled) return;
         if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
-        if (!config.Notifications.OnComplete) return;
+        if (!config.Notifications.NotifyDownloadFinished) return; // the UI toggle for this event
 
         _logger?.LogInformation("Sending completion notification to {WebhookUrl}", config.Notifications.WebhookUrl);
 
@@ -51,7 +51,7 @@ public class NotificationService : INotificationService
     {
         if (!config.Notifications.WebhookEnabled) return;
         if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
-        if (!config.Notifications.OnError) return;
+        if (!config.Notifications.NotifyDownloadFailed) return; // the UI toggle for this event
 
         _logger?.LogError("Sending error notification to {WebhookUrl}: {Error}", config.Notifications.WebhookUrl, result.ErrorMessage);
 

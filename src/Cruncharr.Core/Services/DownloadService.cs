@@ -339,6 +339,7 @@ public class DownloadService : IDownloadService
         var filenameOptions = new FilenameOptions
         {
             NumberPadding = config.Download.LeadingNumbers,
+            WhitespaceReplace = config.Download.FilenameWhitespaceSubstitute,
             Quality = config.Download.QualityVideo,
             AudioLanguage = config.Download.DefaultAudio,
             SonarrSeries = sonarrSeries,
@@ -1077,6 +1078,7 @@ public class DownloadService : IDownloadService
                         var newFilenameOptions = new FilenameOptions
                         {
                             NumberPadding = config.Download.LeadingNumbers,
+                            WhitespaceReplace = config.Download.FilenameWhitespaceSubstitute,
                             Quality = actualHeight.Value.ToString(),
                             AudioLanguage = config.Download.DefaultAudio,
                             SonarrSeries = sonarrSeries,

@@ -13,13 +13,15 @@ public class ConfigController : ControllerBase
     private readonly CruncharrConfig _config;
     private readonly ILogger<ConfigController> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ISonarrService _sonarrService;
     private static readonly object _configLock = new object();
 
-    public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger, IHttpClientFactory httpClientFactory)
+    public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger, IHttpClientFactory httpClientFactory, ISonarrService sonarrService)
     {
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
+        _sonarrService = sonarrService;
     }
 
     /// <summary>
@@ -36,6 +38,39 @@ public class ConfigController : ControllerBase
         {
             _logger.LogError(ex, "Failed to get config");
             return StatusCode(500, new { Error = "Failed to get config", Message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Test connectivity to Sonarr using the submitted settings, falling back to
+    /// stored values for any field left blank (including the masked "[configured]"
+    /// API key). Always returns 200 with a success flag so it is never mistaken for
+    /// an API-key auth challenge by the frontend.
+    /// </summary>
+    [HttpPost("sonarr/test")]
+    public async Task<ActionResult> TestSonarr([FromBody] SonarrUpdateConfig? request)
+    {
+        try
+        {
+            var effective = new SonarrConfig
+            {
+                Enabled = true,
+                Host = !string.IsNullOrWhiteSpace(request?.Host) ? request!.Host : _config.Sonarr?.Host,
+                Port = request?.Port is > 0 ? request.Port.Value : (_config.Sonarr?.Port ?? 0),
+                UseSsl = request?.UseSsl ?? _config.Sonarr?.UseSsl ?? false,
+                UrlBase = request?.UrlBase ?? _config.Sonarr?.UrlBase,
+                ApiKey = (!string.IsNullOrEmpty(request?.ApiKey) && request!.ApiKey != "[configured]")
+                    ? request.ApiKey
+                    : _config.Sonarr?.ApiKey
+            };
+
+            var result = await _sonarrService.TestConnectionDetailedAsync(effective);
+            return Ok(new { success = result.Success, message = result.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Sonarr test endpoint failed");
+            return StatusCode(500, new { success = false, message = "Test failed: " + ex.Message });
         }
     }
 

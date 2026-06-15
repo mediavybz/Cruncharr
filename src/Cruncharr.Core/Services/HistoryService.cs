@@ -36,7 +36,7 @@ public interface IHistoryService
     Task SortItemsAsync();
 
     // Sonarr integration
-    Task MatchHistorySeriesWithSonarrAsync(bool updateAll = false);
+    Task<SonarrMatchResult> MatchHistorySeriesWithSonarrAsync(bool updateAll = false);
     Task MatchHistoryEpisodesWithSonarrAsync(string seriesId, bool rematchAll = false);
 
     // Utilities
@@ -673,11 +673,11 @@ public class HistoryService : IHistoryService, IDisposable
     }
 
     // Sonarr integration methods
-    public async Task MatchHistorySeriesWithSonarrAsync(bool updateAll = false)
+    public async Task<SonarrMatchResult> MatchHistorySeriesWithSonarrAsync(bool updateAll = false)
     {
         if (_config.Sonarr is not { Enabled: true } || _sonarrService == null)
         {
-            return;
+            return new SonarrMatchResult(0, 0, 0);
         }
 
         await EnsureLoadedAsync();
@@ -691,19 +691,22 @@ public class HistoryService : IHistoryService, IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to fetch Sonarr series data");
-            return;
+            return new SonarrMatchResult(0, 0, 0);
         }
 
         var sonarrSeriesById = updateAll
             ? sonarrSeries.ToDictionary(series => series.Id.ToString())
             : [];
 
+        var historyTotal = 0;
+        var matched = 0;
         await _lock.WaitAsync();
         try
         {
             foreach (var historySeries in _historyList)
             {
                 if (historySeries.SeriesType == SeriesType.Artist) continue;
+                historyTotal++;
 
                 if (string.IsNullOrEmpty(historySeries.SonarrSeriesId))
                 {
@@ -728,6 +731,8 @@ public class HistoryService : IHistoryService, IDisposable
                         _logger?.LogWarning("Unable to find sonarr series for {SeriesTitle}", historySeries.SeriesTitle);
                     }
                 }
+
+                if (!string.IsNullOrEmpty(historySeries.SonarrSeriesId)) matched++;
             }
 
             await SaveRichHistoryAsync();
@@ -736,6 +741,8 @@ public class HistoryService : IHistoryService, IDisposable
         {
             _lock.Release();
         }
+
+        return new SonarrMatchResult(historyTotal, matched, sonarrSeries.Count);
     }
 
     public async Task MatchHistoryEpisodesWithSonarrAsync(string seriesId, bool rematchAll = false)

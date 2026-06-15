@@ -1379,7 +1379,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     private const string AnilistSeasonQuery =
         "query($season: MediaSeason, $year: Int, $page: Int){ Page(page:$page){ pageInfo{ hasNextPage } " +
         "media(season:$season, seasonYear:$year, type:ANIME, isAdult:false, sort:TITLE_ENGLISH){ " +
-        "id title{ romaji english native } episodes description coverImage{ extraLarge } externalLinks{ site url } } } }";
+        "id title{ romaji english native } episodes description coverImage{ extraLarge } " +
+        "startDate{ year month day } nextAiringEpisode{ episode airingAt } " +
+        "externalLinks{ site url } } } }";
 
     /// <summary>
     /// Seasonal anime lineup. Mirrors upstream: the full season is pulled from AniList
@@ -1424,29 +1426,53 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     var crLink = (m["externalLinks"] as JArray)?.FirstOrDefault(l =>
                         string.Equals(l["site"]?.ToString(), "Crunchyroll", StringComparison.OrdinalIgnoreCase));
                     var url = crLink?["url"]?.ToString();
-                    if (string.IsNullOrEmpty(url)) continue;
-                    var match = Regex.Match(url, @"series/([^/?#]+)");
-                    if (!match.Success) continue;
-                    var crId = match.Groups[1].Value;
+                    if (string.IsNullOrEmpty(url)) continue; // not on Crunchyroll at all
+
+                    // Resolve the CR series id from the link, following redirects when the
+                    // link isn't a clean /series/<id> URL (upstream does the same HEAD hop).
+                    // Titles whose id can't be resolved are STILL listed (just not clickable)
+                    // so the lineup matches upstream's count.
+                    var crId = await ResolveCrunchyrollSeriesIdAsync(url, cancellationToken);
 
                     var title = m["title"]?["english"]?.ToString();
                     if (string.IsNullOrEmpty(title)) title = m["title"]?["romaji"]?.ToString();
                     if (string.IsNullOrEmpty(title)) title = m["title"]?["native"]?.ToString();
                     var cover = m["coverImage"]?["extraLarge"]?.ToString();
 
-                    bySeries[crId] = new SeriesInfo
+                    // Air dates ("as JObject" so a JSON null field doesn't throw on indexing).
+                    var sd = m["startDate"] as JObject;
+                    string? startDate = null;
+                    var sy = sd?["year"]?.ToObject<int?>();
+                    if (sy.HasValue)
                     {
-                        Id = crId,
+                        var smo = sd?["month"]?.ToObject<int?>() ?? 1;
+                        var sdy = sd?["day"]?.ToObject<int?>() ?? 1;
+                        startDate = $"{sy.Value:D4}-{smo:D2}-{sdy:D2}";
+                    }
+                    var nae = m["nextAiringEpisode"] as JObject;
+                    int? nextEp = nae?["episode"]?.ToObject<int?>();
+                    DateTime? nextAir = null;
+                    var airAt = nae?["airingAt"]?.ToObject<long?>();
+                    if (airAt.HasValue) nextAir = DateTimeOffset.FromUnixTimeSeconds(airAt.Value).UtcDateTime;
+
+                    var info = new SeriesInfo
+                    {
+                        Id = crId ?? "",
                         Title = title ?? "",
                         Description = StripHtmlTags(m["description"]?.ToString()),
                         CoverArtUrl = cover,
                         ThumbnailUrl = cover,
                         EpisodeCount = m["episodes"]?.ToObject<int?>(),
-                        OnCrunchyroll = true
+                        OnCrunchyroll = true,
+                        StartDate = startDate,
+                        NextEpisodeNumber = nextEp,
+                        NextAirUtc = nextAir
                     };
+                    var key = !string.IsNullOrEmpty(crId) ? crId : ("anilist:" + (m["id"]?.ToString() ?? title ?? Guid.NewGuid().ToString()));
+                    bySeries[key] = info;
                 }
                 page++;
-            } while (hasNext && page <= 6);
+            } while (hasNext && page <= 10);
         }
         catch (Exception ex)
         {
@@ -1470,6 +1496,24 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     {
         if (string.IsNullOrEmpty(html)) return html;
         return Regex.Replace(html, "<.*?>", string.Empty).Trim();
+    }
+
+    // Extract the Crunchyroll series id from an external link. If the URL isn't a
+    // clean /series/<id> form, follow redirects (HEAD) and re-check the final URL.
+    private async Task<string?> ResolveCrunchyrollSeriesIdAsync(string url, CancellationToken cancellationToken)
+    {
+        var m = Regex.Match(url, @"series/([^/?#]+)");
+        if (m.Success) return m.Groups[1].Value;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Head, url);
+            using var resp = await _anilistClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var finalUrl = resp.RequestMessage?.RequestUri?.ToString() ?? "";
+            var m2 = Regex.Match(finalUrl, @"series/([^/?#]+)");
+            if (m2.Success) return m2.Groups[1].Value;
+        }
+        catch { /* unresolved - title still listed, just not clickable */ }
+        return null;
     }
 
     private async Task<List<SeriesInfo>> GetSeasonalFromCrunchyrollAsync(string season, string year, string? crLocale, CancellationToken cancellationToken)

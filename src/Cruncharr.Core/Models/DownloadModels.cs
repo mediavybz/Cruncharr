@@ -121,6 +121,9 @@ public class SeriesInfo
     // Seasonal-browse extras (AniList-backed lineup).
     public int? EpisodeCount { get; set; }
     public bool OnCrunchyroll { get; set; }
+    public string? StartDate { get; set; }        // ISO yyyy-MM-dd (AniList season start)
+    public int? NextEpisodeNumber { get; set; }   // next un-aired episode #
+    public DateTime? NextAirUtc { get; set; }      // when that episode airs (UTC)
 }
 
 public class SeasonInfo

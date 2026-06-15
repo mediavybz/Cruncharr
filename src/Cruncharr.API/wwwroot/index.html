@@ -3687,18 +3687,47 @@ MAINTENANCE NOTES:
             content.innerHTML = `
                 <div class="history-poster-meta" style="margin-bottom:12px;">${series.length} titles</div>
                 <div class="history-poster-grid">
-                    ${series.map(s => `
-                        <div class="history-poster" onclick="selectBrowseResult('${escapeJsString(s.id)}')" style="cursor: pointer;">
-                            <div class="history-poster-img">
-                                ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" loading="lazy" alt="" onerror="this.outerHTML='📺'">` : '📺'}
-                            </div>
+                    ${series.map(s => {
+                        const clickable = s.id && s.id.length;
+                        const img = (s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl)
+                            ? `<img src="${escapeHtml(s.coverArtUrl || s.thumbnailUrl)}" loading="lazy" alt="" onerror="this.outerHTML='📺'">` : '📺';
+                        const sd = fmtSeasonalDate(s.startDate);
+                        const na = fmtNextAir(s);
+                        const metaMain = (s.episodeCount ? `${s.episodeCount} ep` : 'On Crunchyroll') + (sd ? ` · ${sd}` : '');
+                        return `
+                        <div class="history-poster" ${clickable
+                            ? `onclick="selectBrowseResult('${escapeJsString(s.id)}')" style="cursor: pointer;"`
+                            : `title="Not on Crunchyroll yet" style="opacity:.55;"`}>
+                            <div class="history-poster-img">${img}</div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
-                                <div class="history-poster-meta">${s.episodeCount ? `${s.episodeCount} ep` : 'On Crunchyroll'}</div>
+                                <div class="history-poster-meta">${metaMain}</div>
+                                ${na ? `<div class="history-poster-meta" style="color:var(--accent);">${na}</div>` : ''}
                             </div>
-                        </div>
-                    `).join('')}
+                        </div>`;
+                    }).join('')}
                 </div>`;
+        }
+
+        // Seasonal date helpers.
+        function fmtSeasonalDate(iso) {
+            if (!iso) return '';
+            const d = new Date(iso + 'T00:00:00');
+            if (isNaN(d.getTime())) return '';
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+        function fmtNextAir(s) {
+            if (!s.nextEpisodeNumber && !s.nextAirUtc) return '';
+            let out = 'Next: ';
+            if (s.nextEpisodeNumber) out += 'E' + s.nextEpisodeNumber;
+            if (s.nextAirUtc) {
+                const d = new Date(s.nextAirUtc);
+                if (!isNaN(d.getTime())) {
+                    out += (s.nextEpisodeNumber ? ' · ' : '') + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+                        ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+            }
+            return out;
         }
 
         function escapeHtml(text) {

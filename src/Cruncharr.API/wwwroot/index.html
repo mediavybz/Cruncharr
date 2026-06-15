@@ -4901,7 +4901,8 @@ MAINTENANCE NOTES:
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-ssl" ${s.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input" id="setting-sonarr-urlbase" value="${escapeHtmlAttribute(s.urlBase||'')}" style="width:200px;"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use Sonarr Numbering</div><div class="setting-desc">Use Sonarr's season/episode numbers in filenames</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-numbering" ${s.useSonarrNumbering?'checked':''}><span class="toggle-slider"></span></label></div>
-
+                                <div class="setting-row"><div><div class="setting-label">Connection</div><div class="setting-desc">Verify host, port and API key against your Sonarr server</div></div><button class="header-btn" id="sonarr-test-btn" onclick="testSonarrConnection()">Test Connection</button></div>
+                                <div class="setting-row" id="sonarr-test-result" style="display:none;"><div id="sonarr-test-msg" style="font-size:0.85em;"></div></div>
                             </div>
                         </div>
                     `;
@@ -6233,7 +6234,9 @@ MAINTENANCE NOTES:
                 showToast('Matching all series with Sonarr...', 'info');
                 const res = await fetch('/api/v1/history/sonarr/match-series', { method: 'POST' });
                 if (res.ok) {
-                    showToast('Sonarr match completed', 'success');
+                    const data = await res.json().catch(() => ({}));
+                    const noSonarr = data.sonarrSeriesCount === 0;
+                    showToast(data.message || 'Sonarr match completed', noSonarr ? 'error' : 'success');
                     fetchHistoryData();
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -6260,8 +6263,47 @@ MAINTENANCE NOTES:
             }
         }
         
+        async function testSonarrConnection() {
+            const btn = document.getElementById('sonarr-test-btn');
+            const resultRow = document.getElementById('sonarr-test-result');
+            const msg = document.getElementById('sonarr-test-msg');
+            const apiKeyVal = document.getElementById('setting-sonarr-apikey')?.value;
+            const payload = {
+                host: document.getElementById('setting-sonarr-host')?.value || null,
+                port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
+                useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
+                urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null
+            };
+            // Only send the key if the user typed a real one; otherwise the server reuses the stored key.
+            if (apiKeyVal && apiKeyVal !== '[configured]') payload.apiKey = apiKeyVal;
+
+            if (btn) { btn.disabled = true; btn.textContent = 'Testing...'; }
+            if (resultRow) resultRow.style.display = '';
+            if (msg) { msg.textContent = 'Testing connection...'; msg.style.color = 'var(--text-secondary)'; }
+            try {
+                const res = await fetch('/api/v1/config/sonarr/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json().catch(() => ({}));
+                const ok = !!data.success;
+                const text = data.message || (ok ? 'Connected.' : 'Connection failed.');
+                if (msg) {
+                    msg.textContent = (ok ? '✓ ' : '✗ ') + text;
+                    msg.style.color = ok ? 'var(--accent-green)' : 'var(--accent-red, #e5534b)';
+                }
+                showToast(text, ok ? 'success' : 'error');
+            } catch (e) {
+                if (msg) { msg.textContent = '✗ Test request failed: ' + e.message; msg.style.color = 'var(--accent-red, #e5534b)'; }
+                showToast('Sonarr test failed', 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Test Connection'; }
+            }
+        }
+
         // ================== SETTINGS OVERRIDE ==================
-        
+
         function showSeriesSettingsOverride(seriesId) {
             const series = historyData.find(s => s.seriesId === seriesId);
             if (!series) return;

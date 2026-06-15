@@ -293,8 +293,15 @@ public class HistoryController : ControllerBase
     {
         try
         {
-            await _historyService.MatchHistorySeriesWithSonarrAsync(updateAll);
-            return Ok(new { Message = "Series matching completed" });
+            var result = await _historyService.MatchHistorySeriesWithSonarrAsync(updateAll);
+            string message;
+            if (result.SonarrSeriesCount == 0)
+                message = "No series returned from Sonarr - check the connection (Settings > Sonarr > Test Connection).";
+            else if (result.HistoryTotal == 0)
+                message = "No history series to match yet.";
+            else
+                message = $"Matched {result.Matched} of {result.HistoryTotal} series ({result.SonarrSeriesCount} in Sonarr).";
+            return Ok(new { Message = message, result.HistoryTotal, result.Matched, result.SonarrSeriesCount });
         }
         catch (Exception ex)
         {

@@ -3750,9 +3750,9 @@ MAINTENANCE NOTES:
 
         function escapeJsString(text) {
             if (text == null) return '';
-            // Escape quotes and angle brackets as \uXXXX (not \" / literal <>) so the result is
-            // safe both inside a JS string AND inside a double-quoted HTML attribute (e.g. inline
-            // onclick="..."): no literal " to close the attribute, and no </script> breakout.
+            // Escape quotes and angle brackets as \uXXXX so the result is safe both inside a JS
+            // string AND inside a double-quoted HTML attribute (e.g. inline onclick): no literal
+            // quote to close the attribute, and no closing-script-tag breakout.
             return String(text)
                 .replace(/\\/g, '\\\\')
                 .replace(/'/g, '\\u0027')

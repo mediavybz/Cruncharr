@@ -143,11 +143,13 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
         // Crunchyroll has permanently deactivated the TV password-grant client (verified:
         // its client_id returns client_inactive). Only the mobile client works, via the SSO
-        // flow. When the user relies on the default client, pin StreamEndpoint to the mobile
-        // client ONCE here so that login, token refresh, and profile switch all present the
-        // SAME client_id for the whole session and across restarts. A mismatch makes refresh
-        // fail (dropping to guest -> downloads stop) and profile switch return HTTP 400.
-        if (StreamEndpoint.UseDefault && string.IsNullOrEmpty(streamEndpointConfig?.Authorization))
+        // flow. Whenever the resolved client IS that dead TV client, swap to the mobile client
+        // ONCE here so that login (SSO), token refresh, and profile switch all present the SAME
+        // live client_id for the whole session and across restarts. (Doing this by value, not
+        // by config flags, is robust to a persisted/reset config that holds the TV token.)
+        // A mismatch makes refresh fail (dropping to guest -> downloads stop), profile switch
+        // return HTTP 400, and the SSO /authorize step return no code ("Missing auth code").
+        if (StreamEndpoint.Authorization == DefaultAndroidTvAuthSettings.Authorization)
         {
             StreamEndpoint.Authorization = DefaultAndroidAuthSettings.Authorization;
             StreamEndpoint.UserAgent = DefaultAndroidAuthSettings.UserAgent;

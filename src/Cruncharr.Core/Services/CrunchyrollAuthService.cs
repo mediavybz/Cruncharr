@@ -63,8 +63,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private static readonly CrAuthSettings DefaultAndroidTvAuthSettings = new()
     {
         Endpoint = "tv/android_tv",
-        Authorization = "Basic bm1oaGcwbDZ4eXhjZm02aHQ2aGY6SjR6bU1mdjNkMVFkWHk4dDk2d1NjeDdoUnkzclBHLTM=",
-        UserAgent = "ANDROIDTV/3.61.0_22341 Android/16",
+        // Fresh TV client (ANDROIDTV 3.65.0) - verified active and password-grant capable.
+        // Crunchyroll deactivated the older 3.59/3.61 TV clients (client_inactive).
+        Authorization = "Basic cmpzMGx0eDBkYndrbGl3eGR6ZGY6NFY3cmYyMS1VRlhlWi01WEFkMFhfUVB3cjFndV9pMXM=",
+        UserAgent = "ANDROIDTV/3.65.0_22347 Android/16",
         Device_name = "Android TV",
         Device_type = "Android TV",
         Video = true,
@@ -74,8 +76,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private static readonly CrAuthSettings DefaultAndroidAuthSettings = new()
     {
         Endpoint = "android/phone",
-        Authorization = "Basic Z24wdTU4dGNoMXRxaXZwNHlsbG46TXFoTlFpRnlHSEZKblNRYjZHTjlRQjhENVNTbUllVVQ=",
-        UserAgent = "Crunchyroll/3.109.2 Android/16 okhttp/4.12.0",
+        // Fresh mobile client (Crunchyroll 3.110.0) - active (SSO flow). Used as fallback if
+        // the TV password-grant client is ever deactivated.
+        Authorization = "Basic YnFjaGljMmc3aTJzcnQ5cXU1c2I6NkVKT0tQLXNxU3hEb3RXdVgwZmVnV3pNX2FiTWRNWUo=",
+        UserAgent = "Crunchyroll/3.110.0 Android/16 okhttp/4.12.0",
         Device_name = "CPH2449",
         Device_type = "OnePlus CPH2449",
         Video = true,
@@ -96,7 +100,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         Audio = true
     };
 
-    private const string EmbeddedAuthData = @"[{""type"":""tv"",""authorization"":""Basic bm1oaGcwbDZ4eXhjZm02aHQ2aGY6SjR6bU1mdjNkMVFkWHk4dDk2d1NjeDdoUnkzclBHLTM="",""versionName"":""3.61.0""},{""type"":""mobile"",""authorization"":""Basic Z24wdTU4dGNoMXRxaXZwNHlsbG46TXFoTlFpRnlHSEZKblNRYjZHTjlRQjhENVNTbUllVVQ="",""versionName"":""3.97.0""}]";
+    private const string EmbeddedAuthData = @"[{""type"":""tv"",""authorization"":""Basic cmpzMGx0eDBkYndrbGl3eGR6ZGY6NFY3cmYyMS1VRlhlWi01WEFkMFhfUVB3cjFndV9pMXM="",""versionName"":""3.65.0""},{""type"":""mobile"",""authorization"":""Basic YnFjaGljMmc3aTJzcnQ5cXU1c2I6NkVKT0tQLXNxU3hEb3RXdVgwZmVnV3pNX2FiTWRNWUo="",""versionName"":""3.110.0""}]";
 
     public CrunchyrollAuthService(CruncharrConfig? config = null, ILogger<CrunchyrollAuthService>? logger = null)
     {
@@ -155,25 +159,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             StreamEndpointSecondary.Audio = true;
         }
 
-        // Crunchyroll has permanently deactivated the TV password-grant client (verified:
-        // its client_id returns client_inactive). Only the mobile client works, via the SSO
-        // flow. Whenever the resolved client IS that dead TV client, swap to the mobile client
-        // ONCE here so that login (SSO), token refresh, and profile switch all present the SAME
-        // live client_id for the whole session and across restarts. (Doing this by value, not
-        // by config flags, is robust to a persisted/reset config that holds the TV token.)
-        // A mismatch makes refresh fail (dropping to guest -> downloads stop), profile switch
-        // return HTTP 400, and the SSO /authorize step return no code ("Missing auth code").
-        if (StreamEndpoint.Authorization == DefaultAndroidTvAuthSettings.Authorization)
-        {
-            StreamEndpoint.Authorization = DefaultAndroidAuthSettings.Authorization;
-            StreamEndpoint.UserAgent = DefaultAndroidAuthSettings.UserAgent;
-            StreamEndpoint.Device_type = DefaultAndroidAuthSettings.Device_type;
-            StreamEndpoint.Device_name = DefaultAndroidAuthSettings.Device_name;
-            // Also move the endpoint to the mobile device profile. The /play URL is built from
-            // this endpoint; a tv/android_tv play URL with a mobile (cr_android) token is
-            // rejected with 40016 "Outdated Token". android/phone matches the token's client.
-            StreamEndpoint.Endpoint = DefaultAndroidAuthSettings.Endpoint;
-        }
+        // NOTE: the embedded TV client (DefaultAndroidTvAuthSettings) is the fresh, active
+        // ANDROIDTV 3.65.0 client which supports the password grant, so the original TV flow
+        // (password grant + tv/android_tv play URL) works directly - no client swap needed.
+        // If Crunchyroll deactivates it later, LoginAsync falls back to the SSO/mobile flow
+        // (and the alternate android client) automatically.
 
         _tokenFilePath = !string.IsNullOrEmpty(config?.TokenFilePath) ? config!.TokenFilePath : GetDefaultTokenPath();
 

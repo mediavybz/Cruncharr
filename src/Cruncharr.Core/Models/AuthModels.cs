@@ -15,6 +15,15 @@ public class CrToken
     public string? profile_id { get; set; }
     public string? device_id { get; set; }
     public DateTime expires { get; set; }
+
+    // Records the Crunchyroll auth client (and its device metadata) used to obtain
+    // this token. Crunchyroll validates that profile switching / token refresh use
+    // the SAME client_id, so these are restored on load to keep them consistent
+    // across restarts. Not part of Crunchyroll's token response.
+    public string? auth_client { get; set; }
+    public string? auth_user_agent { get; set; }
+    public string? auth_device_type { get; set; }
+    public string? auth_device_name { get; set; }
 }
 
 public class CrMultiProfile

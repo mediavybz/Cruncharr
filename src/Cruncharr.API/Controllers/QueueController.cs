@@ -61,6 +61,12 @@ public class QueueController : ControllerBase
             {
                 return BadRequest(new { Error = "EpisodeId is required" });
             }
+            // Crunchyroll IDs are short alphanumerics; this value flows into downstream CR URLs,
+            // so reject anything else before it leaves the app.
+            if (!System.Text.RegularExpressions.Regex.IsMatch(request.EpisodeId, "^[A-Za-z0-9._-]{1,64}$"))
+            {
+                return BadRequest(new { Error = "Invalid EpisodeId format" });
+            }
 
             var episode = new EpisodeInfo
             {

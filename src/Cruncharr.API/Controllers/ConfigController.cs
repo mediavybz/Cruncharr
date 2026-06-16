@@ -685,7 +685,14 @@ public class ConfigController : ControllerBase
         {
             var a = request.Appearance;
             if (!string.IsNullOrEmpty(a.Theme)) _config.Appearance.Theme = a.Theme;
-            if (a.AccentColor != null) _config.Appearance.AccentColor = a.AccentColor;
+            if (a.AccentColor != null)
+            {
+                // The UI injects this into a CSS variable, so only accept a hex color (or empty)
+                // to avoid a CSS-injection vector.
+                var ac = a.AccentColor.Trim();
+                if (ac.Length == 0 || System.Text.RegularExpressions.Regex.IsMatch(ac, "^#[0-9A-Fa-f]{3,8}$"))
+                    _config.Appearance.AccentColor = ac;
+            }
             if (a.BackgroundImagePath != null) _config.Appearance.BackgroundImagePath = ValidatePath(a.BackgroundImagePath, nameof(a.BackgroundImagePath));
             if (a.BackgroundImageOpacity.HasValue) _config.Appearance.BackgroundImageOpacity = a.BackgroundImageOpacity.Value;
             if (a.BackgroundImageBlurRadius.HasValue) _config.Appearance.BackgroundImageBlurRadius = a.BackgroundImageBlurRadius.Value;

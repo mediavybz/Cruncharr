@@ -1324,6 +1324,13 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 return;
             }
 
+            // Record the client that issued this token so profile switch / refresh
+            // present the same client_id (Crunchyroll rejects a mismatch with 400).
+            Token.auth_client = StreamEndpoint.Authorization;
+            Token.auth_user_agent = StreamEndpoint.UserAgent;
+            Token.auth_device_type = StreamEndpoint.Device_type;
+            Token.auth_device_name = StreamEndpoint.Device_name;
+
             SaveToken();
         }
     }
@@ -1345,6 +1352,26 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 if (Token != null && Token.refresh_token != null)
                 {
                     SetETPCookie(Token.refresh_token);
+
+                    // Restore the auth client that issued this token so profile switch /
+                    // refresh present the same client_id. Older tokens predate this field;
+                    // user sessions are obtained via the SSO flow with the secondary
+                    // (mobile) client, so fall back to that.
+                    if (!string.IsNullOrEmpty(Token.auth_client))
+                    {
+                        StreamEndpoint.Authorization = Token.auth_client;
+                        if (!string.IsNullOrEmpty(Token.auth_user_agent)) StreamEndpoint.UserAgent = Token.auth_user_agent;
+                        if (!string.IsNullOrEmpty(Token.auth_device_type)) StreamEndpoint.Device_type = Token.auth_device_type;
+                        if (!string.IsNullOrEmpty(Token.auth_device_name)) StreamEndpoint.Device_name = Token.auth_device_name;
+                    }
+                    else if (!string.IsNullOrEmpty(StreamEndpointSecondary.Authorization))
+                    {
+                        StreamEndpoint.Authorization = StreamEndpointSecondary.Authorization;
+                        StreamEndpoint.UserAgent = StreamEndpointSecondary.UserAgent;
+                        StreamEndpoint.Device_type = StreamEndpointSecondary.Device_type;
+                        StreamEndpoint.Device_name = StreamEndpointSecondary.Device_name;
+                    }
+
                     _logger?.LogInformation("Loaded token from {Path}", tokenFile);
                 }
             }

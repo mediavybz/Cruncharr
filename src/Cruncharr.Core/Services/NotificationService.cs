@@ -178,8 +178,9 @@ public class NotificationService : INotificationService
 
             if (!string.IsNullOrEmpty(bodyTemplate))
             {
-                // Simple template substitution
-                var json = System.Text.Json.JsonSerializer.Serialize(payload);
+                // Simple template substitution. Newtonsoft (not reflection-based
+                // System.Text.Json) so it works in the trimmed published build.
+                var json = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
                 var substituted = bodyTemplate
                     .Replace("{{payload}}", json)
                     .Replace("{{timestamp}}", DateTime.UtcNow.ToString("O"));
@@ -187,11 +188,10 @@ public class NotificationService : INotificationService
             }
             else
             {
-                request.Content = JsonContent.Create(payload);
-                if (contentType != "application/json")
-                {
-                    request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
-                }
+                // Newtonsoft (not reflection-based System.Text.Json) so it works in the
+                // trimmed published build.
+                var json = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
+                request.Content = new StringContent(json, Encoding.UTF8, contentType);
             }
 
             using var response = await _httpClient.SendAsync(request);

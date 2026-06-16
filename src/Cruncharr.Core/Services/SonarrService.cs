@@ -130,7 +130,9 @@ public class SonarrService : ISonarrService
             }
 
             var content = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<List<SonarrSeries>>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<SonarrSeries>();
+            // Newtonsoft (not reflection-based System.Text.Json) so deserialization works
+            // in the trimmed published build, which disables STJ reflection.
+            return Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrSeries>>(content) ?? new List<SonarrSeries>();
         }
         catch (Exception ex)
         {
@@ -163,7 +165,9 @@ public class SonarrService : ISonarrService
             }
 
             var content = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<List<SonarrEpisode>>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<SonarrEpisode>();
+            // Newtonsoft (not reflection-based System.Text.Json) so deserialization works
+            // in the trimmed published build, which disables STJ reflection.
+            return Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrEpisode>>(content) ?? new List<SonarrEpisode>();
         }
         catch (Exception ex)
         {

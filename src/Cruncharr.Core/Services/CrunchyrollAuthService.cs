@@ -28,6 +28,7 @@ public interface ICrunchyrollAuthService
     Task<bool> RefreshTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task GetMultiProfileAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task<bool> ChangeProfileAsync(string profileId, bool useBetaApi, string? pin = null, CancellationToken cancellationToken = default);
+    string? LastProfileSwitchError { get; }
     Task AuthAnonymousAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task AuthAnonymousFoxyAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task<bool> CheckStreamEndpointUpdateAsync(CancellationToken cancellationToken = default);
@@ -1206,11 +1207,15 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
         else
         {
-            _logger?.LogError("Change profile failed: {Error}", error);
+            LastProfileSwitchError = !string.IsNullOrWhiteSpace(content) ? content : error;
+            _logger?.LogError("Change profile failed: {Error}; Response={Content}", error, content);
         }
 
         return false;
     }
+
+    /// <summary>Crunchyroll's raw error from the most recent failed profile switch (for diagnostics/UI).</summary>
+    public string? LastProfileSwitchError { get; private set; }
 
     private async Task GetProfileAsync(bool useBetaApi, CancellationToken cancellationToken = default)
     {

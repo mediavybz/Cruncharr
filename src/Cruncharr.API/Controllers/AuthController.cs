@@ -130,7 +130,7 @@ public class AuthController : ControllerBase
             {
                 return Ok(new { Success = true, Message = "Profile switched successfully" });
             }
-            return BadRequest(new { Success = false, Message = "Failed to switch profile" });
+            return BadRequest(new { Success = false, Message = "Failed to switch profile", Detail = _auth.LastProfileSwitchError });
         }
         catch (Exception ex)
         {

@@ -4129,13 +4129,12 @@ MAINTENANCE NOTES:
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(pin ? { profileId, pin } : { profileId })
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                if (data.success) {
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success) {
                     showToast('Profile switched successfully', 'success');
                     fetchAuthStatus();
                 } else {
-                    showToast(data.message || 'Failed to switch profile', 'error');
+                    showToast(data.detail || data.message || `Failed to switch profile (HTTP ${res.status})`, 'error');
                 }
             } catch (e) {
                 showToast('Profile switch error: ' + e.message, 'error');

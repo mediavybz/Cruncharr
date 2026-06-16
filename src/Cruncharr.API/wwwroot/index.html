@@ -3750,12 +3750,18 @@ MAINTENANCE NOTES:
 
         function escapeJsString(text) {
             if (text == null) return '';
+            // Escape quotes and angle brackets as \uXXXX (not \" / literal <>) so the result is
+            // safe both inside a JS string AND inside a double-quoted HTML attribute (e.g. inline
+            // onclick="..."): no literal " to close the attribute, and no </script> breakout.
             return String(text)
                 .replace(/\\/g, '\\\\')
-                .replace(/'/g, "\\'")
-                .replace(/"/g, '\\"')
+                .replace(/'/g, '\\u0027')
+                .replace(/"/g, '\\u0022')
                 .replace(/`/g, '\\`')
                 .replace(/\$\{/g, '\\${')
+                .replace(/</g, '\\u003C')
+                .replace(/>/g, '\\u003E')
+                .replace(/&/g, '\\u0026')
                 .replace(/\n/g, '\\n')
                 .replace(/\r/g, '\\r');
         }
@@ -5020,9 +5026,13 @@ MAINTENANCE NOTES:
                 document.documentElement.removeAttribute('data-theme'); // Dark = default
             }
 
-            // Apply custom accent color if set
+            // Apply a genuinely custom accent color. The picker defaults to #F47521
+            // (Crunchyroll orange); treat that (and empty) as "no custom accent" so it does
+            // NOT override a theme that defines its own accent (e.g. Seerr/Nebula's indigo).
+            // Always clear first so switching back to a theme restores its accent.
             const accentColor = config?.appearance?.accentColor;
-            if (accentColor) {
+            document.documentElement.style.removeProperty('--accent');
+            if (accentColor && accentColor.toUpperCase() !== '#F47521') {
                 document.documentElement.style.setProperty('--accent', accentColor);
             }
         }

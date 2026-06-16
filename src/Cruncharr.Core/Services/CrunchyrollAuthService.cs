@@ -141,6 +141,20 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             StreamEndpointSecondary.Audio = true;
         }
 
+        // Crunchyroll has permanently deactivated the TV password-grant client (verified:
+        // its client_id returns client_inactive). Only the mobile client works, via the SSO
+        // flow. When the user relies on the default client, pin StreamEndpoint to the mobile
+        // client ONCE here so that login, token refresh, and profile switch all present the
+        // SAME client_id for the whole session and across restarts. A mismatch makes refresh
+        // fail (dropping to guest -> downloads stop) and profile switch return HTTP 400.
+        if (StreamEndpoint.UseDefault && string.IsNullOrEmpty(streamEndpointConfig?.Authorization))
+        {
+            StreamEndpoint.Authorization = DefaultAndroidAuthSettings.Authorization;
+            StreamEndpoint.UserAgent = DefaultAndroidAuthSettings.UserAgent;
+            StreamEndpoint.Device_type = DefaultAndroidAuthSettings.Device_type;
+            StreamEndpoint.Device_name = DefaultAndroidAuthSettings.Device_name;
+        }
+
         _tokenFilePath = !string.IsNullOrEmpty(config?.TokenFilePath) ? config!.TokenFilePath : GetDefaultTokenPath();
 
         Init();
@@ -491,21 +505,12 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             }
             catch (Exception ex)
             {
-                // Crunchyroll has deactivated the TV password-grant clients (client_inactive)
-                // and the mobile client rejects the password grant (unsupported_grant_type).
-                // Fall back to the SSO authorization-code (PKCE) flow, which mirrors the
-                // current web/app login and does not rely on the password grant. This only
-                // runs once the password grant has already failed, so it cannot regress a
-                // previously working login.
-                _logger?.LogWarning(ex, "TV password grant failed; falling back to SSO code flow");
-
-                // The PKCE flow uses the configured client_id. The TV client is deactivated,
-                // so prefer the (confirmed-active) mobile client for the code exchange.
-                if (!string.IsNullOrEmpty(StreamEndpointSecondary.Authorization))
-                {
-                    StreamEndpoint.Authorization = StreamEndpointSecondary.Authorization;
-                    StreamEndpoint.UserAgent = StreamEndpointSecondary.UserAgent;
-                }
+                // The password grant is dead (Crunchyroll deactivated those clients). Fall back
+                // to the SSO authorization-code (PKCE) flow, which the mobile client supports.
+                // StreamEndpoint is already pinned to the mobile client in the constructor, so
+                // login / refresh / profile switch all use the same client_id. This only runs
+                // after the password grant has already failed, so it cannot regress a working login.
+                _logger?.LogWarning(ex, "Password grant failed; falling back to SSO code flow");
                 return await LoginWithCodeFlowAsync(email, password, useBetaApi, cancellationToken);
             }
         }
@@ -1324,13 +1329,6 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 return;
             }
 
-            // Record the client that issued this token so profile switch / refresh
-            // present the same client_id (Crunchyroll rejects a mismatch with 400).
-            Token.auth_client = StreamEndpoint.Authorization;
-            Token.auth_user_agent = StreamEndpoint.UserAgent;
-            Token.auth_device_type = StreamEndpoint.Device_type;
-            Token.auth_device_name = StreamEndpoint.Device_name;
-
             SaveToken();
         }
     }
@@ -1352,26 +1350,6 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 if (Token != null && Token.refresh_token != null)
                 {
                     SetETPCookie(Token.refresh_token);
-
-                    // Restore the auth client that issued this token so profile switch /
-                    // refresh present the same client_id. Older tokens predate this field;
-                    // user sessions are obtained via the SSO flow with the secondary
-                    // (mobile) client, so fall back to that.
-                    if (!string.IsNullOrEmpty(Token.auth_client))
-                    {
-                        StreamEndpoint.Authorization = Token.auth_client;
-                        if (!string.IsNullOrEmpty(Token.auth_user_agent)) StreamEndpoint.UserAgent = Token.auth_user_agent;
-                        if (!string.IsNullOrEmpty(Token.auth_device_type)) StreamEndpoint.Device_type = Token.auth_device_type;
-                        if (!string.IsNullOrEmpty(Token.auth_device_name)) StreamEndpoint.Device_name = Token.auth_device_name;
-                    }
-                    else if (!string.IsNullOrEmpty(StreamEndpointSecondary.Authorization))
-                    {
-                        StreamEndpoint.Authorization = StreamEndpointSecondary.Authorization;
-                        StreamEndpoint.UserAgent = StreamEndpointSecondary.UserAgent;
-                        StreamEndpoint.Device_type = StreamEndpointSecondary.Device_type;
-                        StreamEndpoint.Device_name = StreamEndpointSecondary.Device_name;
-                    }
-
                     _logger?.LogInformation("Loaded token from {Path}", tokenFile);
                 }
             }

@@ -1193,12 +1193,19 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             request.Headers.Add(header.Key, header.Value);
         }
 
+        // Send ONLY the etp_rt cookie for the refresh_token_profile_id grant, and do not let
+        // the shared cookie store attach anything else. The store also holds
+        // sso.crunchyroll.com cookies (a second etp_rt + client_id + device_id from the SSO
+        // login flow); leaking those onto this beta-api request makes Crunchyroll reject the
+        // grant with a client_id "information_mismatch" (verified: an etp_rt-only request
+        // succeeds, the same request plus the SSO cookies fails).
         if (Token?.refresh_token != null)
         {
             SetETPCookie(Token.refresh_token);
+            request.Headers.Add("Cookie", $"etp_rt={Token.refresh_token}");
         }
 
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, suppressError: false, attachCookies: false);
 
         if (isOk)
         {

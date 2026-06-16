@@ -87,8 +87,8 @@ MAINTENANCE NOTES:
             --bg-tertiary: #161618;
             --bg-card: #141416;
             --bg-hover: #1f1f23;
-            --surface-border: rgba(255, 255, 255, 0.06);
-            --border-color: rgba(255, 255, 255, 0.08);
+            --surface-border: rgba(255, 255, 255, 0.045);
+            --border-color: rgba(255, 255, 255, 0.06);
             --sidebar-bg: linear-gradient(180deg, #111113, #0a0a0b);
 
             /* --- Text (WCAG AA+ on near-black) --- */
@@ -239,8 +239,8 @@ MAINTENANCE NOTES:
             --bg-tertiary: #273244;
             --bg-card: #1f2937;
             --bg-hover: #374151;     /* gray-700 */
-            --surface-border: #374151;
-            --border-color: #374151;
+            --surface-border: rgba(255, 255, 255, 0.06); /* softer than the old solid #374151 */
+            --border-color: rgba(255, 255, 255, 0.08);
             --sidebar-bg: linear-gradient(180deg, #1f2937, #111827);
 
             --text-primary: #ffffff;
@@ -314,18 +314,19 @@ MAINTENANCE NOTES:
         }
 
         .sidebar-logo {
-            width: 32px;
-            height: 32px;
+            width: 26px;
+            height: 26px;
             background: var(--accent-orange);
             border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: bold;
+            font-size: 0.8em;
             color: #000;
         }
 
-        .sidebar-title { font-size: 1.55em; font-weight: 700; letter-spacing: -0.01em; }
+        .sidebar-title { font-size: 1.2em; font-weight: 700; letter-spacing: -0.01em; }
 
         .sidebar-nav { flex: 1; padding: 10px 0; }
 

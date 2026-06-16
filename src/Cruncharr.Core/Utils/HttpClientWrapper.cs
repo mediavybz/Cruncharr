@@ -324,6 +324,13 @@ public class HttpClientWrapper : IDisposable
         }
     }
 
+    /// <summary>Clear all stored cookies. Called at login start so a stale etp_rt from a
+    /// previous session can't pollute the SSO /authorize step ("Missing authorization code").</summary>
+    public void ClearCookies()
+    {
+        _cookieStore.Clear();
+    }
+
     public void AddCookie(string domain, Cookie cookie)
     {
         var domainLock = _cookieLocks.GetOrAdd(domain, _ => new object());

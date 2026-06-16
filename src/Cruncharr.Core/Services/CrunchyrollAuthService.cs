@@ -82,6 +82,20 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         Audio = true
     };
 
+    // Alternate android client (upstream's), used as an automatic fallback if the primary
+    // android client above is deactivated by Crunchyroll. Both are currently active. Add more
+    // here as they're discovered; LoginAsync tries each on a client failure.
+    private static readonly CrAuthSettings AlternateAndroidAuthSettings = new()
+    {
+        Endpoint = "android/phone",
+        Authorization = "Basic bzJhNndsamdub3FtdjloMWJ5bHI6Ujk3S3ExZm5faExZVFk0bDJxTjJIT2lDQnpfYnpBSUU=",
+        UserAgent = "Crunchyroll/3.97.0 Android/16 okhttp/4.12.0",
+        Device_name = "CPH2449",
+        Device_type = "OnePlus CPH2449",
+        Video = true,
+        Audio = true
+    };
+
     private const string EmbeddedAuthData = @"[{""type"":""tv"",""authorization"":""Basic bm1oaGcwbDZ4eXhjZm02aHQ2aGY6SjR6bU1mdjNkMVFkWHk4dDk2d1NjeDdoUnkzclBHLTM="",""versionName"":""3.61.0""},{""type"":""mobile"",""authorization"":""Basic Z24wdTU4dGNoMXRxaXZwNHlsbG46TXFoTlFpRnlHSEZKblNRYjZHTjlRQjhENVNTbUllVVQ="",""versionName"":""3.97.0""}]";
 
     public CrunchyrollAuthService(CruncharrConfig? config = null, ILogger<CrunchyrollAuthService>? logger = null)
@@ -527,7 +541,32 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "SSO code login failed, falling back to password grant");
+            _logger?.LogWarning(ex, "SSO code login failed with primary client");
+
+            // AUTO-SWITCH: if using the default android client and it failed (e.g. Crunchyroll
+            // deactivated it), try the alternate embedded android client before giving up. Only
+            // runs after the primary already failed, so it cannot regress a working login, and it
+            // is skipped when the user configured their own client (respect the override).
+            if (StreamEndpoint.Authorization == DefaultAndroidAuthSettings.Authorization
+                && !string.IsNullOrEmpty(AlternateAndroidAuthSettings.Authorization))
+            {
+                _logger?.LogWarning("Trying alternate embedded android client...");
+                StreamEndpoint.Authorization = AlternateAndroidAuthSettings.Authorization;
+                StreamEndpoint.UserAgent = AlternateAndroidAuthSettings.UserAgent;
+                StreamEndpoint.Device_type = AlternateAndroidAuthSettings.Device_type;
+                StreamEndpoint.Device_name = AlternateAndroidAuthSettings.Device_name;
+                StreamEndpoint.Endpoint = AlternateAndroidAuthSettings.Endpoint;
+                try
+                {
+                    return await LoginWithCodeFlowAsync(email, password, useBetaApi, cancellationToken);
+                }
+                catch (Exception altEx)
+                {
+                    _logger?.LogWarning(altEx, "Alternate android client login also failed");
+                }
+            }
+
+            _logger?.LogWarning("Falling back to password grant");
             return await LoginPasswordGrantAsync(email, password, useBetaApi, cancellationToken);
         }
     }
@@ -540,6 +579,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private async Task<bool> LoginWithCodeFlowAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken)
     {
         _logger?.LogInformation("Logging in as {Email} via SSO code flow", email);
+
+        // Start from a clean cookie jar (matches upstream CrAuth.Auth). A leftover etp_rt from a
+        // prior session otherwise gets sent to the SSO /authorize step and makes it return no
+        // code ("Missing authorization code from SSO flow") on re-login.
+        _httpClient.ClearCookies();
 
         var uuid = ResolveDeviceId();
         var loginPayload = JsonConvert.SerializeObject(new Dictionary<string, object>

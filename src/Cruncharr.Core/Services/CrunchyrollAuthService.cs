@@ -155,6 +155,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             StreamEndpoint.UserAgent = DefaultAndroidAuthSettings.UserAgent;
             StreamEndpoint.Device_type = DefaultAndroidAuthSettings.Device_type;
             StreamEndpoint.Device_name = DefaultAndroidAuthSettings.Device_name;
+            // Also move the endpoint to the mobile device profile. The /play URL is built from
+            // this endpoint; a tv/android_tv play URL with a mobile (cr_android) token is
+            // rejected with 40016 "Outdated Token". android/phone matches the token's client.
+            StreamEndpoint.Endpoint = DefaultAndroidAuthSettings.Endpoint;
         }
 
         _tokenFilePath = !string.IsNullOrEmpty(config?.TokenFilePath) ? config!.TokenFilePath : GetDefaultTokenPath();

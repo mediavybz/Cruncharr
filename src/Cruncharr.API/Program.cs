@@ -37,6 +37,19 @@ public class Program
                 options.SerializerSettings.NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore;
             });
 
+        // Compress responses (Brotli/Gzip). The single-file UI is ~390KB uncompressed;
+        // compression drops it to ~60KB, cutting first-load + post-deploy revalidation cost.
+        builder.Services.AddResponseCompression(options =>
+        {
+            options.EnableForHttps = true;
+            options.MimeTypes = Microsoft.AspNetCore.ResponseCompression.ResponseCompressionDefaults.MimeTypes
+                .Concat(new[] { "image/svg+xml", "application/manifest+json" });
+        });
+        builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(
+            o => o.Level = System.IO.Compression.CompressionLevel.Optimal);
+        builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(
+            o => o.Level = System.IO.Compression.CompressionLevel.Optimal);
+
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen(c =>
         {
@@ -97,6 +110,9 @@ public class Program
         });
 
         var app = builder.Build();
+
+        // Compress responses before anything writes the body.
+        app.UseResponseCompression();
 
         // Configure the HTTP request pipeline
         if (app.Environment.IsDevelopment())
@@ -168,6 +184,12 @@ public class Program
                 if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
                 {
                     ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+                }
+                else
+                {
+                    // Icons/manifest/images change rarely — let the browser cache them a week
+                    // so repeat visits don't re-fetch the ~200KB PNGs every time.
+                    ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=604800";
                 }
             }
         });

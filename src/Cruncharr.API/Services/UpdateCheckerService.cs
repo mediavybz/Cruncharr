@@ -46,8 +46,12 @@ public class UpdateCheckerService : BackgroundService
 
     private async Task CheckForUpdateAsync(CancellationToken cancellationToken)
     {
+        // Check THIS project's releases, not the upstream Crunchy-Downloader repo.
+        // (Upstream versions are 3.x while Cruncharr is 0.2.x, so comparing against
+        // upstream made every check report a bogus "update available" pointing at a
+        // different product.)
         using var request = new HttpRequestMessage(HttpMethod.Get,
-            "https://api.github.com/repos/Crunchy-DL/Crunchy-Downloader/releases/latest");
+            "https://api.github.com/repos/mediavybz/Cruncharr/releases/latest");
         request.Headers.Add("User-Agent", "Cruncharr-UpdateChecker/1.0");
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);

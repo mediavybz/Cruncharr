@@ -21,8 +21,9 @@ test-data/tools/device_private_key
 *.key
 *.pem
 
-# Original reference code (separate repo)
+# Original reference code (separate repo) - NOT shipped in this public repo
 crunchy-downloader/
+CRD/
 
 # Test data (binaries and sensitive files)
 test-data/

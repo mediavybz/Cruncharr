@@ -130,9 +130,12 @@ public class Program
 
         // Optional API-key gate. Off by default (no env var) so existing setups keep
         // working. When CRUNCHARR_API_KEY is set, every /api/* call must present the key
-        // via the X-Api-Key header, an Authorization: Bearer <key>, or ?apiKey=. Health
-        // checks and CORS preflight are exempt so the Docker healthcheck and browser
-        // still function. This makes the container safe to expose on a shared network.
+        // via the X-Api-Key header or an Authorization: Bearer <key>. The ?apiKey= query
+        // param is also accepted but ONLY because the SSE endpoint is consumed via the
+        // browser EventSource API, which cannot set request headers; prefer the header
+        // everywhere else since query strings can land in reverse-proxy access logs.
+        // Health checks and CORS preflight are exempt so the Docker healthcheck and
+        // browser still function. This makes the container safe to expose on a shared network.
         var requiredApiKey = Environment.GetEnvironmentVariable("CRUNCHARR_API_KEY");
         if (!string.IsNullOrWhiteSpace(requiredApiKey))
         {

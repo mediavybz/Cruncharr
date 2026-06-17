@@ -107,7 +107,9 @@ public class NotificationService : INotificationService
                 var psi = new ProcessStartInfo
                 {
                     FileName = config.Notifications.DownloadFinishedExecutePath,
-                    UseShellExecute = true,
+                    // false: launch the executable directly (works headless / in the container)
+                    // and avoid the shell interpreting the path as a command line.
+                    UseShellExecute = false,
                     CreateNoWindow = true
                 };
                 using var process = Process.Start(psi);

@@ -27,6 +27,11 @@ public class ImagesController : ControllerBase
 
     private const long MaxImageBytes = 25 * 1024 * 1024; // guardrail against pathological responses
 
+    // Bound the on-disk cache so it cannot grow without limit on the /config volume.
+    private const long MaxCacheBytes = 512L * 1024 * 1024; // ~512MB
+    private static long _writeCounter;
+    private static int _pruneGate; // 0 = idle, 1 = prune running (Interlocked CAS)
+
     public ImagesController(ILogger<ImagesController> logger)
     {
         _logger = logger;
@@ -105,6 +110,7 @@ public class ImagesController : ControllerBase
                 var tmp = cachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 await System.IO.File.WriteAllBytesAsync(tmp, bytes, cancellationToken);
                 System.IO.File.Move(tmp, cachePath, overwrite: true);
+                TriggerCachePruneIfDue();
             }
             catch (Exception ex)
             {
@@ -162,6 +168,47 @@ public class ImagesController : ControllerBase
         ".avif" => "image/avif",
         _ => "image/jpeg"
     };
+
+    // Periodically (and never on more than one thread) evict the oldest cached
+    // images once the cache exceeds its size cap. Runs off the request hot path.
+    private void TriggerCachePruneIfDue()
+    {
+        if (Interlocked.Increment(ref _writeCounter) % 64 != 0) return;   // amortize the cost
+        if (Interlocked.CompareExchange(ref _pruneGate, 1, 0) != 0) return; // one prune at a time
+        _ = Task.Run(() =>
+        {
+            try { PruneCache(_logger); }
+            finally { Interlocked.Exchange(ref _pruneGate, 0); }
+        });
+    }
+
+    private static void PruneCache(ILogger logger)
+    {
+        try
+        {
+            var dir = new DirectoryInfo(_cacheDir);
+            if (!dir.Exists) return;
+
+            var files = dir.GetFiles("*", SearchOption.TopDirectoryOnly);
+            long total = 0;
+            foreach (var f in files) total += f.Length;
+            if (total <= MaxCacheBytes) return;
+
+            // Evict oldest-written first until back under 80% of the cap.
+            long target = (long)(MaxCacheBytes * 0.8);
+            foreach (var f in files.OrderBy(f => f.LastWriteTimeUtc))
+            {
+                if (total <= target) break;
+                try { total -= f.Length; f.Delete(); }
+                catch { /* skip files that are locked or already gone */ }
+            }
+            logger.LogInformation("Image cache pruned to ~{Bytes} bytes", total);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Image cache prune failed");
+        }
+    }
 
     private static string Sha256Hex(string value)
     {

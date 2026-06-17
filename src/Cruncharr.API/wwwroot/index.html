@@ -5650,8 +5650,6 @@ MAINTENANCE NOTES:
         }
 
         async function toggleSetting(key, value) {
-            console.log('Toggle', key, value);
-            
             const settingMap = {
                 'removeFinished': { section: 'general', field: 'removeFinishedDownload', label: 'Remove Finished' },
                 'autoDownload': { section: 'queue', field: 'autoDownload', label: 'Auto Download' }
@@ -6726,7 +6724,10 @@ MAINTENANCE NOTES:
                 return;
             }
             
-            eventSource = new EventSource('/api/v1/queue/sse');
+            // EventSource cannot set request headers, so when an API key is configured
+            // it must travel in the query string (the one place ?apiKey= is required).
+            const sseKey = localStorage.getItem('cruncharrApiKey');
+            eventSource = new EventSource('/api/v1/queue/sse' + (sseKey ? ('?apiKey=' + encodeURIComponent(sseKey)) : ''));
             
             eventSource.onmessage = (event) => {
                 try {
@@ -6758,7 +6759,6 @@ MAINTENANCE NOTES:
             };
             
             eventSource.onopen = () => {
-                console.log('SSE connection established');
                 sseRetryCount = 0;
             };
         }
@@ -6856,7 +6856,6 @@ MAINTENANCE NOTES:
                     fetchQueueStats();
                 }
             }, 5000);
-            console.log('Queue polling fallback started');
         }
 
     </script>

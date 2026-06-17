@@ -140,46 +140,6 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Test login and return full diagnostics
-    /// </summary>
-    [HttpPost("login-test")]
-    public async Task<ActionResult> LoginTest([FromBody] LoginRequest request)
-    {
-        if (request == null)
-        {
-            return BadRequest(new { Success = false, Message = "Request body is required" });
-        }
-        if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
-        {
-            return BadRequest(new { Success = false, Message = "Email and password are required" });
-        }
-
-        try
-        {
-            var success = await _auth.LoginAsync(request.Email, request.Password, useBetaApi: _config?.Crunchyroll?.UseBetaApi ?? true);
-            return Ok(new
-            {
-                Success = success,
-                Message = success ? "Login successful" : "Login failed",
-                Username = _auth.Profile?.Username ?? "",
-                HasPremium = _auth.Profile?.HasPremium ?? false,
-                UseBetaApi = _config?.Crunchyroll?.UseBetaApi ?? true
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Login test failed for {Email}", request.Email);
-            return Ok(new
-            {
-                Success = false,
-                Message = ex.Message,
-                Exception = ex.GetType().Name,
-                UseBetaApi = _config?.Crunchyroll?.UseBetaApi ?? true
-            });
-        }
-    }
-
-    /// <summary>
     /// Login with email and password
     /// </summary>
     [HttpPost("login")]
@@ -227,7 +187,8 @@ public class AuthController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Login failed for {Email}", request.Email);
+            // Do not log the email: these logs are readable via the diagnostics API.
+            _logger?.LogError(ex, "Login failed");
             return Unauthorized(new LoginResponse
             {
                 Success = false,

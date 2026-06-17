@@ -568,7 +568,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     private async Task<bool> LoginWithCodeFlowAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken)
     {
-        _logger?.LogInformation("Logging in as {Email} via SSO code flow", email);
+        _logger?.LogInformation("Logging in via SSO code flow"); // email omitted: logs are diagnostics-readable
 
         // Start from a clean cookie jar (matches upstream CrAuth.Auth). A leftover etp_rt from a
         // prior session otherwise gets sent to the SSO /authorize step and makes it return no
@@ -806,7 +806,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     private async Task<bool> LoginPasswordGrantAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default)
     {
-        _logger?.LogInformation("Logging in as {Email} (BetaAPI: {UseBeta})", email, useBetaApi);
+        _logger?.LogInformation("Logging in (BetaAPI: {UseBeta})", useBetaApi); // email omitted: logs are diagnostics-readable
 
         string uuid = Guid.NewGuid().ToString();
 

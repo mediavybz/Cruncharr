@@ -28,7 +28,7 @@ public class AuthenticationService : IAuthenticationService
 
     public async Task<bool> LoginAsync(string email, string password, CancellationToken cancellationToken = default)
     {
-        _logger?.LogInformation("Logging in as {Email}", email);
+        _logger?.LogInformation("Attempting Crunchyroll login"); // email omitted: logs are diagnostics-readable
         return await _crAuth.LoginAsync(email, password, false, cancellationToken);
     }
 

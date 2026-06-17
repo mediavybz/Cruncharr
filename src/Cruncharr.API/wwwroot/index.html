@@ -3585,8 +3585,13 @@ MAINTENANCE NOTES:
         // ================== BROWSE ==================
         function renderBrowse(container) {
             container.innerHTML = `
-                <div class="page-title">Browse All Series</div>
-                <div class="page-subtitle">Explore all available series</div>
+                <div class="browse-header-row" style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap;">
+                    <div>
+                        <div class="page-title">Browse All Series</div>
+                        <div class="page-subtitle">Explore all available series</div>
+                    </div>
+                    <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; align-items:center;"></div>
+                </div>
                 <div class="browse-filter-bar">
                     <span class="browse-filter-label">Dub language</span>
                     <select class="form-select" id="browse-dub-filter" onchange="onBrowseDubFilterChange(this.value)" style="min-width:180px;">
@@ -3594,7 +3599,6 @@ MAINTENANCE NOTES:
                         ${LANG_OPTIONS.map(o=>`<option value="${escapeHtmlAttribute(o.value)}" ${browseDubFilter===o.value?'selected':''}>${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                     <span class="browse-filter-count" id="browse-count"></span>
-                    <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; justify-content:flex-end;"></div>
                 </div>
                 <div id="browse-content">
                     <div class="loading"><div class="spinner"></div>Loading series...</div>

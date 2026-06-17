@@ -937,16 +937,34 @@ public class HistoryService : IHistoryService, IDisposable
         double highestSimilarity = 0.0;
         var lockObject = new object();
 
+        var needle = title.ToLower();
+
         Parallel.ForEach(sonarrSeries, series =>
         {
+            // Score against the primary title AND any alternate titles (anime in Sonarr
+            // often carry romaji/native/english variants there; CR uses a different one).
+            double best = 0.0;
             if (series.Title != null)
             {
-                double similarity = StringSimilarity.CalculateSimilarity(series.Title.ToLower(), title.ToLower());
+                best = StringSimilarity.CalculateSimilarity(series.Title.ToLower(), needle);
+            }
+            if (series.AlternateTitles != null)
+            {
+                foreach (var alt in series.AlternateTitles)
+                {
+                    if (string.IsNullOrEmpty(alt.Title)) continue;
+                    var sim = StringSimilarity.CalculateSimilarity(alt.Title.ToLower(), needle);
+                    if (sim > best) best = sim;
+                }
+            }
+
+            if (best > 0.0)
+            {
                 lock (lockObject)
                 {
-                    if (similarity > highestSimilarity)
+                    if (best > highestSimilarity)
                     {
-                        highestSimilarity = similarity;
+                        highestSimilarity = best;
                         closestMatch = series;
                     }
                 }

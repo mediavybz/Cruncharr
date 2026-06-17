@@ -1323,6 +1323,11 @@ MAINTENANCE NOTES:
         .sonarr-unmatched { border-left: 3px solid var(--text-secondary); }
         .sonarr-match-badge { font-size: 0.7em; padding: 2px 6px; border-radius: 3px; background: var(--accent-green); color: #fff; margin-left: 5px; }
 
+        /* Browse dub-language filter bar */
+        .browse-filter-bar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
+        .browse-filter-label { font-weight: var(--fw-semibold); font-size: var(--text-sm); color: var(--text-secondary); }
+        .browse-filter-count { font-size: var(--text-sm); color: var(--text-muted); }
+
         /* Dub Language Selection */
         .dub-selector {
             display: flex;
@@ -2139,7 +2144,7 @@ MAINTENANCE NOTES:
         </div>
         <aside class="sidebar">
             <div class="sidebar-header">
-                <img src="/favicon.png" alt="Cruncharr" style="width:32px;height:32px;">
+                <img src="/favicon-96x96.png" alt="Cruncharr" width="32" height="32" style="width:32px;height:32px;">
                 <div class="sidebar-title">Cruncharr</div>
             </div>
             <nav class="sidebar-nav">
@@ -2292,6 +2297,8 @@ MAINTENANCE NOTES:
         let isQueueGloballyPaused = false;
         let authIntervalId, historyIntervalId;
         let selectBrowseResultTimeout = null;
+        let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
+        let browseDubFilter = '';        // '' = all languages
         let historyFilterText = '';
 
         // Constants
@@ -3485,6 +3492,14 @@ MAINTENANCE NOTES:
             container.innerHTML = `
                 <div class="page-title">Browse All Series</div>
                 <div class="page-subtitle">Explore all available series</div>
+                <div class="browse-filter-bar">
+                    <span class="browse-filter-label">Dub language</span>
+                    <select class="form-select" id="browse-dub-filter" onchange="onBrowseDubFilterChange(this.value)" style="min-width:200px;">
+                        <option value="">All languages</option>
+                        ${LANG_OPTIONS.map(o=>`<option value="${escapeHtmlAttribute(o.value)}" ${browseDubFilter===o.value?'selected':''}>${escapeHtml(o.label)}</option>`).join('')}
+                    </select>
+                    <span class="browse-filter-count" id="browse-count"></span>
+                </div>
                 <div id="browse-content">
                     <div class="loading"><div class="spinner"></div>Loading series...</div>
                 </div>
@@ -3497,7 +3512,8 @@ MAINTENANCE NOTES:
                 const res = await fetch('/api/v1/series/all');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                renderBrowseContent(data || []);
+                allBrowseSeries = data || [];
+                renderBrowseFiltered();
             } catch (e) {
                 const content = document.getElementById('browse-content');
                 if (content) content.innerHTML = `
@@ -3506,6 +3522,22 @@ MAINTENANCE NOTES:
                         <div class="empty-state-title">Failed to load series</div>
                     </div>`;
             }
+        }
+
+        function onBrowseDubFilterChange(value) {
+            browseDubFilter = value || '';
+            renderBrowseFiltered();
+        }
+
+        // Apply the current dub-language filter to the cached series list and render.
+        function renderBrowseFiltered() {
+            let list = allBrowseSeries;
+            if (browseDubFilter) {
+                list = allBrowseSeries.filter(s => Array.isArray(s.audioLocales) && s.audioLocales.includes(browseDubFilter));
+            }
+            const count = document.getElementById('browse-count');
+            if (count) count.textContent = `${list.length} series`;
+            renderBrowseContent(list);
         }
 
         function renderBrowseContent(series) {

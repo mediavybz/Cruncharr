@@ -190,6 +190,13 @@ public class SonarrSeries
     public string? Path { get; set; }
     public int TvdbId { get; set; }
     public string? TitleSlug { get; set; }
+    [Newtonsoft.Json.JsonProperty("alternateTitles")]
+    public List<SonarrAlternateTitle>? AlternateTitles { get; set; }
+}
+
+public class SonarrAlternateTitle
+{
+    public string? Title { get; set; }
 }
 
 public class SonarrSeason

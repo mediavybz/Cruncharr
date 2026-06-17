@@ -1358,7 +1358,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                         Description = item.Description,
                         Images = ExtractImageUrls(item.Images),
                         CoverArtUrl = ExtractBestImage(item.Images, "poster_tall"),
-                        ThumbnailUrl = ExtractBestImage(item.Images, "poster_wide")
+                        ThumbnailUrl = ExtractBestImage(item.Images, "poster_wide"),
+                        AudioLocales = item.SeriesMetadata?.AudioLocales ?? new List<string>()
                     });
                 }
             }
@@ -1824,6 +1825,16 @@ public class CrBrowseSeriesItem
     public string Title { get; set; } = "";
     public string Description { get; set; } = "";
     public Dictionary<string, List<List<object>>>? Images { get; set; }
+    [JsonProperty("series_metadata")]
+    public CrBrowseSeriesMetadata? SeriesMetadata { get; set; }
+}
+
+public class CrBrowseSeriesMetadata
+{
+    [JsonProperty("audio_locales")]
+    public List<string>? AudioLocales { get; set; }
+    [JsonProperty("subtitle_locales")]
+    public List<string>? SubtitleLocales { get; set; }
 }
 
 public class CrCmsResponse<T>

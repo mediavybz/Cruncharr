@@ -276,16 +276,25 @@ public class CalendarService : ICalendarService
                             }
 
                             existingNumbers.Sort();
-                            var lowest = existingNumbers.First();
-                            var highest = existingNumbers.Last();
-
-                            existingEpisode.EpisodeNumber = lowest == highest
-                                ? lowest.ToString()
-                                : $"{lowest}-{highest}";
-
-                            if (lowest == 1)
+                            if (existingNumbers.Count == 0)
                             {
-                                existingEpisode.IsPremiere = true;
+                                // All numbers were 0/unparseable and nothing new was added —
+                                // avoid First()/Last() throwing on an empty list.
+                                existingEpisode.EpisodeNumber = "...";
+                            }
+                            else
+                            {
+                                var lowest = existingNumbers.First();
+                                var highest = existingNumbers.Last();
+
+                                existingEpisode.EpisodeNumber = lowest == highest
+                                    ? lowest.ToString()
+                                    : $"{lowest}-{highest}";
+
+                                if (lowest == 1)
+                                {
+                                    existingEpisode.IsPremiere = true;
+                                }
                             }
                         }
 

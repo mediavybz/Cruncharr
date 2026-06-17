@@ -3588,14 +3588,14 @@ MAINTENANCE NOTES:
                 <div class="page-title">Browse All Series</div>
                 <div class="page-subtitle">Explore all available series</div>
                 <div class="browse-filter-bar">
-                    <span class="browse-filter-label">Dub language</span>
-                    <select class="form-select" id="browse-dub-filter" onchange="onBrowseDubFilterChange(this.value)" style="min-width:200px;">
+                    <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+                    <span class="browse-filter-label" style="margin-left:var(--space-3);">Dub language</span>
+                    <select class="form-select" id="browse-dub-filter" onchange="onBrowseDubFilterChange(this.value)" style="min-width:180px;">
                         <option value="">All languages</option>
                         ${LANG_OPTIONS.map(o=>`<option value="${escapeHtmlAttribute(o.value)}" ${browseDubFilter===o.value?'selected':''}>${escapeHtml(o.label)}</option>`).join('')}
                     </select>
-                    <span class="browse-filter-count" id="browse-count"></span>
+                    <span class="browse-filter-count" id="browse-count" style="margin-left:auto;"></span>
                 </div>
-                <div class="browse-filter-bar" id="browse-rating-bar" style="display:none;"></div>
                 <div id="browse-content">
                     <div class="loading"><div class="spinner"></div>Loading series...</div>
                 </div>
@@ -3625,59 +3625,38 @@ MAINTENANCE NOTES:
             renderBrowseFiltered();
         }
 
-        // --- Browse rating filter (CR maturity_ratings grouped into friendly tiers) ---
-        const RATING_TIERS = [
-            { key: 'kids',   label: 'Kids',   codes: ['TV-Y','TV-Y7','TV-G','G','ALL'] },
-            { key: 'teen',   label: 'Teen',   codes: ['TV-PG','TV-14','PG','PG-13'] },
-            { key: 'mature', label: 'Mature', codes: ['TV-MA','R','NC-17','M','MA','18'] },
-        ];
-        function tierForCode(code) {
-            const c = String(code || '').toUpperCase();
-            const t = RATING_TIERS.find(t => t.codes.includes(c));
-            return t ? t.key : null;
-        }
+        // --- Browse rating filter: Crunchyroll's full US maturity set (TV Parental Guidelines) ---
+        // Always shown as individual buttons. Any non-US code CR returns (e.g. numeric region
+        // ratings outside the US) is appended after them so the filter still works there.
+        const US_RATINGS = ['TV-Y','TV-Y7','TV-G','TV-PG','TV-14','TV-MA'];
         function seriesMatchesRating(s, selected) {
             const codes = Array.isArray(s.maturityRatings) ? s.maturityRatings : [];
-            for (const code of codes) {
-                const up = String(code).toUpperCase();
-                if (selected.has(up)) return true;            // raw-code match
-                const tier = tierForCode(up);
-                if (tier && selected.has(tier)) return true;  // tier match
-            }
-            return false;
+            return codes.some(code => selected.has(String(code).toUpperCase()));
         }
-        function onBrowseRatingToggle(key) {
-            if (browseRatingFilter.has(key)) browseRatingFilter.delete(key);
-            else browseRatingFilter.add(key);
+        function onBrowseRatingToggle(code) {
+            if (browseRatingFilter.has(code)) browseRatingFilter.delete(code);
+            else browseRatingFilter.add(code);
             renderBrowseFiltered();
         }
         function clearBrowseRating() {
             browseRatingFilter.clear();
             renderBrowseFiltered();
         }
-        // Build the rating buttons from the distinct maturity_ratings actually present in the
-        // loaded series — region-proof: only tiers/codes CR really returned are shown.
+        // Render the rating buttons inline on the filter bar: the fixed US set first, then any
+        // extra codes present in the loaded data. Codes match exactly (case-insensitive).
         function buildRatingButtons() {
-            const bar = document.getElementById('browse-rating-bar');
-            if (!bar) return;
+            const box = document.getElementById('browse-rating-btns');
+            if (!box) return;
             const present = new Set();
             allBrowseSeries.forEach(s => (Array.isArray(s.maturityRatings) ? s.maturityRatings : [])
                 .forEach(c => { if (c) present.add(String(c).toUpperCase()); }));
-            const tiersPresent = RATING_TIERS.filter(t => t.codes.some(c => present.has(c)));
-            const rawCodes = [...present].filter(c => !tierForCode(c)).sort();
-            if (tiersPresent.length === 0 && rawCodes.length === 0) {
-                bar.style.display = 'none';
-                bar.innerHTML = '';
-                return;
-            }
-            const btn = (key, label) =>
-                `<button class="season-tab ${browseRatingFilter.has(key) ? 'active' : ''}" onclick="onBrowseRatingToggle('${escapeJsString(key)}')">${escapeHtml(label)}</button>`;
-            const buttons = tiersPresent.map(t => btn(t.key, t.label)).concat(rawCodes.map(c => btn(c, c)));
+            const extras = [...present].filter(c => !US_RATINGS.includes(c)).sort();
+            const codes = US_RATINGS.concat(extras);
+            const btn = code =>
+                `<button class="season-tab ${browseRatingFilter.has(code) ? 'active' : ''}" onclick="onBrowseRatingToggle('${escapeJsString(code)}')">${escapeHtml(code)}</button>`;
             const clearBtn = browseRatingFilter.size
-                ? `<button class="season-tab" onclick="clearBrowseRating()" style="margin-left:auto;">Clear</button>` : '';
-            bar.innerHTML = `<span class="browse-filter-label">Rating</span>
-                <div style="display:flex; flex-wrap:wrap; gap:8px;">${buttons.join('')}</div>${clearBtn}`;
-            bar.style.display = 'flex';
+                ? `<button class="season-tab" onclick="clearBrowseRating()">Clear</button>` : '';
+            box.innerHTML = codes.map(btn).join('') + clearBtn;
         }
 
         // Apply the current dub-language + rating filters to the cached series list and render.

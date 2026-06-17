@@ -59,7 +59,11 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     {
         _logger?.LogInformation("Searching for: {Query}", query);
 
-        if (!await EnsureAuthenticatedAsync(useBetaApi, cancellationToken))
+        // Discover endpoints must hit the beta-api host. The www host (ApiN) returns 403 for
+        // the bearer token, so search is forced to beta exactly like GetAllSeries/Browse —
+        // the incoming useBetaApi flag (the controller's "premium" default = false) would
+        // otherwise route to the broken www host and every search came back empty.
+        if (!await EnsureAuthenticatedAsync(true, cancellationToken))
         {
             return new List<SeriesInfo>();
         }
@@ -70,7 +74,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             { "type", "series" }
         };
 
-        var uriBuilder = new UriBuilder(ApiUrls.Search(useBetaApi))
+        var uriBuilder = new UriBuilder(ApiUrls.Search(true))
         {
             Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
         };

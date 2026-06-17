@@ -2324,6 +2324,7 @@ MAINTENANCE NOTES:
         let globalSearchResults = [];    // last top-bar search results
         let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
         let browseDubFilter = '';        // '' = all languages
+        let browseRatingFilter = new Set(); // selected rating tier keys / raw codes; empty = all
         let historyFilterText = '';
 
         // Constants
@@ -3594,6 +3595,7 @@ MAINTENANCE NOTES:
                     </select>
                     <span class="browse-filter-count" id="browse-count"></span>
                 </div>
+                <div class="browse-filter-bar" id="browse-rating-bar" style="display:none;"></div>
                 <div id="browse-content">
                     <div class="loading"><div class="spinner"></div>Loading series...</div>
                 </div>
@@ -3623,11 +3625,70 @@ MAINTENANCE NOTES:
             renderBrowseFiltered();
         }
 
-        // Apply the current dub-language filter to the cached series list and render.
+        // --- Browse rating filter (CR maturity_ratings grouped into friendly tiers) ---
+        const RATING_TIERS = [
+            { key: 'kids',   label: 'Kids',   codes: ['TV-Y','TV-Y7','TV-G','G','ALL'] },
+            { key: 'teen',   label: 'Teen',   codes: ['TV-PG','TV-14','PG','PG-13'] },
+            { key: 'mature', label: 'Mature', codes: ['TV-MA','R','NC-17','M','MA','18'] },
+        ];
+        function tierForCode(code) {
+            const c = String(code || '').toUpperCase();
+            const t = RATING_TIERS.find(t => t.codes.includes(c));
+            return t ? t.key : null;
+        }
+        function seriesMatchesRating(s, selected) {
+            const codes = Array.isArray(s.maturityRatings) ? s.maturityRatings : [];
+            for (const code of codes) {
+                const up = String(code).toUpperCase();
+                if (selected.has(up)) return true;            // raw-code match
+                const tier = tierForCode(up);
+                if (tier && selected.has(tier)) return true;  // tier match
+            }
+            return false;
+        }
+        function onBrowseRatingToggle(key) {
+            if (browseRatingFilter.has(key)) browseRatingFilter.delete(key);
+            else browseRatingFilter.add(key);
+            renderBrowseFiltered();
+        }
+        function clearBrowseRating() {
+            browseRatingFilter.clear();
+            renderBrowseFiltered();
+        }
+        // Build the rating buttons from the distinct maturity_ratings actually present in the
+        // loaded series — region-proof: only tiers/codes CR really returned are shown.
+        function buildRatingButtons() {
+            const bar = document.getElementById('browse-rating-bar');
+            if (!bar) return;
+            const present = new Set();
+            allBrowseSeries.forEach(s => (Array.isArray(s.maturityRatings) ? s.maturityRatings : [])
+                .forEach(c => { if (c) present.add(String(c).toUpperCase()); }));
+            const tiersPresent = RATING_TIERS.filter(t => t.codes.some(c => present.has(c)));
+            const rawCodes = [...present].filter(c => !tierForCode(c)).sort();
+            if (tiersPresent.length === 0 && rawCodes.length === 0) {
+                bar.style.display = 'none';
+                bar.innerHTML = '';
+                return;
+            }
+            const btn = (key, label) =>
+                `<button class="season-tab ${browseRatingFilter.has(key) ? 'active' : ''}" onclick="onBrowseRatingToggle('${escapeJsString(key)}')">${escapeHtml(label)}</button>`;
+            const buttons = tiersPresent.map(t => btn(t.key, t.label)).concat(rawCodes.map(c => btn(c, c)));
+            const clearBtn = browseRatingFilter.size
+                ? `<button class="season-tab" onclick="clearBrowseRating()" style="margin-left:auto;">Clear</button>` : '';
+            bar.innerHTML = `<span class="browse-filter-label">Rating</span>
+                <div style="display:flex; flex-wrap:wrap; gap:8px;">${buttons.join('')}</div>${clearBtn}`;
+            bar.style.display = 'flex';
+        }
+
+        // Apply the current dub-language + rating filters to the cached series list and render.
         function renderBrowseFiltered() {
+            buildRatingButtons();
             let list = allBrowseSeries;
             if (browseDubFilter) {
-                list = allBrowseSeries.filter(s => Array.isArray(s.audioLocales) && s.audioLocales.includes(browseDubFilter));
+                list = list.filter(s => Array.isArray(s.audioLocales) && s.audioLocales.includes(browseDubFilter));
+            }
+            if (browseRatingFilter.size) {
+                list = list.filter(s => seriesMatchesRating(s, browseRatingFilter));
             }
             const count = document.getElementById('browse-count');
             if (count) count.textContent = `${list.length} series`;

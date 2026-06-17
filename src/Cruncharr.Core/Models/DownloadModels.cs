@@ -120,6 +120,9 @@ public class SeriesInfo
     public List<SeasonInfo> Seasons { get; set; } = new();
     // Dub/audio languages this series offers (CR browse series_metadata.audio_locales).
     public List<string> AudioLocales { get; set; } = new();
+    // Maturity ratings this series carries (CR browse series_metadata.maturity_ratings),
+    // e.g. ["TV-14"], ["TV-MA"]. Region-specific codes; used by the Browse rating filter.
+    public List<string> MaturityRatings { get; set; } = new();
     // Seasonal-browse extras (AniList-backed lineup).
     public int? EpisodeCount { get; set; }
     public bool OnCrunchyroll { get; set; }

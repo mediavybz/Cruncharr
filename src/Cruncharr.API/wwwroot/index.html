@@ -425,7 +425,9 @@ MAINTENANCE NOTES:
             position: fixed;
             top: 16px;
             right: 24px;
-            z-index: 40;
+            /* Above the header bar (z-index:100) so it isn't covered, but below modals
+               (1000) and toasts (2000). */
+            z-index: 150;
             display: flex;
             align-items: center;
             gap: 10px;

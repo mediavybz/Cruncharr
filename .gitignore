@@ -56,6 +56,10 @@ tools/*.tar.gz
 # Runtime data - contains credentials and downloaded content
 config/
 downloads/
+# Auth token store written at runtime (NEVER commit - contains live CR tokens)
+**/token_*.json
+src/Cruncharr.API/Cruncharr/
+imgcache/
 opencode.json
 status.md
 *.resume

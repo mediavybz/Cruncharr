@@ -471,6 +471,10 @@ MAINTENANCE NOTES:
             align-items: center;
             padding: 0 25px;
             justify-content: space-between;
+            /* Sit above .content (which makes its own stacking context via fadeSlideUp),
+               so the search dropdown always renders in the foreground. */
+            position: relative;
+            z-index: 100;
         }
 
         .header-search {
@@ -709,7 +713,7 @@ MAINTENANCE NOTES:
             margin-top: 5px;
             max-height: 400px;
             overflow-y: auto;
-            z-index: 100;
+            z-index: 1000;
             box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         }
 

@@ -3588,13 +3588,13 @@ MAINTENANCE NOTES:
                 <div class="page-title">Browse All Series</div>
                 <div class="page-subtitle">Explore all available series</div>
                 <div class="browse-filter-bar">
-                    <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
-                    <span class="browse-filter-label" style="margin-left:var(--space-3);">Dub language</span>
+                    <span class="browse-filter-label">Dub language</span>
                     <select class="form-select" id="browse-dub-filter" onchange="onBrowseDubFilterChange(this.value)" style="min-width:180px;">
                         <option value="">All languages</option>
                         ${LANG_OPTIONS.map(o=>`<option value="${escapeHtmlAttribute(o.value)}" ${browseDubFilter===o.value?'selected':''}>${escapeHtml(o.label)}</option>`).join('')}
                     </select>
-                    <span class="browse-filter-count" id="browse-count" style="margin-left:auto;"></span>
+                    <span class="browse-filter-count" id="browse-count"></span>
+                    <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; justify-content:flex-end;"></div>
                 </div>
                 <div id="browse-content">
                     <div class="loading"><div class="spinner"></div>Loading series...</div>

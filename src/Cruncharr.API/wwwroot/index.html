@@ -6719,9 +6719,15 @@ MAINTENANCE NOTES:
                 const res = await fetch('/api/v1/auth/status');
                 if (!res.ok) throw new Error('status');
                 const s = await res.json();
-                if (s.isAuthenticated && s.username && s.username !== '???') {
+                if (s.isAuthenticated) {
+                    // The account username is often empty; the meaningful label is the active
+                    // profile name. Fall back to username, then a generic "Account".
+                    const selected = Array.isArray(s.multiProfile) ? s.multiProfile.find(p => p.isSelected) : null;
+                    const displayName = (selected && selected.profileName)
+                        || (s.username && s.username !== '???' ? s.username : '')
+                        || 'Account';
                     chip.classList.remove('hidden');
-                    if (nameEl) nameEl.textContent = s.username;
+                    if (nameEl) nameEl.textContent = displayName;
                     const url = resolveAvatarUrl(s.avatar);
                     if (avatarEl) {
                         avatarEl.innerHTML = url && isSafeUrl(url)

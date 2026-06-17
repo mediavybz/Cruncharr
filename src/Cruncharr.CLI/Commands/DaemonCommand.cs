@@ -11,7 +11,7 @@ public static class DaemonCommand
     public static Command Create(IServiceProvider provider)
     {
         var intervalOption = new Option<int>("--interval", () => 300, "Check interval in seconds");
-        var command = new Command("daemon", "Run in daemon mode (continuous monitoring)"){
+        var command = new Command("daemon", "Run in daemon mode (continuously drain the download queue)"){
             intervalOption
         };
 
@@ -47,12 +47,9 @@ public static class DaemonCommand
                         await queueService.ProcessQueueAsync(config, null, cts.Token);
                     }
 
-                    // Check for new episodes (when history is enabled)
-                    if (config.History.Enabled)
-                    {
-                        // TODO: Implement history refresh logic
-                        logger.LogDebug("History check not yet implemented");
-                    }
+                    // Automatic history refresh / new-release checking is handled by the API
+                    // server's AutoDownloadSchedulerService (the container's normal entrypoint),
+                    // not by this CLI daemon — this loop only drains the download queue.
 
                     await Task.Delay(TimeSpan.FromSeconds(interval), cts.Token);
                 }

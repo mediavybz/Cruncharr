@@ -117,6 +117,71 @@ public class HistoryServiceSonarrTests : IDisposable
     }
 
     [Fact]
+    public async Task MatchHistorySeriesWithSonarrAsync_MatchesViaAlternateTitle()
+    {
+        // CR uses the English title; Sonarr's primary title is the romaji. The match must
+        // succeed via the alternate title (the primary title is too dissimilar to clear 0.8).
+        var history = CreateTestHistory();
+        history[0].SeriesTitle = "Frieren: Beyond Journey's End";
+        await SaveTestHistory(history);
+
+        var sonarrSeries = new List<SonarrSeries>{
+            new(){
+                Id = 200,
+                Title = "Sousou no Frieren",
+                CleanTitle = "sousounofrieren",
+                TvdbId = 424536,
+                TitleSlug = "frieren",
+                AlternateTitles = new List<SonarrAlternateTitle>{
+                    new(){ Title = "Frieren: Beyond Journey's End" }
+                }
+            }
+        };
+
+        _sonarrServiceMock
+            .Setup(s => s.GetSeriesAsync(It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(sonarrSeries);
+
+        await _historyService.MatchHistorySeriesWithSonarrAsync();
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        var matched = result.First();
+
+        Assert.Equal("200", matched.SonarrSeriesId);
+        Assert.Equal("424536", matched.SonarrTvDbId);
+        Assert.Equal("frieren", matched.SonarrSlugTitle);
+    }
+
+    [Fact]
+    public async Task MatchHistorySeriesWithSonarrAsync_NoAlternateTitle_DoesNotMatchDissimilarPrimary()
+    {
+        // Negative control: same data WITHOUT the alternate title must NOT match (proves the
+        // alternate title is what enables the match, not a loose threshold).
+        var history = CreateTestHistory();
+        history[0].SeriesTitle = "Frieren: Beyond Journey's End";
+        await SaveTestHistory(history);
+
+        var sonarrSeries = new List<SonarrSeries>{
+            new(){
+                Id = 200,
+                Title = "Sousou no Frieren",
+                CleanTitle = "sousounofrieren",
+                TvdbId = 424536,
+                TitleSlug = "frieren"
+            }
+        };
+
+        _sonarrServiceMock
+            .Setup(s => s.GetSeriesAsync(It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(sonarrSeries);
+
+        await _historyService.MatchHistorySeriesWithSonarrAsync();
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        Assert.Null(result.First().SonarrSeriesId);
+    }
+
+    [Fact]
     public async Task MatchHistorySeriesWithSonarrAsync_AlreadyMatched_DoesNotRematch()
     {
         var history = CreateTestHistory();

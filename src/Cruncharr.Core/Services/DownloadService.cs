@@ -381,6 +381,12 @@ public class DownloadService : IDownloadService
         var tempDir = Path.Combine(tempBase, ".crtmp-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
 
+        // When the temp folder is enabled, also mux + encode INSIDE tempDir (which a user can
+        // point at a tmpfs/RAM disk) and only move the finished file to the output volume at the
+        // end. This keeps the heavy mux/transcode read-write off the output SSD. With the temp
+        // folder disabled, mux/encode write straight to the output dir as before (no extra move).
+        var transcodeInTemp = config.Download.UseTempFolder;
+
         try
         {
             var downloadedFiles = new List<string>();
@@ -1148,29 +1154,50 @@ public class DownloadService : IDownloadService
                                 Path.GetDirectoryName(outputPath) ?? "/downloads",
                                 Path.GetFileNameWithoutExtension(outputPath) + $".{locale}" + Path.GetExtension(outputPath)
                             );
+                            // Mux/encode in tempDir when enabled, then move the finished file out.
+                            var groupWorkPath = transcodeInTemp
+                                ? Path.Combine(tempDir, Path.GetFileName(groupOutputPath))
+                                : groupOutputPath;
 
                             progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 90, Doing = $"Muxing {locale}..." });
-                            await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupOutputPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
+                            await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupWorkPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
 
                             // Post-process encoding for this group if configured
                             if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                             {
                                 progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = $"Encoding {locale}..." });
-                                await EncodeOutputAsync(groupOutputPath, config.Download.EncodingPreset, cancellationToken);
+                                await EncodeOutputAsync(groupWorkPath, config.Download.EncodingPreset, cancellationToken);
+                            }
+
+                            if (!string.Equals(groupWorkPath, groupOutputPath, StringComparison.Ordinal))
+                            {
+                                progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 97, Doing = $"Moving {locale}..." });
+                                MoveToFinalPath(groupWorkPath, groupOutputPath);
                             }
                         }
                     }
                     else
                     {
-                        await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, outputPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
-                    }
-                }
+                        // Mux/encode in tempDir when enabled, then move the finished file to outputPath.
+                        var workPath = transcodeInTemp
+                            ? Path.Combine(tempDir, Path.GetFileName(outputPath))
+                            : outputPath;
 
-                // Post-process encoding if configured (for non-separate mode)
-                if (config.Download.EncodeEnabled && !config.Download.KeepDubsSeparate && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
-                {
-                    progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
-                    await EncodeOutputAsync(outputPath, config.Download.EncodingPreset, cancellationToken);
+                        await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, workPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
+
+                        // Post-process encoding if configured
+                        if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
+                        {
+                            progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
+                            await EncodeOutputAsync(workPath, config.Download.EncodingPreset, cancellationToken);
+                        }
+
+                        if (!string.Equals(workPath, outputPath, StringComparison.Ordinal))
+                        {
+                            progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 97, Doing = "Moving to output..." });
+                            MoveToFinalPath(workPath, outputPath);
+                        }
+                    }
                 }
             }
             finally
@@ -2708,6 +2735,34 @@ public class DownloadService : IDownloadService
             _logger?.LogWarning(ex, "Failed to probe video resolution for {Path}", videoPath);
         }
         return (null, null);
+    }
+
+    // Move a finished file from the temp working dir to its final location. tempDir may live on
+    // a different filesystem than the output dir (e.g. tmpfs vs the SSD mount), where File.Move's
+    // rename() fails with a cross-device error; fall back to copy+delete in that case.
+    private void MoveToFinalPath(string sourcePath, string destPath)
+    {
+        if (!File.Exists(sourcePath))
+        {
+            _logger?.LogWarning("Expected output {Source} not found; cannot move to {Dest}", sourcePath, destPath);
+            return;
+        }
+
+        var destDir = Path.GetDirectoryName(destPath);
+        if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+        if (File.Exists(destPath)) File.Delete(destPath);
+
+        try
+        {
+            File.Move(sourcePath, destPath);
+        }
+        catch (IOException)
+        {
+            // Cross-device (EXDEV) or similar: copy then remove the source.
+            File.Copy(sourcePath, destPath, overwrite: true);
+            File.Delete(sourcePath);
+        }
+        _logger?.LogInformation("Moved output to {Dest}", destPath);
     }
 
     private async Task EncodeOutputAsync(string inputPath, string presetName, CancellationToken cancellationToken)

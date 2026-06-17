@@ -423,7 +423,9 @@ MAINTENANCE NOTES:
         /* Top-right profile chip */
         .topbar-profile {
             position: fixed;
-            top: 16px;
+            /* Vertically centered on the header band so it lines up with the search bar. */
+            top: calc(var(--header-height) / 2);
+            transform: translateY(-50%);
             right: 24px;
             /* Above the header bar (z-index:100) so it isn't covered, but below modals
                (1000) and toasts (2000). */
@@ -441,7 +443,7 @@ MAINTENANCE NOTES:
             box-shadow: var(--shadow-sm);
             transition: transform var(--transition), border-color var(--transition);
         }
-        .topbar-profile:hover { transform: translateY(-1px); border-color: var(--accent-orange); }
+        .topbar-profile:hover { transform: translateY(calc(-50% - 1px)); border-color: var(--accent-orange); }
         .topbar-profile-avatar {
             width: 30px; height: 30px; border-radius: 50%;
             overflow: hidden; flex-shrink: 0;
@@ -451,7 +453,7 @@ MAINTENANCE NOTES:
         .topbar-profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
         .topbar-profile-name { font-size: 0.9em; font-weight: 600; color: var(--text-primary); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .topbar-profile.hidden { display: none; }
-        @media (max-width: 768px) { .topbar-profile { top: 8px; right: 10px; } .topbar-profile-name { display: none; } }
+        @media (max-width: 768px) { .topbar-profile { right: 10px; } .topbar-profile-name { display: none; } }
 
         .nav-section-title {
             padding: 8px 20px;

@@ -55,15 +55,12 @@ MAINTENANCE NOTES:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cruncharr - Crunchyroll Downloader</title>
-    <link rel="icon" type="image/png" href="/favicon.png" sizes="512x512" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
     <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
     <style>
         /* ============================================================
            CRUNCHARR DESIGN TOKENS
@@ -130,7 +127,7 @@ MAINTENANCE NOTES:
             --shadow-glow: 0 8px 30px rgba(244, 117, 33, 0.30);
 
             /* --- Typography scale --- */
-            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             --text-xs: 0.72rem; --text-sm: 0.85rem; --text-base: 0.95rem;
             --text-md: 1.05rem; --text-lg: 1.25rem; --text-xl: 1.6rem;
             --text-2xl: 2.1rem; --text-3xl: 2.6rem;
@@ -314,16 +311,18 @@ MAINTENANCE NOTES:
         }
 
         .sidebar-logo {
-            width: 26px;
-            height: 26px;
-            background: var(--accent-orange);
-            border-radius: 6px;
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-bright));
+            border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: bold;
             font-size: 0.8em;
             color: #000;
+            box-shadow: 0 4px 12px var(--accent-glow);
+            flex-shrink: 0;
         }
 
         .sidebar-title { font-size: 1.2em; font-weight: 700; letter-spacing: -0.01em; }
@@ -2147,9 +2146,163 @@ MAINTENANCE NOTES:
                 background: var(--bg-tertiary);
             }
         }
+
+        /* ── UI polish: scrollbars, card depth, focus states, skeletons ── */
+
+        /* Thin themed scrollbars (WebKit) */
+        .content::-webkit-scrollbar,
+        .sidebar::-webkit-scrollbar { width: 6px; }
+        .content::-webkit-scrollbar-track,
+        .sidebar::-webkit-scrollbar-track { background: transparent; }
+        .content::-webkit-scrollbar-thumb,
+        .sidebar::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .content::-webkit-scrollbar-thumb:hover,
+        .sidebar::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        /* Firefox */
+        .content, .sidebar { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
+
+        /* Card depth + hover */
+        .card {
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm);
+            transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+        }
+        .card:hover { border-color: var(--surface-border); box-shadow: var(--shadow-md); }
+
+        /* Download item polish */
+        .download-item {
+            border-radius: var(--radius-md);
+            transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+        }
+        .download-item:hover { border-color: var(--accent-softer); box-shadow: var(--shadow-sm); }
+
+        /* Search bar — rounded, focus glow */
+        .header-search {
+            border-radius: var(--radius-full);
+            transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+        }
+        .header-search:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-softer);
+        }
+
+        /* Sidebar active nav — left accent bar */
+        .nav-item.active {
+            position: relative;
+            font-weight: var(--fw-semibold);
+        }
+        .nav-item.active::before {
+            content: '';
+            position: absolute;
+            left: -12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 22px;
+            background: var(--accent);
+            border-radius: 0 2px 2px 0;
+        }
+
+        /* Nav item hover — accent tint */
+        .nav-item { transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+        .nav-item:hover { background: var(--bg-hover); }
+
+        /* Poster/card hover — subtle lift */
+        .history-poster, .series-card, .episode-card, .calendar-day-card {
+            transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+        }
+        .history-poster:hover, .series-card:hover, .episode-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--accent-softer);
+            box-shadow: var(--shadow-md);
+        }
+
+        /* Progress bar — smoother gradient */
+        .progress-bar {
+            background: linear-gradient(90deg, var(--accent), var(--accent-bright));
+            box-shadow: 0 0 8px var(--accent-glow);
+        }
+
+        /* Shimmer skeleton loading placeholder */
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .skeleton {
+            background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: var(--radius-sm);
+        }
+
+        /* Empty-state styling */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 80px 20px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        .empty-state .empty-icon { font-size: 3em; margin-bottom: 16px; opacity: 0.4; }
+        .empty-state .empty-text { font-size: 1.05rem; margin-bottom: 4px; color: var(--text-secondary); }
+        .empty-state .empty-hint { font-size: 0.88rem; }
+
+        /* Focus-visible for keyboard navigation */
+        *:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* Loading splash — shown immediately on page load, removed by JS
+           once the app shell renders. Prevents the blank-page flash. */
+        #loading-splash {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 18px;
+            background: var(--bg-primary, #0a0a0a);
+            background-image: var(--bloom, none);
+            background-attachment: fixed;
+            transition: opacity 0.4s var(--ease-out, ease-out);
+        }
+        #loading-splash.hidden { opacity: 0; pointer-events: none; }
+        #loading-splash .splash-logo {
+            width: 56px; height: 56px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, var(--accent, #F47521), var(--accent-bright, #ff9145));
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 8px 32px rgba(244, 117, 33, 0.35);
+        }
+        #loading-splash .splash-logo svg { width: 32px; height: 32px; }
+        #loading-splash .splash-spinner {
+            width: 28px; height: 28px;
+            border: 3px solid var(--border-color, rgba(255,255,255,0.08));
+            border-top-color: var(--accent, #F47521);
+            border-radius: 50%;
+            animation: splash-spin 0.7s linear infinite;
+        }
+        @keyframes splash-spin { to { transform: rotate(360deg); } }
+        #loading-splash .splash-text {
+            font-size: 0.82rem;
+            color: var(--text-muted, #898e98);
+            letter-spacing: 0.04em;
+        }
     </style>
 </head>
 <body>
+    <div id="loading-splash">
+        <div class="splash-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M10 8l6 4-6 4z" fill="white" stroke="none"/></svg>
+        </div>
+        <div class="splash-spinner"></div>
+        <div class="splash-text">Loading Cruncharr…</div>
+    </div>
     <div class="app-container">
         <div class="topbar-profile hidden" id="topbar-profile" onclick="navigateTo('account')" title="Account">
             <div class="topbar-profile-avatar" id="topbar-profile-avatar"><span>&#128100;</span></div>
@@ -2157,7 +2310,9 @@ MAINTENANCE NOTES:
         </div>
         <aside class="sidebar">
             <div class="sidebar-header">
-                <img src="/favicon-96x96.png" alt="Cruncharr" width="32" height="32" style="width:32px;height:32px;">
+                <div class="sidebar-logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M10 8l6 4-6 4z" fill="#000" stroke="none"/></svg>
+                </div>
                 <div class="sidebar-title">Cruncharr</div>
             </div>
             <nav class="sidebar-nav">
@@ -2342,17 +2497,15 @@ MAINTENANCE NOTES:
         const ACTIVE_DROPDOWN_LISTENERS = new Map(); // id -> listener function
 
         document.addEventListener('DOMContentLoaded', async () => {
-            // Load config first so toggles are initialized correctly
-            await fetchConfig();
-            // Fetch version from backend
-            try {
-                const res = await fetch('/api/v1/health');
-                if (res.ok) {
-                    const data = await res.json();
+            // Start config load in the background — don't block the UI shell
+            const configPromise = fetchConfig();
+            // Fetch version from backend (also non-blocking)
+            fetch('/api/v1/health').then(res => res.ok ? res.json() : null).then(data => {
+                if (data && data.version) {
                     const el = document.getElementById('version-info');
-                    if (el && data.version) el.textContent = 'v' + String(data.version).split('+')[0];
+                    if (el) el.textContent = 'v' + String(data.version).split('+')[0];
                 }
-            } catch (e) { /* ignore */ }
+            }).catch(() => {});
             // Restore last visited page or default to downloads
             let savedPage = 'downloads';
             try {
@@ -2372,6 +2525,11 @@ MAINTENANCE NOTES:
             setupNavigation();
             setupMultiSelectDropdowns();
             updateTopbarProfile();
+            // Remove splash once app shell is rendered
+            const splash = document.getElementById('loading-splash');
+            if (splash) { splash.classList.add('hidden'); setTimeout(() => splash.remove(), 500); }
+            // Await config in background — pages that need it will re-render on arrival
+            await configPromise;
         });
 
         function setupMultiSelectDropdowns() {

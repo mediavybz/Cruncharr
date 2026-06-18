@@ -64,6 +64,13 @@ public class ConfigController : ControllerBase
                     : _config.Sonarr?.ApiKey
             };
 
+            var scheme = effective.UseSsl ? "https" : "http";
+            var testUrl = $"{scheme}://{effective.Host}:{effective.Port}";
+            if (!WebhookUrlValidator.IsValidWebhookUrl(testUrl, out var ssrfError))
+            {
+                return BadRequest(new { success = false, message = ssrfError });
+            }
+
             var result = await _sonarrService.TestConnectionDetailedAsync(effective);
             return Ok(new { success = result.Success, message = result.Message });
         }
@@ -578,7 +585,7 @@ public class ConfigController : ControllerBase
             if (request.Queue.PersistQueue.HasValue) _config.Queue.PersistQueue = request.Queue.PersistQueue.Value;
             if (request.Queue.AutoDownload.HasValue) _config.Queue.AutoDownload = request.Queue.AutoDownload.Value;
             if (request.Queue.SimultaneousProcessingJobs.HasValue) _config.Queue.SimultaneousProcessingJobs = request.Queue.SimultaneousProcessingJobs.Value;
-            if (!string.IsNullOrEmpty(request.Queue.QueueFilePath)) _config.Queue.QueueFilePath = request.Queue.QueueFilePath;
+            if (!string.IsNullOrEmpty(request.Queue.QueueFilePath)) _config.Queue.QueueFilePath = ValidatePath(request.Queue.QueueFilePath, nameof(request.Queue.QueueFilePath));
             if (request.Queue.ShutdownWhenQueueEmpty.HasValue) _config.Queue.ShutdownWhenQueueEmpty = request.Queue.ShutdownWhenQueueEmpty.Value;
         }
 
@@ -702,7 +709,7 @@ public class ConfigController : ControllerBase
         {
             if (request.General.LogMode.HasValue) _config.LogMode = request.General.LogMode.Value;
             if (request.General.RemoveFinishedDownload.HasValue) _config.RemoveFinishedDownload = request.General.RemoveFinishedDownload.Value;
-            if (request.General.TokenFilePath != null) _config.TokenFilePath = request.General.TokenFilePath;
+            if (request.General.TokenFilePath != null) _config.TokenFilePath = ValidatePath(request.General.TokenFilePath, nameof(request.General.TokenFilePath));
         }
     }
 }

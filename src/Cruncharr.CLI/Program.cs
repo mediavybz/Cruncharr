@@ -288,8 +288,10 @@ class Program
 
     static string GetConfigPath()
     {
+        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH");
+        if (!string.IsNullOrEmpty(configPath)) return configPath;
         var configDir = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_DIR") ?? "/config";
-        return Path.Combine(configDir, "cruncharr.json");
+        return Path.Combine(configDir, "cruncharr.yaml");
     }
 
     static CruncharrConfig LoadConfig()

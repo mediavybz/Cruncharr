@@ -78,10 +78,12 @@ public class HealthController : ControllerBase
     {
         try
         {
-            var currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
+            var currentVersion = Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString();
             return Ok(new
             {
-                CurrentVersion = currentVersion?.ToString(),
+                CurrentVersion = currentVersion,
                 LatestVersion = _updateChecker?.LatestVersion,
                 UpdateAvailable = _updateChecker?.UpdateAvailable ?? false
             });

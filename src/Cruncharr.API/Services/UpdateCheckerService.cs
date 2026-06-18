@@ -61,38 +61,61 @@ public class UpdateCheckerService : BackgroundService
         var release = JsonConvert.DeserializeObject<GitHubRelease>(json);
         if (release?.TagName == null) return;
 
-        var currentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
-        var latestVersion = ParseVersion(release.TagName.TrimStart('v'));
+        var currentVersionStr = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+            ?? "0.0.0";
+        var latestVersionStr = release.TagName.TrimStart('v');
         LatestVersion = release.TagName;
 
-        if (latestVersion > currentVersion)
+        if (IsNewerVersion(latestVersionStr, currentVersionStr))
         {
             UpdateAvailable = true;
-            _logger?.LogInformation("Update available: {LatestVersion} (current: {CurrentVersion})", release.TagName, currentVersion);
+            _logger?.LogInformation("Update available: {LatestVersion} (current: {CurrentVersion})", release.TagName, currentVersionStr);
         }
         else
         {
             UpdateAvailable = false;
-            _logger?.LogDebug("No update available. Latest: {LatestVersion}, Current: {CurrentVersion}", release.TagName, currentVersion);
+            _logger?.LogDebug("No update available. Latest: {LatestVersion}, Current: {CurrentVersion}", release.TagName, currentVersionStr);
         }
     }
 
-    private static Version ParseVersion(string version)
+    private static bool IsNewerVersion(string latest, string current)
     {
-        if (string.IsNullOrWhiteSpace(version)) return new Version(0, 0, 0, 0);
+        var l = ParseSemver(latest);
+        var c = ParseSemver(current);
 
-        // Remove 'v' prefix if present
-        version = version.TrimStart('v', 'V');
-
-        // Strip prerelease suffix (-beta.1, -rc.2, etc.)
-        var prereleaseIndex = version.IndexOf('-');
-        if (prereleaseIndex > 0)
+        for (int i = 0; i < 3; i++)
         {
-            version = version.Substring(0, prereleaseIndex);
+            if (l[i] != c[i]) return l[i] > c[i];
         }
 
-        if (Version.TryParse(version, out var v)) return v;
-        return new Version(0, 0, 0, 0);
+        if (l[3] == null && c[3] != null) return true;
+        if (l[3] != null && c[3] == null) return false;
+        if (l[3] != null && c[3] != null) return l[3] > c[3];
+
+        return false;
+    }
+
+    private static int?[] ParseSemver(string version)
+    {
+        version = version.TrimStart('v', 'V');
+        int? prereleaseNum = null;
+        var dashIndex = version.IndexOf('-');
+        if (dashIndex > 0)
+        {
+            var prerelease = version.Substring(dashIndex + 1);
+            var match = System.Text.RegularExpressions.Regex.Match(prerelease, @"\d+");
+            if (match.Success) prereleaseNum = int.Parse(match.Value);
+            version = version.Substring(0, dashIndex);
+        }
+
+        var parts = version.Split('.');
+        var result = new int?[4];
+        for (int i = 0; i < 3; i++)
+            result[i] = i < parts.Length && int.TryParse(parts[i], out var n) ? n : 0;
+        result[3] = prereleaseNum;
+        return result;
     }
 
     private class GitHubRelease

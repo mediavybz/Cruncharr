@@ -66,11 +66,17 @@ public static class DaemonCommand
 
     static CruncharrConfig LoadConfig()
     {
-        var configDir = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_DIR") ?? "/config";
-        var configPath = Path.Combine(configDir, "cruncharr.yml");
-        if (!File.Exists(configPath))
+        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH");
+        if (string.IsNullOrEmpty(configPath))
         {
-            configPath = Path.Combine(configDir, "cruncharr.json");
+            var configDir = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_DIR") ?? "/config";
+            configPath = Path.Combine(configDir, "cruncharr.yaml");
+            if (!File.Exists(configPath))
+            {
+                configPath = Path.Combine(configDir, "cruncharr.yml");
+                if (!File.Exists(configPath))
+                    configPath = Path.Combine(configDir, "cruncharr.json");
+            }
         }
         var config = CruncharrConfig.Load(configPath);
         config.ApplyEnvironmentVariables();

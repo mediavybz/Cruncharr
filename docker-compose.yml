@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   cruncharr:
     build: .
@@ -29,9 +27,7 @@ services:
       
       # INTERNAL DIRECTORIES (stay inside container, not mounted):
       # /tmp/cruncharr - temporary processing files
-      # /app/presets - built-in ffmpeg presets (included in image)
-      # /app/fonts - built-in subtitle fonts (included in image)
-      # /app/video - internal workspace
+      # /app/fonts - custom subtitle fonts (mount to add your own)
 
     # GPU passthrough for hardware-accelerated sync (Intel/AMD via VAAPI/QSV).
     # Uncomment to expose the render node so it appears in Settings -> Sync HW Accel.
@@ -62,9 +58,9 @@ services:
       # Webhook for notifications (optional)
       - CRUNCHYROLL_WEBHOOK_URL=${CRUNCHYROLL_WEBHOOK_URL:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8585/api/v1/health"]
+      test: ["CMD", "grep", "-q", ":2189 ", "/proc/net/tcp", "/proc/net/tcp6"]
       interval: 30s
-      timeout: 10s
+      timeout: 3s
       retries: 3
       start_period: 40s
 

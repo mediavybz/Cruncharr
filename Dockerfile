@@ -1,22 +1,24 @@
 # Runtime-only image. The .NET app is published on the host (self-contained,
 # single-file, trimmed) into docker-build/<arch>/ and copied in per-architecture.
-# This avoids pulling the MCR .NET SDK base image at build time (which has been
-# rate-limiting/refusing anonymous pulls); only the Debian runtime base is needed.
+# This avoids pulling the MCR .NET SDK base image at build time.
+#
+# Multi-stage build: stage 1 fetches/builds ffmpeg + Bento4; stage 2 is the
+# lean runtime with only the binaries and packages the app actually needs.
+# No curl, xz-utils, compilers, or git in the final image.
 #
 # Before building, publish the binaries on the host:
 #   dotnet publish src/Cruncharr.API/Cruncharr.API.csproj -c Release -r linux-x64 \
 #     --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=true \
 #     -p:TrimMode=partial -p:InvariantGlobalization=true -o docker-build/amd64/publish
 #   (repeat for the CLI and for linux-arm64 -> docker-build/arm64/)
-FROM debian:bookworm-slim
-ARG TARGETARCH
 
-# Runtime deps + a full-GPU ffmpeg (NVENC/CUDA/VAAPI/QSV/Vulkan) from BtbN static
-# builds, plus mp4decrypt (Bento4) built from source. Build-only deps are purged
-# afterwards to keep the image lean.
+# ── Stage 1: Builder ──────────────────────────────────────────────
+# Fetch BtbN ffmpeg (static) and build Bento4's mp4decrypt from source.
+# All build tools stay in this stage and never reach the final image.
+FROM debian:bookworm-slim AS builder
+ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl xz-utils mkvtoolnix gosu \
-        cmake make g++ git \
+        ca-certificates curl xz-utils cmake make g++ git \
     && if [ "$TARGETARCH" = "arm64" ]; then FF=linuxarm64; else FF=linux64; fi \
     && echo "Fetching BtbN ffmpeg ($FF, full GPU support)" \
     && curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${FF}-gpl.tar.xz" -o /tmp/ffmpeg.tar.xz \
@@ -28,13 +30,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && cd /tmp/bento4 && mkdir build && cd build \
     && cmake .. -DCMAKE_BUILD_TYPE=Release \
     && make -j"$(nproc)" \
-    && cp /tmp/bento4/build/mp4decrypt /usr/local/bin/ && chmod +x /usr/local/bin/mp4decrypt \
-    && rm -rf /tmp/bento4 \
-    && apt-get purge -y cmake make g++ git && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+    && cp /tmp/bento4/build/mp4decrypt /usr/local/bin/ && chmod +x /usr/local/bin/mp4decrypt
 
-# Create directories (matching original app structure)
-RUN mkdir -p /downloads /config /tools /widevine /tmp/cruncharr /app/presets /app/fonts /app/video
+# ── Stage 2: Runtime ──────────────────────────────────────────────
+# Only the packages and binaries the running app needs.
+# No curl, no xz-utils, no compilers, no git — attack surface minimized.
+FROM debian:bookworm-slim
+ARG TARGETARCH
+
+# Copy compiled binaries from builder (ffmpeg/ffprobe are static; mp4decrypt
+# links against libstdc++6 which is present in the base image).
+COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/mp4decrypt /usr/local/bin/
+
+# Runtime deps only: HTTPS certs, MKV muxer, privilege-dropper.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates mkvtoolnix gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -u 1000 -m -s /bin/sh cruncharr \
+    && mkdir -p /downloads /config /tools /widevine /tmp/cruncharr /app/fonts \
+    && chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app
 
 # Copy host-published applications for the target architecture
 WORKDIR /app
@@ -49,11 +63,6 @@ RUN chmod +x ./docker-entrypoint.sh
 # Copy web UI
 COPY docker-build/${TARGETARCH}/publish/wwwroot ./wwwroot
 
-# Default non-root user (uid 1000). Container starts as root so the entrypoint can
-# chown the mounted volumes to PUID/PGID, then drops privileges with gosu.
-RUN useradd -u 1000 -m -s /bin/sh cruncharr && \
-    chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app
-
 # Set environment
 ENV ASPNETCORE_URLS=http://+:8585
 ENV CRUNCHYROLL_CONFIG_PATH=/config/cruncharr.yaml
@@ -67,9 +76,10 @@ EXPOSE 8585
 # Volumes - only user-facing directories
 VOLUME ["/downloads", "/config", "/tools", "/widevine"]
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -fsS http://localhost:8585/api/v1/health || exit 1
+# Health check — uses /proc/net/tcp instead of curl (port 8585 = 0x2189).
+# Zero-dependency: no HTTP client package needed in the image.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+    CMD grep -q ':2189 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null || exit 1
 
 # Entrypoint script creates directories then starts API
 ENTRYPOINT ["./docker-entrypoint.sh"]

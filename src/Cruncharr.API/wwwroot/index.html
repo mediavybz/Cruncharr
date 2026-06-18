@@ -313,15 +313,18 @@ MAINTENANCE NOTES:
         .sidebar-logo {
             width: 32px;
             height: 32px;
-            background: linear-gradient(135deg, var(--accent), var(--accent-bright));
             border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: bold;
-            font-size: 0.8em;
-            color: #000;
-            box-shadow: 0 4px 12px var(--accent-glow);
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+        .sidebar-logo-img {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            object-fit: contain;
             flex-shrink: 0;
         }
 
@@ -2272,14 +2275,11 @@ MAINTENANCE NOTES:
             transition: opacity 0.4s var(--ease-out, ease-out);
         }
         #loading-splash.hidden { opacity: 0; pointer-events: none; }
-        #loading-splash .splash-logo {
+        #loading-splash .splash-logo-img {
             width: 56px; height: 56px;
             border-radius: 14px;
-            background: linear-gradient(135deg, var(--accent, #F47521), var(--accent-bright, #ff9145));
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 8px 32px rgba(244, 117, 33, 0.35);
+            object-fit: contain;
         }
-        #loading-splash .splash-logo svg { width: 32px; height: 32px; }
         #loading-splash .splash-spinner {
             width: 28px; height: 28px;
             border: 3px solid var(--border-color, rgba(255,255,255,0.08));
@@ -2297,9 +2297,7 @@ MAINTENANCE NOTES:
 </head>
 <body>
     <div id="loading-splash">
-        <div class="splash-logo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M10 8l6 4-6 4z" fill="white" stroke="none"/></svg>
-        </div>
+        <img src="/favicon-96x96.png" alt="Cruncharr" class="splash-logo-img">
         <div class="splash-spinner"></div>
         <div class="splash-text">Loading Cruncharr…</div>
     </div>
@@ -2310,9 +2308,7 @@ MAINTENANCE NOTES:
         </div>
         <aside class="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-logo">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M10 8l6 4-6 4z" fill="#000" stroke="none"/></svg>
-                </div>
+                <img src="/favicon-96x96.png" alt="Cruncharr" class="sidebar-logo-img">
                 <div class="sidebar-title">Cruncharr</div>
             </div>
             <nav class="sidebar-nav">

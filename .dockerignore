@@ -2,6 +2,7 @@
 .idea
 .vs
 _builds
+.env
 
 # Build outputs (the image restores/builds fresh)
 **/bin/
@@ -15,7 +16,9 @@ downloads/
 widevine/
 *.log
 cruncharr-image.tar
+designsystem/
+src/publish/
+*.md
 
+# Upstream source kept for reference only — not needed in the image
 CRD/*
-!CRD/Assets/
-!CRD/Assets/**

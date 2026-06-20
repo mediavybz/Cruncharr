@@ -321,10 +321,22 @@ public class DownloadService : IDownloadService
                 if (sonarrSeries != null)
                 {
                     var sonarrEpisodes = await _sonarrService.GetEpisodesAsync(sonarrSeries.Id, config.Sonarr);
-                    sonarrEpisode = sonarrEpisodes.FirstOrDefault(ep =>
-                        ep.SeasonNumber == episode.SeasonNumber && ep.EpisodeNumber == episode.EpisodeNumber);
-                    _logger?.LogInformation("Sonarr match: Series={SeriesTitle}, Episode={EpisodeTitle}",
-                        sonarrSeries.Title, sonarrEpisode?.Title);
+                    // CR and Sonarr/TVDB often number episodes differently: CR groups long-running
+                    // anime into a few "seasons" with CONTINUOUS episode numbers, while Sonarr/TVDB
+                    // splits them into many seasons. So (season, episode) equality usually misses and
+                    // UseSonarrNumbering silently fell back to CR numbers (e.g. CR Fairy Tail S3E278 ->
+                    // Sonarr has it as S8E1, absoluteEpisodeNumber 278). Try, in order: exact
+                    // season+episode, then absolute number (CR episode no. == Sonarr absolute), then
+                    // air date.
+                    sonarrEpisode =
+                        sonarrEpisodes.FirstOrDefault(ep => ep.SeasonNumber == episode.SeasonNumber && ep.EpisodeNumber == episode.EpisodeNumber)
+                        ?? sonarrEpisodes.FirstOrDefault(ep => ep.AbsoluteEpisodeNumber > 0 && ep.AbsoluteEpisodeNumber == episode.EpisodeNumber)
+                        ?? (episode.ReleaseDate.HasValue
+                            ? sonarrEpisodes.FirstOrDefault(ep => ep.AirDateUtc != default && ep.AirDateUtc.UtcDateTime.Date == episode.ReleaseDate.Value.Date)
+                            : null);
+                    _logger?.LogInformation("Sonarr match: {SeriesTitle} CR S{CrS}E{CrE} -> Sonarr S{SnS}E{SnE} (abs {Abs}) \"{EpTitle}\"",
+                        sonarrSeries.Title, episode.SeasonNumber, episode.EpisodeNumber,
+                        sonarrEpisode?.SeasonNumber, sonarrEpisode?.EpisodeNumber, sonarrEpisode?.AbsoluteEpisodeNumber, sonarrEpisode?.Title);
                 }
             }
             catch (Exception ex)

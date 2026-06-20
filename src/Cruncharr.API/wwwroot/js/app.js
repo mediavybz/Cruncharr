@@ -2895,7 +2895,7 @@
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Appearance Settings</span><span class="settings-section-desc">Customize the UI</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select mw-150" id="setting-theme" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Seerr" ${a.theme==='Seerr'||a.theme==='Nebula'?'selected':''}>Seerr</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select mw-150" id="setting-theme" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Seerr" ${a.theme==='Seerr'||a.theme==='Nebula'?'selected':''}>Seerr</option><option value="Sonarr" ${a.theme==='Sonarr'?'selected':''}>Sonarr</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input w-80" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input w-300" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input w-100" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity ?? 0.5)}" min="0" max="1" step="0.1"></div>
@@ -2936,7 +2936,7 @@
         }
 
         // Named themes -> data-theme attribute. "Dark" is the default :root (no attr).
-        const THEME_ATTR = { 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'nebula' };
+        const THEME_ATTR = { 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'nebula', 'Sonarr': 'sonarr' };
         function applyTheme() {
             let theme = config?.appearance?.theme || 'System';
             if (theme === 'System') {

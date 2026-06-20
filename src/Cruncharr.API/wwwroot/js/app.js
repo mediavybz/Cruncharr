@@ -377,7 +377,7 @@
                     return `
                         <div class="download-item">
                             <div class="download-thumb">
-                                ${item.episode?.thumbnailUrl && isSafeUrl(item.episode.thumbnailUrl) ? `<img src="${escapeHtml(crImg(item.episode.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                ${item.episode?.thumbnailUrl && isSafeUrl(item.episode.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(item.episode.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             </div>
                             <div class="download-content">
                                 <div class="download-header">
@@ -481,7 +481,7 @@
                 popup.innerHTML = addDownloadSearchResults.map(s => `
                     <div class="search-result-item" onclick="selectSearchResult('${escapeJsString(s.id)}')">
                         <div class="search-result-poster">
-                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                         </div>
                         <div class="search-result-info">
                             <div class="search-result-title">${escapeHtml(s.title)}</div>
@@ -624,7 +624,7 @@
                 popup.innerHTML = globalSearchResults.map(s => `
                     <div class="search-result-item" onclick="selectGlobalResult('${escapeJsString(s.id)}')">
                         <div class="search-result-poster">
-                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                         </div>
                         <div class="search-result-info">
                             <div class="search-result-title">${escapeHtml(s.title)}</div>
@@ -748,7 +748,7 @@
                 return `
                     <div class="episode-multi-dub ${isSelected ? 'selected' : ''}" onclick="toggleEpisodeSelectionMultiDub('${escapeJsString(epKey)}')">
                         <div class="episode-thumb">
-                            ${ep.img && isSafeUrl(ep.img) ? `<img src="${escapeHtml(crImg(ep.img))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                            ${ep.img && isSafeUrl(ep.img) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(ep.img))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                         </div>
                         <div class="episode-info">
                             <div class="episode-title">${escapeHtml(ep.name) || 'Unknown Episode'}</div>
@@ -995,7 +995,7 @@
                             return `
                             <div style="padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px;">
                                 <div style="width: 80px; height: 45px; background: var(--bg-tertiary); border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                                    ${thumb && isSafeUrl(thumb) ? `<img src="${escapeHtml(crImg(thumb))}" style="width: 100%; height: 100%; object-fit: cover;" alt="" onerror="this.outerHTML='🎵'">` : '🎵'}
+                                    ${thumb && isSafeUrl(thumb) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(thumb))}" style="width: 100%; height: 100%; object-fit: cover;" alt="" onerror="this.outerHTML='🎵'">` : '🎵'}
                                 </div>
                                 <div style="flex: 1;">
                                     <div style="font-weight: 500;">${escapeHtml(video.title || 'Unknown')}</div>
@@ -1189,7 +1189,7 @@
                                         ${historyMark}
                                         <div class="calendar-episode-time">${timeDisplay}</div>
                                         <div class="calendar-episode-thumb">
-                                            ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img src="${escapeHtml(crImg(ep.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                            ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(ep.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                             <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
                                         </div>
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
@@ -1305,7 +1305,7 @@
                     ${seriesList.map(series => `
                         <div class="history-poster clickable" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')">
                             <div class="history-poster-img">
-                                ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img src="${escapeHtml(crImg(series.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(series.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                 ${series.episodes?.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
                             </div>
                             <div class="history-poster-info">
@@ -1435,7 +1435,7 @@
                     ${series.map(s => `
                         <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
                             <div class="history-poster-img">
-                                ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             </div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
@@ -1607,7 +1607,7 @@
                     ${series.map(s => {
                         const clickable = s.id && s.id.length;
                         const img = (s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl)
-                            ? `<img src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" loading="lazy" alt="" onerror="this.outerHTML='📺'">` : '📺';
+                            ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺';
                         const sd = fmtSeasonalDate(s.startDate);
                         const na = fmtNextAir(s);
                         const metaMain = (s.episodeCount ? `${s.episodeCount} ep` : 'On Crunchyroll') + (sd ? ` · ${sd}` : '');
@@ -1902,7 +1902,7 @@
                 content.innerHTML = '<div class="history-poster-grid">' + filteredData.map(item => `
                     <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'} clickable" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')">
                         <div class="history-poster-img">
-                            ${item.thumbnailImageUrl && isSafeUrl(item.thumbnailImageUrl) ? `<img src="${escapeHtml(crImg(item.thumbnailImageUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                            ${item.thumbnailImageUrl && isSafeUrl(item.thumbnailImageUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(item.thumbnailImageUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
                         </div>
                         <div class="history-poster-info">
@@ -2004,7 +2004,7 @@
                 if (authStatus.isAuthenticated) {
                     if (nameEl) nameEl.textContent = authStatus.username || 'User';
                     if (subEl) subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free';
-                    if (avatarEl) { const au = resolveAvatarUrl(authStatus.avatar); avatarEl.innerHTML = au && isSafeUrl(au) ? `<img src="${escapeHtml(crImg(au))}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">` : '<span>&#128100;</span>'; }
+                    if (avatarEl) { const au = resolveAvatarUrl(authStatus.avatar); avatarEl.innerHTML = au && isSafeUrl(au) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(au))}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">` : '<span>&#128100;</span>'; }
                     if (loginBtn) loginBtn.style.display = 'none';
                     if (logoutBtn) logoutBtn.style.display = 'inline-block';
                     
@@ -3892,7 +3892,7 @@
             let html = `
                 <div class="history-detail-header">
                     <div class="history-detail-poster">
-                        ${series.thumbnailImageUrl && isSafeUrl(series.thumbnailImageUrl) ? `<img src="${escapeHtml(crImg(series.thumbnailImageUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                        ${series.thumbnailImageUrl && isSafeUrl(series.thumbnailImageUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(series.thumbnailImageUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                     </div>
                     <div class="history-detail-info">
                         <div class="history-detail-title">${escapeHtml(series.seriesTitle || 'Unknown')}</div>
@@ -4621,7 +4621,7 @@
                     const url = resolveAvatarUrl(s.avatar);
                     if (avatarEl) {
                         avatarEl.innerHTML = url && isSafeUrl(url)
-                            ? `<img src="${escapeHtml(crImg(url))}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">`
+                            ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(url))}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">`
                             : '<span>&#128100;</span>';
                     }
                 } else {

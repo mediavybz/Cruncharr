@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Cruncharr.Core.Configuration;
+using Cruncharr.Core.Utils;
 using Microsoft.Extensions.Logging;
 
 #pragma warning disable IL2026
@@ -144,9 +145,37 @@ public class SonarrService : ISonarrService
     public virtual async Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config)
     {
         var series = await GetSeriesAsync(config);
-        return series.FirstOrDefault(s =>
+        if (string.IsNullOrWhiteSpace(title) || series.Count == 0) return null;
+
+        // 1) Exact (case-insensitive) on the primary title, clean title, or any alternate title.
+        var exact = series.FirstOrDefault(s =>
             s.Title?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
-            s.CleanTitle?.Equals(title, StringComparison.OrdinalIgnoreCase) == true);
+            s.CleanTitle?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
+            (s.AlternateTitles?.Any(a => a.Title?.Equals(title, StringComparison.OrdinalIgnoreCase) == true) ?? false));
+        if (exact != null) return exact;
+
+        // 2) Fuzzy fallback. CR titles frequently differ from Sonarr's (romaji vs english,
+        //    punctuation, season/year suffixes). The old exact-only match silently failed for those,
+        //    so UseSonarrNumbering fell back to Crunchyroll numbers. Score against the primary +
+        //    alternate titles with the same StringSimilarity + 0.8 threshold as the history matcher.
+        var needle = title.ToLowerInvariant();
+        SonarrSeries? best = null;
+        double bestSim = 0.0;
+        foreach (var s in series)
+        {
+            double sim = s.Title != null ? StringSimilarity.CalculateSimilarity(s.Title.ToLowerInvariant(), needle) : 0.0;
+            if (s.AlternateTitles != null)
+            {
+                foreach (var alt in s.AlternateTitles)
+                {
+                    if (string.IsNullOrEmpty(alt.Title)) continue;
+                    var altSim = StringSimilarity.CalculateSimilarity(alt.Title.ToLowerInvariant(), needle);
+                    if (altSim > sim) sim = altSim;
+                }
+            }
+            if (sim > bestSim) { bestSim = sim; best = s; }
+        }
+        return bestSim >= 0.8 ? best : null;
     }
 
     public virtual async Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config)

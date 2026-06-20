@@ -1867,6 +1867,10 @@
                 // Same endpoint feeds the series-detail modal - keep its cache fresh
                 historyRichData = historyData;
                 renderHistoryContent();
+                // Auto-match against Sonarr once per session so matches "rope in" without the
+                // user manually opening the Sonarr menu (no-op if Sonarr disabled or all matched).
+                // Fire-and-forget so history paints immediately.
+                maybeAutoMatchSonarr();
             } catch (e) {
                 const el = document.getElementById('history-content');
                 if (el) el.innerHTML = `
@@ -4132,6 +4136,22 @@
             attachDropdownListener('sonarr-dropdown', dropdown);
         }
         
+        // One-shot-per-session background match so Sonarr data appears on the History page
+        // automatically (the manual "Match All Series" menu item still works for re-runs).
+        async function maybeAutoMatchSonarr() {
+            if (window._sonarrAutoMatched) return;
+            if (!config?.sonarr?.enabled) return;
+            if (!Array.isArray(historyData) || !historyData.some(s => s && !s.sonarrSeriesId)) return;
+            window._sonarrAutoMatched = true; // set first so polling never re-triggers or loops
+            try {
+                const res = await fetch('/api/v1/history/sonarr/match-series', { method: 'POST' });
+                if (res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    if (data && data.matched > 0) fetchHistoryData();
+                }
+            } catch (e) { /* silent; manual "Match All Series" remains available */ }
+        }
+
         async function matchAllSeriesSonarr() {
             try {
                 showToast('Matching all series with Sonarr...', 'info');

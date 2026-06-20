@@ -400,6 +400,9 @@
             padding: 14px 16px;
             font-size: 0.8em;
             color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         /* Rounded version/status pill (Seerr-style "Stable 3.3.0" badge). */
         .version-pill {
@@ -424,6 +427,22 @@
             background: var(--accent-green);
             box-shadow: 0 0 6px var(--accent-green);
         }
+        /* GitHub repo link next to the version pill in the sidebar footer. */
+        .github-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            flex: 0 0 auto;
+            border-radius: var(--radius-full);
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            transition: color var(--transition), border-color var(--transition), transform var(--transition);
+        }
+        .github-link:hover { color: var(--text-primary); border-color: var(--accent-orange); transform: translateY(-1px); }
+        .github-link svg { width: 18px; height: 18px; display: block; }
 
         /* Top-right profile chip */
         .topbar-profile {

@@ -1202,6 +1202,29 @@ public class DownloadService : IDownloadService
                         }
                     }
                 }
+                else
+                {
+                    // Skip muxing: move the raw downloaded streams (+ subs) to the output dir so they
+                    // aren't lost when tempDir is cleaned up. Without this the files downloaded then
+                    // vanished (and with the temp folder enabled nothing appeared at all).
+                    var outDir = Path.GetDirectoryName(outputPath) ?? "/downloads";
+                    var baseName = Path.GetFileNameWithoutExtension(outputPath);
+                    var rawFiles = downloadedFiles.Concat(subtitleFiles.Select(s => s.Path))
+                        .Where(f => !string.IsNullOrEmpty(f) && File.Exists(f)).Distinct().ToList();
+                    foreach (var rawFile in rawFiles)
+                    {
+                        try
+                        {
+                            var dest = Path.Combine(outDir, baseName + "." + Path.GetFileName(rawFile));
+                            MoveToFinalPath(rawFile, dest);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogWarning(ex, "Skip-mux: failed to move raw file out of temp: {File}", rawFile);
+                        }
+                    }
+                    _logger?.LogInformation("Skip muxing: moved {Count} raw stream file(s) to {Dir}", rawFiles.Count, outDir);
+                }
             }
             finally
             {
@@ -2029,6 +2052,14 @@ public class DownloadService : IDownloadService
             for (int i = 0; i < chosenAudios.Count; i++)
             {
                 var (audioItem, lang) = chosenAudios[i];
+                // A dub-specific audio-only fetch (additional dub): Crunchyroll's dub manifest often
+                // labels its audio with the ORIGINAL locale (ja-JP), which collided every extra dub
+                // onto audio_jajp.m4s and left only one language in the mux. Trust the explicitly
+                // requested dub locale instead so each dub gets its own file + track.
+                if (audioOnly && selectedDubs is { Count: 1 } && !string.IsNullOrEmpty(selectedDubs[0]))
+                {
+                    lang = selectedDubs[0];
+                }
                 var langCode = (lang ?? "unknown").Replace("-", "").ToLower();
                 var audioFileName = chosenAudios.Count(a => a.Item2 == lang) > 1
                     ? $"audio_{langCode}_{i}.m4s"

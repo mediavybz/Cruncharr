@@ -100,6 +100,23 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         Audio = true
     };
 
+    // Maintained fallback client from crunchy-cli / crunchyroll-rs (client_id t-kdgp2h8c3jub8fn0fq),
+    // kept fresh by an active upstream (our original upstream, Crunchy-Downloader, was removed).
+    // Verified live + password-grant capable on beta-api AND www (2026-06-19). Tried ONLY as a last
+    // resort, when BOTH the TV and mobile clients above are deactivated. Play endpoint set to the
+    // proven android/phone path as a best guess — the client's native play device is unverified, so
+    // if downloads ever 40016 once this activates, adjust Endpoint.
+    private static readonly CrAuthSettings MaintainedFallbackAuthSettings = new()
+    {
+        Endpoint = "android/phone",
+        Authorization = "Basic dC1rZGdwMmg4YzNqdWI4Zm4wZnE6eWZMRGZNZnJZdktYaDRKWFMxTEVJMmNDcXUxdjVXYW4=",
+        UserAgent = "Crunchyroll/3.110.0 Android/16 okhttp/4.12.0",
+        Device_name = "CPH2449",
+        Device_type = "OnePlus CPH2449",
+        Video = true,
+        Audio = true
+    };
+
     private const string EmbeddedAuthData = @"[{""type"":""tv"",""authorization"":""Basic cmpzMGx0eDBkYndrbGl3eGR6ZGY6NFY3cmYyMS1VRlhlWi01WEFkMFhfUVB3cjFndV9pMXM="",""versionName"":""3.65.0""},{""type"":""mobile"",""authorization"":""Basic YnFjaGljMmc3aTJzcnQ5cXU1c2I6NkVKT0tQLXNxU3hEb3RXdVgwZmVnV3pNX2FiTWRNWUo="",""versionName"":""3.110.0""}]";
 
     public CrunchyrollAuthService(CruncharrConfig? config = null, ILogger<CrunchyrollAuthService>? logger = null)
@@ -916,6 +933,52 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                     {
                         content = retryContent;
                         error = retryError;
+                    }
+                }
+
+                // Tier-2 fallback: the maintained crunchy-cli client (t-kdgp...). Reached ONLY when
+                // BOTH the primary (TV) and secondary (mobile) clients are inactive — login is
+                // already broken at this point — so this can only help, never regress a working login.
+                if (!isOk && (content?.Contains("client_inactive") == true || content?.Contains("invalid_client") == true))
+                {
+                    var maintainedForm = new Dictionary<string, string>
+                    {
+                        { "username", email },
+                        { "password", password },
+                        { "grant_type", "password" },
+                        { "scope", "offline_access" },
+                        { "device_id", uuid },
+                        { "device_type", MaintainedFallbackAuthSettings.Device_type }
+                    };
+                    if (!string.IsNullOrEmpty(MaintainedFallbackAuthSettings.Device_name))
+                    {
+                        maintainedForm["device_name"] = MaintainedFallbackAuthSettings.Device_name;
+                    }
+                    var maintainedRequest = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
+                    {
+                        Content = new FormUrlEncodedContent(maintainedForm)
+                    };
+                    maintainedRequest.Headers.Add("Authorization", MaintainedFallbackAuthSettings.Authorization);
+                    maintainedRequest.Headers.Add("User-Agent", MaintainedFallbackAuthSettings.UserAgent);
+
+                    _logger?.LogInformation("Retrying login with maintained (crunchy-cli) client...");
+                    var (maintainedOk, maintainedContent, maintainedError) = await _httpClient.SendRequestAsync(maintainedRequest, suppressError: false, attachCookies: false);
+
+                    if (maintainedOk)
+                    {
+                        JsonTokenToFileAndVariable(maintainedContent, uuid);
+                        _logger?.LogInformation("Login successful with maintained (crunchy-cli) client");
+                        isOk = true;
+                        StreamEndpoint.Authorization = MaintainedFallbackAuthSettings.Authorization;
+                        StreamEndpoint.UserAgent = MaintainedFallbackAuthSettings.UserAgent;
+                        StreamEndpoint.Device_type = MaintainedFallbackAuthSettings.Device_type;
+                        StreamEndpoint.Device_name = MaintainedFallbackAuthSettings.Device_name;
+                        StreamEndpoint.Endpoint = MaintainedFallbackAuthSettings.Endpoint;
+                    }
+                    else
+                    {
+                        content = maintainedContent;
+                        error = maintainedError;
                     }
                 }
             }

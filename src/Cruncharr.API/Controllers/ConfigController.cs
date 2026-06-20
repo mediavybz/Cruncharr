@@ -64,13 +64,11 @@ public class ConfigController : ControllerBase
                     : _config.Sonarr?.ApiKey
             };
 
-            var scheme = effective.UseSsl ? "https" : "http";
-            var testUrl = $"{scheme}://{effective.Host}:{effective.Port}";
-            if (!WebhookUrlValidator.IsValidWebhookUrl(testUrl, out var ssrfError))
-            {
-                return BadRequest(new { success = false, message = ssrfError });
-            }
-
+            // No SSRF/private-IP guard here: Sonarr is an admin-configured, self-hosted companion
+            // service that lives on a LAN/private IP by design (192.168.x / 10.x / localhost). The
+            // private-IP block (meant for attacker-influenced webhook URLs) wrongly rejected every
+            // real Sonarr ("Private, loopback, or link-local IP addresses are not allowed").
+            // TestConnectionDetailedAsync handles unreachable/invalid hosts gracefully.
             var result = await _sonarrService.TestConnectionDetailedAsync(effective);
             return Ok(new { success = result.Success, message = result.Message });
         }

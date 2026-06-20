@@ -522,6 +522,24 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     public async Task<bool> LoginAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default)
     {
+        try
+        {
+            return await LoginInternalAsync(email, password, useBetaApi, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Final SELF-RELIANT fallback: Crunchyroll's OWN web client, scraped live from the
+            // homepage (accountAuthClientId), used via the etp_rt_cookie flow. Reached only when
+            // every embedded client (TV/mobile/alternate) has already failed, so it cannot regress a
+            // working login. The web client can't be deactivated without breaking crunchyroll.com,
+            // so login stops depending on shipping a fresh embedded client.
+            _logger?.LogWarning(ex, "All embedded clients failed; trying self-reliant web-client fallback");
+            return await LoginWithWebClientAsync(email, password, useBetaApi, cancellationToken);
+        }
+    }
+
+    private async Task<bool> LoginInternalAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default)
+    {
         // [PT] Upstream CrAuth.Auth(AuthData): TV endpoints keep the password grant,
         // other endpoints use the SSO authorization-code (PKCE) flow
         if (StreamEndpoint.Endpoint.StartsWith("tv", StringComparison.OrdinalIgnoreCase))
@@ -713,6 +731,102 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
 
         throw new Exception("Login failed - no refresh token received from Crunchyroll");
+    }
+
+    // ---- Self-reliant web-client fallback --------------------------------------------------
+    // Crunchyroll's website embeds its client id in the homepage HTML (accountAuthClientId). It is
+    // a PUBLIC value (not a secret) and the one CR's own site uses, so it cannot be deactivated
+    // without breaking crunchyroll.com. We scrape it live and authenticate via the etp_rt_cookie
+    // grant (no /authorize redirect needed), giving a login path that doesn't depend on shipping a
+    // fresh embedded client. Verified end-to-end against beta-api.
+    private const string FallbackWebClientId = "kmj7imhjt_q90lcbzzsj"; // last-known; used only if the live scrape is blocked
+    private const string WebClientUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    private const string WebClientDeviceType = "com.crunchyroll.static";
+    private static string? _cachedWebClientBasic;
+
+    private async Task<string> FetchWebClientBasicAsync(CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrEmpty(_cachedWebClientBasic)) return _cachedWebClientBasic!;
+        string? clientId = null;
+        try
+        {
+            var req = new HttpRequestMessage(HttpMethod.Get, "https://www.crunchyroll.com/");
+            req.Headers.Add("User-Agent", WebClientUserAgent);
+            var (ok, html, _) = await _httpClient.SendRequestAsync(req, suppressError: true, attachCookies: false);
+            if (ok && !string.IsNullOrEmpty(html))
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(html, "accountAuthClientId\"\\s*:\\s*\"([A-Za-z0-9_-]+)\"");
+                if (m.Success) clientId = m.Groups[1].Value;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to scrape Crunchyroll web client id; using last-known fallback");
+        }
+        clientId ??= FallbackWebClientId;
+        _logger?.LogInformation("Using Crunchyroll web client id {ClientId}", clientId);
+        _cachedWebClientBasic = "Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(clientId + ":"));
+        return _cachedWebClientBasic;
+    }
+
+    private async Task<bool> LoginWithWebClientAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken)
+    {
+        var webBasic = await FetchWebClientBasicAsync(cancellationToken);
+
+        // 1) SSO login (email/password -> etp_rt cookie). Client-independent.
+        _httpClient.ClearCookies();
+        var uuid = ResolveDeviceId();
+        var loginPayload = JsonConvert.SerializeObject(new Dictionary<string, object>
+        {
+            { "email", email },
+            { "password", password },
+            { "eventSettings", new Dictionary<string, object>() }
+        });
+        var requestContent = new StringContent(loginPayload, System.Text.Encoding.UTF8);
+        requestContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain") { CharSet = "UTF-8" };
+        var ssoRequest = new HttpRequestMessage(HttpMethod.Post, $"https://{SsoDomain}/api/login") { Content = requestContent };
+        ssoRequest.Headers.Add("User-Agent", WebClientUserAgent);
+        var (ssoOk, ssoContent, ssoError) = await _httpClient.SendRequestAsync(ssoRequest);
+        if (!ssoOk) throw new Exception(BuildLoginErrorMessage(ssoContent, ssoError));
+
+        var refreshToken = _httpClient.GetCookieValue(SsoDomain, "etp_rt");
+        if (string.IsNullOrEmpty(refreshToken)) throw new Exception("SSO login did not return a refresh token cookie");
+
+        // 2) Token exchange via the etp_rt_cookie grant with the WEB client. Send ONLY the etp_rt
+        //    cookie (SetETPCookie + attachCookies:false) to avoid cookie-pollution information_mismatch.
+        var formData = new Dictionary<string, string>
+        {
+            { "grant_type", "etp_rt_cookie" },
+            { "scope", "offline_access" },
+            { "device_id", uuid },
+            { "device_type", WebClientDeviceType }
+        };
+        var tokenRequest = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth) { Content = new FormUrlEncodedContent(formData) };
+        tokenRequest.Headers.Add("Authorization", webBasic);
+        tokenRequest.Headers.Add("User-Agent", WebClientUserAgent);
+        // Send ONLY the etp_rt cookie. The wrapper has UseCookies=false: attachCookies:false sends
+        // nothing, attachCookies:true sends the whole store (cross-domain pollution ->
+        // information_mismatch). So hand it exactly one cookie via a manual header.
+        tokenRequest.Headers.TryAddWithoutValidation("Cookie", "etp_rt=" + refreshToken);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(tokenRequest, suppressError: false, attachCookies: false);
+        if (!isOk) throw new Exception(BuildLoginErrorMessage(content, error));
+
+        JsonTokenToFileAndVariable(content, uuid);
+        if (Token?.refresh_token == null) throw new Exception("Web-client login failed - no refresh token received");
+
+        // Pin the session to the web client so refresh + profile switch present the SAME client_id
+        // that minted the token (Crunchyroll validates this).
+        StreamEndpoint.Authorization = webBasic;
+        StreamEndpoint.UserAgent = WebClientUserAgent;
+        StreamEndpoint.Device_type = WebClientDeviceType;
+        StreamEndpoint.Device_name = string.Empty;
+        StreamEndpoint.Endpoint = "web/chrome"; // play-URL device for the web client
+
+        SetETPCookie(Token.refresh_token);
+        SaveToken();
+        await GetMultiProfileAsync(useBetaApi, cancellationToken);
+        _logger?.LogInformation("Login successful via self-reliant web client");
+        return true;
     }
 
     private string ResolveDeviceId()

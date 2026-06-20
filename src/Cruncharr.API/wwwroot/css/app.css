@@ -205,6 +205,73 @@
         }
         [data-theme="nebula"] .nav-item.active .nav-icon { color: #fff; }
 
+        /* Sonarr - signature cyan top bar, dark slate sidebar, clean light content.
+           Mixed theme: content tokens are light; the sidebar + header are re-skinned
+           via the scoped overrides below. */
+        [data-theme="sonarr"] {
+            --accent: #35c5f0;            /* Sonarr cyan */
+            --accent-bright: #1aa9da;
+            --accent-orange: var(--accent);
+            --accent-orange-bright: var(--accent-bright);
+            --accent-soft: rgba(53, 197, 240, 0.14);
+            --accent-softer: rgba(53, 197, 240, 0.07);
+            --accent-glow: rgba(53, 197, 240, 0.28);
+
+            --bg-primary: #f5f6f8;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #eceef1;
+            --bg-hover: #e6e9ee;
+            --bg-card: #ffffff;
+            --text-primary: #1b1f24;
+            --text-secondary: #5c636e;
+            --text-muted: #767d88;
+
+            --accent-blue: #1899c4;   --info-soft: rgba(24, 153, 196, 0.14);
+            --accent-green: #27c24c;  --success-soft: rgba(39, 194, 76, 0.14);
+            --accent-red: #e6312f;    --error-soft: rgba(230, 49, 47, 0.14);
+            --accent-yellow: #e0a800; --warning-soft: rgba(224, 168, 0, 0.16);
+            --premium-soft: var(--accent-soft);
+
+            --border-color: #e3e6ea;
+            --surface-border: #e7eaee;
+            --glass-bg: rgba(255, 255, 255, 0.80);
+            --glass-border: rgba(16, 24, 40, 0.08);
+            --sidebar-bg: linear-gradient(180deg, #4a515f, #3f4654);
+
+            --shadow-sm: 0 1px 2px rgba(16,24,40,0.06);
+            --shadow-md: 0 8px 24px rgba(16,24,40,0.10);
+            --shadow-lg: 0 20px 48px rgba(16,24,40,0.14);
+            --shadow-glow: 0 8px 24px rgba(53, 197, 240, 0.22);
+            --bloom: none;
+            --card-blur: 0px;
+        }
+        /* Dark sidebar needs light text — re-scope the text/surface tokens just for it
+           (content stays dark-on-light). */
+        [data-theme="sonarr"] .sidebar {
+            color: #e7eaf0;
+            --text-primary: #ffffff;
+            --text-secondary: #c3c9d4;
+            --text-muted: #99a1ae;
+            --bg-hover: rgba(255, 255, 255, 0.08);
+            --bg-tertiary: rgba(255, 255, 255, 0.08);
+            --border-color: rgba(255, 255, 255, 0.14);
+            --surface-border: rgba(255, 255, 255, 0.10);
+        }
+        /* Active nav = solid cyan pill (matches the top bar) */
+        [data-theme="sonarr"] .nav-item.active { background: var(--accent); color: #06303d; }
+        [data-theme="sonarr"] .nav-item.active .nav-icon { color: #06303d; }
+        /* Cyan top bar with a translucent search field */
+        [data-theme="sonarr"] .header {
+            background: var(--accent);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+        }
+        [data-theme="sonarr"] .header-search {
+            background: rgba(255, 255, 255, 0.18);
+            border-color: rgba(255, 255, 255, 0.32);
+        }
+        [data-theme="sonarr"] .header-search input { color: #ffffff; }
+        [data-theme="sonarr"] .header-search input::placeholder { color: rgba(255, 255, 255, 0.82); }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {

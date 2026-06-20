@@ -1229,6 +1229,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         return urls;
     }
 
+    // Retina-safe ceiling for catalog thumbnails/posters. CR offers variants up to 1280-1920px,
+    // but grids render them at ~150-300px, so ~480px stays sharp on 2x displays while cutting the
+    // fetched+cached bytes by roughly half (measured: a 750px poster PNG = 1.2MB vs 480px = 0.57MB).
+    // We pick from CR's OFFERED variants only (never rewrite the size in the URL — CR's resizer
+    // rejects non-preset sizes, e.g. 360x540 -> error, so a rewrite would break images).
+    private const int TargetImageWidth = 480;
+
     private static string? ExtractBestImage(Dictionary<string, List<List<object>>>? images, string type)
     {
         if (images == null || !images.ContainsKey(type)) return null;
@@ -1236,25 +1243,27 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         var imageList = images[type];
         if (imageList == null || imageList.Count == 0) return null;
 
-        // CR stores each image as an array of size variants ordered small -> large.
-        // Pick the highest-resolution variant (by width) instead of img[0], which is
-        // the SMALLEST and produced blurry posters/thumbnails.
-        string? best = null;
-        int bestWidth = -1;
+        // CR stores each image as an array of size variants ordered small -> large, and the
+        // largest can be 1280-1920px - far more than a ~150-300px thumbnail/poster needs, which
+        // bloated the on-disk cache and slowed first paint. Pick the SMALLEST variant whose width
+        // is >= the retina-safe target, falling back to the largest available if none reach it
+        // (so it never regresses to the old blurry img[0]).
+        string? chosen = null;
+        int chosenWidth = int.MaxValue;
+        string? largest = null;
+        int largestWidth = -1;
         foreach (var img in imageList)
         {
             if (img == null) continue;
             foreach (var variant in img)
             {
                 var (url, width) = ExtractImageSourceAndWidth(variant);
-                if (!string.IsNullOrEmpty(url) && width >= bestWidth)
-                {
-                    best = url;
-                    bestWidth = width;
-                }
+                if (string.IsNullOrEmpty(url)) continue;
+                if (width > largestWidth) { largest = url; largestWidth = width; }
+                if (width >= TargetImageWidth && width < chosenWidth) { chosen = url; chosenWidth = width; }
             }
         }
-        return best;
+        return chosen ?? largest;
     }
 
     private static (string? source, int width) ExtractImageSourceAndWidth(object? imageObj)

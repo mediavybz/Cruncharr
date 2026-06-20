@@ -1328,8 +1328,8 @@
                         <div class="page-title">Browse All Series</div>
                         <div class="page-subtitle">Explore all available series</div>
                     </div>
-                    <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; align-items:center;"></div>
                 </div>
+                <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; align-items:center; margin:4px 0 14px;"></div>
                 <div class="browse-filter-bar">
                     <span class="browse-filter-label">Dub language</span>
                     <select class="form-select mw-180" id="browse-dub-filter" onchange="onBrowseDubFilterChange(this.value)">
@@ -1342,10 +1342,6 @@
                     <div class="loading"><div class="spinner"></div>Loading series...</div>
                 </div>
             `;
-            // Render the static US rating buttons immediately — they're a hardcoded set
-            // (US_RATINGS) and must not wait on the /series/all fetch, or they vanish while
-            // the page loads its assets and only pop back when data arrives.
-            buildRatingButtons();
             fetchAllSeries();
         }
 
@@ -1388,8 +1384,9 @@
             browseRatingFilter.clear();
             renderBrowseFiltered();
         }
-        // Render the rating buttons inline on the filter bar: the fixed US set first, then any
-        // extra codes present in the loaded data. Codes match exactly (case-insensitive).
+        // Show ONLY ratings actually present in the loaded library: the US set (kept in age
+        // order, youngest→oldest) filtered to those present, then any non-US codes present.
+        // A rating with zero matching series is omitted so it never shows an empty filter.
         function buildRatingButtons() {
             const box = document.getElementById('browse-rating-btns');
             if (!box) return;
@@ -1397,7 +1394,7 @@
             allBrowseSeries.forEach(s => (Array.isArray(s.maturityRatings) ? s.maturityRatings : [])
                 .forEach(c => { if (c) present.add(String(c).toUpperCase()); }));
             const extras = [...present].filter(c => !US_RATINGS.includes(c)).sort();
-            const codes = US_RATINGS.concat(extras);
+            const codes = US_RATINGS.filter(r => present.has(r)).concat(extras);
             const btn = code =>
                 `<button class="season-tab ${browseRatingFilter.has(code) ? 'active' : ''}" onclick="onBrowseRatingToggle('${escapeJsString(code)}')">${escapeHtml(code)}</button>`;
             const clearBtn = browseRatingFilter.size

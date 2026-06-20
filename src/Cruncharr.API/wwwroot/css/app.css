@@ -1723,7 +1723,7 @@
         /* ================== END MODERN UI POLISH ================== */
 
         @media (max-width: 768px) {
-            :root { --sidebar-width: 0px; }
+            :root { --sidebar-width: 0px; --header-height: 50px; } /* keep --header-height in sync with the 50px mobile .header so the fixed top-right profile chip stays vertically centered on the search bar */
             
             .app-container { flex-direction: column; }
             

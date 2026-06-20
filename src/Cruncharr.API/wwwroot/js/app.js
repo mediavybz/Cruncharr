@@ -1342,6 +1342,10 @@
                     <div class="loading"><div class="spinner"></div>Loading series...</div>
                 </div>
             `;
+            // Render the static US rating buttons immediately — they're a hardcoded set
+            // (US_RATINGS) and must not wait on the /series/all fetch, or they vanish while
+            // the page loads its assets and only pop back when data arrives.
+            buildRatingButtons();
             fetchAllSeries();
         }
 

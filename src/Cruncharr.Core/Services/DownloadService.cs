@@ -91,6 +91,9 @@ public class DownloadService : IDownloadService
                 episode.Versions = fullEpisode.Versions;
                 episode.AudioLocale = fullEpisode.AudioLocale;
                 episode.Guid = fullEpisode.Guid ?? episode.Guid;
+                if (!string.IsNullOrEmpty(fullEpisode.SeriesId)) episode.SeriesId = fullEpisode.SeriesId;
+                if (!string.IsNullOrEmpty(fullEpisode.SeasonId)) episode.SeasonId = fullEpisode.SeasonId;
+                if (!string.IsNullOrEmpty(fullEpisode.SeasonTitle)) episode.SeasonTitle = fullEpisode.SeasonTitle;
                 _logger?.LogInformation("Fetched episode details: {EpisodeId}, Versions={VersionCount}, AudioLocale={AudioLocale}, Guid={Guid}",
                     fullEpisode.Id, fullEpisode.Versions?.Count ?? 0, fullEpisode.AudioLocale, fullEpisode.Guid);
             }
@@ -1219,10 +1222,21 @@ public class DownloadService : IDownloadService
                     var downloadedDubs = audioTrackLanguages.Select(a => a.Lang).Distinct().ToList();
                     var downloadedSubs = subtitleFiles.Select(s => s.Lang).Distinct().ToList();
 
+                    // Series id used to group + mark this download. Prefer CR ids; fall back to the
+                    // series title so a download ALWAYS lands in history even when the episode
+                    // metadata carried no id (the old code stored flat history under an empty id and
+                    // never populated the rich history the UI reads -> downloads were invisible).
+                    var richSeriesId = !string.IsNullOrWhiteSpace(episode.SeriesId) ? episode.SeriesId!
+                        : !string.IsNullOrWhiteSpace(episode.Guid) ? episode.Guid
+                        : episode.SeriesTitle;
+                    episode.SeriesId = richSeriesId;
+                    if (string.IsNullOrWhiteSpace(episode.SeasonId))
+                        episode.SeasonId = $"{richSeriesId}|S{episode.SeasonNumber}";
+
                     await _history.AddAsync(new DownloadHistory
                     {
                         EpisodeId = episode.Id,
-                        SeriesId = episode.Guid,
+                        SeriesId = richSeriesId,
                         SeriesTitle = episode.SeriesTitle,
                         EpisodeTitle = episode.Title,
                         SeasonNumber = episode.SeasonNumber,
@@ -1234,8 +1248,14 @@ public class DownloadService : IDownloadService
                         FileSizeBytes = fileInfo.Exists ? fileInfo.Length : 0
                     });
 
-                    // Also update rich history with downloaded dubs/subs for partial download tracking
-                    await _history.SetAsDownloadedAsync(episode.Guid, episode.SeasonId, episode.Id, downloadedDubs, downloadedSubs);
+                    // Populate the rich history (series -> season -> episode) the History UI reads,
+                    // THEN mark the episode downloaded. Without the populate step the mark always
+                    // failed ("Couldn't update download history") and nothing appeared in History.
+                    if (!string.IsNullOrWhiteSpace(richSeriesId))
+                    {
+                        await _history.UpdateWithSeasonDataAsync(new List<EpisodeInfo> { episode });
+                        await _history.SetAsDownloadedAsync(richSeriesId, episode.SeasonId, episode.Id, downloadedDubs, downloadedSubs);
+                    }
                 }
                 catch (Exception ex)
                 {

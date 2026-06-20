@@ -211,29 +211,29 @@
                 
                 <!-- Queue Stats -->
                 <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:20px;">
-                    <div class="card" style="padding:15px; text-align:center; margin-bottom:0;">
-                        <div style="font-size:1.8em; font-weight:600; color:var(--accent-blue);" id="stat-total">-</div>
-                        <div style="font-size:0.85em; color:var(--text-secondary);">Total</div>
+                    <div class="card stat-tile">
+                        <div class="stat-num" style="color:var(--accent-blue);" id="stat-total">-</div>
+                        <div class="hint">Total</div>
                     </div>
-                    <div class="card" style="padding:15px; text-align:center; margin-bottom:0;">
-                        <div style="font-size:1.8em; font-weight:600; color:var(--accent-orange);" id="stat-active">-</div>
-                        <div style="font-size:0.85em; color:var(--text-secondary);">Active</div>
+                    <div class="card stat-tile">
+                        <div class="stat-num" style="color:var(--accent-orange);" id="stat-active">-</div>
+                        <div class="hint">Active</div>
                     </div>
-                    <div class="card" style="padding:15px; text-align:center; margin-bottom:0;">
-                        <div style="font-size:1.8em; font-weight:600; color:var(--accent-yellow);" id="stat-queued">-</div>
-                        <div style="font-size:0.85em; color:var(--text-secondary);">Queued</div>
+                    <div class="card stat-tile">
+                        <div class="stat-num" style="color:var(--accent-yellow);" id="stat-queued">-</div>
+                        <div class="hint">Queued</div>
                     </div>
-                    <div class="card" style="padding:15px; text-align:center; margin-bottom:0;">
-                        <div style="font-size:1.8em; font-weight:600; color:var(--accent-green);" id="stat-completed">-</div>
-                        <div style="font-size:0.85em; color:var(--text-secondary);">Completed</div>
+                    <div class="card stat-tile">
+                        <div class="stat-num" style="color:var(--accent-green);" id="stat-completed">-</div>
+                        <div class="hint">Completed</div>
                     </div>
-                    <div class="card" style="padding:15px; text-align:center; margin-bottom:0;">
-                        <div style="font-size:1.8em; font-weight:600; color:var(--accent-red);" id="stat-failed">-</div>
-                        <div style="font-size:0.85em; color:var(--text-secondary);">Failed</div>
+                    <div class="card stat-tile">
+                        <div class="stat-num" style="color:var(--accent-red);" id="stat-failed">-</div>
+                        <div class="hint">Failed</div>
                     </div>
-                    <div class="card" style="padding:15px; text-align:center; margin-bottom:0;">
-                        <div style="font-size:1.8em; font-weight:600; color:var(--text-muted);" id="stat-retry">-</div>
-                        <div style="font-size:0.85em; color:var(--text-secondary);">Retrying</div>
+                    <div class="card stat-tile">
+                        <div class="stat-num" style="color:var(--text-muted);" id="stat-retry">-</div>
+                        <div class="hint">Retrying</div>
                     </div>
                 </div>
                 
@@ -999,7 +999,7 @@
                                 </div>
                                 <div style="flex: 1;">
                                     <div style="font-weight: 500;">${escapeHtml(video.title || 'Unknown')}</div>
-                                    <div style="font-size: 0.85em; color: var(--text-secondary);">${escapeHtml(video.episode_type || 'Music Video')}</div>
+                                    <div class="hint">${escapeHtml(video.episode_type || 'Music Video')}</div>
                                 </div>
                                 <button class="header-btn" onclick="addMusicVideoToQueue('${escapeJsString(video.id)}', '${escapeJsString(video.title || '')}')">Add</button>
                             </div>
@@ -1303,7 +1303,7 @@
             content.innerHTML = `
                 <div class="history-poster-grid">
                     ${seriesList.map(series => `
-                        <div class="history-poster" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')" style="cursor: pointer;">
+                        <div class="history-poster clickable" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')">
                             <div class="history-poster-img">
                                 ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img src="${escapeHtml(crImg(series.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                 ${series.episodes?.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
@@ -1431,7 +1431,7 @@
             content.innerHTML = `
                 <div class="history-poster-grid">
                     ${series.map(s => `
-                        <div class="history-poster" onclick="selectBrowseResult('${escapeJsString(s.id)}')" style="cursor: pointer;">
+                        <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
                             <div class="history-poster-img">
                                 ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             </div>
@@ -1611,7 +1611,7 @@
                         const metaMain = (s.episodeCount ? `${s.episodeCount} ep` : 'On Crunchyroll') + (sd ? ` · ${sd}` : '');
                         return `
                         <div class="history-poster" ${clickable
-                            ? `onclick="selectBrowseResult('${escapeJsString(s.id)}')" style="cursor: pointer;"`
+                            ? `onclick="selectBrowseResult('${escapeJsString(s.id)}')" class="clickable"`
                             : `title="Not on Crunchyroll yet" style="opacity:.55;"`}>
                             <div class="history-poster-img">${img}</div>
                             <div class="history-poster-info">
@@ -1738,7 +1738,7 @@
                                 <div style="padding: 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
                                     <div>
                                         <div style="font-weight: 500;">Episode ${escapeHtml(ep.episodeNumber || '?')}</div>
-                                        <div style="font-size: 0.85em; color: var(--text-secondary);">${escapeHtml(ep.title || 'Unknown')}</div>
+                                        <div class="hint">${escapeHtml(ep.title || 'Unknown')}</div>
                                     </div>
                                     <button class="header-btn" onclick="addEpisodeToQueueWithDetails('${escapeJsString(ep.id)}', '${escapeJsString(ep.title || '')}', '${escapeJsString(seriesTitle)}')">Add</button>
                                 </div>
@@ -1898,7 +1898,7 @@
 
             if (historyViewMode === 'poster') {
                 content.innerHTML = '<div class="history-poster-grid">' + filteredData.map(item => `
-                    <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')" style="cursor:pointer;">
+                    <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'} clickable" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')">
                         <div class="history-poster-img">
                             ${item.thumbnailImageUrl && isSafeUrl(item.thumbnailImageUrl) ? `<img src="${escapeHtml(crImg(item.thumbnailImageUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
@@ -1928,7 +1928,7 @@
                             </thead>
                             <tbody>
                                 ${filteredData.map(item => `
-                                    <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'}" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')" style="cursor:pointer;">
+                                    <tr class="${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'} clickable" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')">
                                         <td>
                                             <strong>${escapeHtml(item.seriesTitle) || 'Unknown'}</strong>
                                             ${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}
@@ -2413,19 +2413,19 @@
                         <input type="hidden" id="pe-original">
                         <label class="form-label">Enter Preset Name</label>
                         <input class="form-input" id="pe-name" placeholder="H.265 1080p" oninput="updatePresetCmd()">
-                        <label class="form-label" style="margin-top:6px;">Enter Codec</label>
+                        <label class="form-label mt-6">Enter Codec</label>
                         <input class="form-input" id="pe-codec" placeholder="libx265" oninput="updatePresetCmd()">
                         <div class="setting-desc">Leave empty to provide the encoding options through Additional Parameters only.</div>
-                        <label class="form-label" style="margin-top:6px;">Select Resolution</label>
+                        <label class="form-label mt-6">Select Resolution</label>
                         <select class="form-select" id="pe-res" onchange="updatePresetCmd()">${resOpts}</select>
-                        <label class="form-label" style="margin-top:6px;">Enter Frame Rate</label>
+                        <label class="form-label mt-6">Enter Frame Rate</label>
                         <input class="form-input" id="pe-fps" placeholder="24000/1001" oninput="updatePresetCmd()">
-                        <label class="form-label" style="margin-top:6px;">Enter CRF (0-51) - (cq, global_quality, qp)</label>
+                        <label class="form-label mt-6">Enter CRF (0-51) - (cq, global_quality, qp)</label>
                         <input class="form-input" id="pe-crf" type="number" min="0" max="51" value="28" oninput="updatePresetCmd()">
-                        <label class="form-label" style="margin-top:6px;">Additional Parameters</label>
+                        <label class="form-label mt-6">Additional Parameters</label>
                         <textarea class="form-input" id="pe-params" rows="3" placeholder="-map 0" oninput="updatePresetCmd()">-map 0</textarea>
                         <div class="setting-desc">One parameter (or flag + value) per line.</div>
-                        <label class="form-label" style="margin-top:6px;">Generated FFmpeg Command</label>
+                        <label class="form-label mt-6">Generated FFmpeg Command</label>
                         <div id="pe-cmd" style="font-family:monospace; font-size:0.8em; background:var(--bg-tertiary); border:1px solid var(--surface-border); border-radius:var(--radius-sm); padding:8px; word-break:break-all; color:var(--text-secondary);"></div>
                     </div>
                 </div>`;
@@ -2608,7 +2608,7 @@
                             <div class="settings-section-header"><span class="settings-section-title">Dub Languages</span><span class="settings-section-desc">Select languages to download</span></div>
                             <div class="settings-section-body">
                                 <select class="form-select" id="setting-dub-langs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.dubLanguages||['ja-JP']).includes(o.value)?'selected':''}>${o.label}</option>`).join('')}</select>
-                                <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Download Audio Description (AD)</div><div class="setting-desc">Download audio-description tracks for the selected dubs, if available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-ad" ${dl.downloadDescriptionAudio?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row mt-10"><div><div class="setting-label">Download Audio Description (AD)</div><div class="setting-desc">Download audio-description tracks for the selected dubs, if available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-dl-ad" ${dl.downloadDescriptionAudio?'checked':''}><span class="toggle-slider"></span></label></div>
 
                                 <div class="setting-row"><div><div class="setting-label">Download Multiple Dubs</div><div class="setting-desc">Download all selected dubs per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-multi-dub" ${dl.downloadMultipleDubs?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Download First Available Dub</div><div class="setting-desc">Only download the first available dub by priority instead of all selected</div></div><label class="toggle-switch"><input type="checkbox" id="setting-first-dub" ${dl.downloadFirstAvailableDub?'checked':''}><span class="toggle-slider"></span></label></div>
@@ -2746,9 +2746,9 @@
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Additional MKVMerge Options</div></div></div>
                                 ${renderListInput('setting-mkvmerge', dl.mkvmergeOptions, '--option')}
-                                <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
+                                <div class="setting-row mt-10"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
                                 ${renderListInput('setting-ffmpeg', dl.ffmpegOptions, '-option')}
-                                <div class="setting-row" style="margin-top:10px;"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row mt-10"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><div style="display:flex; gap:8px; align-items:center;"><select class="form-select mw-200" id="setting-encode-preset" onfocus="loadEncodingPresets()"><option value="">${dl.encodingPreset || 'None'}</option></select><button class="header-btn" type="button" onclick="openPresetEditor()">Manage Presets</button></div></div>
                             </div>
                         </div>
@@ -2818,7 +2818,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Webhook Headers</div><div class="setting-desc">One header per line (Key: Value)</div></div></div>
                                 <textarea class="form-input w-300" id="setting-webhook-headers" rows="3">${escapeHtml(n.webhookHeaders?Object.entries(n.webhookHeaders).map(([k,v])=>k+': '+v).join('\n'):'')}</textarea>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Body Template</div></div><textarea class="form-input w-300" id="setting-webhook-body" rows="3">${escapeHtml(n.webhookBodyTemplate||'')}</textarea></div>
-                                <div style="margin-top:10px;">
+                                <div class="mt-10">
                                     <button class="header-btn" onclick="testWebhook()">Test Webhook</button>
                                 </div>
                             </div>
@@ -3895,7 +3895,7 @@
                     <div class="history-detail-info">
                         <div class="history-detail-title">${escapeHtml(series.seriesTitle || 'Unknown')}</div>
                         <div class="history-detail-meta">${escapeHtml(series.seriesDescription || '')}</div>
-                        <div style="margin-top:10px;">
+                        <div class="mt-10">
                             <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Episodes:</div>
                             <div>${series.downloadedEpisodes || 0} / ${series.totalEpisodes || 0} downloaded${series.hasNewEpisodes ? ' <span class="lang-badge selected">New</span>' : ''}</div>
                         </div>
@@ -4229,13 +4229,13 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Dub Languages</label>
-                    <select class="form-select" id="override-dub-langs" multiple style="min-height:120px;">
+                    <select class="form-select mh-120" id="override-dub-langs" multiple>
                         ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Softsubs Languages</label>
-                    <select class="form-select" id="override-soft-subs" multiple style="min-height:120px;">
+                    <select class="form-select mh-120" id="override-soft-subs" multiple>
                         ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                 </div>
@@ -4295,13 +4295,13 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Dub Languages</label>
-                    <select class="form-select" id="override-season-dub-langs" multiple style="min-height:120px;">
+                    <select class="form-select mh-120" id="override-season-dub-langs" multiple>
                         ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Softsubs Languages</label>
-                    <select class="form-select" id="override-season-soft-subs" multiple style="min-height:120px;">
+                    <select class="form-select mh-120" id="override-season-soft-subs" multiple>
                         ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                     </select>
                 </div>

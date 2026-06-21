@@ -14,17 +14,80 @@ public interface INotificationService
     Task NotifyErrorAsync(DownloadResult result, CruncharrConfig config);
     Task NotifyQueueCompleteAsync(List<DownloadResult> results, CruncharrConfig config);
     Task NotifyQueueCompleteAsync(CruncharrConfig config);
+    Task NotifyLoginExpiredAsync(string? username, CruncharrConfig config);
+    Task NotifyUpdateAvailableAsync(string currentVersion, string latestVersion, CruncharrConfig config);
+    Task NotifyTrackedSeriesReleasedAsync(string seriesTitle, string episodeTitle, string episodeId, CruncharrConfig config);
+    void ResetLoginExpiredNotification();
 }
 
 public class NotificationService : INotificationService
 {
     private readonly ILogger<NotificationService>? _logger;
     private readonly HttpClient _httpClient;
+    // Dedup so these don't spam on every auth/update poll (ported from upstream's Reset* guards).
+    private bool _loginExpiredNotified;
+    private string _notifiedUpdateVersion = string.Empty;
 
     public NotificationService(IHttpClientFactory httpClientFactory, ILogger<NotificationService>? logger = null)
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient();
+    }
+
+    // Ported notification events whose config flags + UI toggles existed but never fired
+    // (NotifyLoginExpired / NotifyUpdateAvailable / NotifyTrackedSeriesReleased were dead toggles).
+    public async Task NotifyLoginExpiredAsync(string? username, CruncharrConfig config)
+    {
+        if (_loginExpiredNotified) return;
+        if (!config.Notifications.WebhookEnabled || string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
+        if (!config.Notifications.NotifyLoginExpired) return;
+        _loginExpiredNotified = true;
+        _logger?.LogInformation("Sending login-expired notification");
+        await SendWebhookAsync(config, new
+        {
+            event_type = "login_expired",
+            title = "Crunchyroll login expired",
+            message = "The saved Crunchyroll session could not be refreshed. Please log in again.",
+            username = username ?? string.Empty,
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    public void ResetLoginExpiredNotification() => _loginExpiredNotified = false;
+
+    public async Task NotifyUpdateAvailableAsync(string currentVersion, string latestVersion, CruncharrConfig config)
+    {
+        if (string.Equals(_notifiedUpdateVersion, latestVersion, StringComparison.OrdinalIgnoreCase)) return;
+        if (!config.Notifications.WebhookEnabled || string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
+        if (!config.Notifications.NotifyUpdateAvailable) return;
+        _notifiedUpdateVersion = latestVersion;
+        _logger?.LogInformation("Sending update-available notification ({Latest})", latestVersion);
+        await SendWebhookAsync(config, new
+        {
+            event_type = "update_available",
+            title = "Update available",
+            message = $"Version {latestVersion} is available. Current version: {currentVersion}.",
+            current_version = currentVersion,
+            latest_version = latestVersion,
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    public async Task NotifyTrackedSeriesReleasedAsync(string seriesTitle, string episodeTitle, string episodeId, CruncharrConfig config)
+    {
+        if (!config.Notifications.WebhookEnabled || string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
+        if (!config.Notifications.NotifyTrackedSeriesReleased) return;
+        _logger?.LogInformation("Sending tracked-series-released notification for {Series}", seriesTitle);
+        await SendWebhookAsync(config, new
+        {
+            event_type = "tracked_series_episode_released",
+            title = "Tracked series episode released",
+            message = $"A new episode is available for {seriesTitle}: {episodeTitle}.",
+            series_title = seriesTitle,
+            episode_title = episodeTitle,
+            episode_id = episodeId,
+            timestamp = DateTime.UtcNow
+        });
     }
 
     public async Task NotifyCompleteAsync(DownloadResult result, CruncharrConfig config)

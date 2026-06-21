@@ -10,15 +10,17 @@ public class UpdateCheckerService : BackgroundService
     private readonly ILogger<UpdateCheckerService>? _logger;
     private readonly HttpClient _httpClient;
     private readonly CruncharrConfig _config;
+    private readonly Cruncharr.Core.Services.INotificationService _notification;
 
     public string? LatestVersion { get; private set; }
     public bool UpdateAvailable { get; private set; }
 
-    public UpdateCheckerService(ILogger<UpdateCheckerService>? logger, IHttpClientFactory httpClientFactory, CruncharrConfig config)
+    public UpdateCheckerService(ILogger<UpdateCheckerService>? logger, IHttpClientFactory httpClientFactory, CruncharrConfig config, Cruncharr.Core.Services.INotificationService notification)
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient();
         _config = config;
+        _notification = notification;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -72,6 +74,8 @@ public class UpdateCheckerService : BackgroundService
         {
             UpdateAvailable = true;
             _logger?.LogInformation("Update available: {LatestVersion} (current: {CurrentVersion})", release.TagName, currentVersionStr);
+            try { await _notification.NotifyUpdateAvailableAsync(currentVersionStr, latestVersionStr, _config); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Update-available notification failed"); }
         }
         else
         {

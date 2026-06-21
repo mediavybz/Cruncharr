@@ -34,6 +34,19 @@ public class PortedGapTests
     }
 
     [Fact]
+    public void FormatFilename_SupportsSonarrStyleTokens()
+    {
+        var svc = new FilenameService();
+        var opts = new FilenameOptions { Quality = "1080p" };
+
+        var name = svc.FormatFilename(
+            "{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}",
+            MakeEpisode(), opts);
+
+        Assert.Equal("My Show - S02E05 - The Title 1080p", name);
+    }
+
+    [Fact]
     public void UseSonarrNumbering_Disabled_UsesCrunchyrollNumbers()
     {
         var svc = new FilenameService();

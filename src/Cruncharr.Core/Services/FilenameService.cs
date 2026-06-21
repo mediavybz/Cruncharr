@@ -92,6 +92,9 @@ public class FilenameService : IFilenameService
         if (!string.IsNullOrEmpty(options.Quality))
         {
             variables.Add(new Variable("quality", options.Quality, false));
+            // Sonarr/Plex-style aliases so {Quality Full} / {Quality Title} resolve.
+            variables.Add(new Variable("qualityFull", options.Quality, false));
+            variables.Add(new Variable("qualityTitle", options.Quality, false));
         }
         if (!string.IsNullOrEmpty(options.AudioLanguage))
         {
@@ -117,12 +120,16 @@ public class FilenameService : IFilenameService
         var joinedResult = string.Join(Path.DirectorySeparatorChar, result);
 
         // Also support legacy {var} syntax with optional formatting (e.g., {season:00})
-        joinedResult = Regex.Replace(joinedResult, @"\{([A-Za-z0-9]+)(?::([^}]+))?\}", m =>
+        // Match {var} / {var:00} tokens. Allow SPACES in the name so Sonarr/Plex-style tokens work
+        // ({Series Title}, {Episode Title}, {Quality Full}); match by stripping spaces + case so
+        // "Series Title" resolves to the seriesTitle variable. Unknown tokens are left untouched.
+        joinedResult = Regex.Replace(joinedResult, @"\{([A-Za-z0-9 ]+?)(?::([^}]+))?\}", m =>
         {
             var key = m.Groups[1].Value;
             var format = m.Groups[2].Success ? m.Groups[2].Value : null;
 
-            var variable = variables.FirstOrDefault(v => string.Equals(v.Name, key, StringComparison.OrdinalIgnoreCase));
+            var normKey = key.Replace(" ", string.Empty);
+            var variable = variables.FirstOrDefault(v => string.Equals(v.Name.Replace(" ", string.Empty), normKey, StringComparison.OrdinalIgnoreCase));
             if (variable == null) return m.Value;
 
             var value = variable.ReplaceWith?.ToString() ?? string.Empty;

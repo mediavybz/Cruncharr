@@ -109,17 +109,17 @@ public class CruncharrConfig
         {
             Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
 
-            if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml"))
-            {
-                var serializer = new SerializerBuilder()
-                    .Build();
-                File.WriteAllText(configPath, serializer.Serialize(this));
-            }
-            else
-            {
-                var json = Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
-                File.WriteAllText(configPath, json);
-            }
+            string content = (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml"))
+                ? new SerializerBuilder().Build().Serialize(this)
+                : Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
+
+            // Atomic write: serialize to a temp file then rename, so a crash/kill/power-loss
+            // mid-write can't truncate or corrupt the config (which would lose ALL settings,
+            // including credentials, and fall back to defaults on next boot).
+            string tmp = configPath + ".tmp";
+            File.WriteAllText(tmp, content);
+            File.Move(tmp, configPath, overwrite: true);
+
             // Config holds credentials (CR password, proxy password, Sonarr API key) in
             // plaintext; restrict to owner read/write so other users on a shared /config
             // mount cannot read them.

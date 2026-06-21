@@ -1600,7 +1600,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             {
                 var tokenFile = GetTokenFilePath();
                 Directory.CreateDirectory(Path.GetDirectoryName(tokenFile)!);
-                File.WriteAllText(tokenFile, JsonConvert.SerializeObject(Token, Formatting.Indented));
+                // Atomic write (temp + rename) so a crash mid-write can't corrupt the token file.
+                var tmp = tokenFile + ".tmp";
+                File.WriteAllText(tmp, JsonConvert.SerializeObject(Token, Formatting.Indented));
+                File.Move(tmp, tokenFile, overwrite: true);
                 Cruncharr.Core.Utils.SecureFile.Restrict(tokenFile);
                 _logger?.LogDebug("Saved token to {Path}", tokenFile);
             }

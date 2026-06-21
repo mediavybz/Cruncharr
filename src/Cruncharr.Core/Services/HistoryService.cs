@@ -13,6 +13,7 @@ public interface IHistoryService
     Task<List<DownloadHistory>> GetAllAsync(int offset = 0, int limit = 100);
     Task<bool> IsDownloadedAsync(string episodeId, string audioLanguage);
     Task RemoveAsync(string episodeId);
+    Task<bool> RemoveSeriesAsync(string seriesId);
     Task<List<DownloadHistory>> GetSeriesHistoryAsync(string seriesId);
 
     // Rich history methods
@@ -153,6 +154,31 @@ public class HistoryService : IHistoryService, IDisposable
     {
         var history = await GetAllAsync();
         return history.Where(h => h.SeriesId == seriesId).ToList();
+    }
+
+    // Remove an entire series from history (rich tree + flat log) so users can drop series they
+    // no longer want tracked. Single lock; saves are atomic (temp+rename) inside.
+    public async Task<bool> RemoveSeriesAsync(string seriesId)
+    {
+        if (string.IsNullOrEmpty(seriesId)) return false;
+        await EnsureLoadedAsync();
+        await _lock.WaitAsync();
+        try
+        {
+            var removed = _historyList.RemoveAll(s => string.Equals(s.SeriesId, seriesId, StringComparison.Ordinal)) > 0;
+            if (removed) await SaveRichHistoryAsync();
+
+            var flat = await LoadHistoryAsync();
+            if (flat.RemoveAll(h => h.SeriesId == seriesId) > 0)
+            {
+                await SaveHistoryAsync(flat);
+            }
+            return removed;
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     // Rich history methods

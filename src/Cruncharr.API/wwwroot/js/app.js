@@ -3901,6 +3901,7 @@
                 <button class="header-btn" onclick="closeModal()">Close</button>
                 <button class="header-btn" onclick="showSeriesSettingsOverride('${escapeJsString(seriesId)}')">Settings</button>
                 ${series.sonarrSeriesId ? `<button class="header-btn" onclick="matchEpisodesForSeries('${escapeJsString(seriesId)}'); closeModal();">Match Episodes</button>` : ''}
+                <button class="header-btn danger" onclick="removeSeriesFromHistory('${escapeJsString(seriesId)}', '${escapeJsString(series.seriesTitle || '')}')">Remove from History</button>
             `;
             if (modalEl) modalEl.classList.add('active');
 
@@ -3945,7 +3946,21 @@
             
             renderHistorySeriesDetailContent(richSeries);
         }
-        
+
+        async function removeSeriesFromHistory(seriesId, seriesTitle) {
+            if (!confirm(`Remove "${seriesTitle || 'this series'}" from history?\n\nThis only removes it from Cruncharr's history list — your downloaded files are NOT deleted.`)) return;
+            try {
+                const res = await fetch(`/api/v1/history/series/${encodeURIComponent(seriesId)}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (typeof showToast === 'function') showToast('Removed from history', 'success');
+                closeModal();
+                if (window._seriesPopulated) delete window._seriesPopulated[seriesId];
+                await fetchHistoryData();
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('Failed to remove from history', 'error');
+            }
+        }
+
         function renderHistorySeriesDetailContent(series) {
             const body = document.getElementById('modal-body');
             if (!body) return;

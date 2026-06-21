@@ -3857,20 +3857,33 @@
                 ${series.sonarrSeriesId ? `<button class="header-btn" onclick="matchEpisodesForSeries('${escapeJsString(seriesId)}'); closeModal();">Match Episodes</button>` : ''}
             `;
             if (modalEl) modalEl.classList.add('active');
-            
+
+            // Populate the full season (downloaded + missing) from Crunchyroll the first time this
+            // series is opened, so History shows everything for it - not only what was downloaded.
+            // Once per series per session. The backend may re-key the series to its real CR id, so
+            // afterwards we also match by title.
+            const seriesTitle = series.seriesTitle;
+            window._seriesPopulated = window._seriesPopulated || {};
+            if (!window._seriesPopulated[seriesId]) {
+                window._seriesPopulated[seriesId] = true;
+                try { await fetch(`/api/v1/history/update-series/${encodeURIComponent(seriesId)}`, { method: 'POST' }); }
+                catch (e) { /* keep whatever is already in history */ }
+                historyRichData = null;
+            }
+
             // Fetch rich data if needed
             let richSeries = null;
             if (historyRichData && historyRichData.length > 0) {
-                richSeries = historyRichData.find(s => s.seriesId === seriesId);
+                richSeries = historyRichData.find(s => s.seriesId === seriesId) || historyRichData.find(s => s.seriesTitle === seriesTitle);
             }
-            
+
             if (!richSeries) {
                 try {
                     const res = await fetch('/api/v1/history/rich');
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     historyRichData = data || [];
-                    richSeries = historyRichData.find(s => s.seriesId === seriesId);
+                    richSeries = historyRichData.find(s => s.seriesId === seriesId) || historyRichData.find(s => s.seriesTitle === seriesTitle);
                 } catch (e) {
                     const modalBody = document.getElementById('modal-body');
                     if (modalBody) modalBody.innerHTML = '<div class="empty-state"><div class="empty-state-title">Failed to load episodes</div></div>';

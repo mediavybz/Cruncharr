@@ -1091,7 +1091,7 @@ public class HistoryService : IHistoryService, IDisposable
         }
 
         // Perform API calls OUTSIDE the lock
-        List<SeasonInfo>? seasons;
+        List<SeasonInfo>? seasons = null;
         try
         {
             seasons = await _apiService.ParseSeriesByIdAsync(seriesId, "ja-JP", true);
@@ -1099,7 +1099,26 @@ public class HistoryService : IHistoryService, IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to refresh series data for {SeriesId}", seriesId);
-            return false;
+        }
+
+        // Resilience: a download that couldn't capture Crunchyroll's series_id stored the series
+        // TITLE as the id, so the full-season fetch above fails. Recover the real CR series id from a
+        // known episode of this series, re-key the history entry, and retry - so the History page can
+        // show ALL episodes (downloaded + missing) for it.
+        if (seasons == null || seasons.Count == 0)
+        {
+            var realSeriesId = await DeriveCrSeriesIdAsync(seriesId);
+            if (!string.IsNullOrEmpty(realSeriesId) && !string.Equals(realSeriesId, seriesId, StringComparison.Ordinal))
+            {
+                _logger?.LogInformation("Recovered CR series id {Real} for history series {Old}", realSeriesId, seriesId);
+                try { seasons = await _apiService.ParseSeriesByIdAsync(realSeriesId, "ja-JP", true); }
+                catch (Exception ex) { _logger?.LogWarning(ex, "Retry with derived series id {Id} failed", realSeriesId); }
+                if (seasons is { Count: > 0 })
+                {
+                    await RekeyHistorySeriesAsync(seriesId, realSeriesId);
+                    seriesId = realSeriesId;
+                }
+            }
         }
 
         if (seasons == null || seasons.Count == 0)
@@ -1172,6 +1191,53 @@ public class HistoryService : IHistoryService, IDisposable
         await MatchHistoryEpisodesWithSonarrAsync(seriesId, false);
 
         return true;
+    }
+
+    // Recover the real Crunchyroll series id from a downloaded episode of a history series whose id
+    // is a title fallback (a download that didn't capture series_id). The CMS episode endpoint
+    // carries series_id, so any known episode of the series yields it.
+    private async Task<string?> DeriveCrSeriesIdAsync(string? historySeriesId)
+    {
+        if (string.IsNullOrEmpty(historySeriesId) || _apiService == null) return null;
+        await EnsureLoadedAsync();
+        string? episodeId = null;
+        await _lock.WaitAsync();
+        try
+        {
+            var hs = _historyList.FirstOrDefault(s => s.SeriesId == historySeriesId);
+            episodeId = hs?.Seasons
+                .SelectMany(se => se.EpisodesList)
+                .FirstOrDefault(e => !string.IsNullOrEmpty(e.EpisodeId))?.EpisodeId;
+        }
+        finally { _lock.Release(); }
+
+        if (string.IsNullOrEmpty(episodeId)) return null;
+        try
+        {
+            var ep = await _apiService.ParseEpisodeByIdAsync(episodeId, null, true, default);
+            return string.IsNullOrEmpty(ep?.SeriesId) ? null : ep!.SeriesId;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to derive CR series id from episode {EpisodeId}", episodeId);
+            return null;
+        }
+    }
+
+    // Adopt the real CR series id on a history series that was keyed by title (no duplicate exists).
+    private async Task RekeyHistorySeriesAsync(string oldId, string newId)
+    {
+        await _lock.WaitAsync();
+        try
+        {
+            var hs = _historyList.FirstOrDefault(s => s.SeriesId == oldId);
+            if (hs != null && _historyList.All(s => s.SeriesId != newId))
+            {
+                hs.SeriesId = newId;
+                await SaveRichHistoryAsync();
+            }
+        }
+        finally { _lock.Release(); }
     }
 
     public async Task UpdateWithEpisodeListAsync(List<EpisodeInfo> episodeList)

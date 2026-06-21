@@ -36,6 +36,6 @@ public class SearchService : ISearchService
     public Task<List<EpisodeInfo>> GetEpisodesAsync(string seriesId, CancellationToken cancellationToken = default)
     {
         _logger?.LogInformation("Getting episodes for series: {SeriesId}", seriesId);
-        return _api.GetEpisodesAsync(seriesId, false, cancellationToken);
+        return _api.GetEpisodesAsync(seriesId, useBetaApi: true, cancellationToken);
     }
 }

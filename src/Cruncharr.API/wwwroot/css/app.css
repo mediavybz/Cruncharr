@@ -629,6 +629,8 @@
         .btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
         .btn-icon.danger:hover { background: var(--error-soft); color: var(--accent-red); border-color: var(--accent-red); }
         .btn-icon.success:hover { background: var(--success-soft); color: var(--accent-green); border-color: var(--accent-green); }
+        .header-btn.danger { color: var(--accent-red); }
+        .header-btn.danger:hover { background: var(--error-soft); border-color: var(--accent-red); }
 
         /* Progress Bars */
         .progress-container {

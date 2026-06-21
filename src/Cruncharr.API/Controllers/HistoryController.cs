@@ -126,6 +126,25 @@ public class HistoryController : ControllerBase
     }
 
     /// <summary>
+    /// Remove a series from history (rich + flat) so the user can drop series they no longer track.
+    /// </summary>
+    [HttpDelete("series/{seriesId}")]
+    public async Task<IActionResult> RemoveSeries(string seriesId)
+    {
+        if (!IsValidId(seriesId)) return BadRequest(new { Error = "Invalid seriesId" });
+        try
+        {
+            var removed = await _historyService.RemoveSeriesAsync(seriesId);
+            return Ok(new { removed });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in RemoveSeries");
+            return StatusCode(500, new { Error = "RemoveSeries failed", Message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Mark episode as downloaded
     /// </summary>
     [HttpPost("downloaded/{seriesId}/{seasonId}/{episodeId}")]

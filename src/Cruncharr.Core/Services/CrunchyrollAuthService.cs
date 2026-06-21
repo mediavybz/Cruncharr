@@ -31,6 +31,7 @@ public interface ICrunchyrollAuthService
     string? LastProfileSwitchError { get; }
     Task AuthAnonymousAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task AuthAnonymousFoxyAsync(bool useBetaApi, CancellationToken cancellationToken = default);
+    Task<string?> GetGuestAccessTokenAsync(CancellationToken cancellationToken = default);
     Task<bool> CheckStreamEndpointUpdateAsync(CancellationToken cancellationToken = default);
     Task<bool> UpdateAuthCredentialsAsync(CancellationToken cancellationToken = default);
     void Init();
@@ -311,6 +312,60 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             PreferredContentAudioLanguage = "ja-JP",
             PreferredContentSubtitleLanguage = "de-DE"
         };
+    }
+
+    private CrToken? _guestToken;
+    private DateTime _guestTokenExpiry = DateTime.MinValue;
+
+    // Guest/anonymous access token kept SEPARATE from the logged-in user session (upstream uses a
+    // dedicated guest auth instance, CrAuthGuest, for exactly this). Some browse feeds - notably the
+    // "newly_added" new-episodes feed used by the calendar + auto-download new-releases - return 400
+    // with a profile/user token but work with a guest token. Cached until ~expiry; never written to disk.
+    public async Task<string?> GetGuestAccessTokenAsync(CancellationToken cancellationToken = default)
+    {
+        if (_guestToken?.access_token != null && DateTime.Now < _guestTokenExpiry)
+        {
+            return _guestToken.access_token;
+        }
+        try
+        {
+            var uuid = Guid.NewGuid().ToString();
+            var formData = new Dictionary<string, string>
+            {
+                { "grant_type", "client_id" },
+                { "scope", "offline_access" },
+                { "device_id", uuid },
+                { "device_type", StreamEndpoint.Device_type },
+            };
+            if (!string.IsNullOrEmpty(StreamEndpoint.Device_name))
+            {
+                formData.Add("device_name", StreamEndpoint.Device_name);
+            }
+            var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
+            {
+                Content = new FormUrlEncodedContent(formData)
+            };
+            request.Headers.Add("Authorization", StreamEndpoint.Authorization);
+            request.Headers.Add("User-Agent", StreamEndpoint.UserAgent);
+
+            var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
+            if (!isOk)
+            {
+                _logger?.LogWarning("Guest token fetch failed: {Error}", error);
+                return null;
+            }
+            _guestToken = JsonConvert.DeserializeObject<CrToken>(content);
+            if (_guestToken?.expires_in != null)
+            {
+                _guestTokenExpiry = DateTime.Now.AddSeconds((double)_guestToken.expires_in - 60);
+            }
+            return _guestToken?.access_token;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Guest token fetch error");
+            return null;
+        }
     }
 
     // Alternative anonymous auth using Foxy endpoint (guest auth variation)

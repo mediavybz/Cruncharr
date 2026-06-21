@@ -313,6 +313,10 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         var stalePageCount = 0;
         var firstWeekDayDate = firstWeekDay?.Date;
 
+        // The "newly_added" browse feed is an anonymous endpoint that 400s with a profile/user token;
+        // use a guest token (as upstream does), falling back to the user token if guest auth fails.
+        var browseToken = await _authService.GetGuestAccessTokenAsync(cancellationToken) ?? _authService.Token?.access_token;
+
         for (var start = 0; start < requestAmount; start += maxPageSize)
         {
             var pageSize = Math.Min(maxPageSize, requestAmount - start);
@@ -324,7 +328,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
             };
 
-            var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+            var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, browseToken);
 
             var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
 
@@ -558,7 +562,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         }
 
         var request = HttpClientWrapper.CreateRequest(
-            $"{ApiUrls.Content}/discover/{_authService.Token.account_id}/mark_as_watched/{episodeId}",
+            $"{ApiUrls.Content(true)}/discover/{_authService.Token.account_id}/mark_as_watched/{episodeId}",
             HttpMethod.Post,
             true,
             _authService.Token.access_token);

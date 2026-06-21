@@ -106,8 +106,11 @@ public class EncodingService : IEncodingService
         try
         {
             Directory.CreateDirectory(_presetsDir);
-            File.WriteAllText(Path.Combine(_presetsDir, SanitizeFileName(preset.PresetName!) + ".json"),
-                JsonConvert.SerializeObject(preset, Formatting.Indented));
+            // Atomic write (temp + rename) so a crash mid-save can't corrupt a custom preset.
+            var presetPath = Path.Combine(_presetsDir, SanitizeFileName(preset.PresetName!) + ".json");
+            var tmp = presetPath + ".tmp";
+            File.WriteAllText(tmp, JsonConvert.SerializeObject(preset, Formatting.Indented));
+            File.Move(tmp, presetPath, overwrite: true);
             return true;
         }
         catch (Exception ex)

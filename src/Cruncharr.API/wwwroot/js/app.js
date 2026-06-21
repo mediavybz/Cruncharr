@@ -438,7 +438,12 @@
                                                 ? `<button class="btn-icon" onclick="retryDownload('${escapeJsString(item.id)}')" title="Retry">&#8635;</button>`
                                                 : `<button class="btn-icon" onclick="togglePauseResume('${escapeJsString(item.id)}', ${isDownloading})" title="${isDownloading ? 'Pause' : 'Resume'}">${isDownloading ? '&#10074;&#10074;' : '&#9654;'}</button>`
                                         }
-                                        <button class="btn-icon danger" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="Remove">&#128465;</button>
+                                        ${isDone
+                                            ? `<a class="btn-icon" href="/api/v1/queue/${escapeJsString(item.id)}/file" download title="Save a copy to this device">&#128190;</a>
+                                               <button class="btn-icon" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="Remove from list (file kept on server)">&#10005;</button>
+                                               <button class="btn-icon danger" onclick="deleteDownloadedFile('${escapeJsString(item.id)}')" title="Delete the downloaded file from the server">&#128465;</button>`
+                                            : `<button class="btn-icon danger" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="Remove">&#128465;</button>`
+                                        }
                                     </div>
                                 </div>
                                 <div class="progress-container">
@@ -3609,6 +3614,16 @@
                 showToast('Removed from queue', 'success');
                 if (currentPage === 'downloads') fetchDownloads();
             } catch (e) { showToast('Remove failed', 'error'); }
+        }
+
+        async function deleteDownloadedFile(id) {
+            if (!confirm('Delete the downloaded file from the server?\n\nThis permanently deletes the file on the host running Cruncharr.')) return;
+            try {
+                const res = await fetch(`/api/v1/queue/${id}/file`, { method: 'DELETE' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                showToast('Downloaded file deleted', 'success');
+                if (currentPage === 'downloads') fetchDownloads();
+            } catch (e) { showToast('Delete failed', 'error'); }
         }
 
         function refreshHistory() {             fetchHistoryData();

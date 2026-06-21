@@ -11,6 +11,7 @@ namespace Cruncharr.API.Controllers;
 public class QueueController : ControllerBase
 {
     private readonly IQueueService _queueService;
+    private readonly IHistoryService _historyService;
     private readonly ILogger<QueueController> _logger;
     private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings
     {
@@ -19,9 +20,10 @@ public class QueueController : ControllerBase
         NullValueHandling = NullValueHandling.Ignore
     };
 
-    public QueueController(IQueueService queueService, ILogger<QueueController> logger)
+    public QueueController(IQueueService queueService, IHistoryService historyService, ILogger<QueueController> logger)
     {
         _queueService = queueService;
+        _historyService = historyService;
         _logger = logger;
     }
 
@@ -115,6 +117,61 @@ public class QueueController : ControllerBase
             _logger.LogError(ex, "Failed to remove item from queue");
             return StatusCode(500, new { Error = "Failed to remove item", Message = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Stream a completed download's file to the browser so the user can save a copy to the
+    /// device they're viewing the UI on (e.g. a VPS deployment - no FTP needed). The path comes
+    /// from server-side queue state (the client only passes the queue id), so there's no path traversal.
+    /// </summary>
+    [HttpGet("{id}/file")]
+    public async Task<IActionResult> DownloadFile(string id)
+    {
+        var path = await ResolveOutputPathAsync(id);
+        if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+        {
+            return NotFound(new { Error = "File not found - it may have been deleted, moved, or not finished." });
+        }
+        var fileName = System.IO.Path.GetFileName(path);
+        var stream = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
+        return File(stream, "application/octet-stream", fileName, enableRangeProcessing: true);
+    }
+
+    /// <summary>
+    /// Delete a completed download's file from the host running Cruncharr, then drop the queue item.
+    /// </summary>
+    [HttpDelete("{id}/file")]
+    public async Task<IActionResult> DeleteFile(string id)
+    {
+        var item = _queueService.GetQueue()?.FirstOrDefault(q => q.Id == id);
+        if (item == null) return NotFound(new { Error = "Queue item not found" });
+        try
+        {
+            var path = await ResolveOutputPathAsync(id);
+            if (!string.IsNullOrEmpty(path) && System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+                _logger.LogInformation("Deleted downloaded file {Path} for queue item {Id}", path, id);
+            }
+            _queueService.RemoveFromQueue(id);
+            return Ok(new { deleted = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete downloaded file for queue item {Id}", id);
+            return StatusCode(500, new { Error = "Delete failed", Message = ex.Message });
+        }
+    }
+
+    // The output file path is recorded in flat history (DownloadHistory.OutputPath), not on the
+    // queue item. Resolve it from the queue item's episode id.
+    private async Task<string?> ResolveOutputPathAsync(string queueId)
+    {
+        var item = _queueService.GetQueue()?.FirstOrDefault(q => q.Id == queueId);
+        var epId = item?.Episode?.Id;
+        if (string.IsNullOrEmpty(epId)) return null;
+        var history = await _historyService.GetAllAsync(0, 100000);
+        return history.LastOrDefault(h => h.EpisodeId == epId)?.OutputPath;
     }
 
     /// <summary>

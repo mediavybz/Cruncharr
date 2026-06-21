@@ -248,6 +248,13 @@
                         <span class="toggle-slider"></span>
                         Auto Download
                     </label>
+                    <span id="scheduler-status" class="hint" title="Auto-download scheduler" style="display:flex; align-items:center; gap:6px;">
+                        <span id="scheduler-dot" style="width:8px; height:8px; border-radius:50%; background:var(--text-muted); display:inline-block;"></span>
+                        Scheduler: <span id="scheduler-state">—</span>
+                    </span>
+                    <button class="btn-icon" id="btn-scheduler-run" onclick="triggerScheduler()" title="Run the auto-download check now">
+                        &#9889; Run now
+                    </button>
 
                     <div style="margin-left:auto; display:flex; gap:8px;">
                         <button class="btn-icon" id="btn-global-pause" onclick="toggleGlobalPause()" title="Pause/Resume Queue" style="display:none;">
@@ -270,6 +277,45 @@
             `;
             fetchDownloads();
             fetchQueueStats();
+            loadSchedulerStatus();
+        }
+
+        async function loadSchedulerStatus() {
+            const stateEl = document.getElementById('scheduler-state');
+            const dotEl = document.getElementById('scheduler-dot');
+            if (!stateEl) return;
+            try {
+                const res = await fetch('/api/v1/scheduler/status');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const d = await res.json();
+                const running = d.isRunning ?? d.IsRunning ?? false;
+                const lastRun = d.lastRun ?? d.LastRun ?? null;
+                let label = running ? 'running…' : 'idle';
+                if (!running && lastRun) {
+                    const dt = new Date(lastRun);
+                    if (!isNaN(dt)) label = `idle (last run ${dt.toLocaleTimeString()})`;
+                }
+                stateEl.textContent = label;
+                if (dotEl) dotEl.style.background = running ? 'var(--accent-green)' : 'var(--text-muted)';
+            } catch (e) {
+                stateEl.textContent = 'unavailable';
+                if (dotEl) dotEl.style.background = 'var(--accent-red)';
+            }
+        }
+
+        async function triggerScheduler() {
+            const btn = document.getElementById('btn-scheduler-run');
+            if (btn) { btn.disabled = true; btn.innerHTML = '&#9889; Running…'; }
+            try {
+                const res = await fetch('/api/v1/scheduler/trigger', { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (typeof showToast === 'function') showToast('Auto-download check started', 'success');
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('Scheduler trigger failed', 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerHTML = '&#9889; Run now'; }
+                setTimeout(() => { loadSchedulerStatus(); fetchDownloads(); fetchQueueStats(); }, 1500);
+            }
         }
 
         async function fetchQueueStats() {

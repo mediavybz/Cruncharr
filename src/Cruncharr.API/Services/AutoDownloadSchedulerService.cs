@@ -13,6 +13,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
     private Task? _executeTask;
     private DateTimeOffset? _lastRun;
     private bool _isRunning;
+    private DateTimeOffset? _lastNotifyCheck;
 
     public AutoDownloadSchedulerService(IServiceProvider serviceProvider, ILogger<AutoDownloadSchedulerService> logger)
     {
@@ -129,7 +130,8 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
             case 50: // FastNewReleases
             default:
                 _logger.LogInformation("Checking for new releases...");
-                await RefreshHistoryWithNewReleasesAsync(historyService, apiService, authService, cancellationToken);
+                await RefreshHistoryWithNewReleasesAsync(historyService, apiService, authService,
+                    serviceProvider.GetService<INotificationService>(), config, cancellationToken);
                 break;
         }
 
@@ -167,7 +169,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
         }
     }
 
-    private async Task RefreshHistoryWithNewReleasesAsync(IHistoryService historyService, ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, CancellationToken cancellationToken)
+    private async Task RefreshHistoryWithNewReleasesAsync(IHistoryService historyService, ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, INotificationService? notification, CruncharrConfig config, CancellationToken cancellationToken)
     {
         try
         {
@@ -183,10 +185,47 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
 
             _logger.LogInformation("Found {Count} new episodes", newEpisodesBase.Data.Count);
             await historyService.UpdateWithEpisodeAsync(newEpisodesBase.Data);
+
+            await NotifyTrackedSeriesReleasesAsync(historyService, notification, config, newEpisodesBase.Data);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "New releases check failed");
+        }
+    }
+
+    // Notify newly released episodes of series the user tracks (anything in history). Gated on the
+    // toggle; in-memory dedup by release date - the first run seeds the baseline and notifies nothing,
+    // so historical episodes never spam. Baseline seeds from the persisted config field if present.
+    private async Task NotifyTrackedSeriesReleasesAsync(IHistoryService historyService, INotificationService? notification, CruncharrConfig config, List<Cruncharr.Core.Services.CrBrowseEpisode> newEpisodes)
+    {
+        if (notification == null || config.Notifications?.NotifyTrackedSeriesReleased != true) return;
+        try
+        {
+            var baseline = (_lastNotifyCheck ?? (config.TrackedSeriesReleaseLastCheckUtc.HasValue
+                ? new DateTimeOffset(DateTime.SpecifyKind(config.TrackedSeriesReleaseLastCheckUtc.Value, DateTimeKind.Utc))
+                : DateTimeOffset.UtcNow)).UtcDateTime;
+            bool firstRun = _lastNotifyCheck == null;
+            _lastNotifyCheck = DateTimeOffset.UtcNow;
+            if (firstRun) return; // seed baseline only; don't notify pre-existing releases
+
+            var seriesList = await historyService.GetHistorySeriesAsync();
+            var trackedById = (seriesList ?? new List<HistorySeries>())
+                .Where(s => !string.IsNullOrEmpty(s.SeriesId))
+                .GroupBy(s => s.SeriesId!)
+                .ToDictionary(g => g.Key, g => g.First().SeriesTitle ?? string.Empty);
+
+            foreach (var ep in newEpisodes)
+            {
+                var sid = ep.EpisodeMetadata?.SeriesId;
+                if (string.IsNullOrEmpty(sid) || !trackedById.TryGetValue(sid, out var seriesTitle)) continue;
+                if (ep.EpisodeMetadata!.PremiumAvailableDate <= baseline) continue;
+                await notification.NotifyTrackedSeriesReleasedAsync(seriesTitle, ep.Title ?? string.Empty, ep.Id ?? string.Empty, config);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Tracked-series-released notification step failed");
         }
     }
 

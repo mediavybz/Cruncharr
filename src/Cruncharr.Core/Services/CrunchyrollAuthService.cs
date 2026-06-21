@@ -47,6 +47,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private readonly CrAuthSettings _authSettings;
     private readonly string _tokenFilePath;
     private readonly CruncharrConfig? _config;
+    private readonly INotificationService? _notification;
     private static readonly TimeSpan TokenRefreshBuffer = TimeSpan.FromSeconds(60);
 
     public CrToken? Token { get; private set; }
@@ -119,9 +120,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     private const string EmbeddedAuthData = @"[{""type"":""tv"",""authorization"":""Basic cmpzMGx0eDBkYndrbGl3eGR6ZGY6NFY3cmYyMS1VRlhlWi01WEFkMFhfUVB3cjFndV9pMXM="",""versionName"":""3.65.0""},{""type"":""mobile"",""authorization"":""Basic YnFjaGljMmc3aTJzcnQ5cXU1c2I6NkVKT0tQLXNxU3hEb3RXdVgwZmVnV3pNX2FiTWRNWUo="",""versionName"":""3.110.0""}]";
 
-    public CrunchyrollAuthService(CruncharrConfig? config = null, ILogger<CrunchyrollAuthService>? logger = null)
+    public CrunchyrollAuthService(CruncharrConfig? config = null, ILogger<CrunchyrollAuthService>? logger = null, INotificationService? notification = null)
     {
         _logger = logger;
+        _notification = notification;
         _httpClient = new HttpClientWrapper(config);
         _authSettings = new CrAuthSettings();
         _config = config;
@@ -1295,6 +1297,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         if (isOk)
         {
             JsonTokenToFileAndVariable(content, uuid);
+            _notification?.ResetLoginExpiredNotification();
             return true;
         }
         else
@@ -1303,6 +1306,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             if (hadUserSession)
             {
                 _logger?.LogWarning("User session expired - login required");
+                if (_notification != null && _config != null)
+                {
+                    try { await _notification.NotifyLoginExpiredAsync(Profile?.Username, _config); }
+                    catch (Exception ex) { _logger?.LogWarning(ex, "Login-expired notification failed"); }
+                }
             }
             return false;
         }

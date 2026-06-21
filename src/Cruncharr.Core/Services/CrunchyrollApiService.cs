@@ -334,7 +334,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
             if (!isOk)
             {
-                _logger?.LogError("New episodes request failed for start '{Start}' and n '{PageSize}': {Error}", start, pageSize, error);
+                _logger?.LogError("New episodes request failed for start '{Start}' and n '{PageSize}': {Error} | url={Url} | body={Body}",
+                    start, pageSize, error, uriBuilder.Uri.PathAndQuery, (content ?? "").Length > 400 ? content!.Substring(0, 400) : content);
                 return null;
             }
 

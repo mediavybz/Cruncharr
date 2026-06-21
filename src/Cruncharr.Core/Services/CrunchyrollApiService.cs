@@ -291,6 +291,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         {
             crLocale = "en-US";
         }
+        else if (crLocale.Contains('-'))
+        {
+            // CR rejects a lowercase region (e.g. "en-us") with "Invalid request parameters";
+            // normalize to xx-XX (lower language, UPPER region) - upstream always sends en-US.
+            var parts = crLocale.Split('-');
+            if (parts.Length == 2) crLocale = $"{parts[0].ToLowerInvariant()}-{parts[1].ToUpperInvariant()}";
+        }
 
         var queryParams = new NameValueCollection();
         queryParams["locale"] = crLocale;

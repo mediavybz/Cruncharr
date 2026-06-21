@@ -65,6 +65,21 @@ public class Program
         var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
         var config = File.Exists(configPath) ? CruncharrConfig.Load(configPath) : new CruncharrConfig();
         config.ApplyEnvironmentVariables();
+
+        // Persistence hardening: keep ALL per-user state on the mounted config volume (next to the
+        // config file) so it survives container/app UPDATES. Some defaults pointed at ApplicationData
+        // (~/.config INSIDE the container = ephemeral, wiped on every image update -> history/token
+        // reset each update). Redirect those ephemeral defaults to the config dir; respect any
+        // explicit user-set path.
+        var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? "";
+        var appDataDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        bool IsEphemeralPath(string? p) => string.IsNullOrEmpty(p) ||
+            (!string.IsNullOrEmpty(appDataDir) && p.StartsWith(appDataDir, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(config.TokenFilePath))
+        {
+            config.TokenFilePath = Path.Combine(configDir, "token.json");
+        }
+
         builder.Services.AddSingleton(config);
 
         // Initialize log mode if enabled
@@ -78,7 +93,15 @@ public class Program
             new CrunchyrollAuthService(config, sp.GetService<ILogger<CrunchyrollAuthService>>(), sp.GetService<INotificationService>()));
         builder.Services.AddSingleton<ICrunchyrollApiService, CrunchyrollApiService>();
         builder.Services.AddSingleton<IDownloadService, DownloadService>();
-        builder.Services.AddSingleton<IHistoryService, HistoryService>();
+        builder.Services.AddSingleton<IHistoryService>(sp =>
+            new HistoryService(
+                string.IsNullOrEmpty(configDir) ? null : Path.Combine(configDir, "history.json"),
+                sp.GetService<ILogger<HistoryService>>(),
+                sp.GetService<ISonarrService>(),
+                sp.GetService<ICrunchyrollApiService>(),
+                sp.GetService<IMusicService>(),
+                sp.GetService<ICrunchyrollAuthService>(),
+                config));
         builder.Services.AddSingleton<IQueuePersistenceService>(sp =>
             new QueuePersistenceService(config.Queue.QueueFilePath, sp.GetService<ILogger<QueuePersistenceService>>(), config));
         builder.Services.AddSingleton<ICalendarService, CalendarService>();
@@ -197,8 +220,7 @@ public class Program
             }
         });
 
-        // Ensure config directory exists
-        var configDir = Path.GetDirectoryName(configPath);
+        // Ensure config directory exists (configDir computed above during persistence hardening)
         if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
         {
             Directory.CreateDirectory(configDir);

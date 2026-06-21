@@ -121,7 +121,10 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
         try
         {
-            File.WriteAllText(_queueFilePath, json);
+            // Atomic write (temp + rename) so a crash mid-write can't corrupt the queue file.
+            var tmp = _queueFilePath + ".tmp";
+            File.WriteAllText(tmp, json);
+            File.Move(tmp, _queueFilePath, overwrite: true);
             _logger?.LogDebug("Queue persisted: {Count} items to {Path}", snapshot.Count, _queueFilePath);
         }
         catch (Exception ex)

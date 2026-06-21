@@ -49,7 +49,10 @@ public class SeriesController : ControllerBase
         if (string.IsNullOrWhiteSpace(seriesId)) return BadRequest(new { Error = "SeriesId is required" });
         try
         {
-            var episodes = await _api.GetEpisodesAsync(seriesId, premium);
+            // CR's season/episode content requires the beta/CMS API; passing false (the old
+            // default, fed from the unused 'premium' param) returned an EMPTY list -> the
+            // "Download Season" / "Download Series" buttons silently queued nothing.
+            var episodes = await _api.GetEpisodesAsync(seriesId, useBetaApi: true);
             return Ok(episodes);
         }
         catch (Exception ex)

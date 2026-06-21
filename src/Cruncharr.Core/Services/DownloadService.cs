@@ -1342,7 +1342,7 @@ public class DownloadService : IDownloadService
     {
         _logger?.LogInformation("Starting series download: {SeriesId}", seriesId);
 
-        var episodes = await _api.GetEpisodesAsync(seriesId, false, cancellationToken);
+        var episodes = await _api.GetEpisodesAsync(seriesId, useBetaApi: true, cancellationToken);
         if (episodes.Count == 0)
         {
             return new DownloadResult { Success = false, ErrorMessage = "No episodes found" };

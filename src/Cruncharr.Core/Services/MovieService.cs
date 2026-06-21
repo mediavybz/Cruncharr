@@ -51,7 +51,7 @@ public class MovieService : IMovieService
                 }
             }
 
-            var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiUrls.Cms}/objects/{id}?{query}");
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiUrls.Cms(true)}/objects/{id}?{query}");
             request.Headers.Add("Authorization", $"Bearer {_auth.Token?.access_token}");
 
             var (isOk, content, error) = await _httpClient.SendRequestAsync(request);

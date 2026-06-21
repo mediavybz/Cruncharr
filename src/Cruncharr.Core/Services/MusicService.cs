@@ -83,7 +83,7 @@ public class MusicService : IMusicService
             }
 
             var query = CreateQueryParameters(locale, forcedLang);
-            var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiUrls.Content}/music/artists/{id}?{query}");
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiUrls.Content(true)}/music/artists/{id}?{query}");
             request.Headers.Add("Authorization", $"Bearer {_auth.Token?.access_token}");
 
             var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
@@ -124,7 +124,7 @@ public class MusicService : IMusicService
             }
 
             var query = CreateQueryParameters(locale, forcedLang);
-            var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiUrls.Content}/{endpoint}?{query}");
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiUrls.Content(true)}/{endpoint}?{query}");
             request.Headers.Add("Authorization", $"Bearer {_auth.Token?.access_token}");
 
             var (isOk, content, error) = await _httpClient.SendRequestAsync(request);

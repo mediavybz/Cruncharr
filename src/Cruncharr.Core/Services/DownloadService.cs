@@ -2064,11 +2064,13 @@ public class DownloadService : IDownloadService
             for (int i = 0; i < chosenAudios.Count; i++)
             {
                 var (audioItem, lang) = chosenAudios[i];
-                // A dub-specific audio-only fetch (additional dub): Crunchyroll's dub manifest often
-                // labels its audio with the ORIGINAL locale (ja-JP), which collided every extra dub
-                // onto audio_jajp.m4s and left only one language in the mux. Trust the explicitly
-                // requested dub locale instead so each dub gets its own file + track.
-                if (audioOnly && selectedDubs is { Count: 1 } && !string.IsNullOrEmpty(selectedDubs[0]))
+                // Crunchyroll's dub manifest labels its audio track with the ORIGINAL locale (ja-JP),
+                // not the dub's. So a single-dub download (e.g. user picks English-only) gets its
+                // audio downloaded + MUXED as ja-JP even though the content is the English dub. When
+                // exactly ONE dub is requested and ONE audio track is chosen (primary OR additional-
+                // dub fetch), trust the requested dub locale so the track is labelled correctly.
+                // Multi-dub downloads keep their per-track labels (condition requires Count==1).
+                if (selectedDubs is { Count: 1 } && !string.IsNullOrEmpty(selectedDubs[0]) && chosenAudios.Count == 1)
                 {
                     lang = selectedDubs[0];
                 }

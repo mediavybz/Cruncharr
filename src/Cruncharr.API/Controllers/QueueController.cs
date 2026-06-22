@@ -171,7 +171,10 @@ public class QueueController : ControllerBase
         var epId = item?.Episode?.Id;
         if (string.IsNullOrEmpty(epId)) return null;
         var history = await _historyService.GetAllAsync(0, 100000);
-        return history.LastOrDefault(h => h.EpisodeId == epId)?.OutputPath;
+        // Some flat-history ids append the audio locale (e.g. <id>JAJP), so match exact OR prefix.
+        var match = history.LastOrDefault(h => h.EpisodeId == epId)
+                    ?? history.LastOrDefault(h => h.EpisodeId != null && h.EpisodeId.StartsWith(epId, StringComparison.Ordinal));
+        return match?.OutputPath;
     }
 
     /// <summary>

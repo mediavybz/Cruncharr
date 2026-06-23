@@ -257,6 +257,11 @@ public class DownloadConfig
     [YamlMember(Alias = "output_dir", ApplyNamingConventions = false)]
     public string OutputDirectory { get; set; } = "/downloads";
 
+    // Organize finished downloads into <output_dir>/<Series Title>/Season NN/ (Sonarr/Plex layout)
+    // instead of dumping every file in the root. On by default.
+    [YamlMember(Alias = "organize_into_folders", ApplyNamingConventions = false)]
+    public bool OrganizeIntoFolders { get; set; } = true;
+
     [YamlMember(Alias = "temp_dir", ApplyNamingConventions = false)]
     public string TempDirectory { get; set; } = "/tmp/cruncharr";
 

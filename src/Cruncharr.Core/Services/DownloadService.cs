@@ -62,6 +62,37 @@ public class DownloadService : IDownloadService
         _filenameService = new FilenameService();
     }
 
+    /// <summary>
+    /// REGRESSION GUARD — do not weaken without a replacement. Decides whether to re-fetch the
+    /// episode's versions from Crunchyroll instead of trusting whatever the caller posted.
+    ///
+    /// A specific dub's correct stream id (the per-version MediaGuid) ONLY exists in a fresh CR
+    /// fetch. Client-built versions (e.g. the Add Download flow) carry the BASE episode guid for
+    /// every dub and no MediaGuid, so trusting them streams the ORIGINAL (ja-JP) audio under the
+    /// requested dub's label ("English label, Japanese audio"). So: always refetch when versions
+    /// are absent OR a specific dub was requested. Keeps every add-path resolving the SAME correct
+    /// per-dub stream. See memory: download-mux-gotchas (Add Download versions desync, beta.120).
+    /// </summary>
+    public static bool ShouldRefetchVersions(EpisodeInfo episode)
+    {
+        if (episode.Versions == null || episode.Versions.Count == 0) return true;
+        // A dub was explicitly requested -> never trust posted versions; the real per-dub
+        // MediaGuid must come from Crunchyroll.
+        if (episode.SelectedDubs != null && episode.SelectedDubs.Any(d => !string.IsNullOrWhiteSpace(d))) return true;
+        return false;
+    }
+
+    /// <summary>Make a series/season string safe as a single path segment (strip invalid chars,
+    /// collapse whitespace, drop trailing dots/spaces which are illegal on Windows).</summary>
+    private static string SanitizeFolderName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+        var invalid = Path.GetInvalidFileNameChars();
+        var sb = new System.Text.StringBuilder(name.Length);
+        foreach (var c in name) sb.Append(invalid.Contains(c) ? ' ' : c);
+        return System.Text.RegularExpressions.Regex.Replace(sb.ToString(), @"\s+", " ").Trim().TrimEnd('.', ' ');
+    }
+
     public async Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default, Action? onDownloadComplete = null)
     {
         _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", episode.Id, episode.Title);
@@ -82,7 +113,7 @@ public class DownloadService : IDownloadService
 
         // Fetch full episode details with versions if not already loaded
         // [PT] Using ParseEpisodeByIdAsync instead of GetEpisodeAsync to get version deduplication
-        if (episode.Versions == null || episode.Versions.Count == 0)
+        if (ShouldRefetchVersions(episode))
         {
             progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 10, Doing = "Fetching episode info..." });
             var fullEpisode = await _api.ParseEpisodeByIdAsync(episode.Id, null, false, cancellationToken);
@@ -365,6 +396,22 @@ public class DownloadService : IDownloadService
                 : config.Download.DubLanguages
         };
         var fileName = _filenameService.FormatFilename(filenameTemplate, episode, filenameOptions);
+
+        // Organize into <Series Title>/Season NN/ folders (Sonarr/Plex layout) when enabled. The
+        // season mirrors what the FILENAME uses (Sonarr numbering when active) so folder + name
+        // agree. Without this every show dumps into the download root.
+        if (config.Download.OrganizeIntoFolders && !string.IsNullOrWhiteSpace(episode.SeriesTitle))
+        {
+            var folderSeason = (config.Sonarr.UseSonarrNumbering && sonarrEpisode != null)
+                ? sonarrEpisode.SeasonNumber
+                : episode.SeasonNumber;
+            var seriesFolder = SanitizeFolderName(episode.SeriesTitle);
+            if (!string.IsNullOrEmpty(seriesFolder))
+            {
+                outputDir = Path.Combine(outputDir, seriesFolder, $"Season {folderSeason:00}");
+            }
+        }
+
         string outputExtension;
         if (config.Download.MuxAudioOnlyToMp3 && config.Download.NoVideo)
         {
@@ -379,6 +426,12 @@ public class DownloadService : IDownloadService
             outputExtension = ".mkv";
         }
         var outputPath = Path.Combine(outputDir, fileName + outputExtension);
+
+        // Ensure the full output directory exists. Covers the Series/Season folders above AND any
+        // subfolders a user put in their filename template (previously a template with "/" wrote to
+        // a non-existent dir and failed at mux time).
+        var outputParentDir = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrEmpty(outputParentDir)) Directory.CreateDirectory(outputParentDir);
 
         // Replace existing file if configured
         if (config.Download.ReplaceExistingFiles && File.Exists(outputPath))
@@ -501,6 +554,53 @@ public class DownloadService : IDownloadService
                         catch (Exception ex)
                         {
                             _logger?.LogWarning(ex, "Failed to download additional DASH dub: {Dub}", dub);
+                        }
+                    }
+                }
+
+                // Single-dub subtitles: the dub's own playback has no subs (CR keeps the full set on
+                // the ORIGINAL version), and the multi-dub loop above only runs when extra dubs were
+                // requested. So if a requested subtitle is still missing, fetch the ORIGINAL version's
+                // playback HERE — the same LATE point (after the main download) where the dub-audio
+                // fetches above succeed. A 2nd /play done IMMEDIATELY after the primary fails CR with
+                // 40016 "Outdated Token"; done after the download it works (the prior play settles).
+                // Union its subtitles only — do NOT add its audio. Best-effort.
+                if (!config.Download.SkipSubs && episode.Versions != null)
+                {
+                    var wantedSubs = (episode.SelectedSubs?.Count > 0 ? episode.SelectedSubs : config.Download.SoftSubs) ?? new List<string>();
+                    var havePool = playbackData.Subtitles ?? new List<SubtitleInfo>();
+                    var stillMissing = wantedSubs.Any(r => !string.IsNullOrWhiteSpace(r) &&
+                        !havePool.Any(s => string.Equals(s.Lang, r, StringComparison.OrdinalIgnoreCase)));
+                    var origVersion = episode.Versions.FirstOrDefault(v => v.Original);
+                    if (stillMissing && origVersion != null && !string.IsNullOrEmpty(origVersion.Guid) &&
+                        !string.Equals(origVersion.Guid, mediaGuid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var origGuid = origVersion.Guid;
+                        if (origGuid.Contains(':')) origGuid = origGuid.Split(':')[1];
+                        try
+                        {
+                            var subPlayback = await GetPlaybackDataAsync(origGuid, true, cancellationToken, config);
+                            if (subPlayback?.Subtitles != null && subPlayback.Subtitles.Count > 0)
+                            {
+                                playbackData.Subtitles ??= new List<SubtitleInfo>();
+                                var existing = new HashSet<string>(
+                                    playbackData.Subtitles.Where(s => s.Lang != null).Select(s => $"{s.Lang}|{s.IsCC}"),
+                                    StringComparer.OrdinalIgnoreCase);
+                                var added = 0;
+                                foreach (var s in subPlayback.Subtitles)
+                                {
+                                    if (!string.IsNullOrEmpty(s.Lang) && existing.Add($"{s.Lang}|{s.IsCC}"))
+                                    {
+                                        playbackData.Subtitles.Add(s);
+                                        added++;
+                                    }
+                                }
+                                _logger?.LogInformation("Unioned {Added} subtitles from original version {Guid} (late, subs-only)", added, origGuid);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogWarning(ex, "Failed to fetch original-version subtitles (late)");
                         }
                     }
                 }
@@ -1175,7 +1275,7 @@ public class DownloadService : IDownloadService
                                 : groupOutputPath;
 
                             progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 90, Doing = $"Muxing {locale}..." });
-                            await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupWorkPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
+                            await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupWorkPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: locale);
 
                             // Post-process encoding for this group if configured
                             if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
@@ -1198,7 +1298,11 @@ public class DownloadService : IDownloadService
                             ? Path.Combine(tempDir, Path.GetFileName(outputPath))
                             : outputPath;
 
-                        await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, workPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath);
+                        // Default audio = the user's FIRST chosen dub for this download (e.g. "en-US"
+                        // when they picked English in Add Download), so the player auto-plays it
+                        // instead of the global ja-JP default. Bare adds (no selection) fall back.
+                        var primaryDub = episode.SelectedDubs?.FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
+                        await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, workPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: primaryDub);
 
                         // Post-process encoding if configured
                         if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
@@ -2270,7 +2374,25 @@ public class DownloadService : IDownloadService
             })
             .ToList();
 
-        return sorted.Select(a => (a, a.language?.CrLocale ?? "und")).ToList();
+        // Filter to the REQUESTED languages. Crunchyroll's per-dub DASH manifest frequently
+        // bundles the original (ja-JP) audio alongside the dub's audio (e.g. the en-US version
+        // manifest carries both en-US@136.119 and ja-JP@136.031). Upstream takes a SINGLE audio
+        // track per version's manifest; the previous port returned EVERY track and kept one per
+        // language group, so requesting only "en-US" still muxed the Japanese track — and if CR
+        // flags it default the player plays Japanese. Keep only tracks whose locale was asked for.
+        var requested = new HashSet<string>(
+            languages.Where(l => !string.IsNullOrWhiteSpace(l)), StringComparer.OrdinalIgnoreCase);
+        var filtered = sorted
+            .Where(a => requested.Contains(a.language?.CrLocale ?? "und"))
+            .ToList();
+
+        // Fallback: if NOTHING matched, CR mislabelled this dub's audio with the original locale
+        // (the known dub-manifest mislabel) so no track carries the requested locale. Return all
+        // tracks unchanged so the single-track relabel path (audio loop, selectedDubs Count==1)
+        // can still tag it with the requested dub. Only this all-mislabelled case falls through.
+        var chosen = filtered.Count > 0 ? filtered : sorted;
+
+        return chosen.Select(a => (a, a.language?.CrLocale ?? "und")).ToList();
     }
 
     // Ported from upstream Helpers.SnapToAudioBucket
@@ -2509,8 +2631,16 @@ public class DownloadService : IDownloadService
     private static string FormatKey(byte[] keyBytes) =>
         BitConverter.ToString(keyBytes).Replace("-", "").ToLower();
 
-    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang, bool Cc, bool Signs)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null, string? descriptionPath = null)
+    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang, bool Cc, bool Signs)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null, string? descriptionPath = null, string? preferredAudioLang = null)
     {
+        // The DEFAULT audio track (what a player auto-plays) is the user's chosen dub for THIS
+        // download, not the global DefaultAudio. Without this, picking English in Add Download but
+        // leaving the config default at ja-JP muxes en+ja and flags ja-JP default -> plays Japanese
+        // even though English is present ("I selected English, it plays Japanese"). Fall back to the
+        // config default when no per-download dub was chosen (e.g. a bare series/season add).
+        var defaultAudioLocale = !string.IsNullOrWhiteSpace(preferredAudioLang)
+            ? preferredAudioLang
+            : config.Download.DefaultAudio;
         var mergerOptions = new MergerOptions
         {
             Output = outputPath,
@@ -2532,7 +2662,7 @@ public class DownloadService : IDownloadService
             Defaults = new Defaults
             {
                 Video = Languages.FindLang(config.Download.DefaultVideo),
-                Audio = Languages.FindLang(config.Download.DefaultAudio),
+                Audio = Languages.FindLang(defaultAudioLocale),
                 Sub = Languages.FindLang(config.Download.DefaultSub)
             }
         };

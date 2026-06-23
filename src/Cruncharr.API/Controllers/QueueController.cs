@@ -12,6 +12,7 @@ public class QueueController : ControllerBase
 {
     private readonly IQueueService _queueService;
     private readonly IHistoryService _historyService;
+    private readonly ILanguagePrefsService _languagePrefs;
     private readonly ILogger<QueueController> _logger;
     private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings
     {
@@ -20,10 +21,11 @@ public class QueueController : ControllerBase
         NullValueHandling = NullValueHandling.Ignore
     };
 
-    public QueueController(IQueueService queueService, IHistoryService historyService, ILogger<QueueController> logger)
+    public QueueController(IQueueService queueService, IHistoryService historyService, ILanguagePrefsService languagePrefs, ILogger<QueueController> logger)
     {
         _queueService = queueService;
         _historyService = historyService;
+        _languagePrefs = languagePrefs;
         _logger = logger;
     }
 
@@ -89,6 +91,11 @@ public class QueueController : ControllerBase
 
             _queueService.AddToQueue(episode);
             _logger.LogInformation("Added episode {EpisodeId} to queue", request.EpisodeId);
+
+            // Adaptive defaults: learn from the PRIMARY (first) language the user picked for this
+            // download. No-op unless the feature is enabled; bare adds (no explicit pick) don't count.
+            _languagePrefs.RecordPick("audio", request.SelectedDubs?.FirstOrDefault());
+            _languagePrefs.RecordPick("sub", request.SelectedSubs?.FirstOrDefault());
 
             return Ok(new { Message = "Added to queue", EpisodeId = request.EpisodeId });
         }

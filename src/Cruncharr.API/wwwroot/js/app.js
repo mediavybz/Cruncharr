@@ -48,6 +48,8 @@
         let addDownloadSeriesData = null; // Stores EpisodeAndLanguage data from ListSeriesId
         let addDownloadEpisodeList = []; // Stores EpisodeDisplay list from ListSeriesId
         let selectedEpisodeDubs = new Map(); // episodeKey -> Set of selected dub locales
+        let languagePrefsEnabled = false; // adaptive default language feature (loaded from /language-prefs)
+        let _langSuggestShownFor = ''; // de-dupe the suggestion prompt within a session
         let historyRichData = []; // Cache for rich history data with episodes
         let historySearchQuery = '';
         let historySearchPopupOpen = false;
@@ -79,6 +81,7 @@
         document.addEventListener('DOMContentLoaded', async () => {
             // Start config load in the background — don't block the UI shell
             const configPromise = fetchConfig();
+            loadLanguagePrefs(); // adaptive default language state (non-blocking)
             // Fetch version from backend (also non-blocking)
             fetch('/api/v1/health').then(res => res.ok ? res.json() : null).then(data => {
                 if (data && data.version) {
@@ -487,6 +490,7 @@
                         </select>
                     </div>
                 </div>
+                <div id="add-default-hint" class="hint" style="display:none; margin:6px 2px 0; font-size:0.82em; opacity:0.8;"></div>
                 <div id="add-episodes-list">
                     <div class="empty-state">
                         <div class="empty-state-icon">&#128270;</div>
@@ -597,22 +601,30 @@
                 });
                 const seasons = Array.from(seasonMap.values());
                 
-                // Initialize default dub selections from config
+                // Pre-select ONLY the user's preferred audio (their Crunchyroll profile's
+                // preferredAudioLanguage, e.g. en-US), falling back to the config default.
+                // Previously EVERY configured dub was pre-checked, so the original ja-JP rode
+                // along with an English pick and the file played Japanese. Users add extra dubs
+                // explicitly. If the preferred audio isn't offered for an episode, fall back to
+                // its first available track so something is still selected.
                 selectedEpisodeDubs.clear();
-                const defaultDubs = new Set(dubLangs);
+                await refreshAuthStatus(); // reflect any website-side language change without re-login
+                const preferredAudio = authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
                 addDownloadEpisodeList.forEach(ep => {
                     const epKey = ep.e; // Episode key like "E1", "SP1", etc.
                     const epData = addDownloadSeriesData[epKey];
                     if (epData && epData.variants) {
-                        const availableDubs = new Set(epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale));
-                        // Intersection of config dubs and available dubs
-                        const selected = new Set([...defaultDubs].filter(d => availableDubs.has(d)));
+                        const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
+                        const selected = new Set();
+                        if (availableDubs.includes(preferredAudio)) selected.add(preferredAudio);
+                        else if (availableDubs.length > 0) selected.add(availableDubs[0]);
                         if (selected.size > 0) {
                             selectedEpisodeDubs.set(epKey, selected);
                         }
                     }
                 });
-                
+                updateAddDefaultHint(preferredAudio);
+
                 const dropdown = document.getElementById('season-dropdown');
                 if (!dropdown) return;
                 dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
@@ -823,18 +835,46 @@
                 selectedEpisodes.delete(epKey);
             } else {
                 selectedEpisodes.add(epKey);
-                // If no dubs selected for this episode, select all available dubs
+                // If no dubs selected yet for this episode, default to the preferred audio only
+                // (CR profile pref, fallback config default, then first available) - NOT every dub,
+                // so a checked episode doesn't silently pull the ja-JP original alongside.
                 if (!selectedEpisodeDubs.has(epKey)) {
                     const epData = addDownloadSeriesData[epKey];
                     if (epData && epData.variants) {
-                        const allDubs = new Set(epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean));
-                        if (allDubs.size > 0) {
-                            selectedEpisodeDubs.set(epKey, allDubs);
+                        const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
+                        const preferredAudio = authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
+                        const selected = new Set();
+                        if (availableDubs.includes(preferredAudio)) selected.add(preferredAudio);
+                        else if (availableDubs.length > 0) selected.add(availableDubs[0]);
+                        if (selected.size > 0) {
+                            selectedEpisodeDubs.set(epKey, selected);
                         }
                     }
                 }
             }
             renderAddEpisodesMultiDub();
+        }
+
+        // Pull the CURRENT Crunchyroll account language (preferred audio/sub) so a change made on
+        // crunchyroll.com is reflected in Add Download without a re-login. Lightweight account GET.
+        async function refreshAuthStatus() {
+            try {
+                const r = await fetch('/api/v1/auth/status?refresh=true');
+                if (r.ok) authStatus = await r.json();
+            } catch (e) { /* non-fatal: fall back to cached authStatus */ }
+        }
+
+        // Show WHY a language is pre-selected in Add Download, so the default isn't a mystery.
+        // Source priority matches the seed: CR account preferred audio > Settings Default Audio.
+        function updateAddDefaultHint(preferredAudio) {
+            const el = document.getElementById('add-default-hint');
+            if (!el) return;
+            let src;
+            if (authStatus?.preferredAudioLanguage) src = "your Crunchyroll account's preferred audio";
+            else if (config?.download?.defaultAudio) src = 'Settings → Default Audio';
+            else src = 'the app default';
+            el.innerHTML = `&#9432; Audio pre-selected: <strong>${escapeHtml(preferredAudio)}</strong> (from ${src}). Toggle per episode to change just this download — it won't alter your saved defaults.`;
+            el.style.display = 'block';
         }
 
         function toggleDubSelection(epKey, locale) {
@@ -893,15 +933,20 @@
                 ? addDownloadEpisodeList.filter(ep => ep.id === currentSeasonId)
                 : addDownloadEpisodeList;
             if (checked) {
+                const preferredAudio = authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
                 visibleEpisodes.forEach(ep => {
                     const epKey = ep.e;
                     selectedEpisodes.add(epKey);
-                    // Select all available dubs
+                    // Default each episode to the preferred audio only (not every dub), unless the
+                    // user already chose dubs for it - keep their explicit picks.
                     const epData = addDownloadSeriesData[epKey];
-                    if (epData && epData.variants) {
-                        const allDubs = new Set(epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean));
-                        if (allDubs.size > 0) {
-                            selectedEpisodeDubs.set(epKey, allDubs);
+                    if (epData && epData.variants && !selectedEpisodeDubs.has(epKey)) {
+                        const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
+                        const selected = new Set();
+                        if (availableDubs.includes(preferredAudio)) selected.add(preferredAudio);
+                        else if (availableDubs.length > 0) selected.add(availableDubs[0]);
+                        if (selected.size > 0) {
+                            selectedEpisodeDubs.set(epKey, selected);
                         }
                     }
                 });
@@ -984,14 +1029,15 @@
                                 selectedDubs: item.selectedDubs || [],
                                 selectedSubs: item.downloadSubs || [],
                                 hslang: item.hslang || 'none',
-                                videoQuality: item.videoQuality || 'best',
-                                versions: item.data?.map(v => ({
-                                    audioLocale: v.lang?.crLocale || v.lang?.locale || '',
-                                    guid: v.mediaId || '',
-                                    mediaGuid: v.mediaId || '',
-                                    original: v.versions?.some(ver => ver.original) || false,
-                                    seasonGuid: v.versions?.[0]?.seasonGuid || ''
-                                })) || []
+                                videoQuality: item.videoQuality || 'best'
+                                // NOTE: deliberately NOT sending `versions`. The ItemSelectMultiDub
+                                // variants carry the BASE episode guid (item.id) for every dub and
+                                // have no per-version MediaGuid, so a posted versions array made the
+                                // backend stream the ORIGINAL (ja-JP) audio while labelling it the
+                                // requested dub ("English label, Japanese audio"). With versions
+                                // omitted, DownloadService re-fetches the real per-dub guid+MediaGuid
+                                // from Crunchyroll (the same path a bare queue POST uses) and picks
+                                // the correct dub stream.
                             })
                         });
                         if (queueRes.ok) {
@@ -1014,12 +1060,95 @@
                 selectedEpisodes.clear();
                 selectedEpisodeDubs.clear();
                 renderAddEpisodesMultiDub();
+                checkLanguageSuggestion();
             } catch (e) {
                 console.error('Failed to add to queue:', e);
                 showToast('Failed to add to queue: ' + e.message, 'error');
             } finally {
                 isAddingToQueue = false;
             }
+        }
+
+        // ── Adaptive default language (opt-in, confirm-by-prompt) ──────────────────
+        async function loadLanguagePrefs() {
+            try {
+                const res = await fetch('/api/v1/language-prefs');
+                if (!res.ok) return;
+                const d = await res.json();
+                languagePrefsEnabled = !!d.enabled;
+            } catch (e) { /* non-fatal */ }
+        }
+
+        async function toggleAdaptiveLang(enabled) {
+            languagePrefsEnabled = enabled;
+            try {
+                await fetch('/api/v1/language-prefs/enabled', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                showToast(enabled ? 'Adaptive language defaults on' : 'Adaptive language defaults off', 'success');
+            } catch (e) { showToast('Failed to update setting', 'error'); }
+        }
+
+        async function resetAdaptiveLang(btn) {
+            try {
+                if (btn) btn.disabled = true;
+                const res = await fetch('/api/v1/language-prefs/reset', { method: 'POST' });
+                showToast(res.ok ? 'Learned languages reset' : 'Reset failed', res.ok ? 'success' : 'error');
+            } catch (e) { showToast('Reset failed', 'error'); }
+            finally { if (btn) btn.disabled = false; }
+        }
+
+        // After a download is queued, ask the backend whether a language now dominates enough to
+        // suggest as the default. Shows a non-blocking prompt; user accepts / snoozes / declines.
+        async function checkLanguageSuggestion() {
+            if (!languagePrefsEnabled) return;
+            try {
+                const res = await fetch('/api/v1/language-prefs');
+                if (!res.ok) return;
+                const d = await res.json();
+                const s = d.suggestion;
+                if (!s || !s.locale) return;
+                const tag = `${s.category}:${s.locale}`;
+                if (_langSuggestShownFor === tag) return; // don't repeat within a session
+                _langSuggestShownFor = tag;
+                showLanguageSuggestionPrompt(s);
+            } catch (e) { /* non-fatal */ }
+        }
+
+        function showLanguageSuggestionPrompt(s) {
+            document.getElementById('lang-suggest-prompt')?.remove();
+            const kind = s.category === 'sub' ? 'subtitle' : 'audio';
+            const el = document.createElement('div');
+            el.id = 'lang-suggest-prompt';
+            el.style.cssText = 'position:fixed; right:18px; bottom:18px; z-index:9000; max-width:340px; background:var(--card-bg,#1c1c1e); border:1px solid var(--border,#333); border-radius:10px; padding:14px 16px; box-shadow:0 8px 28px rgba(0,0,0,.45); font-size:0.9em;';
+            el.innerHTML = `
+                <div style="margin-bottom:10px;">You keep choosing <strong>${escapeHtml(s.locale)}</strong> ${kind}. Make it your default ${kind} language?</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="header-btn primary" data-act="accept">Yes, set default</button>
+                    <button class="header-btn" data-act="dismiss">Not now</button>
+                    <button class="header-btn" data-act="decline">Don't ask again</button>
+                </div>`;
+            const send = async (act) => {
+                el.remove();
+                try {
+                    await fetch(`/api/v1/language-prefs/${act}`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ category: s.category, locale: s.locale })
+                    });
+                    if (act === 'accept') {
+                        await fetchConfig().catch(() => {});
+                        // Make the background change visible: if Settings is open, re-render so the
+                        // Default Audio/Subtitle dropdown reflects the new value live (not silently).
+                        if (currentPage === 'settings') renderSettingsTab();
+                        showToast(`${s.locale} is now your default ${kind}`, 'success');
+                    }
+                } catch (e) { /* non-fatal */ }
+            };
+            el.querySelector('[data-act="accept"]').onclick = () => send('accept');
+            el.querySelector('[data-act="dismiss"]').onclick = () => send('dismiss');
+            el.querySelector('[data-act="decline"]').onclick = () => send('decline');
+            document.body.appendChild(el);
         }
 
         async function showFeaturedMusic() {
@@ -1542,20 +1671,25 @@
                     });
                     const seasons = Array.from(seasonMap.values());
                     
+                    // Pre-select preferred audio only (see renderAddEpisodesMultiDub init above).
                     selectedEpisodeDubs.clear();
-                    const defaultDubs = new Set(dubLangs);
+                    await refreshAuthStatus(); // reflect website-side language change without re-login
+                    const preferredAudio = authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
                     addDownloadEpisodeList.forEach(ep => {
                         const epKey = ep.e;
                         const epData = addDownloadSeriesData[epKey];
                         if (epData && epData.variants) {
-                            const availableDubs = new Set(epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale));
-                            const selected = new Set([...defaultDubs].filter(d => availableDubs.has(d)));
+                            const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
+                            const selected = new Set();
+                            if (availableDubs.includes(preferredAudio)) selected.add(preferredAudio);
+                            else if (availableDubs.length > 0) selected.add(availableDubs[0]);
                             if (selected.size > 0) {
                                 selectedEpisodeDubs.set(epKey, selected);
                             }
                         }
                     });
-                    
+                    updateAddDefaultHint(preferredAudio);
+
                     const dropdown = document.getElementById('season-dropdown');
                     if (dropdown) {
                         dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
@@ -2707,6 +2841,7 @@
                             <div class="settings-section-header"><span class="settings-section-title">Download Settings</span><span class="settings-section-desc">Adjust download behavior</span></div>
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Output Directory</div><div class="setting-desc">Where downloads are saved</div></div><input type="text" class="form-input w-250" id="setting-output-dir" value="${escapeHtmlAttribute(dl.outputDirectory||'/downloads')}"></div>
+                                <div class="setting-row"><div><div class="setting-label">Organize Into Folders</div><div class="setting-desc">Save as &lt;output&gt;/Series Title/Season NN/file (Sonarr/Plex layout) instead of all in the root</div></div><label class="toggle-switch"><input type="checkbox" id="setting-organize-folders" ${dl.organizeIntoFolders!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Temp Directory</div><div class="setting-desc">Working dir for downloads + muxing/transcoding when "Use Temp Folder" is on. Point at a RAM disk (tmpfs) to keep that I/O off your SSD.</div></div><input type="text" class="form-input w-250" id="setting-temp-dir" value="${escapeHtmlAttribute(dl.tempDirectory||'/tmp/cruncharr')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use Temp Folder</div><div class="setting-desc">Download, mux and encode in the Temp Directory, then move the finished file to the output folder. Off = work directly in the output folder.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-temp" ${dl.useTempFolder?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Part Size</div><div class="setting-desc">Download chunk size in MB (larger = fewer requests, more memory)</div></div><input type="number" class="form-input w-80" id="setting-part-size" value="${escapeHtmlAttribute(dl.partSize ?? 10)}" min="1"></div>
@@ -2785,6 +2920,8 @@
                                 <div class="setting-row"><div><div class="setting-label">Default Video</div><div class="setting-desc">Language flagged as the default video track in the muxed file</div></div><select class="form-select mw-150" id="setting-default-video"><option value="none" ${(dl.defaultVideo==='none'||!dl.defaultVideo)?'selected':''}>none</option>${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${dl.defaultVideo===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Default Audio</div><div class="setting-desc">Language flagged as the default audio track in the muxed file</div></div><select class="form-select mw-150" id="setting-default-audio">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.defaultAudio||dl.muxDefaultDub)===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Default Subtitle</div><div class="setting-desc">Language flagged as the default subtitle track in the muxed file</div></div><select class="form-select mw-150" id="setting-default-sub">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.defaultSub||dl.muxDefaultSub)===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
+                                <div class="setting-row"><div><div class="setting-label">Adaptive Default Language</div><div class="setting-desc">Learn from the audio/subtitle languages you keep picking and offer to make them your default. Opt-in — you confirm each change, and "don't ask again" is remembered.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-adaptive-lang" ${languagePrefsEnabled?'checked':''} onchange="toggleAdaptiveLang(this.checked)"><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Reset Learned Languages</div><div class="setting-desc">Clear the recorded language history behind adaptive defaults</div></div><button class="header-btn" onclick="resetAdaptiveLang(this)">Reset</button></div>
                                 <div class="setting-row"><div><div class="setting-label">Default Subtitle Signs</div><div class="setting-desc">Use the Signs/Songs subtitle as the default track instead</div></div><label class="toggle-switch"><input type="checkbox" id="setting-default-sub-signs" ${dl.muxDefaultSubSigns?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Force Default Subtitle Display</div><div class="setting-desc">Marks the default subtitle as forced so it shows automatically during playback</div></div><label class="toggle-switch"><input type="checkbox" id="setting-default-sub-forced" ${dl.muxDefaultSubForcedDisplay?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Include Fonts</div><div class="setting-desc">Embed subtitle fonts into the MKV</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mux-fonts" ${dl.muxFonts?'checked':''}><span class="toggle-slider"></span></label></div>
@@ -2991,12 +3128,10 @@
         }
 
         // Named themes -> data-theme attribute. "Dark" is the default :root (no attr).
-        const THEME_ATTR = { 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'nebula', 'Sonarr': 'sonarr' };
+        // "System" sets data-theme="system" and lets CSS follow prefers-color-scheme.
+        const THEME_ATTR = { 'System': 'system', 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'nebula', 'Sonarr': 'sonarr' };
         function applyTheme() {
-            let theme = config?.appearance?.theme || 'System';
-            if (theme === 'System') {
-                theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Dark' : 'Light';
-            }
+            const theme = config?.appearance?.theme || 'System';
             const attr = THEME_ATTR[theme];
             if (attr) {
                 document.documentElement.setAttribute('data-theme', attr);
@@ -3015,7 +3150,7 @@
             }
         }
         
-        // Listen for system theme changes
+        // React to system theme changes (CSS handles the swap via prefers-color-scheme).
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
             if (config?.appearance?.theme === 'System') applyTheme();
         });
@@ -3106,6 +3241,8 @@
                     const dl = {};
                     const outDir = getFieldValue('setting-output-dir');
                     if (outDir !== undefined) dl.outputDirectory = outDir;
+                    const organizeFolders = document.getElementById('setting-organize-folders');
+                    if (organizeFolders) dl.organizeIntoFolders = organizeFolders.checked;
                     const tempDir = getFieldValue('setting-temp-dir');
                     if (tempDir !== undefined) dl.tempDirectory = tempDir;
                     const useTemp = getFieldValue('setting-use-temp', 'bool');
@@ -4129,6 +4266,7 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added to queue with selected dubs/subs', 'success');
                 panel.remove();
+                checkLanguageSuggestion();
             } catch (e) {
                 btn.disabled = false;
                 showToast('Failed to add to queue', 'error');
@@ -4321,7 +4459,7 @@
         async function matchEpisodesForSeries(seriesId) {
             try {
                 showToast('Matching episodes with Sonarr...', 'info');
-                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${seriesId}`, { method: 'POST' });
+                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${encodeURIComponent(seriesId)}`, { method: 'POST' });
                 if (res.ok) {
                     showToast('Episodes matched successfully', 'success');
                     fetchHistoryData();

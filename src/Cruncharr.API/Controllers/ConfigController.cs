@@ -14,14 +14,16 @@ public class ConfigController : ControllerBase
     private readonly ILogger<ConfigController> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ISonarrService _sonarrService;
+    private readonly ILanguagePrefsService _languagePrefs;
     private static readonly object _configLock = new object();
 
-    public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger, IHttpClientFactory httpClientFactory, ISonarrService sonarrService)
+    public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger, IHttpClientFactory httpClientFactory, ISonarrService sonarrService, ILanguagePrefsService languagePrefs)
     {
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _sonarrService = sonarrService;
+        _languagePrefs = languagePrefs;
     }
 
     /// <summary>
@@ -141,6 +143,8 @@ public class ConfigController : ControllerBase
                 _config.Save(configPath);
                 _logger.LogInformation("Configuration reset to defaults (login preserved), saved to {Path}", configPath);
             }
+            // Also clear the learned adaptive-language history so a global reset is a clean slate.
+            _languagePrefs.Reset();
             return Ok(new { Success = true, Message = "Settings reset to default" });
         }
         catch (Exception ex)
@@ -189,6 +193,7 @@ public class ConfigController : ControllerBase
                 Download = new
                 {
                     OutputDirectory = _config.Download?.OutputDirectory ?? "/downloads",
+                    OrganizeIntoFolders = _config.Download?.OrganizeIntoFolders ?? true,
                     TempDirectory = _config.Download?.TempDirectory ?? "/downloads/temp",
                     UseTempFolder = _config.Download?.UseTempFolder ?? false,
                     Filename = _config.Download?.Filename ?? "{seriesTitle} - S{season}E{episode} - {title} [{height}p]",
@@ -313,7 +318,12 @@ public class ConfigController : ControllerBase
                 {
                     Enabled = _config.Sonarr?.Enabled ?? false,
                     Host = _config.Sonarr?.Host ?? "localhost",
-                    Port = _config.Sonarr?.Port ?? 8989,
+                    // Upstream defaults Port to 0 (unset). Don't fabricate 8989 here: a non-zero
+                    // default pre-fills the settings field with a plausible-but-wrong port, so a
+                    // user whose Sonarr runs on a non-default port (e.g. 8991) sees "8989" already
+                    // filled, assumes it's correct, and every request 401s/misses against the wrong
+                    // instance. Show the real stored value (0 when unconfigured) so it's visibly unset.
+                    Port = _config.Sonarr?.Port ?? 0,
                     ApiKey = !string.IsNullOrEmpty(_config.Sonarr?.ApiKey) ? "[configured]" : null,
                     UseSsl = _config.Sonarr?.UseSsl ?? false,
                     UrlBase = _config.Sonarr?.UrlBase ?? "",
@@ -500,6 +510,7 @@ public class ConfigController : ControllerBase
         {
             var dl = request.Download;
             if (!string.IsNullOrEmpty(dl.OutputDirectory)) _config.Download.OutputDirectory = ValidatePath(dl.OutputDirectory, nameof(dl.OutputDirectory));
+            if (dl.OrganizeIntoFolders.HasValue) _config.Download.OrganizeIntoFolders = dl.OrganizeIntoFolders.Value;
             if (!string.IsNullOrEmpty(dl.TempDirectory)) _config.Download.TempDirectory = ValidatePath(dl.TempDirectory, nameof(dl.TempDirectory));
             if (dl.UseTempFolder.HasValue) _config.Download.UseTempFolder = dl.UseTempFolder.Value;
             if (!string.IsNullOrEmpty(dl.Filename)) _config.Download.Filename = dl.Filename;
@@ -744,6 +755,7 @@ public class CrunchyrollUpdateConfig
 public class DownloadUpdateConfig
 {
     public string? OutputDirectory { get; set; }
+    public bool? OrganizeIntoFolders { get; set; }
     public string? TempDirectory { get; set; }
     public bool? UseTempFolder { get; set; }
     public string? Filename { get; set; }

@@ -25,7 +25,7 @@ public interface ICrunchyrollAuthService
     Task<bool> LoginAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default);
     Task<bool> LoginWithTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task LogoutAsync();
-    Task<bool> RefreshTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default);
+    Task<bool> RefreshTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default, bool force = false);
     Task GetMultiProfileAsync(bool useBetaApi, CancellationToken cancellationToken = default);
     Task<bool> ChangeProfileAsync(string profileId, bool useBetaApi, string? pin = null, CancellationToken cancellationToken = default);
     string? LastProfileSwitchError { get; }
@@ -1230,11 +1230,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         return Task.CompletedTask;
     }
 
-    public async Task<bool> RefreshTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default)
+    public async Task<bool> RefreshTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default, bool force = false)
     {
         if (EndpointEnum == CrunchyrollEndpoints.Guest)
         {
-            if (!IsTokenExpiredOrNearExpiry())
+            if (!force && !IsTokenExpiredOrNearExpiry())
             {
                 return true;
             }
@@ -1250,7 +1250,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
         else
         {
-            if (!IsTokenExpiredOrNearExpiry())
+            if (!force && !IsTokenExpiredOrNearExpiry())
             {
                 return true;
             }

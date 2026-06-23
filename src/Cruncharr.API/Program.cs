@@ -104,6 +104,10 @@ public class Program
                 config));
         builder.Services.AddSingleton<IQueuePersistenceService>(sp =>
             new QueuePersistenceService(config.Queue.QueueFilePath, sp.GetService<ILogger<QueuePersistenceService>>(), config));
+        builder.Services.AddSingleton<ILanguagePrefsService>(sp =>
+            new LanguagePrefsService(
+                string.IsNullOrEmpty(configDir) ? null : Path.Combine(configDir, "language_prefs.json"),
+                sp.GetService<ILogger<LanguagePrefsService>>()));
         builder.Services.AddSingleton<ICalendarService, CalendarService>();
         builder.Services.AddSingleton<IQueueService, QueueService>();
         builder.Services.AddSingleton<QueueBroadcastService>();

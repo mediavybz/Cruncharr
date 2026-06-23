@@ -1,8 +1,8 @@
         /* ============================================================
-           CRUNCHARR DESIGN TOKENS
-           Premium streaming-platform dark theme. Every color, space,
-           radius, shadow, motion and type value lives here so components
-           never hardcode. Light theme below overrides only what differs.
+           CRUNCHARR DESIGN TOKENS  (v2 — distinct themes, working glass,
+           visible scrollbars). Every color/space/radius/shadow/motion/type
+           value lives here so components never hardcode. Theme blocks below
+           override only what differs. All token names are back-compat.
            ============================================================ */
         :root {
             /* --- Brand / accent (Crunchyroll orange) --- */
@@ -13,38 +13,45 @@
             --accent-soft: rgba(244, 117, 33, 0.15);
             --accent-softer: rgba(244, 117, 33, 0.08);
             --accent-glow: rgba(244, 117, 33, 0.40);
+            --accent-grad: linear-gradient(135deg, var(--accent), var(--accent-bright));
 
-            /* --- Surfaces (#0A0A0A–#181818) --- */
-            --bg-primary: #0a0a0a;
-            --bg-secondary: #101012;
-            --bg-tertiary: #161618;
-            --bg-card: #141416;
-            --bg-hover: #1f1f23;
-            --surface-border: rgba(255, 255, 255, 0.045);
-            --border-color: rgba(255, 255, 255, 0.06);
-            --sidebar-bg: linear-gradient(180deg, #111113, #0a0a0b);
+            /* --- Surfaces (#0A0A0A–#1F1F23) — warm-neutral near-black --- */
+            --bg-primary: #0a0a0c;
+            --bg-secondary: #121216;
+            --bg-tertiary: #1a1a20;
+            --bg-card: #16161c;
+            --bg-hover: #23232b;
+            --surface-border: rgba(255, 255, 255, 0.07);
+            --border-color: rgba(255, 255, 255, 0.09);
+            --sidebar-bg: linear-gradient(180deg, #15151b, #0c0c10);
 
-            /* --- Text (WCAG AA+ on near-black) --- */
-            --text-primary: #f5f6f8;
-            --text-secondary: #bcc0ca;
-            --text-muted: #898e98;
+            /* --- Text (WCAG AA on near-black) --- */
+            --text-primary: #f6f7f9;
+            --text-secondary: #c0c4ce;
+            --text-muted: #888e9a;
 
-            /* --- Status + soft fills (no component should hardcode these) --- */
+            /* --- Status + soft fills --- */
             --accent-blue: #4aa8ff;   --info-soft: rgba(74, 168, 255, 0.16);
             --accent-green: #36d399;  --success-soft: rgba(54, 211, 153, 0.16);
             --accent-red: #ff5a63;    --error-soft: rgba(255, 90, 99, 0.16);
             --accent-yellow: #ffb020; --warning-soft: rgba(255, 176, 32, 0.16);
             --premium-soft: var(--accent-soft);
 
-            /* --- Glass (backdrop blur 8–16px) --- */
-            --glass-bg: rgba(18, 18, 22, 0.62);
-            --glass-border: rgba(255, 255, 255, 0.09);
-            --glass-blur: 12px;
+            /* --- Glass (backdrop blur) --- */
+            --glass-bg: rgba(20, 20, 26, 0.72);
+            --glass-border: rgba(255, 255, 255, 0.11);
+            --glass-blur: 16px;
             /* Ambient page bloom + card translucency (overridden per theme) */
             --bloom:
-                radial-gradient(1200px 600px at 78% -8%, rgba(244, 117, 33, 0.10), transparent 60%),
-                radial-gradient(1000px 700px at -10% 110%, rgba(58, 120, 255, 0.06), transparent 55%);
+                radial-gradient(1200px 620px at 78% -8%, rgba(244, 117, 33, 0.12), transparent 60%),
+                radial-gradient(1000px 720px at -10% 110%, rgba(86, 120, 255, 0.08), transparent 55%);
             --card-blur: 0px;
+
+            /* --- Scrollbars (themed; visible against sidebar + content) --- */
+            --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+            --scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+            --scrollbar-thumb-sidebar: rgba(255, 255, 255, 0.14);
+            --scrollbar-thumb-sidebar-hover: var(--accent);
 
             /* --- Spacing scale (4px base) --- */
             --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
@@ -82,9 +89,46 @@
             --header-height: 64px;
         }
 
+        /* ── System theme: follow OS preference. The JS applies "light" when the
+              OS is in light mode; when OS is dark it leaves :root alone (= Dark).
+              So System ≠ Dark is only visible when the OS is set to light. To make
+              System feel meaningfully different from Dark even on dark-OS setups,
+              it uses a slightly cooler, higher-contrast dark base. ── */
+        [data-theme="system"] {
+            --bg-primary: #08080a;
+            --bg-secondary: #0f0f13;
+            --bg-tertiary: #18181f;
+            --sidebar-bg: linear-gradient(180deg, #131319, #0a0a0d);
+            --bloom:
+                radial-gradient(1200px 620px at 78% -8%, rgba(86, 120, 255, 0.10), transparent 60%),
+                radial-gradient(1000px 720px at -10% 110%, rgba(244, 117, 33, 0.06), transparent 55%);
+        }
+        @media (prefers-color-scheme: light) {
+            [data-theme="system"] {
+                --bg-primary: #f4f5f7; --bg-secondary: #ffffff; --bg-tertiary: #eceef1;
+                --bg-hover: #e6e9ee; --bg-card: #ffffff;
+                --text-primary: #1b1f24; --text-secondary: #5c636e; --text-muted: #767d88;
+                --accent: #d9600f; --accent-bright: #e8730f;
+                --accent-soft: rgba(244,117,33,0.12); --accent-softer: rgba(244,117,33,0.06);
+                --accent-glow: rgba(244,117,33,0.22);
+                --accent-blue: #0277bd; --accent-green: #2e7d32;
+                --accent-red: #c62828; --accent-yellow: #b7791f;
+                --info-soft: rgba(2,119,189,0.12); --success-soft: rgba(46,125,50,0.12);
+                --error-soft: rgba(198,40,40,0.12); --warning-soft: rgba(183,121,31,0.14);
+                --border-color: #e3e6ea; --surface-border: #e7eaee;
+                --glass-bg: rgba(255,255,255,0.78); --glass-border: rgba(16,24,40,0.08);
+                --sidebar-bg: linear-gradient(180deg, #ffffff, #f7f8fa);
+                --scrollbar-thumb: rgba(16,24,40,0.22); --scrollbar-thumb-hover: rgba(16,24,40,0.38);
+                --scrollbar-thumb-sidebar: rgba(255,255,255,0.22); --scrollbar-thumb-sidebar-hover: var(--accent);
+                --shadow-sm: 0 1px 2px rgba(16,24,40,0.06);
+                --shadow-md: 0 8px 24px rgba(16,24,40,0.10);
+                --shadow-lg: 0 20px 48px rgba(16,24,40,0.14);
+                --bloom: none;
+            }
+        }
+
+        /* ── Light: clean *arr-stack palette, high-contrast text, no bloom ── */
         [data-theme="light"] {
-            /* Clean *arr-stack light palette: off-white page, white surfaces,
-               subtle borders, high-contrast text. */
             --bg-primary: #f4f5f7;
             --bg-secondary: #ffffff;
             --bg-tertiary: #eceef1;
@@ -111,7 +155,7 @@
             --premium-soft: var(--accent-soft);
             --border-color: #e3e6ea;
             --surface-border: #e7eaee;
-            --glass-bg: rgba(255, 255, 255, 0.72);
+            --glass-bg: rgba(255, 255, 255, 0.78);
             --glass-border: rgba(16, 24, 40, 0.08);
             --sidebar-bg: linear-gradient(180deg, #ffffff, #f7f8fa);
             --shadow-sm: 0 1px 2px rgba(16,24,40,0.06);
@@ -120,96 +164,129 @@
             --shadow-glow: 0 8px 24px rgba(232, 93, 4, 0.20);
             --bloom: none;
             --card-blur: 0px;
+            --scrollbar-thumb: rgba(16,24,40,0.22);
+            --scrollbar-thumb-hover: rgba(16,24,40,0.38);
+            --scrollbar-thumb-sidebar: rgba(255,255,255,0.30);
+            --scrollbar-thumb-sidebar-hover: var(--accent);
         }
 
-        /* AMOLED - pure-black surfaces for OLED screens */
+        /* ── AMOLED: pure-black surfaces for OLED + a faint accent vignette so
+              it reads as intentional "cinematic black", not "flat darker dark".
+              Bloom kept minimal (OLED battery savings). ── */
         [data-theme="amoled"] {
             --bg-primary: #000000;
             --bg-secondary: #000000;
             --bg-tertiary: #0c0c0d;
             --bg-card: #070708;
             --bg-hover: #161618;
-            --surface-border: rgba(255, 255, 255, 0.07);
-            --border-color: rgba(255, 255, 255, 0.09);
-            --sidebar-bg: linear-gradient(180deg, #000000, #000000);
-            --bloom: none;
+            --surface-border: rgba(255, 255, 255, 0.08);
+            --border-color: rgba(255, 255, 255, 0.11);
+            --sidebar-bg: linear-gradient(180deg, #050505, #000000);
+            --bloom:
+                radial-gradient(900px 480px at 50% -10%, rgba(244, 117, 33, 0.06), transparent 65%);
             --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.6);
             --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.65);
             --shadow-lg: 0 28px 64px rgba(0, 0, 0, 0.75);
+            --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+            --scrollbar-thumb-hover: rgba(255, 255, 255, 0.30);
+            --scrollbar-thumb-sidebar: rgba(255, 255, 255, 0.12);
+            --scrollbar-thumb-sidebar-hover: var(--accent);
         }
 
-        /* Cinematic - glassy translucent panels + a richer ambient bloom */
+        /* ── Cinematic: the glassy theme. Glass actually works here — stronger
+              ambient bloom behind translucent surfaces, visible backdrop-blur on
+              cards/panels, layered glass on header + modal. ── */
         [data-theme="cinematic"] {
-            --bg-primary: #0b0b0f;
-            --bg-secondary: #101016;
-            --bg-tertiary: #16161e;
-            --bg-card: rgba(22, 22, 30, 0.55);
-            --bg-hover: rgba(40, 40, 52, 0.6);
-            --surface-border: rgba(255, 255, 255, 0.10);
-            --glass-bg: rgba(22, 22, 30, 0.5);
-            --card-blur: 14px;
-            --sidebar-bg: linear-gradient(180deg, rgba(18,18,26,0.72), rgba(10,10,16,0.85));
+            --bg-primary: #07070b;
+            --bg-secondary: rgba(20, 20, 28, 0.55);
+            --bg-tertiary: rgba(32, 32, 42, 0.62);
+            --bg-card: rgba(24, 24, 34, 0.46);
+            --bg-hover: rgba(48, 48, 62, 0.55);
+            --surface-border: rgba(255, 255, 255, 0.12);
+            --border-color: rgba(255, 255, 255, 0.11);
+            --glass-bg: rgba(22, 22, 32, 0.55);
+            --glass-border: rgba(255, 255, 255, 0.14);
+            --glass-blur: 18px;
+            --card-blur: 18px;
+            --sidebar-bg: linear-gradient(180deg, rgba(20,20,30,0.72), rgba(8,8,14,0.82));
             --bloom:
-                radial-gradient(1100px 620px at 80% -10%, rgba(244, 117, 33, 0.16), transparent 60%),
-                radial-gradient(1000px 760px at -12% 112%, rgba(108, 92, 231, 0.12), transparent 58%);
+                radial-gradient(1300px 720px at 82% -12%, rgba(244, 117, 33, 0.22), transparent 58%),
+                radial-gradient(1100px 820px at -14% 116%, rgba(126, 92, 231, 0.20), transparent 58%),
+                radial-gradient(700px 500px at 50% 50%, rgba(20, 20, 35, 0.30), transparent 70%);
+            --shadow-glow: 0 8px 30px rgba(244, 117, 33, 0.35);
+            --scrollbar-thumb: rgba(255, 255, 255, 0.20);
+            --scrollbar-thumb-hover: rgba(244, 117, 33, 0.55);
+            --scrollbar-thumb-sidebar: rgba(255, 255, 255, 0.16);
+            --scrollbar-thumb-sidebar-hover: var(--accent);
         }
+        /* Cinematic: header + content use translucent surfaces so the bloom blur
+           is actually visible behind them. */
+        [data-theme="cinematic"] .header {
+            background: rgba(14, 14, 22, 0.55);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+        [data-theme="cinematic"] .content { background: transparent; }
 
-        /* Nebula - slate-graphite dashboard with an indigo->purple aurora accent
-           (Seerr-inspired). Non-destructive: overrides tokens only. */
+        /* ── Seerr (Nebula): indigo→purple aurora on a mid-slate dashboard.
+              Distinct from Dark: lighter slate surfaces, vivid purple aurora,
+              lavender-tinted text highlights, signature gradient active nav. ── */
         [data-theme="nebula"] {
-            /* Accent: indigo-600 -> purple-600. The primary-button gradient is
-               built from --accent -> --accent-bright, so it becomes indigo->purple. */
-            --accent: #4f46e5;
-            --accent-bright: #9333ea;
+            --accent: #6366f1;            /* indigo-500 */
+            --accent-bright: #a855f7;     /* purple-500 */
             --accent-orange: var(--accent);
             --accent-orange-bright: var(--accent-bright);
-            --accent-soft: rgba(99, 102, 241, 0.18);
-            --accent-softer: rgba(147, 51, 234, 0.10);
-            --accent-glow: rgba(99, 102, 241, 0.40);
+            --accent-soft: rgba(99, 102, 241, 0.20);
+            --accent-softer: rgba(168, 85, 247, 0.12);
+            --accent-glow: rgba(99, 102, 241, 0.45);
+            --accent-grad: linear-gradient(135deg, #6366f1, #a855f7);
 
-            --bg-primary: #111827;   /* gray-900 */
-            --bg-secondary: #1f2937; /* gray-800 */
-            --bg-tertiary: #273244;
-            --bg-card: #1f2937;
-            --bg-hover: #374151;     /* gray-700 */
-            --surface-border: rgba(255, 255, 255, 0.06); /* softer than the old solid #374151 */
-            --border-color: rgba(255, 255, 255, 0.08);
-            --sidebar-bg: linear-gradient(180deg, #1f2937, #111827);
+            --bg-primary: #1a1d29;        /* slate-900-ish, lifted from near-black */
+            --bg-secondary: #232736;      /* slate-800 */
+            --bg-tertiary: #2c3142;
+            --bg-card: #232736;
+            --bg-hover: #353a4d;
+            --surface-border: rgba(255, 255, 255, 0.08);
+            --border-color: rgba(255, 255, 255, 0.11);
+            --sidebar-bg: linear-gradient(180deg, #262b3c, #181b27);
 
-            --text-primary: #ffffff;
-            --text-secondary: #e5e7eb; /* gray-200 */
-            --text-muted: #9ca3af;     /* gray-400 */
+            --text-primary: #f5f6ff;
+            --text-secondary: #c7cbdf;
+            --text-muted: #8b91ad;
 
-            --accent-blue: #6366f1;   --info-soft: rgba(99, 102, 241, 0.16);
-            --accent-green: #34d399;  --success-soft: rgba(52, 211, 153, 0.16);
-            --accent-red: #f87171;    --error-soft: rgba(248, 113, 113, 0.16);
-            --accent-yellow: #fbbf24; --warning-soft: rgba(251, 191, 36, 0.16);
+            --accent-blue: #818cf8;   --info-soft: rgba(129, 140, 248, 0.18);
+            --accent-green: #34d399;  --success-soft: rgba(52, 211, 153, 0.18);
+            --accent-red: #fb7185;    --error-soft: rgba(251, 113, 133, 0.18);
+            --accent-yellow: #fbbf24; --warning-soft: rgba(251, 191, 36, 0.18);
             --premium-soft: var(--accent-soft);
 
-            --glass-bg: rgba(31, 41, 55, 0.90); /* gray-800/90 (mobile-nav style) */
-            --glass-border: rgba(255, 255, 255, 0.08);
-            --glass-blur: 12px;
+            --glass-bg: rgba(35, 39, 54, 0.82);
+            --glass-border: rgba(168, 85, 247, 0.18);
+            --glass-blur: 14px;
             --card-blur: 0px;
 
             --bloom:
-                radial-gradient(1100px 600px at 82% -10%, rgba(147, 51, 234, 0.14), transparent 60%),
-                radial-gradient(1000px 700px at -10% 112%, rgba(79, 70, 229, 0.12), transparent 58%);
-            --shadow-glow: 0 8px 30px rgba(99, 102, 241, 0.30);
+                radial-gradient(1200px 640px at 84% -10%, rgba(168, 85, 247, 0.22), transparent 58%),
+                radial-gradient(1100px 760px at -12% 116%, rgba(99, 102, 241, 0.20), transparent 58%);
+            --shadow-glow: 0 8px 30px rgba(99, 102, 241, 0.40);
+            --scrollbar-thumb: rgba(199, 203, 223, 0.22);
+            --scrollbar-thumb-hover: rgba(168, 85, 247, 0.65);
+            --scrollbar-thumb-sidebar: rgba(199, 203, 223, 0.18);
+            --scrollbar-thumb-sidebar-hover: var(--accent-bright);
         }
-        /* Seerr signature: active nav uses the full vivid indigo->purple gradient
-           (scoped to Nebula so other themes' nav pills are untouched). */
+        /* Seerr signature: active nav uses the full vivid indigo→purple gradient. */
         [data-theme="nebula"] .nav-item.active {
-            background: linear-gradient(to right, var(--accent), var(--accent-bright));
+            background: var(--accent-grad);
             color: #fff;
-            box-shadow: 0 6px 18px rgba(99, 102, 241, 0.28);
+            box-shadow: 0 6px 18px rgba(99, 102, 241, 0.32);
         }
         [data-theme="nebula"] .nav-item.active .nav-icon { color: #fff; }
+        [data-theme="nebula"] .nav-item.active::before { background: #fff; }
 
-        /* Sonarr - signature cyan top bar, dark slate sidebar, clean light content.
-           Mixed theme: content tokens are light; the sidebar + header are re-skinned
-           via the scoped overrides below. */
+        /* ── Sonarr: signature cyan top bar, dark slate sidebar, light content.
+              Mixed theme: content tokens are light; sidebar + header re-skinned. ── */
         [data-theme="sonarr"] {
-            --accent: #35c5f0;            /* Sonarr cyan */
+            --accent: #35c5f0;
             --accent-bright: #1aa9da;
             --accent-orange: var(--accent);
             --accent-orange-bright: var(--accent-bright);
@@ -244,9 +321,12 @@
             --shadow-glow: 0 8px 24px rgba(53, 197, 240, 0.22);
             --bloom: none;
             --card-blur: 0px;
+            --scrollbar-thumb: rgba(16,24,40,0.22);
+            --scrollbar-thumb-hover: rgba(53,197,240,0.55);
+            --scrollbar-thumb-sidebar: rgba(255,255,255,0.18);
+            --scrollbar-thumb-sidebar-hover: #ffffff;
         }
-        /* Dark sidebar needs light text — re-scope the text/surface tokens just for it
-           (content stays dark-on-light). */
+        /* Dark sidebar needs light text — re-scope tokens just for it. */
         [data-theme="sonarr"] .sidebar {
             color: #e7eaf0;
             --text-primary: #ffffff;
@@ -257,10 +337,9 @@
             --border-color: rgba(255, 255, 255, 0.14);
             --surface-border: rgba(255, 255, 255, 0.10);
         }
-        /* Active nav = solid cyan pill (matches the top bar) */
         [data-theme="sonarr"] .nav-item.active { background: var(--accent); color: #06303d; }
         [data-theme="sonarr"] .nav-item.active .nav-icon { color: #06303d; }
-        /* Cyan top bar with a translucent search field */
+        [data-theme="sonarr"] .nav-item.active::before { background: #06303d; }
         [data-theme="sonarr"] .header {
             background: var(--accent);
             border-bottom: 1px solid rgba(0, 0, 0, 0.12);
@@ -294,7 +373,7 @@
 
         .app-container { display: flex; height: 100vh; }
 
-        /* Sidebar - solid dark surface */
+        /* Sidebar — themed gradient surface with a subtle top accent glow */
         .sidebar {
             width: var(--sidebar-width);
             background: var(--sidebar-bg);
@@ -305,12 +384,24 @@
             position: relative;
             z-index: 5;
         }
+        /* Faint accent glow along the top edge of the sidebar (theme-tinted) */
+        .sidebar::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 120px;
+            background: radial-gradient(60% 100% at 50% 0%, var(--accent-softer), transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .sidebar > * { position: relative; z-index: 1; }
 
         .sidebar-header {
             padding: 20px;
             display: flex;
             align-items: center;
             gap: 10px;
+            border-bottom: 1px solid var(--surface-border);
         }
 
         .sidebar-logo {
@@ -329,9 +420,19 @@
             border-radius: var(--radius-sm);
             object-fit: contain;
             flex-shrink: 0;
+            filter: drop-shadow(0 2px 6px var(--accent-glow));
         }
 
-        .sidebar-title { font-size: 1.2em; font-weight: 700; letter-spacing: -0.01em; }
+        .sidebar-title {
+            font-size: 1.2em;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            background: var(--accent-grad);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: var(--accent);
+        }
 
         .sidebar-nav { flex: 1; padding: 10px 0; }
 
@@ -1655,40 +1756,51 @@
         /* Mobile Responsive - Comprehensive */
         /* ================== MODERN UI POLISH ================== */
 
-        /* Slim custom scrollbars */
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        /* Themed scrollbars — visible against both content and sidebar surfaces.
+           Per-theme --scrollbar-thumb* tokens keep contrast correct in every theme
+           (was --cr-gray-700, invisible on dark sidebar). */
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--cr-gray-700); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--cr-gray-600); }
-        * { scrollbar-width: thin; scrollbar-color: var(--cr-gray-700) transparent; }
+        ::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-thumb);
+            border-radius: 6px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
+        /* Sidebar gets its own thumb token (against the sidebar gradient). */
+        .sidebar::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb-sidebar); background-clip: padding-box; }
+        .sidebar::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-sidebar-hover); background-clip: padding-box; }
+        * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+        .sidebar { scrollbar-color: var(--scrollbar-thumb-sidebar) transparent; }
 
         /* Respect reduced motion */
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
         }
 
-        /* Header: translucent with blur */
+        /* Header: translucent with blur (Cinematic overrides with stronger glass) */
         .header {
-            background: color-mix(in srgb, var(--bg-secondary) 85%, transparent);
+            background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
         }
 
-        /* Sidebar nav: floating pill with glow on active */
-        .nav-item { transition: background var(--transition), color var(--transition), transform var(--transition); }
-        .nav-item:hover { transform: translateX(3px); }
-        .nav-item:hover .nav-icon { color: var(--accent-orange); }
-
-        /* Monochrome icons highlight orange on hover */
-        .btn-icon:hover, .toolbar-btn:hover .nav-icon { color: var(--accent-orange); }
+        /* Sidebar nav: smooth color transitions (no translateX — caused jitter) */
+        .nav-item { transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+        .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .nav-item:hover .nav-icon { color: var(--accent); }
         .nav-item.active {
             background: linear-gradient(135deg, var(--accent-soft), var(--accent-softer));
-            color: var(--accent-orange);
-            box-shadow: inset 0 0 0 1px var(--accent-glow), 0 6px 18px var(--accent-soft);
+            color: var(--accent);
+            box-shadow: inset 0 0 0 1px var(--accent-glow);
         }
-        .nav-item.active .nav-icon { color: var(--accent-orange); }
+        .nav-item.active .nav-icon { color: var(--accent); }
 
-        /* Cards: surface honors --card-blur (0 normally, glass in the Cinematic theme) */
+        /* Monochrome icons highlight accent on hover */
+        .btn-icon:hover, .toolbar-btn:hover .nav-icon { color: var(--accent); }
+
+        /* Cards: surface honors --card-blur (glass in Cinematic; solid elsewhere) */
         .card {
             background: var(--bg-card);
             backdrop-filter: blur(var(--card-blur));
@@ -1696,101 +1808,93 @@
             border: 1px solid var(--surface-border);
             border-radius: var(--radius);
             box-shadow: var(--shadow-sm);
-            transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+            transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
         }
-        .card:hover { transform: translateY(-6px); box-shadow: var(--shadow-lg); border-color: rgba(255,255,255,0.12); }
+        .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--accent-softer); }
 
         /* Buttons: rounder, focus ring, primary glow */
         .header-btn, .btn-icon, .toolbar-btn {
             border-radius: 8px;
-            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+            transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
         .header-btn:hover, .toolbar-btn:hover { transform: translateY(-1px); }
-        .header-btn:active, .btn-icon:active, .toolbar-btn:active { transform: scale(0.96); }
+        .header-btn:active, .btn-icon:active, .toolbar-btn:active { transform: scale(0.97); }
         .header-btn.primary {
-            background: linear-gradient(135deg, var(--accent-orange), var(--accent-orange-bright));
+            background: var(--accent-grad);
             color: #0a0a0a; font-weight: 700; border: none;
             box-shadow: var(--shadow-glow);
         }
-        .header-btn.primary:hover {
-            box-shadow: 0 12px 34px var(--accent-glow);
-            transform: translateY(-1px) scale(1.02);
-        }
+        .header-btn.primary:hover { box-shadow: 0 12px 34px var(--accent-glow); transform: translateY(-1px); }
         .header-btn:focus-visible, .btn-icon:focus-visible, .toolbar-btn:focus-visible,
         .form-input:focus-visible, .form-select:focus-visible, .settings-tab:focus-visible {
-            outline: 2px solid var(--accent-orange);
+            outline: 2px solid var(--accent);
             outline-offset: 2px;
         }
 
-        /* Inputs: rounder + accent focus */
+        /* Inputs: rounder + accent focus glow */
         .form-input, .form-select {
             border-radius: 8px;
-            transition: border-color 0.2s, box-shadow 0.2s;
+            transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
         }
         .form-input:focus, .form-select:focus {
-            border-color: var(--accent-orange);
-            box-shadow: 0 0 0 3px var(--accent-soft), 0 6px 20px var(--accent-soft);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-softer);
         }
-        .header-search { border-radius: 10px; transition: border-color 0.2s, box-shadow 0.2s; }
-        .header-search:focus-within {
-            border-color: var(--accent-orange);
-            box-shadow: 0 0 0 3px var(--accent-soft);
-        }
+        .header-search { border-radius: var(--radius-full); transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
+        .header-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-softer); }
 
         /* Toggle switch: white knob when on */
         .toggle-slider::after { background: var(--cr-gray-300); }
         .toggle-switch input:checked + .toggle-slider::after { background: #ffffff; }
 
-        /* Progress bar: gradient fill */
+        /* Progress bar: gradient fill + glow */
         .progress-container { border-radius: 6px; overflow: hidden; }
         .progress-bar {
-            background: linear-gradient(90deg, var(--cr-orange-classic), var(--cr-orange));
+            background: var(--accent-grad);
             border-radius: 6px;
             transition: width 0.4s ease;
         }
-        /* Completed reads as done (green), errored as red - not in-progress orange. */
         .progress-bar.complete { background: var(--accent-green); }
         .progress-bar.error { background: var(--accent-red); }
 
-        /* Download / episode rows: hover lift */
+        /* Download / episode rows: hover lift (theme-safe border) */
         .download-item, .episode-multi-dub {
-            border-radius: 12px;
-            transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+            border-radius: var(--radius-md);
+            transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
         }
         .download-item:hover, .episode-multi-dub:hover {
-            border-color: var(--cr-gray-600);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+            border-color: var(--accent-softer);
+            box-shadow: var(--shadow-sm);
         }
 
         /* Poster cards: zoom + shadow on hover */
         .history-poster {
-            border-radius: 12px;
+            border-radius: var(--radius-md);
             overflow: hidden;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
         }
-        .history-poster:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-        }
+        .history-poster:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
         .history-poster-img { overflow: hidden; }
-        .history-poster-img img { transition: transform 0.3s ease; }
+        .history-poster-img img { transition: transform var(--dur-slow) var(--ease-out); }
         .history-poster:hover .history-poster-img img { transform: scale(1.05); }
 
         /* Calendar polish */
-        .calendar-day { border-radius: 12px; }
-        .calendar-episode { transition: background 0.2s, transform 0.15s, box-shadow 0.2s; }
-        .calendar-episode:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
-        }
+        .calendar-day { border-radius: var(--radius-md); }
+        .calendar-episode { transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
+        .calendar-episode:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
 
         /* Settings tabs: pill style */
-        .settings-tab { border-radius: 999px; transition: background 0.2s, color 0.2s; }
+        .settings-tab { border-radius: var(--radius-full); transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 
-        /* Modal: deep glass + pop-in */
-        .modal { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); background: rgba(0, 0, 0, 0.55); }
-        .modal-content {
-            border-radius: var(--radius);
+        /* Modal: overlay = blurred dark backdrop, panel = glass surface.
+           (Previously reversed: .modal panel got overlay styling + .modal-content
+           was dead code — the panel was nearly invisible.) */
+        .modal-overlay {
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            background: rgba(0, 0, 0, 0.55);
+        }
+        .modal {
             background: var(--glass-bg);
             backdrop-filter: blur(28px);
             -webkit-backdrop-filter: blur(28px);
@@ -2069,7 +2173,7 @@
             }
             
             /* Modals */
-            .modal-content {
+            .modal {
                 width: 95%;
                 max-width: 95%;
                 margin: 10px;
@@ -2176,25 +2280,20 @@
 
         /* ── UI polish: scrollbars, card depth, focus states, skeletons ── */
 
-        /* Thin themed scrollbars (WebKit) */
+        /* Thin themed scrollbars for content + sidebar (WebKit) — tokens set above. */
         .content::-webkit-scrollbar,
-        .sidebar::-webkit-scrollbar { width: 6px; }
+        .sidebar::-webkit-scrollbar { width: 8px; }
         .content::-webkit-scrollbar-track,
         .sidebar::-webkit-scrollbar-track { background: transparent; }
-        .content::-webkit-scrollbar-thumb,
-        .sidebar::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
-        .content::-webkit-scrollbar-thumb:hover,
-        .sidebar::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-        /* Firefox */
-        .content, .sidebar { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
+        .content, .sidebar { scrollbar-width: thin; }
 
-        /* Card depth + hover */
+        /* Card depth + hover (accent-tinted border on hover) */
         .card {
             border-radius: var(--radius-md);
             box-shadow: var(--shadow-sm);
-            transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+            transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
         }
-        .card:hover { border-color: var(--surface-border); box-shadow: var(--shadow-md); }
+        .card:hover { border-color: var(--accent-softer); box-shadow: var(--shadow-md); }
 
         /* Download item polish */
         .download-item {

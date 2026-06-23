@@ -24,7 +24,7 @@ public class AuthController : ControllerBase
     /// Get current authentication status and profile
     /// </summary>
     [HttpGet("status")]
-    public async Task<ActionResult<AuthStatusResponse>> GetStatus()
+    public async Task<ActionResult<AuthStatusResponse>> GetStatus([FromQuery] bool refresh = false)
     {
         try
         {
@@ -41,8 +41,12 @@ public class AuthController : ControllerBase
                 }
             }
 
-            // If we have a token but profile is not loaded, fetch it
-            if (_auth.Token?.access_token != null && _auth.Profile?.Username == "???")
+            // Fetch the profile when it isn't loaded yet, OR when the caller explicitly asks to
+            // refresh (refresh=true). The latter lets the UI pull the CURRENT Crunchyroll account
+            // language (preferred audio/sub) so a change made on crunchyroll.com shows up without a
+            // re-login. It's a lightweight account GET (no playback session), so safe to call on
+            // demand (e.g. when opening Add Download).
+            if (_auth.Token?.access_token != null && (refresh || _auth.Profile?.Username == "???"))
             {
                 try
                 {

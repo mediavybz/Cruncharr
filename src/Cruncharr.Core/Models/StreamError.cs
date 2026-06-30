@@ -2,6 +2,8 @@ using Newtonsoft.Json;
 
 namespace Cruncharr.Core.Models;
 
+// CR may send null for value-type fields; ignore them so one null never throws away the response.
+[JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]
 public class StreamError
 {
     [JsonProperty("error")]
@@ -50,6 +52,7 @@ public class StreamError
     }
 }
 
+[JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]
 public class ActiveStream
 {
     [JsonProperty("deviceSubtype")]

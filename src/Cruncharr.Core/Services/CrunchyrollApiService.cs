@@ -1911,6 +1911,9 @@ public class CrSeriesDetail
     public Dictionary<string, List<List<object>>>? Images { get; set; }
 }
 
+// CR may send null for value-type fields (dates/numbers) on specials/movies; ignore them so one
+// null never throws away the whole response (the empty-calendar bug, 1.0.14).
+[JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]
 public class CrSeasonDetail
 {
     public string Id { get; set; } = "";
@@ -1932,6 +1935,7 @@ public class CrEpisodeVersion
     public string SeasonGuid { get; set; } = "";
 }
 
+[JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]
 public class CrEpisodeDetail
 {
     public string Id { get; set; } = "";
@@ -1985,6 +1989,7 @@ public class CrBrowseEpisodeBase
     public CrBrowseMeta? Meta { get; set; }
 }
 
+[JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]
 public class CrBrowseEpisode
 {
     [JsonProperty("external_id")]
@@ -2014,6 +2019,7 @@ public class CrBrowseEpisode
     public string? StreamsLink { get; set; }
 }
 
+[JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]
 public class CrBrowseEpisodeMetaData
 {
     [JsonProperty("audio_locale")]

@@ -675,6 +675,10 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     SeasonId = e.SeasonId,
                     Description = e.Description,
                     SeriesTitle = e.SeriesTitle,
+                    // [FIX] Without SeriesId the full-series populate produced episodes with a null
+                    // series id, so UpdateWithSeasonData (which groups by series id) silently dropped
+                    // every episode -> History never showed the full season, only the downloaded one.
+                    SeriesId = e.SeriesId,
                     Locale = e.AudioLocale ?? "ja-JP",
                     AudioLocale = e.AudioLocale ?? "ja-JP",
                     IsPremium = e.IsPremiumOnly,

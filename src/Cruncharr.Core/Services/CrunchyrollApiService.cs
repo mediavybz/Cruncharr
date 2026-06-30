@@ -774,6 +774,18 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                Regex.IsMatch(episode, @"^\d+(\.\d+)?(\s*-\s*\d+(\.\d+)?)?$");
     }
 
+    // [PT] Upstream v1.6.14 fix ("special season detection incorrectly identifying some regular
+    // seasons as specials"): a regular sequential episode whose text label is a non-numeric saga
+    // code (e.g. One Piece "FMI1") must NOT be treated as a special. CR still provides a valid
+    // integer episode_number for those; true OVAs/specials have episode_number 0 or null.
+    internal static bool IsSpecialEpisode(string? episodeLabel, int? episodeNumber)
+    {
+        if (string.IsNullOrEmpty(episodeLabel)) return false;
+        if (IsRegularEpisodeNumber(episodeLabel)) return false;
+        if (episodeNumber.HasValue && episodeNumber.Value > 0) return false;
+        return true;
+    }
+
     // CRITICAL: Ported from upstream CrSeries.ItemSelectMultiDub
     public Dictionary<string, CrunchyEpMeta> ItemSelectMultiDub(Dictionary<string, EpisodeAndLanguage> eps, List<string> dubLang, bool? all, List<string>? e)
     {
@@ -984,7 +996,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             var baseEp = item.Variants[0].Item;
 
             var epStr = baseEp.Episode;
-            var isSpecial = epStr != null && !IsRegularEpisodeNumber(epStr);
+            var hasRealEpisodeNumber = baseEp.EpisodeNumber.HasValue && baseEp.EpisodeNumber.Value > 0;
+            var isSpecial = IsSpecialEpisode(epStr, baseEp.EpisodeNumber);
 
             string newKey;
             if (isSpecial && !string.IsNullOrEmpty(baseEp.Episode))
@@ -994,10 +1007,11 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             else
             {
                 // [PT] Upstream: keep the season prefix and use the real episode label
-                // (supports multi-episode ranges like "11-12")
+                // (supports multi-episode ranges like "11-12"). When the label is a non-numeric
+                // saga code, fall back to the real episode_number so it keys as a normal episode.
                 var episodeLabel = IsRegularEpisodeNumber(baseEp.Episode)
                     ? baseEp.Episode
-                    : epIndex.ToString();
+                    : (hasRealEpisodeNumber ? baseEp.EpisodeNumber!.Value.ToString() : epIndex.ToString());
                 var separatorIndex = key.LastIndexOf('E');
                 var keyPrefix = separatorIndex > 0 ? key[..separatorIndex] : string.Empty;
                 newKey = $"{keyPrefix}E{episodeLabel}";
@@ -1638,7 +1652,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         var baseEp = data.EpisodeAndLanguages.Variants[0].Item;
 
-        bool isSpecial = !string.IsNullOrEmpty(baseEp.Episode) && !IsRegularEpisodeNumber(baseEp.Episode);
+        // [PT] Same special-detection fix as the season grouping (shared IsSpecialEpisode helper).
+        bool isSpecial = IsSpecialEpisode(baseEp.Episode, baseEp.EpisodeNumber);
 
         string newKey;
         if (isSpecial && !string.IsNullOrEmpty(baseEp.Episode))
@@ -1647,7 +1662,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         }
         else
         {
-            var epPart = baseEp.Episode ?? (baseEp.EpisodeNumber?.ToString() ?? "1");
+            var epPart = (!string.IsNullOrEmpty(baseEp.Episode) && IsRegularEpisodeNumber(baseEp.Episode))
+                ? baseEp.Episode
+                : (baseEp.EpisodeNumber?.ToString() ?? baseEp.Episode ?? "1");
             newKey = isSpecial
                 ? $"SP{epPart} {baseEp.Id}"
                 : $"E{epPart}";

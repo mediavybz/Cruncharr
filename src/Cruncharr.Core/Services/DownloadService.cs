@@ -1398,7 +1398,7 @@ public class DownloadService : IDownloadService
                     await _history.AddAsync(new DownloadHistory
                     {
                         EpisodeId = episode.Id,
-                        SeriesId = richSeriesId,
+                        SeriesId = richSeriesId ?? string.Empty,
                         SeriesTitle = episode.SeriesTitle,
                         EpisodeTitle = episode.Title,
                         SeasonNumber = episode.SeasonNumber,

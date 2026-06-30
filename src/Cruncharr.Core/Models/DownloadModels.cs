@@ -213,7 +213,9 @@ public class CrBrowseEpisodeMetaData
     public string? Episode { get; set; }
     [JsonProperty("episode_air_date")]
     public DateTime EpisodeAirDate { get; set; }
-    [JsonProperty("episode_number")]
+    // CR sends episode_number = null for specials/movies/recaps. Ignore the null so the whole
+    // browse page doesn't fail to deserialize (was emptying the entire calendar).
+    [JsonProperty("episode_number", NullValueHandling = NullValueHandling.Ignore)]
     public int EpisodeCount { get; set; }
     [JsonProperty("duration_ms")]
     public int DurationMs { get; set; }

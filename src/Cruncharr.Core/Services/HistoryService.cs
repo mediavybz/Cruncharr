@@ -1209,6 +1209,10 @@ public class HistoryService : IHistoryService, IDisposable
 
             if (historySeries != null)
             {
+                // Merge any episode that ended up in more than one season (a legacy fallback-keyed
+                // season + the real populated season) so a downloaded episode shows under its real
+                // season with its download state intact, not duplicated.
+                DeduplicateEpisodesAcrossSeasons(historySeries);
                 RemoveUnavailableEpisodesFromSeries(historySeries);
                 if (historySeries.Seasons.Count == 0)
                 {
@@ -1658,6 +1662,52 @@ public class HistoryService : IHistoryService, IDisposable
     }
 
 
+
+    // When the same CR episode id appears in more than one season (e.g. a legacy season keyed by the
+    // series-title fallback plus the real season added by a full populate), collapse them into the
+    // episode in the real (available) season and carry over the downloaded state. CR episode ids are
+    // unique per episode, so duplicates across seasons only arise from that migration case.
+    internal static void DeduplicateEpisodesAcrossSeasons(HistorySeries series)
+    {
+        var byId = new Dictionary<string, List<(HistorySeason Season, HistoryEpisode Ep)>>();
+        foreach (var season in series.Seasons)
+        {
+            foreach (var ep in season.EpisodesList)
+            {
+                if (string.IsNullOrEmpty(ep.EpisodeId)) continue;
+                if (!byId.TryGetValue(ep.EpisodeId!, out var list))
+                {
+                    list = new List<(HistorySeason, HistoryEpisode)>();
+                    byId[ep.EpisodeId!] = list;
+                }
+                list.Add((season, ep));
+            }
+        }
+
+        foreach (var occurrences in byId.Values)
+        {
+            if (occurrences.Count < 2) continue;
+
+            // Prefer the copy in a real (available) season; otherwise keep the first.
+            var keep = occurrences.FirstOrDefault(o => o.Ep.IsEpisodeAvailableOnStreamingService).Ep
+                       ?? occurrences[0].Ep;
+
+            if (occurrences.Any(o => o.Ep.WasDownloaded)) keep.WasDownloaded = true;
+            keep.DownloadedDubLang = occurrences.SelectMany(o => o.Ep.DownloadedDubLang)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            keep.DownloadedSoftSubs = occurrences.SelectMany(o => o.Ep.DownloadedSoftSubs)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            foreach (var (season, ep) in occurrences)
+            {
+                if (!ReferenceEquals(ep, keep)) season.EpisodesList.Remove(ep);
+            }
+        }
+
+        series.Seasons.RemoveAll(s => s.EpisodesList.Count == 0);
+        foreach (var season in series.Seasons) season.UpdateDownloaded();
+        series.UpdateNewEpisodes();
+    }
 
     private void RemoveUnavailableEpisodesFromSeries(HistorySeries historySeries)
     {

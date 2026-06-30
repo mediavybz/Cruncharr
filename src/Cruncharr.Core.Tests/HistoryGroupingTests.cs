@@ -36,4 +36,48 @@ public class HistoryGroupingTests
         var ep = new EpisodeInfo { SeriesId = "", SeriesTitle = "", Guid = "EPGUID1" };
         Assert.Equal("EPGUID1", DownloadService.ResolveRichSeriesId(ep));
     }
+
+    // Guard the migration dedup: a downloaded episode left in a legacy fallback season must collapse
+    // into the same episode in the real (available) season, keeping its downloaded state.
+    [Fact]
+    public void DeduplicateEpisodesAcrossSeasons_mergesDownloadStateIntoRealSeason()
+    {
+        var series = new HistorySeries
+        {
+            SeriesId = "GR123",
+            Seasons = new List<HistorySeason>
+            {
+                // Legacy fallback season: episode downloaded, marked unavailable.
+                new HistorySeason
+                {
+                    SeasonId = "Fairy Tail|S3",
+                    EpisodesList = new List<HistoryEpisode>
+                    {
+                        new HistoryEpisode { EpisodeId = "EP278", Episode = "278", WasDownloaded = true,
+                            IsEpisodeAvailableOnStreamingService = false,
+                            DownloadedDubLang = new List<string> { "ja-JP" } }
+                    }
+                },
+                // Real populated season: same episode, not downloaded, available.
+                new HistorySeason
+                {
+                    SeasonId = "GRSEASONREAL",
+                    EpisodesList = new List<HistoryEpisode>
+                    {
+                        new HistoryEpisode { EpisodeId = "EP278", Episode = "278", WasDownloaded = false,
+                            IsEpisodeAvailableOnStreamingService = true }
+                    }
+                }
+            }
+        };
+
+        HistoryService.DeduplicateEpisodesAcrossSeasons(series);
+
+        // One season left (the real one), one episode, downloaded state carried over.
+        var allEps = series.Seasons.SelectMany(s => s.EpisodesList).ToList();
+        Assert.Single(allEps);
+        Assert.Equal("GRSEASONREAL", series.Seasons.Single().SeasonId);
+        Assert.True(allEps[0].WasDownloaded);
+        Assert.Contains("ja-JP", allEps[0].DownloadedDubLang);
+    }
 }

@@ -173,7 +173,7 @@ public class ConfigController : ControllerBase
                     {
                         Endpoint = "tv/android_tv",
                         Authorization = "", // Server-managed, not exposed to client
-                        UserAgent = "ANDROIDTV/3.61.0_22341 Android/16",
+                        UserAgent = "ANDROIDTV/3.66.0_22348 Android/16",
                         DeviceType = "Android TV",
                         DeviceName = "Android TV",
                         Video = true,
@@ -183,7 +183,7 @@ public class ConfigController : ControllerBase
                     {
                         Endpoint = "android/phone",
                         Authorization = "", // Server-managed, not exposed to client
-                        UserAgent = "Crunchyroll/3.109.2 Android/16 okhttp/4.12.0",
+                        UserAgent = "Crunchyroll/3.110.0 Android/16 okhttp/4.12.0",
                         DeviceType = "OnePlus CPH2449",
                         DeviceName = "CPH2449",
                         Video = true,

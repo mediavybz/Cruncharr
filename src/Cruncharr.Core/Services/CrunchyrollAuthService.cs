@@ -64,10 +64,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private static readonly CrAuthSettings DefaultAndroidTvAuthSettings = new()
     {
         Endpoint = "tv/android_tv",
-        // Fresh TV client (ANDROIDTV 3.65.0) - verified active and password-grant capable.
-        // Crunchyroll deactivated the older 3.59/3.61 TV clients (client_inactive).
-        Authorization = "Basic cmpzMGx0eDBkYndrbGl3eGR6ZGY6NFY3cmYyMS1VRlhlWi01WEFkMFhfUVB3cjFndV9pMXM=",
-        UserAgent = "ANDROIDTV/3.65.0_22347 Android/16",
+        // Fresh TV client (ANDROIDTV 3.66.0) - from upstream CRD Codeberg data.json, verified active
+        // and password-grant capable. Crunchyroll deactivated the older 3.59/3.61/3.65 TV clients.
+        Authorization = "Basic bGFzcnF6eGJlbXZvcWlveTU2bTA6ZHlodDVSWVYyXzIyUm4xaWF0X29YV0c2ejBUWUswazE=",
+        UserAgent = "ANDROIDTV/3.66.0_22348 Android/16",
         Device_name = "Android TV",
         Device_type = "Android TV",
         Video = true,
@@ -118,7 +118,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         Audio = true
     };
 
-    private const string EmbeddedAuthData = @"[{""type"":""tv"",""authorization"":""Basic cmpzMGx0eDBkYndrbGl3eGR6ZGY6NFY3cmYyMS1VRlhlWi01WEFkMFhfUVB3cjFndV9pMXM="",""versionName"":""3.65.0""},{""type"":""mobile"",""authorization"":""Basic YnFjaGljMmc3aTJzcnQ5cXU1c2I6NkVKT0tQLXNxU3hEb3RXdVgwZmVnV3pNX2FiTWRNWUo="",""versionName"":""3.110.0""}]";
+    private const string EmbeddedAuthData = @"[{""type"":""tv"",""Authorization"":""Basic bGFzcnF6eGJlbXZvcWlveTU2bTA6ZHlodDVSWVYyXzIyUm4xaWF0X29YV0c2ejBUWUswazE="",""version_name"":""3.66.0"",""version_code"":""22348""},{""type"":""mobile"",""Authorization"":""Basic YnFjaGljMmc3aTJzcnQ5cXU1c2I6NkVKT0tQLXNxU3hEb3RXdVgwZmVnV3pNX2FiTWRNWUo="",""version_name"":""3.110.0"",""version_code"":""101143""}]";
 
     public CrunchyrollAuthService(CruncharrConfig? config = null, ILogger<CrunchyrollAuthService>? logger = null, INotificationService? notification = null)
     {
@@ -374,8 +374,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     // Fetches updated auth credentials from upstream data endpoint
     public async Task<bool> UpdateAuthCredentialsAsync(CancellationToken cancellationToken = default)
     {
-        const string dataUrl = "https://crunchy-dl.github.io/Crunchy-Downloader/data.json";
-        const string fallbackUrl = "https://raw.githubusercontent.com/Crunchy-DL/Crunchy-Downloader/main/data.json";
+        // Upstream CRD moved off GitHub to Codeberg (v1.6.14: "Changed GitHub URLs to Codeberg
+        // URLs"). The old Crunchy-Downloader GitHub endpoints are dead; auth data now lives on the
+        // CRD repo's Codeberg pages branch.
+        const string dataUrl = "https://codeberg.org/YomuLoad/CRD/raw/branch/pages/data.json";
+        const string fallbackUrl = "https://yomuload.codeberg.page/CRD/data.json";
 
         string? authResponse = null;
 
@@ -460,7 +463,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 {
                     _logger?.LogInformation("Updating TV auth from version {Old} to {New}", currentVersion, ghAuthTv.VersionName);
                     StreamEndpoint.Authorization = ghAuthTv.Authorization;
-                    StreamEndpoint.UserAgent = $"ANDROIDTV/{ghAuthTv.VersionName} Android/16";
+                    // Real Android TV UA carries the build code: "ANDROIDTV/3.66.0_22348 Android/16".
+                    var tvVersion = !string.IsNullOrEmpty(ghAuthTv.VersionCode)
+                        ? $"{ghAuthTv.VersionName}_{ghAuthTv.VersionCode}"
+                        : ghAuthTv.VersionName;
+                    StreamEndpoint.UserAgent = $"ANDROIDTV/{tvVersion} Android/16";
                 }
             }
 
@@ -1639,11 +1646,17 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         [JsonProperty("type")]
         public string? Type { get; set; }
 
-        [JsonProperty("authorization")]
+        // Upstream CRD's Codeberg data.json uses capital "Authorization"; old Crunchy-Downloader
+        // data.json used lowercase "authorization". Newtonsoft matches case-insensitively.
+        [JsonProperty("Authorization")]
         public string? Authorization { get; set; }
 
-        [JsonProperty("versionName")]
+        // New schema: "version_name" + "version_code"; old schema used "versionName".
+        [JsonProperty("version_name")]
         public string? VersionName { get; set; }
+
+        [JsonProperty("version_code")]
+        public string? VersionCode { get; set; }
     }
 
     public async Task<string> GetBase64EncodedTokenAsync(CancellationToken cancellationToken = default)

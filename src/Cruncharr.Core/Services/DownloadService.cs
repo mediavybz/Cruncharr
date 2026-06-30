@@ -2019,7 +2019,12 @@ public class DownloadService : IDownloadService
         // Download manifest with auth headers
         var manifestRequest = new HttpRequestMessage(HttpMethod.Get, manifestUrl);
         manifestRequest.Headers.Add("Authorization", $"Bearer {_auth.Token?.access_token}");
-        manifestRequest.Headers.Add("User-Agent", "ANDROIDTV/3.59.0 Android/16");
+        // [PT] Use the active stream-endpoint UA so the manifest request matches the play client
+        // instead of a hardcoded (and quickly stale) TV UA. Falls back to the current TV default.
+        var manifestUserAgent = !string.IsNullOrEmpty(_auth.StreamEndpoint?.UserAgent)
+            ? _auth.StreamEndpoint.UserAgent
+            : "ANDROIDTV/3.66.0_22348 Android/16";
+        manifestRequest.Headers.Add("User-Agent", manifestUserAgent);
         if (!string.IsNullOrEmpty(videoToken))
         {
             manifestRequest.Headers.Add("x-cr-video-token", videoToken);

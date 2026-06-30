@@ -434,7 +434,9 @@ public class HistoryController : ControllerBase
                     SonarrSeasonNumber = e.SonarrSeasonNumber,
                     SonarrSeasonEpisodeText = e.SonarrSeasonEpisodeText,
                     DownloadedDubLang = e.DownloadedDubLang ?? new List<string>(),
-                    DownloadedSoftSubs = e.DownloadedSoftSubs ?? new List<string>()
+                    DownloadedSoftSubs = e.DownloadedSoftSubs ?? new List<string>(),
+                    AvailableDubLang = e.HistoryEpisodeAvailableDubLang ?? new List<string>(),
+                    AvailableSoftSubs = e.HistoryEpisodeAvailableSoftSubs ?? new List<string>()
                 }).ToList() ?? new List<HistoryEpisodeResponse>()
             }).ToList() ?? new List<HistorySeasonResponse>()
         };
@@ -497,6 +499,8 @@ public class HistoryEpisodeResponse
     public string SonarrSeasonEpisodeText { get; set; } = "";
     public List<string> DownloadedDubLang { get; set; } = [];
     public List<string> DownloadedSoftSubs { get; set; } = [];
+    public List<string> AvailableDubLang { get; set; } = [];
+    public List<string> AvailableSoftSubs { get; set; } = [];
 }
 
 public class HistorySettingsOverrideRequest

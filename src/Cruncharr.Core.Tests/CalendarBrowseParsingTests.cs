@@ -33,4 +33,37 @@ public class CalendarBrowseParsingTests
         Assert.Equal(1, parsed.Data[0].EpisodeMetadata.EpisodeCount);
         Assert.Equal(0, parsed.Data[1].EpisodeMetadata.EpisodeCount); // null -> default 0, no crash
     }
+
+    [Fact]
+    public void NullValueTypeFields_doNotBreakBrowsePageParse()
+    {
+        // Broader guard for the same bug class: CR can send null for any value-type field
+        // (dates, season_number, duration_ms...). [JsonObject(ItemNullValueHandling=Ignore)] on the
+        // CR models must let the page parse, leaving those members at their defaults.
+        var json = @"{
+            ""total"": 1,
+            ""data"": [
+                { ""id"": ""G3"", ""title"": ""Movie"", ""episode_metadata"": {
+                    ""series_id"": ""GSER"",
+                    ""episode_number"": null,
+                    ""season_number"": null,
+                    ""duration_ms"": null,
+                    ""episode_air_date"": null,
+                    ""premium_available_date"": null,
+                    ""is_premium_only"": null
+                } }
+            ]
+        }";
+
+        var ex = Record.Exception(() => JsonConvert.DeserializeObject<CrBrowseEpisodeBase>(json));
+        Assert.Null(ex);
+
+        var parsed = JsonConvert.DeserializeObject<CrBrowseEpisodeBase>(json);
+        Assert.NotNull(parsed);
+        Assert.Single(parsed!.Data!);
+        var meta = parsed.Data![0].EpisodeMetadata;
+        Assert.Equal(0, meta.EpisodeCount);
+        Assert.Equal(default, meta.EpisodeAirDate);
+        Assert.Equal(default, meta.PremiumAvailableDate);
+    }
 }

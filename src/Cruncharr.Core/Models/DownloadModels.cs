@@ -202,6 +202,9 @@ public class CrBrowseEpisode
     public string? StreamsLink { get; set; }
 }
 
+// CR may send null for value-type fields (dates/numbers) on specials/movies; ignore them so one
+// null never throws away the whole response (the empty-calendar bug, 1.0.14).
+[JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]
 public class CrBrowseEpisodeMetaData
 {
     [JsonProperty("audio_locale")]

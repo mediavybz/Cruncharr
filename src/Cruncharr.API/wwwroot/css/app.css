@@ -1704,6 +1704,7 @@
         .history-season-title { font-weight: 600; }
         .history-season-actions { display: flex; gap: 8px; }
         .history-season-body { padding: 0 15px 15px; }
+        .season-collapse-chevron { font-size: 0.7em; color: var(--text-muted); width: 10px; display: inline-block; }
 
         .history-episode {
             display: flex;

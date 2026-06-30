@@ -2098,7 +2098,7 @@
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(item.seriesTitle || '')}">${escapeHtml(item.seriesTitle) || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
                             <div class="history-poster-meta">${escapeHtml(item.sonarrNextAirDate || '')}</div>
                             <div class="history-poster-meta" style="font-size:0.7em; margin-top:4px;">
-                                ${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0} episodes
+                                ${seriesHaveCount(item)} / ${seriesTotalCount(item)} available
                             </div>
                         </div>
                     </div>
@@ -2127,7 +2127,7 @@
                                         </td>
                                         <td>${getHistoryStatusBadge(item)}</td>
                                         <td>${item.sonarrSeriesId ? `✓ ${escapeHtml(item.sonarrSlugTitle) || 'Matched'}` : '—'}</td>
-                                        <td>${item.downloadedEpisodes || 0} / ${item.totalEpisodes || 0}</td>
+                                        <td>${seriesHaveCount(item)} / ${seriesTotalCount(item)}</td>
                                         <td>${item.hasNewEpisodes ? '✓' : '—'}</td>
                                         <td>
                                             <button class="btn-icon" onclick="event.stopPropagation(); refreshSeries('${escapeJsString(item.seriesId)}')">&#128260;</button>
@@ -3978,8 +3978,10 @@
                 if (field === 'title') return (a.seriesTitle || '').localeCompare(b.seriesTitle || '');
 
                 if (field === 'status') {
-                    const aStatus = (a.downloadedEpisodes||0) >= (a.totalEpisodes||0) ? 2 : (a.downloadedEpisodes||0) > 0 ? 1 : 0;
-                    const bStatus = (b.downloadedEpisodes||0) >= (b.totalEpisodes||0) ? 2 : (b.downloadedEpisodes||0) > 0 ? 1 : 0;
+                    const aHave = seriesHaveCount(a), aTot = seriesTotalCount(a);
+                    const bHave = seriesHaveCount(b), bTot = seriesTotalCount(b);
+                    const aStatus = aTot > 0 && aHave >= aTot ? 2 : aHave > 0 ? 1 : 0;
+                    const bStatus = bTot > 0 && bHave >= bTot ? 2 : bHave > 0 ? 1 : 0;
                     return aStatus - bStatus;
                 }
                 return 0;
@@ -4011,8 +4013,30 @@
             return missingDubs.length > 0 || missingSubs.length > 0;
         }
         
-        function getEpisodeDownloadStatus(episode) {
+        // An episode counts as "have" if Cruncharr downloaded it OR (when Sonarr counting is on and
+        // the series is matched) Sonarr already has the file. Mirrors upstream HistoryCountSonarr.
+        function episodeIsHave(episode, series) {
+            if (episode.wasDownloaded) return true;
+            const countSonarr = config?.history?.countSonarr !== false;
+            if (countSonarr && series && series.sonarrSeriesId && episode.sonarrHasFile) return true;
+            return false;
+        }
+
+        // "Have" / total counts for a series, factoring Sonarr-owned files (see episodeIsHave).
+        function seriesHaveCount(series) {
+            return (series.seasons || []).reduce((n, se) => n + (se.episodes || []).filter(e => episodeIsHave(e, series)).length, 0);
+        }
+        function seriesTotalCount(series) {
+            return (series.seasons || []).reduce((n, se) => n + (se.episodes || []).length, 0) || series.totalEpisodes || 0;
+        }
+
+        function getEpisodeDownloadStatus(episode, series) {
             if (episode.wasDownloaded) {
+                return { class: 'status-full', icon: '&#10004;' };
+            }
+            // Sonarr already has the file -> show as "have" (check), distinct tooltip handled elsewhere.
+            const countSonarr = config?.history?.countSonarr !== false;
+            if (countSonarr && series && series.sonarrSeriesId && episode.sonarrHasFile) {
                 return { class: 'status-full', icon: '&#10004;' };
             }
             if (isEpisodePartiallyDownloaded(episode)) {
@@ -4021,7 +4045,7 @@
             return { class: 'status-none', icon: '' };
         }
         
-        function getEpisodeStatusTooltip(episode) {
+        function getEpisodeStatusTooltip(episode, series) {
             const downloadedDubs = episode.downloadedDubLang || [];
             const downloadedSubs = episode.downloadedSoftSubs || [];
             const availableDubs = episode.availableDubLang || [];
@@ -4049,7 +4073,14 @@
                 tooltip += `Available but missing: ${missing.join(', ')}`;
             }
 
-            return tooltip.trim() || 'Not downloaded';
+            const tip = tooltip.trim();
+            if (tip) return tip;
+            // Not downloaded by Cruncharr, but Sonarr may already own it.
+            const countSonarr = config?.history?.countSonarr !== false;
+            if (countSonarr && series && series.sonarrSeriesId && episode.sonarrHasFile) {
+                return 'Already in Sonarr (file present)';
+            }
+            return 'Not downloaded';
         }
         
         async function showHistorySeriesDetail(seriesId) {
@@ -4142,7 +4173,7 @@
                         <div class="history-detail-meta">${escapeHtml(series.seriesDescription || '')}</div>
                         <div class="mt-10">
                             <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Episodes:</div>
-                            <div>${series.downloadedEpisodes || 0} / ${series.totalEpisodes || 0} downloaded${series.hasNewEpisodes ? ' <span class="lang-badge selected">New</span>' : ''}</div>
+                            <div>${seriesHaveCount(series)} / ${seriesTotalCount(series)} available${series.hasNewEpisodes ? ' <span class="lang-badge selected">New</span>' : ''}</div>
                         </div>
                     </div>
                 </div>
@@ -4158,8 +4189,8 @@
             
             html += seasons.map(season => {
                 const episodesHtml = (season.episodes || []).map(ep => {
-                    const status = getEpisodeDownloadStatus(ep);
-                    const tooltip = getEpisodeStatusTooltip(ep);
+                    const status = getEpisodeDownloadStatus(ep, series);
+                    const tooltip = getEpisodeStatusTooltip(ep, series);
                     const airDate = ep.episodeCrPremiumAirDate ? new Date(ep.episodeCrPremiumAirDate) : null;
                     const airStr = airDate && !isNaN(airDate.getTime()) ? airDate.toLocaleDateString() : '';
                     // Sonarr per-episode indicator (mirrors the desktop app): green check when Sonarr
@@ -4194,13 +4225,14 @@
                 return `
                     <div class="history-season">
                         <div class="history-season-header" onclick="toggleSeasonCollapse(this)">
-                            <div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="season-collapse-chevron" title="Collapse / expand episodes">&#9662;</span>
                                 <span class="history-season-title">${escapeHtml(season.seasonTitle || `Season ${season.seasonNum || 1}`)}</span>
-                                <span style="font-size:0.8em; color:var(--text-muted); margin-left:8px;">${(season.episodes || []).filter(e => e.wasDownloaded).length}/${season.episodes?.length || 0} downloaded</span>
+                                <span style="font-size:0.8em; color:var(--text-muted);">${(season.episodes || []).filter(e => episodeIsHave(e, series)).length}/${season.episodes?.length || 0} available</span>
                             </div>
                             <div class="history-season-actions">
-                                <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${escapeJsString(season.seasonId)}')" title="Settings">&#9881;</button>
-                                <button class="btn-icon" onclick="event.stopPropagation(); downloadSeason('${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}')" title="Download season">&#9660;</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${escapeJsString(season.seasonId)}')" title="Season settings">&#9881;</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); downloadSeason('${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}')" title="Download whole season">&#11015;</button>
                             </div>
                         </div>
                         <div class="history-season-body">
@@ -4216,7 +4248,10 @@
         function toggleSeasonCollapse(header) {
             const body = header.nextElementSibling;
             if (body) {
-                body.style.display = body.style.display === 'none' ? 'block' : 'none';
+                const collapsed = body.style.display === 'none';
+                body.style.display = collapsed ? 'block' : 'none';
+                const chevron = header.querySelector('.season-collapse-chevron');
+                if (chevron) chevron.innerHTML = collapsed ? '&#9662;' : '&#9656;'; // down when open, right when collapsed
             }
         }
         
@@ -4738,8 +4773,8 @@
         }
 
         function getHistoryStatusBadge(series) {
-            const downloaded = series.downloadedEpisodes || 0;
-            const total = series.totalEpisodes || 0;
+            const downloaded = seriesHaveCount(series);
+            const total = seriesTotalCount(series);
             if (total === 0) return '<span class="badge badge-queued">Empty</span>';
             if (downloaded >= total) return '<span class="badge badge-done">Complete</span>';
             if (downloaded > 0) return '<span class="badge badge-downloading">Partial</span>';

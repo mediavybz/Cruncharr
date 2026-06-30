@@ -287,53 +287,55 @@
               Distinct from nebula (which is a lifted slate). Layout is shared/app-wide; only the
               colour tokens differ here. ── */
         [data-theme="seerr"] {
-            --accent: #6c47ff;            /* Overseerr indigo */
-            --accent-bright: #8b5cf6;     /* violet-500 */
+            /* Exact Overseerr palette, lifted from the saved Series-Seerr CSS: Tailwind
+               gray-900/800/700 surfaces + indigo-500/indigo-600 -> purple accent. */
+            --accent: #6366f1;            /* indigo-500 */
+            --accent-bright: #a855f7;     /* purple-500 */
             --accent-orange: var(--accent);
             --accent-orange-bright: var(--accent-bright);
-            --accent-soft: rgba(108, 71, 255, 0.20);
-            --accent-softer: rgba(139, 92, 246, 0.12);
-            --accent-glow: rgba(108, 71, 255, 0.45);
-            --accent-grad: linear-gradient(135deg, #6c47ff, #8b5cf6);
+            --accent-soft: rgba(99, 102, 241, 0.18);
+            --accent-softer: rgba(168, 85, 247, 0.12);
+            --accent-glow: rgba(99, 102, 241, 0.40);
+            --accent-grad: linear-gradient(135deg, #4f46e5, #9333ea);  /* indigo-600 -> purple-600 */
 
-            --bg-primary: #0b0d14;        /* near-black navy content */
-            --bg-secondary: #11141d;      /* cards / header */
-            --bg-tertiary: #171b27;
-            --bg-card: #11141d;
-            --bg-hover: #1d2230;
+            --bg-primary: #111827;        /* gray-900 content */
+            --bg-secondary: #1f2937;      /* gray-800 cards / header */
+            --bg-tertiary: #374151;       /* gray-700 */
+            --bg-card: #1f2937;
+            --bg-hover: #374151;
             --surface-border: rgba(255, 255, 255, 0.06);
-            --border-color: rgba(255, 255, 255, 0.09);
-            --sidebar-bg: linear-gradient(180deg, #0e1119, #090b11);
+            --border-color: #374151;      /* gray-700 */
+            --sidebar-bg: linear-gradient(180deg, #1f2937, #111827);
 
-            --text-primary: #eef0f7;
-            --text-secondary: #aab0c4;
-            --text-muted: #737a93;
+            --text-primary: #f9fafb;      /* gray-50 */
+            --text-secondary: #d1d5db;    /* gray-300 */
+            --text-muted: #9ca3af;        /* gray-400 */
 
-            --accent-blue: #818cf8;   --info-soft: rgba(129, 140, 248, 0.18);
-            --accent-green: #34d399;  --success-soft: rgba(52, 211, 153, 0.18);
-            --accent-red: #fb7185;    --error-soft: rgba(251, 113, 133, 0.18);
-            --accent-yellow: #fbbf24; --warning-soft: rgba(251, 191, 36, 0.18);
+            --accent-blue: #3b82f6;   --info-soft: rgba(59, 130, 246, 0.18);
+            --accent-green: #22c55e;  --success-soft: rgba(34, 197, 94, 0.18);
+            --accent-red: #ef4444;    --error-soft: rgba(239, 68, 68, 0.18);
+            --accent-yellow: #eab308; --warning-soft: rgba(234, 179, 8, 0.18);
             --premium-soft: var(--accent-soft);
 
-            --glass-bg: rgba(17, 20, 29, 0.82);
-            --glass-border: rgba(139, 92, 246, 0.18);
+            --glass-bg: rgba(31, 41, 55, 0.82);
+            --glass-border: rgba(168, 85, 247, 0.18);
             --glass-blur: 14px;
             --card-blur: 0px;
 
             --bloom:
-                radial-gradient(1200px 640px at 84% -10%, rgba(139, 92, 246, 0.20), transparent 58%),
-                radial-gradient(1100px 760px at -12% 116%, rgba(108, 71, 255, 0.18), transparent 58%);
-            --shadow-glow: 0 8px 30px rgba(108, 71, 255, 0.40);
-            --scrollbar-thumb: rgba(170, 176, 196, 0.22);
-            --scrollbar-thumb-hover: rgba(139, 92, 246, 0.65);
-            --scrollbar-thumb-sidebar: rgba(170, 176, 196, 0.16);
+                radial-gradient(1200px 640px at 84% -10%, rgba(168, 85, 247, 0.16), transparent 58%),
+                radial-gradient(1100px 760px at -12% 116%, rgba(99, 102, 241, 0.16), transparent 58%);
+            --shadow-glow: 0 8px 30px rgba(99, 102, 241, 0.40);
+            --scrollbar-thumb: rgba(209, 213, 219, 0.22);
+            --scrollbar-thumb-hover: rgba(168, 85, 247, 0.65);
+            --scrollbar-thumb-sidebar: rgba(209, 213, 219, 0.16);
             --scrollbar-thumb-sidebar-hover: var(--accent-bright);
         }
         /* Seerr signature: active nav uses the full indigo→purple gradient pill. */
         [data-theme="seerr"] .nav-item.active {
             background: var(--accent-grad);
             color: #fff;
-            box-shadow: 0 6px 18px rgba(108, 71, 255, 0.32);
+            box-shadow: 0 6px 18px rgba(99, 102, 241, 0.32);
         }
         [data-theme="seerr"] .nav-item.active .nav-icon { color: #fff; }
         [data-theme="seerr"] .nav-item.active::before { background: #fff; }
@@ -1116,13 +1118,14 @@
         .toolbar-btn.active { background: var(--bg-tertiary); color: var(--accent-orange); border-color: var(--accent-orange); }
         .toolbar-btn .icon { font-size: 1.5em; }
 
+        /* Exact Overseerr/seerr poster grid: ul.cards-vertical = minmax(9.375rem,1fr), gap 1rem. */
         .history-poster-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-            gap: 12px;
+            grid-template-columns: repeat(auto-fill, minmax(9.375rem, 1fr));
+            gap: 1rem;
         }
         @media (max-width: 480px) {
-            .history-poster-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+            .history-poster-grid { grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: 0.75rem; }
         }
 
         .history-poster {

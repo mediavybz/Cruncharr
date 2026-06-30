@@ -215,6 +215,12 @@ public class CrunchyrollConfig
     [YamlMember(Alias = "mark_as_watched", ApplyNamingConventions = false)]
     public bool MarkAsWatched { get; set; } = false;
 
+    // Profile id whose preferred languages were last synced into the download defaults. Used so the
+    // profile->defaults sync only fires when the active profile actually changes (login/switch),
+    // not on every token refresh. Empty = never synced.
+    [YamlMember(Alias = "last_synced_profile_id", ApplyNamingConventions = false)]
+    public string LastSyncedProfileId { get; set; } = "";
+
     [YamlMember(Alias = "search_fetch_featured_music", ApplyNamingConventions = false)]
     public bool SearchFetchFeaturedMusic { get; set; } = false;
 
@@ -312,6 +318,12 @@ public class DownloadConfig
 
     [YamlMember(Alias = "default_audio", ApplyNamingConventions = false)]
     public string DefaultAudio { get; set; } = "ja-JP";
+
+    // When true, logging in or switching Crunchyroll profiles sets DefaultAudio/DefaultSub to that
+    // profile's preferred content languages. Re-syncs only when the profile actually changes, so a
+    // manual change in Settings is preserved while you stay on the same profile.
+    [YamlMember(Alias = "sync_defaults_from_profile", ApplyNamingConventions = false)]
+    public bool SyncDefaultsFromProfile { get; set; } = true;
 
     [YamlMember(Alias = "download_description_audio", ApplyNamingConventions = false)]
     public bool DownloadDescriptionAudio { get; set; } = false;

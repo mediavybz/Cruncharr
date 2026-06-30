@@ -1349,6 +1349,8 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 }
 
                 await GetSubscriptionAsync(useBetaApi, cancellationToken);
+                // Profile (with its preferred languages + id) is now finalized -> sync defaults.
+                SyncDefaultLanguagesFromProfile();
             }
         }
         else
@@ -1480,11 +1482,50 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 Profile = profileTemp;
                 _logger?.LogInformation("Logged in as {Username}", Profile.Username);
                 await GetSubscriptionAsync(useBetaApi, cancellationToken);
+                // Fallback sync for accounts where the multi-profile endpoint is unavailable; no-ops
+                // if GetMultiProfileAsync already synced this profile (same key).
+                SyncDefaultLanguagesFromProfile();
             }
         }
         else
         {
             _logger?.LogError("Failed to get profile: {Error}", error);
+        }
+    }
+
+    // Pure decision+mutation for the profile->defaults sync (unit-testable). Sets DefaultAudio/
+    // DefaultSub from the profile's preferred languages, but only when the active profile actually
+    // changes (profileKey != LastSyncedProfileId) so a manual change made while on one profile is
+    // preserved. Returns true if the config changed and should be persisted.
+    internal static bool ApplyProfileLanguageDefaults(CruncharrConfig config, string? profileKey, string? prefAudio, string? prefSub)
+    {
+        if (config?.Download?.SyncDefaultsFromProfile != true) return false;
+        if (string.IsNullOrWhiteSpace(profileKey)) return false;
+        if (string.Equals(profileKey, config.Crunchyroll?.LastSyncedProfileId, StringComparison.Ordinal)) return false;
+
+        if (!string.IsNullOrWhiteSpace(prefAudio)) config.Download.DefaultAudio = prefAudio!;
+        if (!string.IsNullOrWhiteSpace(prefSub)) config.Download.DefaultSub = prefSub!;
+        config.Crunchyroll!.LastSyncedProfileId = profileKey!;
+        return true;
+    }
+
+    private void SyncDefaultLanguagesFromProfile()
+    {
+        try
+        {
+            if (_config == null || Profile == null || Profile.Username == "???") return;
+            var key = !string.IsNullOrWhiteSpace(Profile.ProfileId) ? Profile.ProfileId : Profile.Username;
+            if (ApplyProfileLanguageDefaults(_config, key, Profile.PreferredContentAudioLanguage, Profile.PreferredContentSubtitleLanguage))
+            {
+                var path = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+                _config.Save(path);
+                _logger?.LogInformation("Synced default languages from profile {Key}: audio={Audio} sub={Sub}",
+                    key, _config.Download.DefaultAudio, _config.Download.DefaultSub);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Profile language sync failed");
         }
     }
 

@@ -3992,15 +3992,19 @@
             if (config?.history?.checkPartialDownloads === false) return false;
             const downloadedDubs = episode.downloadedDubLang || [];
             const downloadedSubs = episode.downloadedSoftSubs || [];
+            const availableDubs = episode.availableDubLang || [];
+            const availableSubs = episode.availableSoftSubs || [];
             const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];
             const requestedSubs = episode.requestedSoftSubs || config?.download?.softSubs || [];
-            
+
             const hasSomeDownloads = downloadedDubs.length > 0 || downloadedSubs.length > 0;
             if (!hasSomeDownloads) return false;
-            
-            const missingDubs = requestedDubs.filter(d => !downloadedDubs.includes(d));
-            const missingSubs = requestedSubs.filter(s => !downloadedSubs.includes(s));
-            
+
+            // Only count a requested language as missing when it is actually available for this
+            // episode — orange should not appear for languages Crunchyroll never offered.
+            const missingDubs = requestedDubs.filter(d => availableDubs.includes(d) && !downloadedDubs.includes(d));
+            const missingSubs = requestedSubs.filter(s => availableSubs.includes(s) && !downloadedSubs.includes(s));
+
             return missingDubs.length > 0 || missingSubs.length > 0;
         }
         
@@ -4017,9 +4021,11 @@
         function getEpisodeStatusTooltip(episode) {
             const downloadedDubs = episode.downloadedDubLang || [];
             const downloadedSubs = episode.downloadedSoftSubs || [];
+            const availableDubs = episode.availableDubLang || [];
+            const availableSubs = episode.availableSoftSubs || [];
             const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];
             const requestedSubs = episode.requestedSoftSubs || config?.download?.softSubs || [];
-            
+
             let tooltip = '';
             if (downloadedDubs.length > 0) {
                 tooltip += `Downloaded dubs: ${downloadedDubs.join(', ')}\n`;
@@ -4027,16 +4033,20 @@
             if (downloadedSubs.length > 0) {
                 tooltip += `Downloaded subs: ${downloadedSubs.join(', ')}\n`;
             }
-            
-            const missingDubs = requestedDubs.filter(d => !downloadedDubs.includes(d));
-            const missingSubs = requestedSubs.filter(s => !downloadedSubs.includes(s));
+            if (availableSubs.length > 0) {
+                tooltip += `Available subs: ${availableSubs.join(', ')}\n`;
+            }
+
+            // Only surface languages that are actually available for this episode.
+            const missingDubs = requestedDubs.filter(d => availableDubs.includes(d) && !downloadedDubs.includes(d));
+            const missingSubs = requestedSubs.filter(s => availableSubs.includes(s) && !downloadedSubs.includes(s));
             const missing = [...missingDubs, ...missingSubs];
-            
+
             if (missing.length > 0) {
                 tooltip += `Available but missing: ${missing.join(', ')}`;
             }
-            
-            return tooltip || 'Not downloaded';
+
+            return tooltip.trim() || 'Not downloaded';
         }
         
         async function showHistorySeriesDetail(seriesId) {

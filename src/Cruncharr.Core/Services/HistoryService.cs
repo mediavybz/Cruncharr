@@ -271,6 +271,10 @@ public class HistoryService : IHistoryService, IDisposable
 
     public async Task SetAsDownloadedAsync(string? seriesId, string? seasonId, string episodeId, List<string>? downloadedDubs = null, List<string>? downloadedSubs = null)
     {
+        // A manual "Mark as Downloaded" supplies no specific dubs/subs: the user is asserting the
+        // episode is fully downloaded, so reset the dub/sub tracking to everything available for the
+        // episode. Otherwise stale partial tracking would incorrectly re-flag it as partial.
+        bool isManualMark = downloadedDubs == null && downloadedSubs == null;
         var normalizedDubs = NormalizeLocales(downloadedDubs);
         var normalizedSubs = NormalizeLocales(downloadedSubs);
 
@@ -289,19 +293,29 @@ public class HistoryService : IHistoryService, IDisposable
                     if (historyEpisode != null)
                     {
                         historyEpisode.WasDownloaded = true;
-                        // Track downloaded dubs/subs for partial download detection
-                        if (normalizedDubs.Count > 0)
+                        if (isManualMark)
                         {
-                            foreach (var dub in normalizedDubs.Where(d => !historyEpisode.DownloadedDubLang.Contains(d, StringComparer.OrdinalIgnoreCase)))
-                            {
-                                historyEpisode.DownloadedDubLang.Add(dub);
-                            }
+                            // Reset tracking to the full available set so the episode is treated as
+                            // fully downloaded, not partial.
+                            historyEpisode.DownloadedDubLang = new List<string>(historyEpisode.HistoryEpisodeAvailableDubLang);
+                            historyEpisode.DownloadedSoftSubs = new List<string>(historyEpisode.HistoryEpisodeAvailableSoftSubs);
                         }
-                        if (normalizedSubs.Count > 0)
+                        else
                         {
-                            foreach (var sub in normalizedSubs.Where(s => !historyEpisode.DownloadedSoftSubs.Contains(s, StringComparer.OrdinalIgnoreCase)))
+                            // Track downloaded dubs/subs for partial download detection
+                            if (normalizedDubs.Count > 0)
                             {
-                                historyEpisode.DownloadedSoftSubs.Add(sub);
+                                foreach (var dub in normalizedDubs.Where(d => !historyEpisode.DownloadedDubLang.Contains(d, StringComparer.OrdinalIgnoreCase)))
+                                {
+                                    historyEpisode.DownloadedDubLang.Add(dub);
+                                }
+                            }
+                            if (normalizedSubs.Count > 0)
+                            {
+                                foreach (var sub in normalizedSubs.Where(s => !historyEpisode.DownloadedSoftSubs.Contains(s, StringComparer.OrdinalIgnoreCase)))
+                                {
+                                    historyEpisode.DownloadedSoftSubs.Add(sub);
+                                }
                             }
                         }
                         historySeason.UpdateDownloaded();

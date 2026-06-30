@@ -521,6 +521,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 SeasonNumber = episode.SeasonNumber,
                 Description = episode.Description,
                 SeriesTitle = episode.SeriesTitle,
+                // [FIX] Carry the series/season identity through. Without these the download flow
+                // could never get the real CR series_id, so History keyed every download by the
+                // series TITLE -> the full-series populate (ParseSeriesById) and per-episode Sonarr
+                // match both failed. CMS /episodes/{id} returns these at top level.
+                SeriesId = episode.SeriesId,
+                SeasonId = episode.SeasonId,
+                SeasonTitle = episode.SeasonTitle,
                 Locale = episode.AudioLocale ?? "ja-JP",
                 AudioLocale = episode.AudioLocale ?? "ja-JP",
                 IsPremium = episode.IsPremiumOnly,

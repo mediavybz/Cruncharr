@@ -1485,6 +1485,7 @@
                     ${seriesList.map(series => `
                         <div class="history-poster clickable" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')">
                             <div class="history-poster-img">
+                                <span class="poster-type-badge">Series</span>
                                 ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(series.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                 ${series.episodes?.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
                             </div>
@@ -1615,6 +1616,7 @@
                     ${series.map(s => `
                         <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
                             <div class="history-poster-img">
+                                <span class="poster-type-badge">Series</span>
                                 ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             </div>
                             <div class="history-poster-info">
@@ -1800,7 +1802,7 @@
                         <div class="history-poster" ${clickable
                             ? `onclick="selectBrowseResult('${escapeJsString(s.id)}')" class="clickable"`
                             : `title="Not on Crunchyroll yet" style="opacity:.55;"`}>
-                            <div class="history-poster-img">${img}</div>
+                            <div class="history-poster-img"><span class="poster-type-badge">Series</span>${img}</div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
                                 <div class="history-poster-meta">${metaMain}</div>
@@ -2091,6 +2093,7 @@
                 content.innerHTML = '<div class="history-poster-grid">' + filteredData.map(item => `
                     <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'} clickable" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')">
                         <div class="history-poster-img">
+                            <span class="poster-type-badge">Series</span>
                             ${item.thumbnailImageUrl && isSafeUrl(item.thumbnailImageUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(item.thumbnailImageUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
                         </div>
@@ -3130,7 +3133,7 @@
 
         // Named themes -> data-theme attribute. "Dark" is the default :root (no attr).
         // "System" sets data-theme="system" and lets CSS follow prefers-color-scheme.
-        const THEME_ATTR = { 'System': 'system', 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'nebula', 'Sonarr': 'sonarr' };
+        const THEME_ATTR = { 'System': 'system', 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'seerr', 'Sonarr': 'sonarr' };
         function applyTheme() {
             const theme = config?.appearance?.theme || 'System';
             const attr = THEME_ATTR[theme];

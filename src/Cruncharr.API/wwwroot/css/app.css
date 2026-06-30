@@ -283,6 +283,61 @@
         [data-theme="nebula"] .nav-item.active .nav-icon { color: #fff; }
         [data-theme="nebula"] .nav-item.active::before { background: #fff; }
 
+        /* ── Seerr: exact Overseerr palette — near-black navy surfaces + indigo→purple accent.
+              Distinct from nebula (which is a lifted slate). Layout is shared/app-wide; only the
+              colour tokens differ here. ── */
+        [data-theme="seerr"] {
+            --accent: #6c47ff;            /* Overseerr indigo */
+            --accent-bright: #8b5cf6;     /* violet-500 */
+            --accent-orange: var(--accent);
+            --accent-orange-bright: var(--accent-bright);
+            --accent-soft: rgba(108, 71, 255, 0.20);
+            --accent-softer: rgba(139, 92, 246, 0.12);
+            --accent-glow: rgba(108, 71, 255, 0.45);
+            --accent-grad: linear-gradient(135deg, #6c47ff, #8b5cf6);
+
+            --bg-primary: #0b0d14;        /* near-black navy content */
+            --bg-secondary: #11141d;      /* cards / header */
+            --bg-tertiary: #171b27;
+            --bg-card: #11141d;
+            --bg-hover: #1d2230;
+            --surface-border: rgba(255, 255, 255, 0.06);
+            --border-color: rgba(255, 255, 255, 0.09);
+            --sidebar-bg: linear-gradient(180deg, #0e1119, #090b11);
+
+            --text-primary: #eef0f7;
+            --text-secondary: #aab0c4;
+            --text-muted: #737a93;
+
+            --accent-blue: #818cf8;   --info-soft: rgba(129, 140, 248, 0.18);
+            --accent-green: #34d399;  --success-soft: rgba(52, 211, 153, 0.18);
+            --accent-red: #fb7185;    --error-soft: rgba(251, 113, 133, 0.18);
+            --accent-yellow: #fbbf24; --warning-soft: rgba(251, 191, 36, 0.18);
+            --premium-soft: var(--accent-soft);
+
+            --glass-bg: rgba(17, 20, 29, 0.82);
+            --glass-border: rgba(139, 92, 246, 0.18);
+            --glass-blur: 14px;
+            --card-blur: 0px;
+
+            --bloom:
+                radial-gradient(1200px 640px at 84% -10%, rgba(139, 92, 246, 0.20), transparent 58%),
+                radial-gradient(1100px 760px at -12% 116%, rgba(108, 71, 255, 0.18), transparent 58%);
+            --shadow-glow: 0 8px 30px rgba(108, 71, 255, 0.40);
+            --scrollbar-thumb: rgba(170, 176, 196, 0.22);
+            --scrollbar-thumb-hover: rgba(139, 92, 246, 0.65);
+            --scrollbar-thumb-sidebar: rgba(170, 176, 196, 0.16);
+            --scrollbar-thumb-sidebar-hover: var(--accent-bright);
+        }
+        /* Seerr signature: active nav uses the full indigo→purple gradient pill. */
+        [data-theme="seerr"] .nav-item.active {
+            background: var(--accent-grad);
+            color: #fff;
+            box-shadow: 0 6px 18px rgba(108, 71, 255, 0.32);
+        }
+        [data-theme="seerr"] .nav-item.active .nav-icon { color: #fff; }
+        [data-theme="seerr"] .nav-item.active::before { background: #fff; }
+
         /* ── Sonarr: signature cyan top bar, dark slate sidebar, light content.
               Mixed theme: content tokens are light; sidebar + header re-skinned. ── */
         [data-theme="sonarr"] {
@@ -654,7 +709,7 @@
         /* Content Area */
         .content { flex: 1; overflow-y: auto; padding: 32px 36px; animation: fadeSlideUp 0.45s var(--transition); }
 
-        .page-title { font-size: var(--text-2xl); font-weight: var(--fw-black); letter-spacing: -0.02em; margin-bottom: var(--space-1); color: var(--text-primary); }
+        .page-title { font-size: var(--text-2xl); font-weight: var(--fw-black); letter-spacing: -0.02em; margin-bottom: var(--space-1); color: var(--accent); }
         .page-subtitle { color: var(--text-secondary); font-size: var(--text-base); margin-bottom: var(--space-6); }
 
         /* Cards */
@@ -1063,8 +1118,11 @@
 
         .history-poster-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+            gap: 12px;
+        }
+        @media (max-width: 480px) {
+            .history-poster-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
         }
 
         .history-poster {
@@ -1112,6 +1170,24 @@
         .history-poster-info { padding: 10px; text-align: center; }
         .history-poster-title { font-weight: 600; font-size: 0.9em; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .history-poster-meta { font-size: 0.8em; color: var(--text-secondary); }
+
+        /* seerr-style content-type pill, top-left of the poster art. */
+        .poster-type-badge {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            padding: 2px 7px;
+            border-radius: 6px;
+            z-index: 2;
+            line-height: 1.4;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+        }
 
         .history-table table { width: 100%; border-collapse: collapse; }
         .history-table th { padding: 12px 15px; text-align: left; font-weight: 600; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); background: var(--bg-tertiary); }
@@ -1795,12 +1871,14 @@
         .nav-item { transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
         .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
         .nav-item:hover .nav-icon { color: var(--accent); }
+        /* seerr-style active nav: solid filled accent pill, app-wide. Colour comes from the
+           theme's --accent-grad so each theme keeps its own hue. */
         .nav-item.active {
-            background: linear-gradient(135deg, var(--accent-soft), var(--accent-softer));
-            color: var(--accent);
-            box-shadow: inset 0 0 0 1px var(--accent-glow);
+            background: var(--accent-grad);
+            color: #fff;
+            box-shadow: 0 6px 18px var(--accent-glow);
         }
-        .nav-item.active .nav-icon { color: var(--accent); }
+        .nav-item.active .nav-icon { color: #fff; }
 
         /* Monochrome icons highlight accent on hover */
         .btn-icon:hover, .toolbar-btn:hover .nav-icon { color: var(--accent); }
@@ -2322,17 +2400,8 @@
             position: relative;
             font-weight: var(--fw-semibold);
         }
-        .nav-item.active::before {
-            content: '';
-            position: absolute;
-            left: -12px;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 3px;
-            height: 22px;
-            background: var(--accent);
-            border-radius: 0 2px 2px 0;
-        }
+        /* Left accent bar removed — the active item is now a solid filled pill (seerr style). */
+        .nav-item.active::before { display: none; }
 
         /* Nav item hover — accent tint */
         .nav-item { transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }

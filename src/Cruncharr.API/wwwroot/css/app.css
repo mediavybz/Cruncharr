@@ -314,7 +314,7 @@
             --accent-soft: rgba(99, 102, 241, 0.18);
             --accent-softer: rgba(168, 85, 247, 0.12);
             --accent-glow: rgba(99, 102, 241, 0.40);
-            --accent-grad: linear-gradient(135deg, #4f46e5, #9333ea);  /* indigo-600 -> purple-600 */
+            --accent-grad: linear-gradient(to bottom right, #4f46e5, #9333ea);  /* seerr from-indigo-600 to-purple-600 (bg-gradient-to-br) */
 
             --bg-primary: #111827;        /* gray-900 content */
             --bg-secondary: #1f2937;      /* gray-800 cards / header */
@@ -323,7 +323,7 @@
             --bg-hover: #374151;
             --surface-border: rgba(255, 255, 255, 0.06);
             --border-color: #374151;      /* gray-700 */
-            --sidebar-bg: linear-gradient(180deg, #1f2937, #111827);
+            --sidebar-bg: linear-gradient(#1f2937 0%, #131928 100%);  /* exact Overseerr .sidebar */
 
             --text-primary: #f9fafb;      /* gray-50 */
             --text-secondary: #d1d5db;    /* gray-300 */
@@ -453,35 +453,30 @@
         .sidebar {
             width: var(--sidebar-width);
             background: var(--sidebar-bg);
-            border-right: 1px solid var(--surface-border);
+            border-right: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
             position: relative;
             z-index: 5;
         }
-        /* Faint accent glow along the top edge of the sidebar (theme-tinted) */
-        .sidebar::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 120px;
-            background: radial-gradient(60% 100% at 50% 0%, var(--accent-softer), transparent 70%);
-            pointer-events: none;
-            z-index: 0;
-        }
+        /* No sidebar top-glow — seerr's sidebar is flat. */
+        .sidebar::before { content: none; }
         .sidebar > * { position: relative; z-index: 1; }
 
+        /* seerr brand block: a tall (h-24 = 96px) logo area, px-4 py-2. */
         .sidebar-header {
-            padding: 20px;
+            padding: 8px 16px;
+            min-height: 96px;
             display: flex;
             align-items: center;
-            gap: 12px;
+            justify-content: center;
+            gap: 14px;
         }
 
         .sidebar-logo {
-            width: 44px;
-            height: 44px;
+            width: 60px;
+            height: 60px;
             border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
@@ -490,8 +485,8 @@
             overflow: hidden;
         }
         .sidebar-logo-img {
-            width: 44px;
-            height: 44px;
+            width: 60px;
+            height: 60px;
             border-radius: var(--radius-sm);
             object-fit: contain;
             flex-shrink: 0;
@@ -499,7 +494,7 @@
         }
 
         .sidebar-title {
-            font-size: 1.7em;
+            font-size: 2em;
             font-weight: 800;
             letter-spacing: -0.01em;
             background: var(--accent-grad);
@@ -511,7 +506,7 @@
 
         .sidebar-nav { flex: 1; padding: 10px 0; }
 
-        /* seerr SidebarItem: px-2 py-2 text-base/leading-6 font-medium rounded-md, text-gray-300. */
+        /* seerr SidebarItem: px-2 py-2 text-lg/leading-6 font-medium rounded-md, white text. */
         .nav-item {
             display: flex;
             align-items: center;
@@ -520,11 +515,11 @@
             cursor: pointer;
             transition: background 0.15s, color 0.15s;
             gap: 12px;
-            color: var(--text-secondary);
+            color: var(--text-primary);
             text-decoration: none;
             border-radius: 6px;
             font-weight: 500;
-            font-size: 1rem;
+            font-size: 1.125rem;
             line-height: 1.5rem;
         }
 
@@ -571,8 +566,8 @@
         .more-sheet-item:active { background: var(--bg-hover); }
         .more-sheet-item .nav-icon { width: 22px; color: var(--text-secondary); }
 
-        .nav-icon { width: 20px; text-align: center; display: flex; align-items: center; justify-content: center; }
-        .nav-icon svg { width: 18px; height: 18px; }
+        .nav-icon { width: 24px; text-align: center; display: flex; align-items: center; justify-content: center; }
+        .nav-icon svg { width: 24px; height: 24px; }
 
         .sidebar-footer {
             padding: 14px 16px;

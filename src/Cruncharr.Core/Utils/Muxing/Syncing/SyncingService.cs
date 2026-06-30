@@ -140,7 +140,8 @@ public class SyncingService : ISyncingService
             for (int y = 0; y < accessor.Height; y++)
             {
                 Span<Rgba32> row = accessor.GetRowSpan(y);
-                for (int x = 0; x < row.Length; x++)
+                // Bound by pixels.Length so a dimension mismatch can never overflow the buffer.
+                for (int x = 0; x < row.Length && index < pixels.Length; x++)
                 {
                     pixels[index++] = row[x].R / 255f;
                 }
@@ -155,16 +156,20 @@ public class SyncingService : ISyncingService
         using (var image1 = Image.Load<Rgba32>(imagePath1))
         using (var image2 = Image.Load<Rgba32>(imagePath2))
         {
+            // Stretch (not Max) so both frames normalize to the exact same target grid regardless of
+            // source scale/aspect. Max preserves aspect ratio, so videos of different scales produced
+            // different actual dimensions and the two pixel arrays misaligned -> SSIM could not match
+            // frames and syncing failed ("unable to sync"). Grayscale thumbnails don't need aspect.
             image1.Mutate(x => x.Resize(new ResizeOptions
             {
                 Size = new Size(targetWidth, targetHeight),
-                Mode = ResizeMode.Max
+                Mode = ResizeMode.Stretch
             }).Grayscale());
 
             image2.Mutate(x => x.Resize(new ResizeOptions
             {
                 Size = new Size(targetWidth, targetHeight),
-                Mode = ResizeMode.Max
+                Mode = ResizeMode.Stretch
             }).Grayscale());
 
             float[] pixels1 = ExtractPixels(image1, targetWidth, targetHeight);
@@ -215,10 +220,11 @@ public class SyncingService : ISyncingService
     public float[] GetPixelsArray(string imagePath, int targetWidth = 256, int targetHeight = 144)
     {
         using var image = Image.Load<Rgba32>(imagePath);
+        // Stretch to the exact grid (see ComputeSSIM) so frames from different-scale videos align.
         image.Mutate(x => x.Resize(new ResizeOptions
         {
             Size = new Size(targetWidth, targetHeight),
-            Mode = ResizeMode.Max
+            Mode = ResizeMode.Stretch
         }).Grayscale());
         return ExtractPixels(image, targetWidth, targetHeight);
     }

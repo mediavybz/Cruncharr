@@ -2673,9 +2673,9 @@ public class DownloadService : IDownloadService
         };
 
         // Map video and audio files
-        _logger?.LogInformation("MUX DEBUG: mediaFiles count={Count}, audioTracks count={AudioCount}", mediaFiles.Count, audioTracks.Count);
-        foreach (var f in mediaFiles) _logger?.LogInformation("MUX DEBUG: mediaFile: {File}", f);
-        foreach (var a in audioTracks) _logger?.LogInformation("MUX DEBUG: audioTrack: {Path} / {Lang}", a.Path, a.Lang);
+        _logger?.LogDebug("MUX: mediaFiles count={Count}, audioTracks count={AudioCount}", mediaFiles.Count, audioTracks.Count);
+        foreach (var f in mediaFiles) _logger?.LogDebug("MUX: mediaFile: {File}", f);
+        foreach (var a in audioTracks) _logger?.LogDebug("MUX: audioTrack: {Path} / {Lang}", a.Path, a.Lang);
 
         foreach (var file in mediaFiles)
         {
@@ -2683,7 +2683,7 @@ public class DownloadService : IDownloadService
             if (audioTrack != default)
             {
                 // Audio file
-                _logger?.LogInformation("MUX DEBUG: Adding to OnlyAudio: {File} ({Lang})", file, audioTrack.Lang);
+                _logger?.LogDebug("MUX: Adding to OnlyAudio: {File} ({Lang})", file, audioTrack.Lang);
                 var mergerInput = new MergerInput
                 {
                     Path = file,
@@ -2693,7 +2693,7 @@ public class DownloadService : IDownloadService
                 if (audioDelays != null && audioDelays.TryGetValue(audioTrack.Lang, out var delay))
                 {
                     mergerInput.Delay = delay;
-                    _logger?.LogInformation("MUX DEBUG: Applying sync delay {Delay}ms to audio: {Lang}", delay, audioTrack.Lang);
+                    _logger?.LogDebug("MUX: Applying sync delay {Delay}ms to audio: {Lang}", delay, audioTrack.Lang);
                 }
                 mergerOptions.OnlyAudio.Add(mergerInput);
             }
@@ -2701,7 +2701,7 @@ public class DownloadService : IDownloadService
             {
                 // Video-only file
                 var vidLang = videoLocales?.TryGetValue(file, out var vl) == true ? Languages.FindLang(vl) : Languages.DEFAULT_lang;
-                _logger?.LogInformation("MUX DEBUG: Adding to OnlyVid: {File} ({Lang})", file, vidLang?.CrLocale ?? "default");
+                _logger?.LogDebug("MUX: Adding to OnlyVid: {File} ({Lang})", file, vidLang?.CrLocale ?? "default");
                 mergerOptions.OnlyVid.Add(new MergerInput
                 {
                     Path = file,
@@ -2710,7 +2710,7 @@ public class DownloadService : IDownloadService
             }
         }
 
-        _logger?.LogInformation("MUX DEBUG: OnlyVid.Count={OnlyVid}, OnlyAudio.Count={OnlyAudio}, Subtitles.Count={Subs}",
+        _logger?.LogDebug("MUX: OnlyVid.Count={OnlyVid}, OnlyAudio.Count={OnlyAudio}, Subtitles.Count={Subs}",
             mergerOptions.OnlyVid.Count, mergerOptions.OnlyAudio.Count, mergerOptions.Subtitles.Count);
 
         // Map subtitles. CC and Signs flags are determined at download time and carried

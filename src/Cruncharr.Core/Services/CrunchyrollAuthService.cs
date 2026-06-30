@@ -1493,20 +1493,52 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
     }
 
+    // The factory "select everything" language lists. A config still holding the full set was never
+    // customised by the user, so the profile sync may narrow it to the profile's language.
+    private static readonly List<string> _factoryDubLanguages = new DownloadConfig().DubLanguages;
+    private static readonly List<string> _factorySoftSubs = new DownloadConfig().SoftSubs;
+    private static readonly List<string> _factorySubtitleLanguages = new DownloadConfig().SubtitleLanguages;
+
+    private static bool IsUntouchedFullSet(List<string>? current, List<string> factory)
+        => current != null && current.Count == factory.Count && new HashSet<string>(current).SetEquals(factory);
+
     // Pure decision+mutation for the profile->defaults sync (unit-testable). Sets DefaultAudio/
-    // DefaultSub from the profile's preferred languages, but only when the active profile actually
-    // changes (profileKey != LastSyncedProfileId) so a manual change made while on one profile is
-    // preserved. Returns true if the config changed and should be persisted.
+    // DefaultSub AND the dub/sub language lists from the profile's preferred languages.
+    //   - Scalars (DefaultAudio/DefaultSub) sync only when the active profile actually changes
+    //     (profileKey != LastSyncedProfileId), so a manual default change made while on one profile
+    //     is preserved.
+    //   - The multi-select lists (DubLanguages/SoftSubs/SubtitleLanguages) sync when the profile
+    //     changes OR when they are still the untouched factory "all languages" set — the latter
+    //     self-heals an existing install whose lists were never narrowed (the user's complaint:
+    //     every language pre-selected, unaffected by the profile). A list the user has edited (any
+    //     selection other than the full factory set) is left alone.
+    // Returns true if the config changed and should be persisted.
     internal static bool ApplyProfileLanguageDefaults(CruncharrConfig config, string? profileKey, string? prefAudio, string? prefSub)
     {
         if (config?.Download?.SyncDefaultsFromProfile != true) return false;
         if (string.IsNullOrWhiteSpace(profileKey)) return false;
-        if (string.Equals(profileKey, config.Crunchyroll?.LastSyncedProfileId, StringComparison.Ordinal)) return false;
 
-        if (!string.IsNullOrWhiteSpace(prefAudio)) config.Download.DefaultAudio = prefAudio!;
-        if (!string.IsNullOrWhiteSpace(prefSub)) config.Download.DefaultSub = prefSub!;
-        config.Crunchyroll!.LastSyncedProfileId = profileKey!;
-        return true;
+        bool profileChanged = !string.Equals(profileKey, config.Crunchyroll?.LastSyncedProfileId, StringComparison.Ordinal);
+        bool dubUntouched = IsUntouchedFullSet(config.Download.DubLanguages, _factoryDubLanguages);
+        bool softUntouched = IsUntouchedFullSet(config.Download.SoftSubs, _factorySoftSubs);
+        bool subUntouched = IsUntouchedFullSet(config.Download.SubtitleLanguages, _factorySubtitleLanguages);
+
+        if (!profileChanged && !dubUntouched && !softUntouched && !subUntouched) return false;
+
+        bool changed = false;
+        if (!string.IsNullOrWhiteSpace(prefAudio))
+        {
+            if (profileChanged && config.Download.DefaultAudio != prefAudio) { config.Download.DefaultAudio = prefAudio!; changed = true; }
+            if (profileChanged || dubUntouched) { config.Download.DubLanguages = new List<string> { prefAudio! }; changed = true; }
+        }
+        if (!string.IsNullOrWhiteSpace(prefSub))
+        {
+            if (profileChanged && config.Download.DefaultSub != prefSub) { config.Download.DefaultSub = prefSub!; changed = true; }
+            if (profileChanged || softUntouched) { config.Download.SoftSubs = new List<string> { prefSub! }; changed = true; }
+            if (profileChanged || subUntouched) { config.Download.SubtitleLanguages = new List<string> { prefSub! }; changed = true; }
+        }
+        if (profileChanged) { config.Crunchyroll!.LastSyncedProfileId = profileKey!; changed = true; }
+        return changed;
     }
 
     private void SyncDefaultLanguagesFromProfile()

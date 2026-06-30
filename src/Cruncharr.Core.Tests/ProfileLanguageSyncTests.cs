@@ -37,11 +37,46 @@ public class ProfileLanguageSyncTests
     {
         var c = NewConfig(lastProfile: "profile-troy");
         c.Download.DefaultAudio = "ko-KR"; // user manually changed it while on this profile
+        // User has also customised the language lists (not the factory full set) -> must be preserved.
+        c.Download.DubLanguages = new() { "ko-KR" };
+        c.Download.SoftSubs = new() { "ko-KR" };
+        c.Download.SubtitleLanguages = new() { "ko-KR" };
 
         var changed = CrunchyrollAuthService.ApplyProfileLanguageDefaults(c, "profile-troy", "en-US", "en-US");
 
         Assert.False(changed);
         Assert.Equal("ko-KR", c.Download.DefaultAudio); // preserved
+        Assert.Equal(new() { "ko-KR" }, c.Download.DubLanguages); // preserved
+        Assert.Equal(new() { "ko-KR" }, c.Download.SoftSubs); // preserved
+    }
+
+    [Fact]
+    public void NewProfile_narrowsLanguageListsToProfile()
+    {
+        var c = NewConfig(); // lists start at the factory full set
+        var changed = CrunchyrollAuthService.ApplyProfileLanguageDefaults(c, "profile-troy", "en-US", "de-DE");
+
+        Assert.True(changed);
+        Assert.Equal(new() { "en-US" }, c.Download.DubLanguages);
+        Assert.Equal(new() { "de-DE" }, c.Download.SoftSubs);
+        Assert.Equal(new() { "de-DE" }, c.Download.SubtitleLanguages);
+    }
+
+    [Fact]
+    public void SameProfile_selfHealsUntouchedFullLists()
+    {
+        // The reported bug: already on this profile (no switch), but every language is still
+        // pre-selected (factory full set). Sync must narrow the untouched lists to the profile
+        // WITHOUT touching the (possibly manually set) scalar defaults.
+        var c = NewConfig(lastProfile: "profile-troy");
+        c.Download.DefaultAudio = "ko-KR"; // manual scalar -> must be preserved
+
+        var changed = CrunchyrollAuthService.ApplyProfileLanguageDefaults(c, "profile-troy", "en-US", "en-US");
+
+        Assert.True(changed);
+        Assert.Equal("ko-KR", c.Download.DefaultAudio);            // scalar preserved
+        Assert.Equal(new() { "en-US" }, c.Download.DubLanguages);  // untouched full set narrowed
+        Assert.Equal(new() { "en-US" }, c.Download.SoftSubs);
     }
 
     [Fact]

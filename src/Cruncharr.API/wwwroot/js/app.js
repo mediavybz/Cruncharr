@@ -4226,7 +4226,7 @@
                     <div class="history-season">
                         <div class="history-season-header" onclick="toggleSeasonCollapse(this)">
                             <div style="display:flex; align-items:center; gap:8px;">
-                                <span class="season-collapse-chevron" title="Collapse / expand episodes">&#9662;</span>
+                                <span class="season-collapse-chevron" title="Collapse / expand episodes">&#9656;</span>
                                 <span class="history-season-title">${escapeHtml(season.seasonTitle || `Season ${season.seasonNum || 1}`)}</span>
                                 <span style="font-size:0.8em; color:var(--text-muted);">${(season.episodes || []).filter(e => episodeIsHave(e, series)).length}/${season.episodes?.length || 0} available</span>
                             </div>
@@ -4235,7 +4235,7 @@
                                 <button class="btn-icon" onclick="event.stopPropagation(); downloadSeason('${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}')" title="Download whole season">&#11015;</button>
                             </div>
                         </div>
-                        <div class="history-season-body">
+                        <div class="history-season-body" style="display:none;">
                             ${episodesHtml}
                         </div>
                     </div>

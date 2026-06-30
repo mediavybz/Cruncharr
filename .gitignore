@@ -86,3 +86,9 @@ shots/
 
 # Local third-party tool binaries (ffmpeg etc.) - not used by the Linux image
 tools/
+
+# Desktop/upstream build artifacts (never commit)
+CRD.exe
+Updater.exe
+*.dll
+*.exe

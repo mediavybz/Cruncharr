@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Cruncharr</Name>
+  <Repository>ghcr.io/mediavybz/cruncharr:latest</Repository>
+  <Registry>https://ghcr.io/mediavybz/cruncharr</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+
+  <Icon>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/icon.svg</Icon>
+  <WebUI>http://[IP]:[PORT:8585]/</WebUI>
+
+  <Overview>Cruncharr is a self-hosted Crunchyroll downloader with an *arr-style web UI. Search and queue series, pick dub/sub languages, browse a release calendar, and track download history. Includes Sonarr integration (matches your library and shows what you already have) and a multi-profile language sync that sets your defaults from the Crunchyroll profile you log in with. Multi-architecture image (amd64 and arm64). Set PUID/PGID to match the owner of your appdata and downloads shares so the container can write. Widevine DRM device files are required in /widevine to download DRM-protected content.</Overview>
+
+  <Project>https://github.com/mediavybz/Cruncharr</Project>
+  <Support>https://github.com/mediavybz/Cruncharr/issues</Support>
+  <TemplateURL>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/templates/cruncharr.xml</TemplateURL>
+  <ReadMe>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/README.md</ReadMe>
+
+  <Category>Downloaders MediaApp:Video</Category>
+  <ExtraSearchTerms>crunchyroll anime downloader sonarr seerr arr</ExtraSearchTerms>
+  <Requires>Internet access and a Crunchyroll account. Widevine device files (in /widevine) are required for DRM-protected downloads.</Requires>
+  <Date>2026-06-30</Date>
+  <MinVer>6.9</MinVer>
+  <License>MIT</License>
+
+  <Config Name="WebUI Port" Target="8585" Default="8585" Mode="tcp" Description="HTTP port for the Cruncharr web UI." Type="Port" Display="always" Required="true" Mask="false">8585</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/cruncharr" Mode="rw" Description="Stores cruncharr.yaml, history, queue, auth token and logs." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/cruncharr</Config>
+  <Config Name="Downloads" Target="/downloads" Default="/mnt/user/Media/Anime" Mode="rw" Description="Where completed downloads are written." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/Media/Anime</Config>
+  <Config Name="Widevine" Target="/widevine" Default="/mnt/user/appdata/cruncharr/widevine" Mode="rw" Description="Place device_client_id_blob.bin and device_private_key.pem here. Required for DRM-protected content." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/cruncharr/widevine</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Description="User ID the container runs as. Match the owner of your config and downloads shares." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Description="Group ID the container runs as." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="API Key (optional)" Target="CRUNCHARR_API_KEY" Default="" Description="Optional: require this key to access the API/UI. Leave blank to disable the gate." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Crunchyroll Email (optional)" Target="CRUNCHYROLL_EMAIL" Default="" Description="Optional: pre-fill the Crunchyroll login email. Can also be set in the web UI." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Crunchyroll Password (optional)" Target="CRUNCHYROLL_PASSWORD" Default="" Description="Optional: pre-fill the Crunchyroll password. Can also be set in the web UI." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Webhook URL (optional)" Target="CRUNCHYROLL_WEBHOOK_URL" Default="" Description="Optional: webhook for download notifications." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+</Container>

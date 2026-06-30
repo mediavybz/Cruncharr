@@ -207,6 +207,7 @@ public class ConfigController : ControllerBase
                     QualityAudio = _config.Download?.QualityAudio ?? "best",
                     DubLanguages = _config.Download?.DubLanguages ?? new List<string> { "ja-JP" },
                     DefaultAudio = _config.Download?.DefaultAudio ?? "ja-JP",
+                    SyncDefaultsFromProfile = _config.Download?.SyncDefaultsFromProfile ?? true,
                     DownloadDescriptionAudio = _config.Download?.DownloadDescriptionAudio ?? false,
                     DownloadFirstAvailableDub = _config.Download?.DownloadFirstAvailableDub ?? false,
                     DlVideoOnce = _config.Download?.DlVideoOnce ?? false,
@@ -525,6 +526,7 @@ public class ConfigController : ControllerBase
             if (dl.DubLanguages != null && dl.DubLanguages.Count > 0) _config.Download.DubLanguages = dl.DubLanguages;
             else if (dl.DubLanguages != null && dl.DubLanguages.Count == 0) _config.Download.DubLanguages = new List<string> { "ja-JP" }; // Prevent empty - default to Japanese
             if (!string.IsNullOrEmpty(dl.DefaultAudio)) _config.Download.DefaultAudio = dl.DefaultAudio;
+            if (dl.SyncDefaultsFromProfile.HasValue) _config.Download.SyncDefaultsFromProfile = dl.SyncDefaultsFromProfile.Value;
             if (dl.DownloadDescriptionAudio.HasValue) _config.Download.DownloadDescriptionAudio = dl.DownloadDescriptionAudio.Value;
             if (dl.DownloadFirstAvailableDub.HasValue) _config.Download.DownloadFirstAvailableDub = dl.DownloadFirstAvailableDub.Value;
             if (dl.DlVideoOnce.HasValue) _config.Download.DlVideoOnce = dl.DlVideoOnce.Value;
@@ -769,6 +771,7 @@ public class DownloadUpdateConfig
     public string? QualityAudio { get; set; }
     public List<string>? DubLanguages { get; set; }
     public string? DefaultAudio { get; set; }
+    public bool? SyncDefaultsFromProfile { get; set; }
     public bool? DownloadDescriptionAudio { get; set; }
     public bool? DownloadFirstAvailableDub { get; set; }
     public bool? DlVideoOnce { get; set; }

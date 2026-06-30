@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -30,8 +31,11 @@ public class CalendarService : ICalendarService
     private readonly ICrunchyrollAuthService _authService;
     private readonly HttpClientWrapper _httpClient;
 
-    private readonly Dictionary<string, CalendarWeek> _calendarCache = new();
-    private readonly Dictionary<string, List<CalendarEpisode>> _anilistCache = new();
+    // Singleton service hit by concurrent requests -> caches must be thread-safe. A plain Dictionary
+    // read+written from two requests at once can corrupt internally (throw / hang).
+    private readonly ConcurrentDictionary<string, CalendarWeek> _calendarCache = new();
+    private readonly ConcurrentDictionary<string, List<CalendarEpisode>> _anilistCache = new();
+    private readonly SemaphoreSlim _anilistLoadLock = new(1, 1);
     private DateTime? _anilistUpcomingLoadedDate;
 
     // [PT] Upstream CalendarManager.GenericSeasonLabelRegex
@@ -694,6 +698,17 @@ public class CalendarService : ICalendarService
             return;
         }
 
+        // Serialize the build so two concurrent first-loads don't both fetch and Add to the same
+        // shared episode lists (List is not thread-safe). Double-check inside the lock.
+        await _anilistLoadLock.WaitAsync();
+        try
+        {
+        if (_anilistUpcomingLoadedDate == DateTime.Today || _anilistCache.ContainsKey(today))
+        {
+            _anilistUpcomingLoadedDate = DateTime.Today;
+            return;
+        }
+
         // Use UTC midnight: new DateTimeOffset(localDate, TimeSpan.Zero) throws on any
         // non-UTC host because the local date's offset != zero. The value only feeds the
         // AniList airingAt window (UTC unix seconds), so UTC is the correct basis anyway.
@@ -837,5 +852,10 @@ public class CalendarService : ICalendarService
         }
 
         _anilistUpcomingLoadedDate = DateTime.Today;
+        }
+        finally
+        {
+            _anilistLoadLock.Release();
+        }
     }
 }

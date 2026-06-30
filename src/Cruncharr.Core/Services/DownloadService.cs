@@ -24,6 +24,10 @@ public interface IDownloadService
 
 public class DownloadService : IDownloadService
 {
+    // Dedupe post-download full-series enrichment so a batch download of many episodes of the same
+    // show triggers the heavy CR series-fetch + Sonarr match once, not once per episode.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _lastSeriesEnrich = new();
+
     private readonly ILogger<DownloadService>? _logger;
     private readonly ICrunchyrollAuthService _auth;
     private readonly ICrunchyrollApiService _api;
@@ -73,6 +77,17 @@ public class DownloadService : IDownloadService
     /// are absent OR a specific dub was requested. Keeps every add-path resolving the SAME correct
     /// per-dub stream. See memory: download-mux-gotchas (Add Download versions desync, beta.120).
     /// </summary>
+    // Resolve the id used to GROUP a download under a series in History. Prefer the real CR series
+    // id, then the series title (stable across a show's episodes), and only as a last resort the
+    // per-episode Guid. Using the Guid before the title made every download its own one-episode
+    // "series" (the History grouping bug). Returns null only when the episode carries no identity.
+    internal static string? ResolveRichSeriesId(EpisodeInfo episode)
+    {
+        if (!string.IsNullOrWhiteSpace(episode.SeriesId)) return episode.SeriesId;
+        if (!string.IsNullOrWhiteSpace(episode.SeriesTitle)) return episode.SeriesTitle;
+        return string.IsNullOrWhiteSpace(episode.Guid) ? null : episode.Guid;
+    }
+
     public static bool ShouldRefetchVersions(EpisodeInfo episode)
     {
         if (episode.Versions == null || episode.Versions.Count == 0) return true;
@@ -111,22 +126,35 @@ public class DownloadService : IDownloadService
             return new DownloadResult { Success = false, ErrorMessage = $"Authentication error: {ex.Message}", ErrorType = DownloadErrorType.NotAuthenticated };
         }
 
-        // Fetch full episode details with versions if not already loaded
-        // [PT] Using ParseEpisodeByIdAsync instead of GetEpisodeAsync to get version deduplication
-        if (ShouldRefetchVersions(episode))
+        // Fetch full episode details when we need fresh per-dub versions OR when the episode is
+        // missing the series identity used to group it in History. A queue-added episode often
+        // carries only an id, so without fetching series_id/series_title every download would land
+        // under a per-episode id and show as its own "Episode N" row instead of nesting under the
+        // show (upstream groups by the real CR series id).
+        // [PT] Using ParseEpisodeByIdAsync instead of GetEpisodeAsync to get version deduplication.
+        bool needVersions = ShouldRefetchVersions(episode);
+        bool needSeriesMeta = string.IsNullOrWhiteSpace(episode.SeriesId) || string.IsNullOrWhiteSpace(episode.SeriesTitle);
+        if (needVersions || needSeriesMeta)
         {
             progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 10, Doing = "Fetching episode info..." });
             var fullEpisode = await _api.ParseEpisodeByIdAsync(episode.Id, null, false, cancellationToken);
             if (fullEpisode != null)
             {
-                episode.Versions = fullEpisode.Versions;
-                episode.AudioLocale = fullEpisode.AudioLocale;
+                if (needVersions)
+                {
+                    episode.Versions = fullEpisode.Versions;
+                    episode.AudioLocale = fullEpisode.AudioLocale;
+                }
                 episode.Guid = fullEpisode.Guid ?? episode.Guid;
                 if (!string.IsNullOrEmpty(fullEpisode.SeriesId)) episode.SeriesId = fullEpisode.SeriesId;
+                if (!string.IsNullOrEmpty(fullEpisode.SeriesTitle)) episode.SeriesTitle = fullEpisode.SeriesTitle;
                 if (!string.IsNullOrEmpty(fullEpisode.SeasonId)) episode.SeasonId = fullEpisode.SeasonId;
                 if (!string.IsNullOrEmpty(fullEpisode.SeasonTitle)) episode.SeasonTitle = fullEpisode.SeasonTitle;
-                _logger?.LogInformation("Fetched episode details: {EpisodeId}, Versions={VersionCount}, AudioLocale={AudioLocale}, Guid={Guid}",
-                    fullEpisode.Id, fullEpisode.Versions?.Count ?? 0, fullEpisode.AudioLocale, fullEpisode.Guid);
+                if (fullEpisode.SeasonNumber > 0 && episode.SeasonNumber <= 0) episode.SeasonNumber = fullEpisode.SeasonNumber;
+                if (fullEpisode.EpisodeNumber > 0 && episode.EpisodeNumber <= 0) episode.EpisodeNumber = fullEpisode.EpisodeNumber;
+                if (!string.IsNullOrEmpty(fullEpisode.Episode)) episode.Episode = fullEpisode.Episode;
+                _logger?.LogInformation("Fetched episode details: {EpisodeId}, Versions={VersionCount}, Series={Series}, Season={Season}",
+                    fullEpisode.Id, fullEpisode.Versions?.Count ?? 0, fullEpisode.SeriesTitle, fullEpisode.SeasonTitle);
             }
             else
             {
@@ -1361,13 +1389,8 @@ public class DownloadService : IDownloadService
                     var downloadedDubs = audioTrackLanguages.Select(a => a.Lang).Distinct().ToList();
                     var downloadedSubs = subtitleFiles.Select(s => s.Lang).Distinct().ToList();
 
-                    // Series id used to group + mark this download. Prefer CR ids; fall back to the
-                    // series title so a download ALWAYS lands in history even when the episode
-                    // metadata carried no id (the old code stored flat history under an empty id and
-                    // never populated the rich history the UI reads -> downloads were invisible).
-                    var richSeriesId = !string.IsNullOrWhiteSpace(episode.SeriesId) ? episode.SeriesId!
-                        : !string.IsNullOrWhiteSpace(episode.Guid) ? episode.Guid
-                        : episode.SeriesTitle;
+                    // Series id used to group + mark this download (see ResolveRichSeriesId).
+                    var richSeriesId = ResolveRichSeriesId(episode);
                     episode.SeriesId = richSeriesId;
                     if (string.IsNullOrWhiteSpace(episode.SeasonId))
                         episode.SeasonId = $"{richSeriesId}|S{episode.SeasonNumber}";
@@ -1394,6 +1417,28 @@ public class DownloadService : IDownloadService
                     {
                         await _history.UpdateWithSeasonDataAsync(new List<EpisodeInfo> { episode });
                         await _history.SetAsDownloadedAsync(richSeriesId, episode.SeasonId, episode.Id, downloadedDubs, downloadedSubs);
+
+                        // [PT parity with upstream History.UpdateWithSeasonData] Mirror the desktop
+                        // app: after recording the download, populate the FULL series (all seasons +
+                        // episodes, downloaded and missing) and auto-match Sonarr (series + episodes)
+                        // so History shows the whole show with Sonarr status, not just the one
+                        // downloaded episode. CrUpdateSeriesAsync also recovers the real CR series id
+                        // when the download could only key by title. Best-effort - a completed
+                        // download must never fail over history enrichment. Deduped per series within
+                        // a short window so a batch download enriches the series once, not per episode.
+                        var enrichNow = DateTime.UtcNow;
+                        if (!_lastSeriesEnrich.TryGetValue(richSeriesId, out var lastEnrich) || (enrichNow - lastEnrich).TotalSeconds > 30)
+                        {
+                            _lastSeriesEnrich[richSeriesId] = enrichNow;
+                            try
+                            {
+                                await _history.CrUpdateSeriesAsync(richSeriesId, null);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger?.LogWarning(ex, "Post-download history/Sonarr enrichment failed for {SeriesId}", richSeriesId);
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)

@@ -4157,12 +4157,24 @@
                 const episodesHtml = (season.episodes || []).map(ep => {
                     const status = getEpisodeDownloadStatus(ep);
                     const tooltip = getEpisodeStatusTooltip(ep);
-                    
+                    const airDate = ep.episodeCrPremiumAirDate ? new Date(ep.episodeCrPremiumAirDate) : null;
+                    const airStr = airDate && !isNaN(airDate.getTime()) ? airDate.toLocaleDateString() : '';
+                    // Sonarr per-episode indicator (mirrors the desktop app): green check when Sonarr
+                    // already has the file, otherwise a neutral Sonarr mark when it's tracked there.
+                    const sonarrTip = ep.sonarrEpisodeId
+                        ? (ep.sonarrHasFile ? 'In Sonarr — file present' : (ep.sonarrIsMonitored ? 'In Sonarr — monitored, missing' : 'In Sonarr'))
+                          + (ep.sonarrSeasonEpisodeText ? ` (${ep.sonarrSeasonEpisodeText})` : '')
+                        : '';
+                    const sonarrBadge = ep.sonarrEpisodeId
+                        ? `<span class="sonarr-ep-badge ${ep.sonarrHasFile ? 'has-file' : 'missing'}" title="${escapeHtmlAttribute(sonarrTip)}">${ep.sonarrHasFile ? '&#10004; Sonarr' : '&#9679; Sonarr'}</span>`
+                        : '';
+
                     return `
                         <div class="history-episode">
                             <div class="history-episode-number">${ep.episode || '?'}</div>
-                            <div class="history-episode-title">${escapeHtml(ep.episodeTitle || 'Unknown Episode')}</div>
+                            <div class="history-episode-title">${escapeHtml(ep.episodeTitle || 'Unknown Episode')}${airStr ? `<span class="history-episode-airdate"> · ${escapeHtml(airStr)}</span>` : ''}</div>
                             <div class="history-episode-langs">
+                                ${sonarrBadge}
                                 ${(ep.downloadedDubLang || []).map(d => `<span class="lang-badge downloaded">${escapeHtml(d)}</span>`).join('')}
                             </div>
                             <div class="history-episode-status">
@@ -4181,7 +4193,7 @@
                         <div class="history-season-header" onclick="toggleSeasonCollapse(this)">
                             <div>
                                 <span class="history-season-title">${escapeHtml(season.seasonTitle || `Season ${season.seasonNum || 1}`)}</span>
-                                <span style="font-size:0.8em; color:var(--text-muted); margin-left:8px;">${season.episodes?.length || 0} episodes</span>
+                                <span style="font-size:0.8em; color:var(--text-muted); margin-left:8px;">${(season.episodes || []).filter(e => e.wasDownloaded).length}/${season.episodes?.length || 0} downloaded</span>
                             </div>
                             <div class="history-season-actions">
                                 <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${escapeJsString(season.seasonId)}')" title="Settings">&#9881;</button>

@@ -485,7 +485,7 @@
             overflow: hidden;
         }
         .sidebar-logo-img {
-            width: 60px;
+            width: auto;
             height: 60px;
             border-radius: var(--radius-sm);
             object-fit: contain;
@@ -2492,7 +2492,7 @@
         }
         #loading-splash.hidden { opacity: 0; pointer-events: none; }
         #loading-splash .splash-logo-img {
-            width: 56px; height: 56px;
+            width: auto; height: 56px;
             border-radius: 14px;
             object-fit: contain;
         }

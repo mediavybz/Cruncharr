@@ -19,8 +19,22 @@ public interface IEncodingService
 
 public class EncodingService : IEncodingService
 {
-    // Built-in presets (mirrors upstream FfmpegEncoding.presets - the first 15).
+    // Built-in presets. The first 15 mirror upstream FfmpegEncoding.presets; the two
+    // "[...] Anime" presets are Cruncharr additions (user-requested): unofficial
+    // recreations of the settings anime mini-encode groups publish for small files at
+    // high perceived quality. Video is re-encoded 10-bit; audio/subs/fonts are stream-
+    // copied so nothing else is degraded.
     private static readonly List<VideoPreset> _builtIn = new(){
+        // EMBER-style: x265 10-bit, slower preset, anime-tuned psy/aq settings.
+        new(){ PresetName = "[EMBER] Anime HEVC 10-bit (unofficial)", Codec = "libx265", Resolution = "-2:1080", FrameRate = "24000/1001", Crf = 21,
+               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset slow",
+                   "-x265-params limit-sao=1:bframes=8:psy-rd=1.5:psy-rdoq=2.0:aq-mode=3:deblock=-1,-1",
+                   "-c:a copy", "-c:s copy", "-c:t copy" } },
+        // Trix-style: SVT-AV1 10-bit (tune=0 = subjective quality), even smaller files.
+        new(){ PresetName = "[Trix] Anime AV1 10-bit (unofficial)", Codec = "libsvtav1", Resolution = "-2:1080", FrameRate = "24000/1001", Crf = 30,
+               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 4",
+                   "-svtav1-params tune=0:keyint=240:enable-overlays=1:scd=1",
+                   "-c:a copy", "-c:s copy", "-c:t copy" } },
         new(){ PresetName = "AV1 1080p24", Codec = "libaom-av1", Resolution = "1920:1080", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },
         new(){ PresetName = "AV1 720p24", Codec = "libaom-av1", Resolution = "1280:720", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },
         new(){ PresetName = "AV1 480p24", Codec = "libaom-av1", Resolution = "854:480", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },

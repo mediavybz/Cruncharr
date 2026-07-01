@@ -73,7 +73,12 @@ public class Program
         // explicit user-set path.
         var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? "";
         var appDataDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        // Relative paths count as ephemeral too: when ApplicationData resolves empty (root
+        // with no HOME) the legacy default persisted literally as "Cruncharr/token.json",
+        // which lands in the read-only /app workdir and every token save fails with
+        // UnauthorizedAccessException (seen live) — token then can't survive a restart.
         bool IsEphemeralPath(string? p) => string.IsNullOrEmpty(p) ||
+            !Path.IsPathRooted(p) ||
             (!string.IsNullOrEmpty(appDataDir) && p.StartsWith(appDataDir, StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(config.TokenFilePath))
         {

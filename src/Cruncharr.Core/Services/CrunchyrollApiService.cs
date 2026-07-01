@@ -1576,7 +1576,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         var queryParams = new NameValueCollection{
             { "seasonal_tag", $"{season.ToLower()}-{year}" },
-            { "n", "200" }
+            // Upstream uses n=100 (CrSeries.GetSeasonalSeries); the browse endpoint
+            // rejects larger page sizes with 400 Bad Request.
+            { "n", "100" }
         };
         if (!string.IsNullOrEmpty(crLocale))
         {

@@ -2667,9 +2667,13 @@
                 const all = await res.json();
                 const custom = (all || []).filter(p => !p.builtIn);
                 if (custom.length === 0) { list.innerHTML = '<div style="color:var(--text-muted); font-size:0.85em;">No custom presets yet.</div>'; return; }
-                list.innerHTML = custom.map(p => `
+                // Reference presets by index instead of serializing the object into the
+                // onclick attribute: a preset name containing a quote or angle bracket
+                // would otherwise break out of the attribute (broken handler / HTML injection).
+                window._customPresets = custom;
+                list.innerHTML = custom.map((p, i) => `
                     <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; background:var(--bg-tertiary); border-radius:var(--radius-sm);">
-                        <span style="cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" onclick='loadPresetIntoForm(${JSON.stringify(p)})'>${escapeHtml(p.presetName)}</span>
+                        <span style="cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" onclick="loadPresetIntoForm(window._customPresets[${i}])">${escapeHtml(p.presetName)}</span>
                         <button class="btn-icon danger" title="Delete" onclick="deletePresetEditor('${escapeJsString(p.presetName)}')">&#128465;</button>
                     </div>`).join('');
             } catch (e) { list.innerHTML = '<div style="color:var(--accent-red); font-size:0.85em;">Failed to load presets</div>'; }

@@ -25,9 +25,9 @@
   <License>MIT</License>
 
   <Config Name="WebUI Port" Target="8585" Default="8585" Mode="tcp" Description="HTTP port for the Cruncharr web interface." Type="Port" Display="always" Required="true" Mask="false">8585</Config>
-  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/cruncharr" Mode="rw" Description="Stores settings, catalog, activity history and logs." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/cruncharr</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/Cruncharr" Mode="rw" Description="Stores settings, catalog, activity history and logs." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/Cruncharr</Config>
   <Config Name="Media" Target="/downloads" Default="/mnt/user/Media/Anime" Mode="rw" Description="Where your library files are written and organized." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/Media/Anime</Config>
-  <Config Name="Device Files" Target="/widevine" Default="/mnt/user/appdata/cruncharr/widevine" Mode="rw" Description="Optional path for source device files, if your source requires them." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/cruncharr/widevine</Config>
+  <Config Name="Device Files" Target="/widevine" Default="/mnt/user/appdata/Cruncharr/widevine" Mode="rw" Description="Optional path for source device files, if your source requires them." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/Cruncharr/widevine</Config>
   <Config Name="PUID" Target="PUID" Default="99" Description="User ID the container runs as. Match the owner of your config and media shares." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Description="Group ID the container runs as." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
   <Config Name="API Key (optional)" Target="CRUNCHARR_API_KEY" Default="" Description="Optional: require this key to access the interface. Leave blank to disable." Type="Variable" Display="advanced" Required="false" Mask="true"/>

@@ -7,7 +7,7 @@
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
 
-  <Icon>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/icon.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/icon.png</Icon>
   <WebUI>http://[IP]:[PORT:8585]/</WebUI>
 
   <Overview>Cruncharr is a self-hosted companion for keeping your personal anime media library organized. It gives you a clean, *arr-style web interface with catalog and library tracking, a release calendar, activity history, and Sonarr integration so everything lines up with the collection you already manage. Multi-architecture image (amd64 and arm64). Set PUID/PGID to match the owner of your appdata and media shares so the container can write to them.</Overview>

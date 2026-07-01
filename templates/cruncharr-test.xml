@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Cruncharr-Test</Name>
+  <Repository>ghcr.io/mediavybz/cruncharr:testing</Repository>
+  <Registry>https://ghcr.io/mediavybz/cruncharr</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+
+  <Icon>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/icon.png</Icon>
+  <WebUI>http://[IP]:[PORT:8585]/</WebUI>
+
+  <Overview>BLEEDING-EDGE TEST CHANNEL of Cruncharr — tracks the testing branch and updates ahead of the stable release. Expect occasional bugs; use the regular Cruncharr template for the stable channel. Cruncharr is a self-hosted companion for keeping your personal anime media library organized: an *arr-style web interface with catalog and library tracking, a release calendar, activity history, and Sonarr integration. Multi-architecture image (amd64 and arm64). Set PUID/PGID to match the owner of your appdata and media shares so the container can write to them.</Overview>
+
+  <Project>https://github.com/mediavybz/Cruncharr</Project>
+  <Support>https://github.com/mediavybz/Cruncharr/issues</Support>
+  <TemplateURL>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/templates/cruncharr-test.xml</TemplateURL>
+  <ReadMe>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/README.md</ReadMe>
+
+  <Category>MediaApp:Video Tools:Utilities Status:Beta</Category>
+  <ExtraSearchTerms>anime media library catalog sonarr arr beta testing</ExtraSearchTerms>
+  <Requires>Internet access and an account with your source service. Some sources may require the matching device files to be placed in the /widevine path.</Requires>
+  <Date>2026-07-01</Date>
+  <MinVer>6.9</MinVer>
+  <License>MIT</License>
+
+  <Config Name="WebUI Port" Target="8585" Default="8585" Mode="tcp" Description="HTTP port for the Cruncharr web interface." Type="Port" Display="always" Required="true" Mask="false">8585</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/Cruncharr-Test" Mode="rw" Description="Stores settings, catalog, activity history and logs. Use a separate appdata path from the stable container if you run both." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/Cruncharr-Test</Config>
+  <Config Name="Media" Target="/downloads" Default="/mnt/user/Media/Anime" Mode="rw" Description="Where your library files are written and organized." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/Media/Anime</Config>
+  <Config Name="Device Files" Target="/widevine" Default="/mnt/user/appdata/Cruncharr-Test/widevine" Mode="rw" Description="Optional path for source device files, if your source requires them." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/Cruncharr-Test/widevine</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Description="User ID the container runs as. Match the owner of your config and media shares." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Description="Group ID the container runs as." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="API Key (optional)" Target="CRUNCHARR_API_KEY" Default="" Description="Optional: require this key to access the interface. Leave blank to disable." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Account Email (optional)" Target="CRUNCHYROLL_EMAIL" Default="" Description="Optional: pre-fill your source account email. Can also be set in the web interface." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Account Password (optional)" Target="CRUNCHYROLL_PASSWORD" Default="" Description="Optional: pre-fill your source account password. Can also be set in the web interface." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Webhook URL (optional)" Target="CRUNCHYROLL_WEBHOOK_URL" Default="" Description="Optional: webhook for activity notifications." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+</Container>

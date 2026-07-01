@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CommunityApplications>
   <Profile>
-Cruncharr is a self-hosted Crunchyroll downloader with an *arr-style web UI: Sonarr integration, a release calendar, download history, and multi-profile language sync. Multi-arch image (amd64 + arm64).
+Cruncharr is a self-hosted companion for organizing and maintaining your personal anime media library. It offers a clean, *arr-style web interface with catalog tracking, a release calendar, activity history, and Sonarr integration so it lines up with the collection you already manage. Multi-architecture image (amd64 and arm64).
 
-This repository ships the Cruncharr container template. For setup, documentation, and support, visit the project page: https://github.com/mediavybz/Cruncharr
+This repository ships the Cruncharr container template. For documentation and support, visit the project page: https://github.com/mediavybz/Cruncharr
   </Profile>
   <Icon>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/icon.svg</Icon>
   <WebPage>https://github.com/mediavybz/Cruncharr</WebPage>

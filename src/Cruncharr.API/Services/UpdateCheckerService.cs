@@ -104,6 +104,10 @@ public class UpdateCheckerService : BackgroundService
     private static int?[] ParseSemver(string version)
     {
         version = version.TrimStart('v', 'V');
+        // InformationalVersion carries "+<commit>" build metadata (e.g. "1.0.20+abc123");
+        // strip it or the patch segment fails to parse as 0 and every release looks newer.
+        var plusIndex = version.IndexOf('+');
+        if (plusIndex > 0) version = version.Substring(0, plusIndex);
         int? prereleaseNum = null;
         var dashIndex = version.IndexOf('-');
         if (dashIndex > 0)
@@ -124,6 +128,9 @@ public class UpdateCheckerService : BackgroundService
 
     private class GitHubRelease
     {
+        // GitHub's API returns snake_case; without the explicit mapping TagName
+        // deserializes to null and the update check silently never fires.
+        [JsonProperty("tag_name")]
         public string? TagName { get; set; }
     }
 }

@@ -8,7 +8,7 @@ A self-hosted companion for organizing and maintaining your personal anime media
 
 ```bash
 # Create directories
-mkdir -p cruncharr/config cruncharr/downloads cruncharr/widevine
+mkdir -p Cruncharr/config Cruncharr/downloads Cruncharr/widevine
 
 # Run the container
 docker run -d \
@@ -158,7 +158,7 @@ The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 - `POST /api/v1/auth/login` - Sign in with credentials
 - `GET /api/v1/queue` - Activity queue
 - `POST /api/v1/queue` - Add to queue
-- `GET /api/v1/series/search?q=QUERY` - Search catalog
+- `GET /api/v1/series/search?query=QUERY` - Search catalog
 - `GET /api/v1/series/{id}/episodes` - Get episodes
 - `GET /api/v1/config` - Get configuration
 - `POST /api/v1/config` - Update configuration

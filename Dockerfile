@@ -42,9 +42,11 @@ ARG TARGETARCH
 # links against libstdc++6 which is present in the base image).
 COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/mp4decrypt /usr/local/bin/
 
-# Runtime deps only: HTTPS certs, MKV muxer, privilege-dropper.
+# Runtime deps only: HTTPS certs, MKV muxer, privilege-dropper, PCI device-name
+# database (pci.ids ≈1MB — lets the UI show the exact GPU model instead of a
+# generic vendor label).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates mkvtoolnix gosu \
+        ca-certificates mkvtoolnix gosu pci.ids \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -u 1000 -m -s /bin/sh cruncharr \
     && mkdir -p /downloads /config /tools /widevine /tmp/cruncharr /app/fonts \

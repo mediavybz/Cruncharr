@@ -115,8 +115,25 @@ public class SonarrService : ISonarrService
         }
     }
 
+    // /series returns Sonarr's ENTIRE library. GetSeriesByTitleAsync is called once per
+    // queued download (Sonarr numbering) and per unmatched history series, so without a
+    // cache a season add re-downloads the full library dozens of times back-to-back.
+    // 60s is short enough that library edits show up promptly.
+    private static readonly TimeSpan SeriesCacheTtl = TimeSpan.FromSeconds(60);
+    private (string Key, DateTime FetchedUtc, List<SonarrSeries> Data)? _seriesCache;
+    private readonly object _seriesCacheLock = new();
+
     public virtual async Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config)
     {
+        var cacheKey = $"{config.UseSsl}|{config.Host}|{config.Port}|{config.UrlBase}|{config.ApiKey}";
+        lock (_seriesCacheLock)
+        {
+            if (_seriesCache is { } c && c.Key == cacheKey && DateTime.UtcNow - c.FetchedUtc < SeriesCacheTtl)
+            {
+                return c.Data;
+            }
+        }
+
         try
         {
             var url = $"{BuildBaseUrl(config)}/series";
@@ -133,7 +150,9 @@ public class SonarrService : ISonarrService
             var content = await response.Content.ReadAsStringAsync();
             // Newtonsoft (not reflection-based System.Text.Json) so deserialization works
             // in the trimmed published build, which disables STJ reflection.
-            return Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrSeries>>(content) ?? new List<SonarrSeries>();
+            var series = Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrSeries>>(content) ?? new List<SonarrSeries>();
+            lock (_seriesCacheLock) { _seriesCache = (cacheKey, DateTime.UtcNow, series); }
+            return series;
         }
         catch (Exception ex)
         {

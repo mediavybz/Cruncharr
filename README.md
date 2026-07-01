@@ -14,9 +14,9 @@ mkdir -p cruncharr/config cruncharr/downloads cruncharr/widevine
 docker run -d \
   --name cruncharr \
   -p 8585:8585 \
-  -v $(pwd)/cruncharr/config:/config \
-  -v $(pwd)/cruncharr/downloads:/downloads \
-  -v $(pwd)/cruncharr/widevine:/widevine \
+  -v $(pwd)/Cruncharr/config:/config \
+  -v $(pwd)/Cruncharr/downloads:/downloads \
+  -v $(pwd)/Cruncharr/widevine:/widevine \
   ghcr.io/mediavybz/cruncharr:latest
 
 # Access the web interface

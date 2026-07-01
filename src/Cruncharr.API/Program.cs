@@ -263,7 +263,22 @@ public class Program
             try
             {
                 logger?.LogInformation("Initializing authentication...");
-                var authResult = await authService.AuthenticateAsync(config.Crunchyroll?.UseBetaApi ?? true);
+                var useBetaApi = config.Crunchyroll?.UseBetaApi ?? true;
+                var authResult = await authService.AuthenticateAsync(useBetaApi);
+
+                // No saved token yielded a session. If credentials are configured (e.g. via the
+                // CRUNCHYROLL_EMAIL / CRUNCHYROLL_PASSWORD Docker env vars, applied in
+                // ApplyEnvironmentVariables), log in with them so the container comes up
+                // authenticated. Runs only when token auth failed, so it cannot regress the
+                // token-first flow; a successful login persists a token for subsequent boots.
+                if (!authResult
+                    && !string.IsNullOrEmpty(config.Crunchyroll?.Email)
+                    && !string.IsNullOrEmpty(config.Crunchyroll?.Password))
+                {
+                    logger?.LogInformation("No valid token; logging in with configured credentials...");
+                    authResult = await authService.LoginAsync(config.Crunchyroll!.Email, config.Crunchyroll!.Password, useBetaApi);
+                }
+
                 if (authResult)
                 {
                     logger?.LogInformation("Authentication successful - logged in as {User}", authService.Profile.Username);

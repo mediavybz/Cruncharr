@@ -1,5 +1,9 @@
 *.png filter=lfs diff=lfs merge=lfs -text
 
+# icon.png must be a normal blob: Unraid fetches it via raw.githubusercontent,
+# which serves the LFS pointer text (not the image) for LFS-tracked files.
+icon.png -filter -diff -merge -text
+
 # Shell scripts must keep LF endings or the Linux container can't exec them
 # (a CRLF shebang becomes "#!/bin/sh\r" -> bad interpreter).
 *.sh text eol=lf

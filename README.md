@@ -1,6 +1,6 @@
 # Cruncharr
 
-Dockerized Crunchyroll downloader with web UI. Headless backend with REST API + single-page web frontend.
+A self-hosted companion for organizing and maintaining your personal anime media library — a headless backend with a REST API plus a single-page web interface.
 
 ## Quick Deploy
 
@@ -19,7 +19,7 @@ docker run -d \
   -v $(pwd)/cruncharr/widevine:/widevine \
   ghcr.io/mediavybz/cruncharr:latest
 
-# Access the web UI
+# Access the web interface
 open http://localhost:8585
 ```
 
@@ -49,23 +49,23 @@ docker-compose up -d
 
 ## First Time Setup
 
-1. **Access the web UI** at `http://your-server:8585`
-2. **Login** with your Crunchyroll credentials
+1. **Open the web interface** at `http://your-server:8585`
+2. **Sign in** with your account credentials
 3. **Configure settings**:
-   - Download directory: `/downloads` (inside container)
-   - Temp directory: `/tmp/cruncharr.`
-   - Stream endpoints: Use defaults (recommended)
-   - Dub Languages: `ja-JP` (Japanese) by default
-   - Soft Subs: `en-US` (English) by default
-   - Change these in Settings → Crunchyroll tab, then click Save
+   - Library directory: `/downloads` (inside container)
+   - Temp directory: `/tmp/cruncharr`
+   - Endpoints: use defaults (recommended)
+   - Audio languages: `ja-JP` (Japanese) by default
+   - Subtitles: `en-US` (English) by default
+   - Adjust these in Settings, then click Save
 
 ## Volume Mounts
 
 | Path | Purpose | Required |
 |------|---------|----------|
-| `/config` | Config file, auth tokens, history | Yes |
-| `/downloads` | Downloaded videos | Yes |
-| `/widevine` | Widevine CDM files (device_private_key.pem, device_client_id_blob.bin) | For premium content |
+| `/config` | Settings, tokens, catalog/activity history | Yes |
+| `/downloads` | Your media library files | Yes |
+| `/widevine` | Optional device files, if your source requires them | Optional |
 
 ## Hardware Acceleration (GPU)
 
@@ -146,7 +146,7 @@ history:
 ```bash
 git clone https://github.com/mediavybz/Cruncharr.git
 cd Cruncharr
-docker build -t cruncharr.
+docker build -t cruncharr .
 docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncharr
 ```
 
@@ -155,48 +155,47 @@ docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncha
 The backend exposes a REST API at `http://localhost:8585/api/v1/`:
 
 - `GET /api/v1/auth/status` - Auth status
-- `POST /api/v1/auth/login` - Login with credentials
-- `GET /api/v1/queue` - Download queue
+- `POST /api/v1/auth/login` - Sign in with credentials
+- `GET /api/v1/queue` - Activity queue
 - `POST /api/v1/queue` - Add to queue
-- `GET /api/v1/series/search?q=QUERY` - Search series
+- `GET /api/v1/series/search?q=QUERY` - Search catalog
 - `GET /api/v1/series/{id}/episodes` - Get episodes
 - `GET /api/v1/config` - Get configuration
 - `POST /api/v1/config` - Update configuration
 
 ## Features
 
-- **Web UI**: Single-page app at `/` - search series, browse episodes, manage downloads, configure settings
-- **Auth**: Login with Crunchyroll credentials, automatic token refresh
-- **Downloads**: Select episodes with multi-dub support, concurrent downloads with progress tracking
-- **Queue**: Add episodes to queue, auto-download option, download management
-- **History**: Track downloaded episodes, Sonarr integration, refresh series data
-- **Calendar**: View upcoming episode releases
-- **Stream Endpoints**: Configurable device endpoints (Android TV, Web, Console) with working defaults
-- **Languages**: Select audio dubs and subtitle languages (default: Japanese audio, English subs)
+- **Web interface**: Single-page app at `/` - search the catalog, browse episodes, manage activity, configure settings
+- **Sign-in**: Account login with automatic token refresh
+- **Library**: Select episodes with multi-track support and concurrent processing with progress tracking
+- **Queue**: Add episodes to a queue, optional automatic processing, activity management
+- **History**: Track your catalog, Sonarr integration, refresh series data
+- **Calendar**: View upcoming release schedule
+- **Endpoints**: Configurable device endpoints (Android TV, Web, Console) with working defaults
+- **Languages**: Select audio and subtitle languages (default: Japanese audio, English subtitles)
 - **Muxing**: Automatic muxing with ffmpeg/mkvtoolnix, MP4/MP3 output options
 - **Hardware acceleration**: Full-GPU ffmpeg (NVENC/CUDA, QSV, VAAPI/AMF, Vulkan); GPU picker for sync that lists only the devices passed into the container
-- **Themes**: Multiple selectable UI themes (Dark, Light, Cinematic, AMOLED, Nebula) with a centralized design-token system
-- **Settings**: Full settings panel with download, queue, history, notifications, and appearance options
+- **Themes**: Multiple selectable UI themes (Dark, Light, Cinematic, AMOLED, Nebula, Seerr) with a centralized design-token system
+- **Settings**: Full settings panel with library, queue, history, notifications, and appearance options
 - **Notifications**: Webhook support for completion/failure events
 
 ## Troubleshooting
 
 ### No Audio Track
-- Check that `dub_languages` in config includes the episode's audio language
+- Check that `dub_languages` in config includes the item's audio language
 - Default is `ja-JP` only - add more languages in Settings if needed
 
-### Auth Issues
-- Delete `config/token.json` to force re-login
-- Check that stream endpoint "Use Default" is enabled
+### Sign-in Issues
+- Delete `config/token.json` to force a fresh sign-in
+- Check that the stream endpoint "Use Default" is enabled
 
 ### Reset All Settings
 - Stop the container
-- Delete `config/cruncharr.yaml.`
+- Delete `config/cruncharr.yaml`
 - Restart the container - it will recreate with defaults
 
-### Widevine/DRM
-- Place `device_private_key.pem` and `device_client_id_blob.bin` in `widevine/` directory
-- Required for downloading premium/DRM content
+### Device Files
+- Some sources require `device_private_key.pem` and `device_client_id_blob.bin` in the `widevine/` directory
 
 ## Security
 
@@ -207,11 +206,11 @@ proxy). Before exposing it more widely:
   from an untrusted network, set the `CRUNCHARR_API_KEY` env var — every `/api/*`
   request must then present it via the `X-Api-Key` header, `Authorization: Bearer
   <key>`, or (only for the browser Server-Sent-Events stream, which cannot send
-  headers) the `?apiKey=` query param. The web UI prompts for the key once and stores
-  it locally. Health checks stay exempt.
+  headers) the `?apiKey=` query param. The web interface prompts for the key once and
+  stores it locally. Health checks stay exempt.
 - **TLS.** The container serves plain HTTP. Terminate HTTPS at a reverse proxy
   (Caddy / nginx / Traefik) if it leaves your host.
-- **Credentials at rest.** Your Crunchyroll login and any Sonarr/proxy keys live in
+- **Credentials at rest.** Your account login and any Sonarr/proxy keys live in
   `config/cruncharr.yaml` in plaintext (file mode `600`) — the same model as
   Sonarr/Radarr. Protect the `/config` volume accordingly. The config API never
   returns secrets (they read back as `[configured]`), and credentials are never
@@ -220,15 +219,15 @@ proxy). Before exposing it more widely:
   with the `CORS_ORIGINS` env var (comma-separated) if you serve the UI elsewhere.
 - **Outbound calls are guarded.** Webhook URLs are rejected if they resolve to
   private/loopback/link-local addresses (SSRF protection); catalog images are proxied
-  and cached server-side only from `*.crunchyroll.com` over HTTPS.
+  and cached server-side only from the source's own image host over HTTPS.
 
 ## Credits
 
-This project is based on the original **Crunchy-Downloader** desktop application by [Crunchy-DL](https://github.com/Crunchy-DL/Crunchy-Downloader). All core download logic, Crunchyroll API integration, and media processing is ported from the upstream source.
+This project is based on the original **Crunchy-Downloader** desktop application by [Crunchy-DL](https://github.com/Crunchy-DL/Crunchy-Downloader). All core logic and media processing is ported from the upstream source, as required by its license.
 
 - **Upstream**: https://github.com/Crunchy-DL/Crunchy-Downloader
 - **Upstream License**: MIT License (Copyright (c) 2024 Crunchy DL)
-- **Port**: Dockerized web UI version with REST API and headless backend
+- **Port**: Dockerized web interface with REST API and headless backend
 
 ## License
 

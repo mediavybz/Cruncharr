@@ -6,7 +6,11 @@
 # lean runtime with only the binaries and packages the app actually needs.
 # No curl, xz-utils, compilers, or git in the final image.
 #
-# Before building, publish the binaries on the host:
+# Before building, publish the binaries on the host. Use ./publish-docker.sh (it does both
+# architectures + the CLI with the required flags). A self-contained, single-file, trimmed
+# publish is MANDATORY — this image has no .NET runtime, so a framework-dependent publish
+# fails at startup ("application to execute does not exist: /app/Cruncharr.API.dll").
+# Equivalent manual command (per arch):
 #   dotnet publish src/Cruncharr.API/Cruncharr.API.csproj -c Release -r linux-x64 \
 #     --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=true \
 #     -p:TrimMode=partial -p:InvariantGlobalization=true -o docker-build/amd64/publish

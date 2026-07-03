@@ -43,20 +43,55 @@ public class PortedGapTests
             "{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}",
             MakeEpisode(), opts);
 
-        Assert.Equal("My Show - S02E05 - The Title 1080p", name);
+        // {Quality Full} is Sonarr source-qualified: Crunchyroll = WEBDL.
+        Assert.Equal("My Show - S02E05 - The Title WEBDL-1080p", name);
     }
 
     [Fact]
-    public void FormatFilename_BareHeightQuality_RendersWithPSuffix()
+    public void FormatFilename_BareHeightQuality_SourceQualified()
     {
         // The post-download resolution probe passes a bare height ("1080");
-        // {Quality Full} should render "1080p", not "1080".
+        // {Quality Full} should render "WEBDL-1080p" (source + resolution), matching Sonarr.
         var svc = new FilenameService();
         var opts = new FilenameOptions { Quality = "1080" };
 
         var name = svc.FormatFilename("{Episode Title} {Quality Full}", MakeEpisode(), opts);
 
-        Assert.Equal("The Title 1080p", name);
+        Assert.Equal("The Title WEBDL-1080p", name);
+    }
+
+    [Fact]
+    public void UseSonarrNumbering_OverridesEpisodeTitleWithSonarrTitle()
+    {
+        // When Sonarr numbering is on and an episode matched, {Episode Title} uses the
+        // Sonarr/TVDB title (e.g. "Purification Strategy") instead of the Crunchyroll title
+        // ("The Purification Plan"), so the filename matches Sonarr exactly.
+        var svc = new FilenameService();
+        var opts = new FilenameOptions
+        {
+            UseSonarrNumbering = true,
+            SonarrEpisode = new SonarrEpisode { SeasonNumber = 8, EpisodeNumber = 5, Title = "Purification Strategy" }
+        };
+
+        var name = svc.FormatFilename("S{season:00}E{episode:00} - {Episode Title}", MakeEpisode(), opts);
+
+        Assert.Equal("S08E05 - Purification Strategy", name);
+    }
+
+    [Fact]
+    public void UseSonarrNumbering_CrTitleAliasKeepsCrunchyrollTitle()
+    {
+        // {crEpisodeTitle} always keeps the Crunchyroll title even under Sonarr numbering.
+        var svc = new FilenameService();
+        var opts = new FilenameOptions
+        {
+            UseSonarrNumbering = true,
+            SonarrEpisode = new SonarrEpisode { SeasonNumber = 8, EpisodeNumber = 5, Title = "Purification Strategy" }
+        };
+
+        var name = svc.FormatFilename("{crEpisodeTitle}", MakeEpisode(), opts);
+
+        Assert.Equal("The Title", name);
     }
 
     [Fact]

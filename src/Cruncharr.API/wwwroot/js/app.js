@@ -2823,13 +2823,16 @@
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Sonarr Settings</span><span class="settings-section-desc">Sonarr integration</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-enabled" ${s.enabled?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div id="sonarr-disabled-banner" style="display:${s.enabled?'none':'block'}; margin:0 0 10px; padding:10px 12px; border:1px solid var(--accent-red); border-radius:6px; background:rgba(220,53,69,0.08); font-size:0.85em; line-height:1.4;">
+                                    <strong>Sonarr is disabled.</strong> The settings below — including <em>Use Sonarr Numbering</em> — do nothing until you enable Sonarr, fill in Host / Port / API Key, and <em>Test Connection</em> succeeds. With Sonarr off, filenames use Crunchyroll's own numbering and titles.
+                                </div>
+                                <div class="setting-row"><div><div class="setting-label">Enabled</div><div class="setting-desc">Connect to a Sonarr server so the options below can use its data</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-enabled" ${s.enabled?'checked':''} onchange="updateSonarrGating()"><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input w-200" id="setting-sonarr-host" value="${escapeHtmlAttribute(s.host||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input w-100" id="setting-sonarr-port" value="${escapeHtmlAttribute(s.port||0)}"></div>
                                 <div class="setting-row"><div><div class="setting-label">API Key</div></div><input type="text" class="form-input w-250" id="setting-sonarr-apikey" value="${escapeHtmlAttribute(s.apiKey||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-ssl" ${s.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input w-200" id="setting-sonarr-urlbase" value="${escapeHtmlAttribute(s.urlBase||'')}"></div>
-                                <div class="setting-row"><div><div class="setting-label">Use Sonarr Numbering</div><div class="setting-desc">Use Sonarr's season/episode numbers AND episode titles in filenames (e.g. CR S03E282 "The Purification Plan" → Sonarr S08E05 "Purification Strategy"). Requires Sonarr enabled and reachable.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-numbering" ${s.useSonarrNumbering?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row" id="sonarr-numbering-row"><div><div class="setting-label">Use Sonarr Numbering</div><div class="setting-desc">Use Sonarr's season/episode numbers AND episode titles in filenames (e.g. CR S03E282 "The Purification Plan" → Sonarr S08E05 "Purification Strategy"). <span id="sonarr-numbering-warn" style="color:var(--accent-red); display:${s.enabled?'none':'inline'};">Requires Sonarr to be enabled and connected above.</span></div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-numbering" ${s.useSonarrNumbering?'checked':''} ${s.enabled?'':'disabled'}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Connection</div><div class="setting-desc">Verify host, port and API key against your Sonarr server</div></div><button class="header-btn" id="sonarr-test-btn" onclick="testSonarrConnection()">Test Connection</button></div>
                                 <div class="setting-row" id="sonarr-test-result" style="display:none;"><div id="sonarr-test-msg" style="font-size:0.85em;"></div></div>
                             </div>
@@ -4367,6 +4370,21 @@
             }
         }
         
+        // Live-gate the Sonarr-dependent settings on the Enabled toggle so a checkbox never
+        // sits there doing nothing. Called on render and whenever Enabled is flipped.
+        function updateSonarrGating() {
+            const enabled = document.getElementById('setting-sonarr-enabled')?.checked || false;
+            const banner = document.getElementById('sonarr-disabled-banner');
+            const numbering = document.getElementById('setting-sonarr-numbering');
+            const warn = document.getElementById('sonarr-numbering-warn');
+            if (banner) banner.style.display = enabled ? 'none' : 'block';
+            if (warn) warn.style.display = enabled ? 'none' : 'inline';
+            // Disable (grey out) but DON'T uncheck — the checkbox keeps showing the user's saved
+            // preference; the greyed state + red warning + banner communicate that it's inactive
+            // until Sonarr is connected. The backend already ignores the flag with no Sonarr match.
+            if (numbering) numbering.disabled = !enabled;
+        }
+
         async function testSonarrConnection() {
             const btn = document.getElementById('sonarr-test-btn');
             const resultRow = document.getElementById('sonarr-test-result');

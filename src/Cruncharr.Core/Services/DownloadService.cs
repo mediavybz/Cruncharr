@@ -548,14 +548,16 @@ public class DownloadService : IDownloadService
                             if (dubPlayback?.Subtitles != null && dubPlayback.Subtitles.Count > 0)
                             {
                                 playbackData.Subtitles ??= new List<SubtitleInfo>();
-                                // Key on lang+CC so a Closed Caption track is not deduped away
-                                // by a regular subtitle that shares the same locale.
+                                // Key on lang+CC+signs so a Closed Caption track is not deduped away
+                                // by a regular subtitle that shares the same locale, and a full
+                                // dialogue track (from the original version) is not deduped away by
+                                // a same-locale signs track from a dub version (or vice versa).
                                 var existingSubLangs = new HashSet<string>(
-                                    playbackData.Subtitles.Where(s => s.Lang != null).Select(s => $"{s.Lang}|{s.IsCC}"),
+                                    playbackData.Subtitles.Where(s => s.Lang != null).Select(s => $"{s.Lang}|{s.IsCC}|{IsSignsSubtitle(s)}"),
                                     StringComparer.OrdinalIgnoreCase);
                                 foreach (var s in dubPlayback.Subtitles)
                                 {
-                                    if (!string.IsNullOrEmpty(s.Lang) && existingSubLangs.Add($"{s.Lang}|{s.IsCC}"))
+                                    if (!string.IsNullOrEmpty(s.Lang) && existingSubLangs.Add($"{s.Lang}|{s.IsCC}|{IsSignsSubtitle(s)}"))
                                     {
                                         playbackData.Subtitles.Add(s);
                                     }
@@ -597,8 +599,11 @@ public class DownloadService : IDownloadService
                 {
                     var wantedSubs = (episode.SelectedSubs?.Count > 0 ? episode.SelectedSubs : config.Download.SoftSubs) ?? new List<string>();
                     var havePool = playbackData.Subtitles ?? new List<SubtitleInfo>();
+                    // A wanted language only counts as present when the pool holds its FULL
+                    // dialogue track. A dub version's own same-locale sub is signs/songs only,
+                    // so it must not stop us fetching the original version's full track.
                     var stillMissing = wantedSubs.Any(r => !string.IsNullOrWhiteSpace(r) &&
-                        !havePool.Any(s => string.Equals(s.Lang, r, StringComparison.OrdinalIgnoreCase)));
+                        !havePool.Any(s => string.Equals(s.Lang, r, StringComparison.OrdinalIgnoreCase) && !s.IsCC && !IsSignsSubtitle(s)));
                     var origVersion = episode.Versions.FirstOrDefault(v => v.Original);
                     if (stillMissing && origVersion != null && !string.IsNullOrEmpty(origVersion.Guid) &&
                         !string.Equals(origVersion.Guid, mediaGuid, StringComparison.OrdinalIgnoreCase))
@@ -612,12 +617,12 @@ public class DownloadService : IDownloadService
                             {
                                 playbackData.Subtitles ??= new List<SubtitleInfo>();
                                 var existing = new HashSet<string>(
-                                    playbackData.Subtitles.Where(s => s.Lang != null).Select(s => $"{s.Lang}|{s.IsCC}"),
+                                    playbackData.Subtitles.Where(s => s.Lang != null).Select(s => $"{s.Lang}|{s.IsCC}|{IsSignsSubtitle(s)}"),
                                     StringComparer.OrdinalIgnoreCase);
                                 var added = 0;
                                 foreach (var s in subPlayback.Subtitles)
                                 {
-                                    if (!string.IsNullOrEmpty(s.Lang) && existing.Add($"{s.Lang}|{s.IsCC}"))
+                                    if (!string.IsNullOrEmpty(s.Lang) && existing.Add($"{s.Lang}|{s.IsCC}|{IsSignsSubtitle(s)}"))
                                     {
                                         playbackData.Subtitles.Add(s);
                                         added++;
@@ -885,18 +890,18 @@ public class DownloadService : IDownloadService
             if (!config.Download.SkipSubs && playbackData.Subtitles != null && playbackData.Subtitles.Count > 0)
             {
                 progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 80, Doing = "Downloading subtitles..." });
-                // Locales of the dubs we actually downloaded — a subtitle whose locale
-                // matches a dub (and is not CC) is a "signs/forced" track.
-                var dubLocales = new HashSet<string>(
-                    audioTrackLanguages.Select(a => a.Lang),
-                    StringComparer.OrdinalIgnoreCase);
                 // Track (lang|cc|signs) we already wrote to honor SubsDownloadDuplicate.
                 var downloadedSubKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                // Same resolution order as the availability check and the late original-version
+                // fetch: per-episode SelectedSubs (what the user picked in the UI), then SoftSubs,
+                // then SubtitleLanguages. Previously SelectedSubs was ignored here, so the add-paths
+                // were not synchronized with the actual subtitle download.
+                var subLangs = episode.SelectedSubs?.Count > 0 ? episode.SelectedSubs
+                    : (config.Download.SoftSubs?.Count > 0 ? config.Download.SoftSubs : config.Download.SubtitleLanguages);
 
                 foreach (var sub in playbackData.Subtitles)
                 {
                     var langCode = (sub.Lang ?? "unknown").Replace("-", "").ToLower();
-                    var subLangs = config.Download.SoftSubs?.Count > 0 ? config.Download.SoftSubs : config.Download.SubtitleLanguages;
                     var shouldDownload = subLangs.Contains("all") ||
                                          (sub.Lang != null && subLangs.Contains(sub.Lang)) ||
                                          subLangs.Contains(langCode);
@@ -905,7 +910,11 @@ public class DownloadService : IDownloadService
                         continue;
 
                     var isCc = sub.IsCC;
-                    var isSigns = !isCc && sub.Lang != null && dubLocales.Contains(sub.Lang);
+                    // Upstream (CrunchyrollManager.DownloadSubtitles): a subtitle is "signs" when
+                    // its locale equals the audio locale of the VERSION it came from — the dub's
+                    // own same-language track is signs/songs, while the same language fetched from
+                    // the original (ja-JP) version is the full dialogue track.
+                    var isSigns = IsSignsSubtitle(sub);
 
                     // Include filters (upstream: skip signs unless IncludeSignsSubs, CC unless IncludeCcSubs).
                     if ((!config.Download.IncludeSignsSubs && isSigns) || (!config.Download.IncludeCcSubs && isCc))
@@ -1309,7 +1318,7 @@ public class DownloadService : IDownloadService
                             if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                             {
                                 progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = $"Encoding {locale}..." });
-                                await EncodeOutputAsync(groupWorkPath, config.Download.EncodingPreset, cancellationToken);
+                                await EncodeOutputAsync(groupWorkPath, config.Download.EncodingPreset, cancellationToken, progress, locale);
                             }
 
                             if (!string.Equals(groupWorkPath, groupOutputPath, StringComparison.Ordinal))
@@ -1336,7 +1345,7 @@ public class DownloadService : IDownloadService
                         if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                         {
                             progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
-                            await EncodeOutputAsync(workPath, config.Download.EncodingPreset, cancellationToken);
+                            await EncodeOutputAsync(workPath, config.Download.EncodingPreset, cancellationToken, progress);
                         }
 
                         if (!string.Equals(workPath, outputPath, StringComparison.Ordinal))
@@ -1850,6 +1859,14 @@ public class DownloadService : IDownloadService
         }
     }
 
+    // Upstream parity (CrunchyrollManager.DownloadSubtitles): "signs" = a non-CC subtitle whose
+    // locale equals the audio locale of the playback version it was fetched from. Unknown origin
+    // is treated as NOT signs — dropping a full dialogue track is far worse than keeping one
+    // extra signs track. (internal for the guard test)
+    internal static bool IsSignsSubtitle(SubtitleInfo s) =>
+        !s.IsCC && !string.IsNullOrEmpty(s.SourceAudioLocale) &&
+        string.Equals(s.Lang, s.SourceAudioLocale, StringComparison.OrdinalIgnoreCase);
+
     private async Task<PlaybackData?> ParsePlaybackDataAsync(string content, CancellationToken cancellationToken)
     {
         try
@@ -1887,7 +1904,8 @@ public class DownloadService : IDownloadService
                         Lang = sub.Key,
                         Url = sub.Value.Url ?? "",
                         Format = sub.Value.Format ?? "vtt",
-                        IsCC = false
+                        IsCC = false,
+                        SourceAudioLocale = playStream.AudioLocale
                     });
                 }
             }
@@ -1905,7 +1923,8 @@ public class DownloadService : IDownloadService
                         Lang = capLang,
                         Url = cap.Value.Url ?? "",
                         Format = cap.Value.Format ?? "vtt",
-                        IsCC = true
+                        IsCC = true,
+                        SourceAudioLocale = playStream.AudioLocale
                     });
                 }
             }
@@ -2884,6 +2903,13 @@ public class DownloadService : IDownloadService
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
+        // Kill the child on cancellation — WaitForExitAsync alone only abandons the wait,
+        // leaving ffmpeg/decrypt running orphaned after a queue-item cancel.
+        await using var killRegistration = cancellationToken.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(true); } catch { /* ignored */ }
+        });
+
         await process.WaitForExitAsync(cancellationToken);
 
         var output = await outputTask;
@@ -2933,6 +2959,11 @@ public class DownloadService : IDownloadService
 
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        await using var killRegistration = cancellationToken.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(true); } catch { /* ignored */ }
+        });
 
         await process.WaitForExitAsync(cancellationToken);
 
@@ -3010,7 +3041,7 @@ public class DownloadService : IDownloadService
         _logger?.LogInformation("Moved output to {Dest}", destPath);
     }
 
-    private async Task EncodeOutputAsync(string inputPath, string presetName, CancellationToken cancellationToken)
+    private async Task EncodeOutputAsync(string inputPath, string presetName, CancellationToken cancellationToken, IProgress<DownloadProgress>? progress = null, string? label = null)
     {
         var preset = _encodingService?.GetPreset(presetName);
         if (preset == null)
@@ -3054,9 +3085,16 @@ public class DownloadService : IDownloadService
         foreach (var param in preset.AdditionalParameters)
             args.AddRange(SplitArguments(param));
 
+        // Machine-readable progress on stdout (key=value blocks) so the queue can show
+        // encode percentage + ETA instead of a frozen "Encoding...".
+        args.Add("-progress");
+        args.Add("pipe:1");
+        args.Add("-nostats");
+
         args.Add(tempOutput);
 
-        await RunProcessAsync(ffmpegPath, args, cancellationToken);
+        var durationSeconds = await ProbeVideoDurationAsync(inputPath, cancellationToken);
+        await RunFfmpegWithEncodeProgressAsync(ffmpegPath, args, durationSeconds, progress, label, cancellationToken);
 
         if (File.Exists(tempOutput))
         {
@@ -3067,6 +3105,134 @@ public class DownloadService : IDownloadService
         else
         {
             _logger?.LogWarning("Encoding produced no output for {Path} with preset {Preset}; keeping muxed file", inputPath, presetName);
+        }
+    }
+
+    /// <summary>Total duration in seconds of the container's longest stream (ffprobe), or null.</summary>
+    private async Task<double?> ProbeVideoDurationAsync(string videoPath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!File.Exists(videoPath)) return null;
+            var ffprobePath = FindExecutable("ffprobe") ?? "ffprobe";
+            var args = new List<string>{
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                videoPath
+            };
+            var output = await RunProcessWithOutputAsync(ffprobePath, args, cancellationToken);
+            if (double.TryParse(output, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0)
+            {
+                return seconds;
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Failed to probe duration of {Path}", videoPath);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Runs ffmpeg reading its "-progress pipe:1" key=value output, reporting encode
+    /// percentage + ETA through the queue progress (Percent stays in the 95-99 processing
+    /// band; Doing carries the human-readable "Encoding... N%"). Kills ffmpeg on cancel.
+    /// </summary>
+    private async Task RunFfmpegWithEncodeProgressAsync(string ffmpegPath, List<string> args, double? durationSeconds, IProgress<DownloadProgress>? progress, string? label, CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            Arguments = string.Join(" ", args.Select(EscapeProcessArgument)),
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        _logger?.LogDebug("Running: {Executable} {Args}", ffmpegPath, startInfo.Arguments);
+
+        using var process = Process.Start(startInfo);
+        if (process == null)
+        {
+            _logger?.LogError("Failed to start process: {Executable}", ffmpegPath);
+            return;
+        }
+
+        await using var killRegistration = cancellationToken.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(true); } catch { /* ignored */ }
+        });
+
+        // Drain stderr concurrently so a full pipe buffer can't deadlock ffmpeg.
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        var labelSuffix = string.IsNullOrEmpty(label) ? "" : $" {label}";
+        double outTimeSeconds = 0;
+        double speed = 0;
+        var lastReport = DateTime.MinValue;
+
+        string? line;
+        while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) != null)
+        {
+            var eq = line.IndexOf('=');
+            if (eq <= 0) continue;
+            var key = line[..eq];
+            var value = line[(eq + 1)..].Trim();
+
+            switch (key)
+            {
+                case "out_time_us":
+                case "out_time_ms": // both are microseconds in ffmpeg's -progress output
+                    if (long.TryParse(value, out var us) && us > 0) outTimeSeconds = us / 1_000_000.0;
+                    break;
+                case "speed":
+                    var sVal = value.TrimEnd('x');
+                    if (double.TryParse(sVal, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sp)) speed = sp;
+                    break;
+                case "progress": // end of a stats block — report once per block, throttled
+                    if (progress == null) break;
+                    var now = DateTime.UtcNow;
+                    if (value != "end" && (now - lastReport).TotalSeconds < 1) break;
+                    lastReport = now;
+                    if (durationSeconds is > 0)
+                    {
+                        var pct = Math.Clamp(outTimeSeconds / durationSeconds.Value * 100.0, 0, 100);
+                        var eta = speed > 0 ? Math.Max(0, (durationSeconds.Value - outTimeSeconds) / speed) : 0;
+                        progress.Report(new DownloadProgress
+                        {
+                            State = DownloadState.Processing,
+                            Percent = 95 + pct * 0.04, // keep inside the processing band
+                            Doing = $"Encoding{labelSuffix}... {pct:0}%",
+                            Time = eta
+                        });
+                    }
+                    else
+                    {
+                        // No duration — still show elapsed encode position so it visibly moves.
+                        progress.Report(new DownloadProgress
+                        {
+                            State = DownloadState.Processing,
+                            Percent = 95,
+                            Doing = $"Encoding{labelSuffix}... {TimeSpan.FromSeconds(outTimeSeconds):hh\\:mm\\:ss}"
+                        });
+                    }
+                    break;
+            }
+        }
+
+        await process.WaitForExitAsync(cancellationToken);
+        var error = await errorTask;
+
+        if (process.ExitCode != 0)
+        {
+            _logger?.LogError("Process failed with exit code {ExitCode}: {Error}", process.ExitCode, error);
+        }
+        else if (!string.IsNullOrEmpty(error))
+        {
+            _logger?.LogDebug("Process stderr: {Error}", error);
         }
     }
 
@@ -3331,4 +3497,11 @@ public class SubtitleInfo
     public string Format { get; set; } = "vtt";
     // Closed Caption track (from playStream.Captions, not Subtitles).
     public bool IsCC { get; set; } = false;
+    // Audio locale of the playback VERSION this subtitle came from. Upstream classifies a
+    // subtitle as "signs" per version (sub locale == that version's audio locale), NOT
+    // against the set of downloaded dubs: the full en-US dialogue track lives on the ja-JP
+    // original version, while the en-US dub version only carries an en-US signs/songs track.
+    // Without the origin, a merged sub pool misclassifies the full dialogue track as signs
+    // and IncludeSignsSubs=false drops every subtitle (seen live).
+    public string? SourceAudioLocale { get; set; }
 }

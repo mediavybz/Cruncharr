@@ -42,7 +42,6 @@
         let historyViewMode = 'poster';
         let settingsTab = 'general';
         let selectedEpisodes = new Set();
-        let addDownloadSearchResults = [];
         let addDownloadSelectedSeries = null;
 
         let addDownloadSeriesData = null; // Stores EpisodeAndLanguage data from ListSeriesId
@@ -421,6 +420,8 @@
                     const state = (item.downloadProgress?.state || 'queued').toLowerCase();
                     const isError = state === 'error';
                     const isDownloading = state === 'downloading';
+                    // Processing (muxing/encoding) is also active work that can be paused/cancelled.
+                    const isActive = isDownloading || state === 'processing';
                     const isPaused = state === 'paused';
                     const isDone = state === 'done';
                     return `
@@ -439,13 +440,13 @@
                                             ? `<button class="btn-icon primary" onclick="startDownload('${escapeJsString(item.id)}')" title="Start">&#9654;</button>`
                                             : isError
                                                 ? `<button class="btn-icon" onclick="retryDownload('${escapeJsString(item.id)}')" title="Retry">&#8635;</button>`
-                                                : `<button class="btn-icon" onclick="togglePauseResume('${escapeJsString(item.id)}', ${isDownloading})" title="${isDownloading ? 'Pause' : 'Resume'}">${isDownloading ? '&#10074;&#10074;' : '&#9654;'}</button>`
+                                                : `<button class="btn-icon" onclick="togglePauseResume('${escapeJsString(item.id)}', ${isActive})" title="${isActive ? 'Pause (stops the current download/encode; Resume restarts it)' : 'Resume'}">${isActive ? '&#10074;&#10074;' : '&#9654;'}</button>`
                                         }
                                         ${isDone
                                             ? `<a class="btn-icon" href="/api/v1/queue/${escapeJsString(item.id)}/file" download title="Save a copy to this device">&#128190;</a>
                                                <button class="btn-icon" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="Remove from list (file kept on server)">&#10005;</button>
                                                <button class="btn-icon danger" onclick="deleteDownloadedFile('${escapeJsString(item.id)}')" title="Delete the downloaded file from the server">&#128465;</button>`
-                                            : `<button class="btn-icon danger" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="Remove">&#128465;</button>`
+                                            : `<button class="btn-icon danger" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="${isActive ? 'Cancel and remove' : 'Remove'}">&#128465;</button>`
                                         }
                                     </div>
                                 </div>
@@ -467,14 +468,7 @@
         function renderAddDownload(container) {
             container.innerHTML = `
                 <div class="page-title">Add Download</div>
-                <div class="page-subtitle">Search and add episodes to the queue</div>
-                <div style="position:relative; margin-bottom:10px;">
-                    <div class="header-search" style="width:100%;">
-                        <span>&#128269;</span>
-                        <input type="text" id="add-search-input" placeholder="Enter series or episode URL..." oninput="onAddSearchInput(this.value)">
-                    </div>
-                    <div class="search-popup" id="search-popup"></div>
-                </div>
+                <div class="page-subtitle">Use the search bar at the top to find a series or paste a URL</div>
                 <div class="season-selector">
                     <button class="header-btn primary" id="add-btn" onclick="addSelectedToQueue()" disabled>Add</button>
                     <label class="checkbox-label">
@@ -495,161 +489,10 @@
                     <div class="empty-state">
                         <div class="empty-state-icon">&#128270;</div>
                         <div class="empty-state-title">Search for a series</div>
-                        <div>Type a series name or URL to find episodes</div>
+                        <div>Use the search bar at the top &mdash; type a series name or paste a URL</div>
                     </div>
                 </div>
             `;
-        }
-
-        let searchDebounce;
-        let searchAbortController = null;
-        function onAddSearchInput(value) {
-            clearTimeout(searchDebounce);
-            const popup = document.getElementById('search-popup');
-            if (!value.trim()) {
-                if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
-                return;
-            }
-            searchDebounce = setTimeout(() => doAddSearch(value), 400);
-        }
-
-        async function doAddSearch(query) {
-            const popup = document.getElementById('search-popup');
-            if (!popup) return;
-            if (searchAbortController) {
-                searchAbortController.abort();
-            }
-            const controller = new AbortController();
-            searchAbortController = controller;
-            try {
-                const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`, {
-                    signal: controller.signal
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const results = await res.json();
-                addDownloadSearchResults = results || [];
-                if (addDownloadSearchResults.length === 0) {
-                    popup.innerHTML = '<div style="padding:15px; color:var(--text-muted);">No results found</div>';
-                    popup.style.display = 'block';
-                    return;
-                }
-                popup.innerHTML = addDownloadSearchResults.map(s => `
-                    <div class="search-result-item" onclick="selectSearchResult('${escapeJsString(s.id)}')">
-                        <div class="search-result-poster">
-                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
-                        </div>
-                        <div class="search-result-info">
-                            <div class="search-result-title">${escapeHtml(s.title)}</div>
-                            <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
-                        </div>
-                    </div>
-                `).join('');
-                popup.style.display = 'block';
-            } catch (e) {
-                if (e.name === 'AbortError') return;
-                if (!popup) return;
-                popup.innerHTML = '<div style="padding:15px; color:var(--accent-red);">Search failed</div>';
-                popup.style.display = 'block';
-            } finally {
-                if (searchAbortController === controller) {
-                    searchAbortController = null;
-                }
-            }
-        }
-
-        async function selectSearchResult(seriesId) {
-            const searchPopup = document.getElementById('search-popup');
-            if (searchPopup) searchPopup.style.display = 'none';
-            const series = addDownloadSearchResults.find(s => s.id === seriesId);
-            addDownloadSelectedSeries = series;
-            if (!series) return;
-            const searchInput = document.getElementById('add-search-input');
-            if (searchInput) searchInput.value = series.title;
-            const musicBtn = document.getElementById('music-btn');
-            if (musicBtn) musicBtn.style.display = 'inline-flex';
-            // Show loading spinner while fetching episodes
-            const listContainer = document.getElementById('add-episodes-list');
-            if (listContainer) {
-                listContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
-            }
-            try {
-                // Use ListSeriesId endpoint to get episodes with dub version info
-                const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
-                const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
-                const res = await fetch(`/api/v1/series/${seriesId}/list?${dubLangParam}`);
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const result = await res.json();
-                
-                if (!result || !result.list) {
-                    showToast('No episodes found for this series', 'error');
-                    return;
-                }
-                
-                addDownloadEpisodeList = result.list || [];
-                addDownloadSeriesData = result.data || {};
-                
-                // Extract unique seasons from episodes
-                const seasonMap = new Map();
-                addDownloadEpisodeList.forEach(ep => {
-                    const seasonId = ep.id; // EpisodeDisplay.Id is the seasonId
-                    if (seasonId && !seasonMap.has(seasonId)) {
-                        seasonMap.set(seasonId, {
-                            id: seasonId,
-                            title: ep.seasonTitle || `Season ${ep.season}`
-                        });
-                    }
-                });
-                const seasons = Array.from(seasonMap.values());
-                
-                // Pre-select ONLY the user's preferred audio (their Crunchyroll profile's
-                // preferredAudioLanguage, e.g. en-US), falling back to the config default.
-                // Previously EVERY configured dub was pre-checked, so the original ja-JP rode
-                // along with an English pick and the file played Japanese. Users add extra dubs
-                // explicitly. If the preferred audio isn't offered for an episode, fall back to
-                // its first available track so something is still selected.
-                selectedEpisodeDubs.clear();
-                await refreshAuthStatus(); // reflect any website-side language change without re-login
-                const preferredAudio = authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
-                addDownloadEpisodeList.forEach(ep => {
-                    const epKey = ep.e; // Episode key like "E1", "SP1", etc.
-                    const epData = addDownloadSeriesData[epKey];
-                    if (epData && epData.variants) {
-                        const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
-                        const selected = new Set();
-                        if (availableDubs.includes(preferredAudio)) selected.add(preferredAudio);
-                        else if (availableDubs.length > 0) selected.add(availableDubs[0]);
-                        if (selected.size > 0) {
-                            selectedEpisodeDubs.set(epKey, selected);
-                        }
-                    }
-                });
-                updateAddDefaultHint(preferredAudio);
-
-                const dropdown = document.getElementById('season-dropdown');
-                if (!dropdown) return;
-                dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
-                if (seasons.length > 0) {
-                    dropdown.value = seasons[0].id;
-                    onSeasonChange(seasons[0].id);
-                } else {
-                    // No seasons found, show all episodes
-                    selectedEpisodes.clear();
-                    renderAddEpisodesMultiDub();
-                }
-            } catch (e) {
-                console.error('Failed to load series episodes:', e);
-                showToast('Failed to load episodes', 'error');
-                const listContainer = document.getElementById('add-episodes-list');
-                if (listContainer) {
-                    listContainer.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">❌</div>
-                            <div class="empty-state-title">Failed to load episodes</div>
-                            <div>Please try again</div>
-                        </div>
-                    `;
-                }
-            }
         }
 
         // ===== Top-bar global search (Seerr-style) =====
@@ -1655,9 +1498,6 @@
                     const browseTitle = addDownloadEpisodeList[0]?.seasonTitle || 'Selected Series';
                     addDownloadSelectedSeries = { id: seriesId, title: browseTitle };
 
-                    const searchInput = document.getElementById('add-search-input');
-                    if (searchInput) searchInput.value = browseTitle;
-                    
                     const musicBtn = document.getElementById('music-btn');
                     if (musicBtn) musicBtn.style.display = 'inline-flex';
                     
@@ -1945,23 +1785,11 @@
             })();
         }
 
-        function performSearch() {
-            const searchInput = document.getElementById('add-search-input');
-            if (searchInput && searchInput.value.trim()) {
-                doAddSearch(searchInput.value.trim());
-            }
-        }
-
         function searchSeriesById(seriesId) {
+            // The Add Download page no longer has its own search bar; go straight to the
+            // Browse flow, which loads the series' episodes into Add Download.
             closeModal();
-            navigateTo('add-download');
-            setTimeout(() => {
-                const searchInput = document.getElementById('add-search-input');
-                if (searchInput) {
-                    searchInput.value = seriesId;
-                    performSearch();
-                }
-            }, 100);
+            selectBrowseResult(seriesId);
         }
 
         async function addEpisodeToQueueWithDetails(episodeId, title, seriesTitle) {

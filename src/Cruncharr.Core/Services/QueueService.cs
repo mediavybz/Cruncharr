@@ -56,6 +56,22 @@ public class QueueService : IQueueService, IDisposable
     private readonly object _downloadStartLock = new();
     private readonly HashSet<string> _activeOrStarting = new();
 
+    // Per-item cancellation. A remove or pause of an ACTIVE item cancels its in-flight
+    // download/mux/encode instead of letting it run to completion in the background
+    // (previously the trash/pause buttons only changed queue state; ffmpeg kept going).
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _itemCts = new();
+    // Items whose active work was cancelled by PauseItem (as opposed to removed):
+    // the cancellation handler restores Paused instead of Cancelled so Resume works.
+    private readonly ConcurrentDictionary<string, byte> _pauseRequested = new();
+
+    private void CancelActiveItem(string queueItemId)
+    {
+        if (_itemCts.TryGetValue(queueItemId, out var cts))
+        {
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        }
+    }
+
     // Ported from upstream: pump scheduling
     private int _pumpScheduled;
     private int _pumpDirty;
@@ -158,6 +174,8 @@ public class QueueService : IQueueService, IDisposable
     {
         if (_queue.TryRemove(queueItemId, out _))
         {
+            // Cancel any in-flight download/mux/encode for this item.
+            CancelActiveItem(queueItemId);
             _logger?.LogInformation("Removed from queue: {QueueItemId}", queueItemId);
             OnQueueStateChanged();
             ScheduleSave();
@@ -189,6 +207,11 @@ public class QueueService : IQueueService, IDisposable
     public void ClearQueue()
     {
         _queue.Clear();
+        // Clearing the queue also cancels every in-flight download/mux/encode.
+        foreach (var id in _itemCts.Keys.ToList())
+        {
+            CancelActiveItem(id);
+        }
         _logger?.LogInformation("Queue cleared");
         OnQueueStateChanged();
         ScheduleSave();
@@ -238,8 +261,20 @@ public class QueueService : IQueueService, IDisposable
     {
         if (_queue.TryGetValue(queueItemId, out var item))
         {
-            item.DownloadProgress.State = DownloadState.Paused;
-            item.DownloadProgress.Doing = "Paused";
+            // Actively downloading/processing: cancel the in-flight work so pause actually
+            // frees the machine (Resume restarts the episode from the beginning). The
+            // cancellation handler in RunDownloadAsync sets the final Paused state.
+            if (_itemCts.ContainsKey(queueItemId))
+            {
+                _pauseRequested[queueItemId] = 1;
+                item.DownloadProgress.Doing = "Pausing...";
+                CancelActiveItem(queueItemId);
+            }
+            else
+            {
+                item.DownloadProgress.State = DownloadState.Paused;
+                item.DownloadProgress.Doing = "Paused";
+            }
             _logger?.LogInformation("Paused item {QueueItemId}", queueItemId);
             OnQueueStateChanged();
             ScheduleSave();
@@ -582,7 +617,7 @@ public class QueueService : IQueueService, IDisposable
     }
 
     // Extracted download execution logic
-    private async Task RunDownloadAsync(QueueItem item, CancellationToken cancellationToken)
+    private async Task RunDownloadAsync(QueueItem item, CancellationToken outerCancellationToken)
     {
         item.DownloadProgress.State = DownloadState.Downloading;
         item.DownloadProgress.Doing = "Starting download...";
@@ -590,6 +625,12 @@ public class QueueService : IQueueService, IDisposable
         ScheduleSave();
 
         _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+
+        // Per-item cancellation (linked to app shutdown) so removing/pausing this item
+        // cancels ITS download without touching the others.
+        using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancellationToken);
+        _itemCts[item.Id] = itemCts;
+        var cancellationToken = itemCts.Token;
 
         try
         {
@@ -664,9 +705,20 @@ public class QueueService : IQueueService, IDisposable
         }
         catch (OperationCanceledException)
         {
-            item.DownloadProgress.State = DownloadState.Cancelled;
-            item.DownloadProgress.Doing = "Cancelled";
-            _logger?.LogInformation("Download cancelled: {EpisodeId}", item.Episode.Id);
+            if (_pauseRequested.TryRemove(item.Id, out _))
+            {
+                // Cancelled BY PauseItem: park it as Paused so Resume can restart it.
+                item.DownloadProgress.State = DownloadState.Paused;
+                item.DownloadProgress.Doing = "Paused";
+                item.DownloadProgress.Percent = 0;
+                _logger?.LogInformation("Download paused (in-flight work cancelled): {EpisodeId}", item.Episode.Id);
+            }
+            else
+            {
+                item.DownloadProgress.State = DownloadState.Cancelled;
+                item.DownloadProgress.Doing = "Cancelled";
+                _logger?.LogInformation("Download cancelled: {EpisodeId}", item.Episode.Id);
+            }
         }
         catch (Exception ex)
         {
@@ -682,6 +734,11 @@ public class QueueService : IQueueService, IDisposable
                 item.DownloadProgress.State = DownloadState.Error;
                 item.DownloadProgress.Doing = $"Error: {ex.Message}";
             }
+        }
+        finally
+        {
+            _itemCts.TryRemove(item.Id, out _);
+            _pauseRequested.TryRemove(item.Id, out _);
         }
 
         OnQueueStateChanged();

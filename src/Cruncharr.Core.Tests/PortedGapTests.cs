@@ -47,6 +47,19 @@ public class PortedGapTests
     }
 
     [Fact]
+    public void FormatFilename_BareHeightQuality_RendersWithPSuffix()
+    {
+        // The post-download resolution probe passes a bare height ("1080");
+        // {Quality Full} should render "1080p", not "1080".
+        var svc = new FilenameService();
+        var opts = new FilenameOptions { Quality = "1080" };
+
+        var name = svc.FormatFilename("{Episode Title} {Quality Full}", MakeEpisode(), opts);
+
+        Assert.Equal("The Title 1080p", name);
+    }
+
+    [Fact]
     public void UseSonarrNumbering_Disabled_UsesCrunchyrollNumbers()
     {
         var svc = new FilenameService();

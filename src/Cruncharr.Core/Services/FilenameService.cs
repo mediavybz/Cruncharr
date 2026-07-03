@@ -91,10 +91,13 @@ public class FilenameService : IFilenameService
         // Backward compatibility variables (not in upstream but supported by previous implementation)
         if (!string.IsNullOrEmpty(options.Quality))
         {
-            variables.Add(new Variable("quality", options.Quality, false));
+            // A bare height ("1080", from the post-download resolution probe) renders as
+            // "1080p"; values that already carry a suffix ("1080p", "best") pass through.
+            var qualityDisplay = int.TryParse(options.Quality, out var qNum) ? $"{qNum}p" : options.Quality;
+            variables.Add(new Variable("quality", qualityDisplay, false));
             // Sonarr/Plex-style aliases so {Quality Full} / {Quality Title} resolve.
-            variables.Add(new Variable("qualityFull", options.Quality, false));
-            variables.Add(new Variable("qualityTitle", options.Quality, false));
+            variables.Add(new Variable("qualityFull", qualityDisplay, false));
+            variables.Add(new Variable("qualityTitle", qualityDisplay, false));
         }
         if (!string.IsNullOrEmpty(options.AudioLanguage))
         {

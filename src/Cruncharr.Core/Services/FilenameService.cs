@@ -34,13 +34,21 @@ public class FilenameService : IFilenameService
 
         var variables = new List<Variable>();
 
-        // Upstream variables
-        variables.Add(new Variable("title", episode.Title, true));
-        // Aliases so the names documented in the UI resolve.
-        variables.Add(new Variable("episodeTitle", episode.Title, true));
-
-        // UseSonarrNumbering: override CR's episode/season with Sonarr's matched numbers.
+        // UseSonarrNumbering: when on AND an episode matched, the file mirrors Sonarr/TVDB
+        // identity — season/episode NUMBERS *and* the episode TITLE (user intent: "name it
+        // like Sonarr"). Off or unmatched, it keeps Crunchyroll's own title. The always-CR
+        // aliases below let a Sonarr-numbered template still opt into the Crunchyroll title.
         bool useSonarrNumbering = options.UseSonarrNumbering && options.SonarrEpisode != null;
+        var effectiveTitle = (useSonarrNumbering && !string.IsNullOrEmpty(options.SonarrEpisode!.Title))
+            ? options.SonarrEpisode!.Title!
+            : episode.Title;
+
+        variables.Add(new Variable("title", effectiveTitle, true));
+        // Aliases so the names documented in the UI resolve.
+        variables.Add(new Variable("episodeTitle", effectiveTitle, true));
+        // Always the Crunchyroll title, regardless of Sonarr numbering.
+        variables.Add(new Variable("crTitle", episode.Title, true));
+        variables.Add(new Variable("crEpisodeTitle", episode.Title, true));
 
         // Episode: try to parse as double for fractional episodes (e.g., 12.5), fallback to int
         object episodeValue;
@@ -93,11 +101,18 @@ public class FilenameService : IFilenameService
         {
             // A bare height ("1080", from the post-download resolution probe) renders as
             // "1080p"; values that already carry a suffix ("1080p", "best") pass through.
-            var qualityDisplay = int.TryParse(options.Quality, out var qNum) ? $"{qNum}p" : options.Quality;
+            // `height` above already parsed the resolution (strips a trailing "p"), so both
+            // "1080" and "1080p" resolve to 1080; "best"/"worst" leave height 0.
+            var qualityDisplay = height > 0 ? $"{height}p" : options.Quality;
             variables.Add(new Variable("quality", qualityDisplay, false));
-            // Sonarr/Plex-style aliases so {Quality Full} / {Quality Title} resolve.
-            variables.Add(new Variable("qualityFull", qualityDisplay, false));
-            variables.Add(new Variable("qualityTitle", qualityDisplay, false));
+            // Sonarr's {Quality Full}/{Quality Title} are SOURCE-qualified, e.g. "WEBDL-1080p".
+            // Crunchyroll delivers via web streaming, so the source is WEBDL — this is what
+            // Sonarr itself assigns to Crunchyroll grabs, so the filename matches Sonarr. When
+            // the resolution is not yet numeric (the pre-probe "best"/"worst" temp name) there is
+            // nothing to source-qualify, so it passes through unprefixed.
+            var qualityFull = height > 0 ? $"WEBDL-{height}p" : qualityDisplay;
+            variables.Add(new Variable("qualityFull", qualityFull, false));
+            variables.Add(new Variable("qualityTitle", qualityFull, false));
         }
         if (!string.IsNullOrEmpty(options.AudioLanguage))
         {

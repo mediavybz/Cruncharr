@@ -31,7 +31,7 @@ public class EncodingService : IEncodingService
                    "-x265-params limit-sao=1:bframes=8:psy-rd=1.5:psy-rdoq=2.0:aq-mode=3:deblock=-1,-1",
                    "-c:a copy", "-c:s copy", "-c:t copy" } },
         // Trix-style: SVT-AV1 10-bit (tune=0 = subjective quality), even smaller files.
-        new(){ PresetName = "[Trix] Anime AV1 10-bit (unofficial)", Codec = "libsvtav1", Resolution = "-2:1080", FrameRate = "24000/1001", Crf = 30,
+        new(){ PresetName = "[Trix] Anime AV1 10-bit (unofficial)", Codec = "libsvtav1", Resolution = "-2:1080", FrameRate = "24000/1001", Crf = 24,
                AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 4",
                    "-svtav1-params tune=0:keyint=240:enable-overlays=1:scd=1",
                    "-c:a copy", "-c:s copy", "-c:t copy" } },

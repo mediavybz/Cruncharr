@@ -218,6 +218,8 @@ public class CalendarController : ControllerBase
             IsPremiere = episode.IsPremiere,
             ThumbnailUrl = episode.ThumbnailUrl,
             HasAired = episode.HasPassed ?? false,
+            // Scheduled-but-unreleased entry from the AniList airing feed (no CR episode id yet).
+            IsUpcoming = episode.AnilistEpisode,
             AudioLocale = episode.AudioLocale,
             // [PT] Upstream calendar history marks
             IsInHistory = episode.IsInHistory,
@@ -253,6 +255,7 @@ public class CalendarEpisodeResponse
     public bool IsPremiere { get; set; }
     public string? ThumbnailUrl { get; set; }
     public bool HasAired { get; set; }
+    public bool IsUpcoming { get; set; }
     public string? AudioLocale { get; set; }
     public bool IsInHistory { get; set; }
     public bool ShowHistoryMark { get; set; }

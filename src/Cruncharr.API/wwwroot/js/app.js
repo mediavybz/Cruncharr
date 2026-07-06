@@ -1216,10 +1216,10 @@
                                     const preferredAudio = config?.download?.defaultAudio || authStatus?.preferredAudioLanguage || '';
                                     const chosenDub = epLocales.includes(preferredAudio) ? preferredAudio : (epLocales[0] || '');
                                     return `
-                                    <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''}">
+                                    <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''} ${ep.isUpcoming ? 'upcoming' : ''}">
                                         ${historyMark}
                                         <div class="calendar-episode-time">${timeDisplay}</div>
-                                        <div class="calendar-episode-thumb">
+                                        <div class="calendar-episode-thumb ${ep.isUpcoming ? 'poster' : ''}">
                                             ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(ep.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                             <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
                                         </div>
@@ -1227,8 +1227,10 @@
                                         ${(ep.audioLocales && ep.audioLocales.length > 0)
                                             ? `<div class="calendar-episode-langs">${ep.audioLocales.map(l => `<span class="cal-lang">${escapeHtml(l)}</span>`).join('')}</div>`
                                             : (ep.audioLocale ? `<div class="calendar-episode-locale">${escapeHtml(ep.audioLocale)}</div>` : '')}
-                                        ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
-                                        ${ep.hasAired ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(chosenDub)}')">Download</button>` : ''}
+                                        ${ep.isUpcoming
+                                            ? '<span class="badge badge-upcoming">Upcoming</span>'
+                                            : (ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : '')}
+                                        ${ep.hasAired && !ep.isUpcoming ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(chosenDub)}')">Download</button>` : ''}
                                     </div>
                                     `;
                                 }).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}

@@ -15,15 +15,17 @@ public class ConfigController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ISonarrService _sonarrService;
     private readonly ILanguagePrefsService _languagePrefs;
+    private readonly IQueueService _queueService;
     private static readonly object _configLock = new object();
 
-    public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger, IHttpClientFactory httpClientFactory, ISonarrService sonarrService, ILanguagePrefsService languagePrefs)
+    public ConfigController(CruncharrConfig config, ILogger<ConfigController> logger, IHttpClientFactory httpClientFactory, ISonarrService sonarrService, ILanguagePrefsService languagePrefs, IQueueService queueService)
     {
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _sonarrService = sonarrService;
         _languagePrefs = languagePrefs;
+        _queueService = queueService;
     }
 
     /// <summary>
@@ -275,6 +277,7 @@ public class ConfigController : ControllerBase
                     PersistQueue = _config.Queue?.PersistQueue ?? false,
                     AutoDownload = _config.Queue?.AutoDownload ?? false,
                     SimultaneousProcessingJobs = _config.Queue?.SimultaneousProcessingJobs ?? 1,
+                    MaxSimultaneousTranscodes = _config.Queue?.MaxSimultaneousTranscodes ?? 1,
                     QueueFilePath = _config.Queue?.QueueFilePath ?? "/config/queue.json",
                     ShutdownWhenQueueEmpty = _config.Queue?.ShutdownWhenQueueEmpty ?? false
                 },
@@ -595,7 +598,16 @@ public class ConfigController : ControllerBase
         {
             if (request.Queue.PersistQueue.HasValue) _config.Queue.PersistQueue = request.Queue.PersistQueue.Value;
             if (request.Queue.AutoDownload.HasValue) _config.Queue.AutoDownload = request.Queue.AutoDownload.Value;
-            if (request.Queue.SimultaneousProcessingJobs.HasValue) _config.Queue.SimultaneousProcessingJobs = request.Queue.SimultaneousProcessingJobs.Value;
+            if (request.Queue.SimultaneousProcessingJobs.HasValue)
+            {
+                _config.Queue.SimultaneousProcessingJobs = request.Queue.SimultaneousProcessingJobs.Value;
+                _queueService.SetProcessingLimit(request.Queue.SimultaneousProcessingJobs.Value); // apply live
+            }
+            if (request.Queue.MaxSimultaneousTranscodes.HasValue)
+            {
+                _config.Queue.MaxSimultaneousTranscodes = Math.Max(1, request.Queue.MaxSimultaneousTranscodes.Value);
+                _queueService.SetTranscodeLimit(_config.Queue.MaxSimultaneousTranscodes); // apply live
+            }
             if (!string.IsNullOrEmpty(request.Queue.QueueFilePath)) _config.Queue.QueueFilePath = ValidatePath(request.Queue.QueueFilePath, nameof(request.Queue.QueueFilePath));
             if (request.Queue.ShutdownWhenQueueEmpty.HasValue) _config.Queue.ShutdownWhenQueueEmpty = request.Queue.ShutdownWhenQueueEmpty.Value;
         }
@@ -840,6 +852,7 @@ public class QueueUpdateConfig
     public bool? PersistQueue { get; set; }
     public bool? AutoDownload { get; set; }
     public int? SimultaneousProcessingJobs { get; set; }
+    public int? MaxSimultaneousTranscodes { get; set; }
     public string? QueueFilePath { get; set; }
     public bool? ShutdownWhenQueueEmpty { get; set; }
 }

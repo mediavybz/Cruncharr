@@ -35,6 +35,11 @@ public interface IQueueService
     void ReleaseProcessingSlot();
     void SetProcessingLimit(int newLimit);
 
+    // Transcode (encode-step) slot management — separate limit from processing jobs.
+    Task WaitForTranscodeSlotAsync(CancellationToken cancellationToken = default);
+    void ReleaseTranscodeSlot();
+    void SetTranscodeLimit(int newLimit);
+
     // Init-completion gate (ported from upstream c123093)
     void SetInitialized(bool initialized);
     bool IsGloballyPaused { get; }
@@ -49,6 +54,7 @@ public class QueueService : IQueueService, IDisposable
     private readonly IQueuePersistenceService? _persistenceService;
     private readonly ILogger<QueueService>? _logger;
     private ProcessingSlotManager? _processingSlots;
+    private ProcessingSlotManager? _transcodeSlots;
     private CruncharrConfig? _config;
     private CancellationToken _cancellationToken;
 
@@ -427,9 +433,11 @@ public class QueueService : IQueueService, IDisposable
         _cancellationToken = cancellationToken;
         _processingSlots?.Dispose();
         _processingSlots = new ProcessingSlotManager(config.Queue.SimultaneousProcessingJobs);
+        _transcodeSlots?.Dispose();
+        _transcodeSlots = new ProcessingSlotManager(Math.Max(1, config.Queue.MaxSimultaneousTranscodes));
 
-        _logger?.LogInformation("Queue processor started with {Downloads} concurrent downloads, {Processing} processing jobs",
-            config.Download.SimultaneousDownloads, config.Queue.SimultaneousProcessingJobs);
+        _logger?.LogInformation("Queue processor started with {Downloads} concurrent downloads, {Processing} processing jobs, {Transcodes} transcodes",
+            config.Download.SimultaneousDownloads, config.Queue.SimultaneousProcessingJobs, config.Queue.MaxSimultaneousTranscodes);
 
         // Keep running until cancellation
         try
@@ -859,6 +867,24 @@ public class QueueService : IQueueService, IDisposable
         _processingSlots?.SetLimit(newLimit);
     }
 
+    public async Task WaitForTranscodeSlotAsync(CancellationToken cancellationToken = default)
+    {
+        if (_transcodeSlots != null)
+        {
+            await _transcodeSlots.WaitAsync(cancellationToken);
+        }
+    }
+
+    public void ReleaseTranscodeSlot()
+    {
+        _transcodeSlots?.Release();
+    }
+
+    public void SetTranscodeLimit(int newLimit)
+    {
+        _transcodeSlots?.SetLimit(Math.Max(1, newLimit));
+    }
+
     // [PT] Ported from upstream c123093: init-completion gate
     public void SetInitialized(bool initialized)
     {
@@ -886,5 +912,6 @@ public class QueueService : IQueueService, IDisposable
     public void Dispose()
     {
         _processingSlots?.Dispose();
+        _transcodeSlots?.Dispose();
     }
 }

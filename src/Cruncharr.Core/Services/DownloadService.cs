@@ -1318,7 +1318,7 @@ public class DownloadService : IDownloadService
                             if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                             {
                                 progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = $"Encoding {locale}..." });
-                                await EncodeOutputAsync(groupWorkPath, config.Download.EncodingPreset, cancellationToken, progress, locale);
+                                await EncodeOutputWithLimitAsync(groupWorkPath, config.Download.EncodingPreset, cancellationToken, progress, locale);
                             }
 
                             if (!string.Equals(groupWorkPath, groupOutputPath, StringComparison.Ordinal))
@@ -1345,7 +1345,7 @@ public class DownloadService : IDownloadService
                         if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                         {
                             progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
-                            await EncodeOutputAsync(workPath, config.Download.EncodingPreset, cancellationToken, progress);
+                            await EncodeOutputWithLimitAsync(workPath, config.Download.EncodingPreset, cancellationToken, progress);
                         }
 
                         if (!string.Equals(workPath, outputPath, StringComparison.Ordinal))
@@ -3041,6 +3041,29 @@ public class DownloadService : IDownloadService
         _logger?.LogInformation("Moved output to {Dest}", destPath);
     }
 
+    // Acquire a transcode slot before encoding so the CPU-heavy encode step honors the
+    // separate "max simultaneous transcodes" limit (downloads/muxes stay parallel; encodes
+    // serialize to the configured limit). Always released, even on cancel/failure.
+    private async Task EncodeOutputWithLimitAsync(string inputPath, string presetName, CancellationToken cancellationToken, IProgress<DownloadProgress>? progress = null, string? label = null)
+    {
+        bool held = false;
+        try
+        {
+            if (_queueService != null)
+            {
+                progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 94,
+                    Doing = label == null ? "Waiting for transcode slot..." : $"Waiting for transcode slot ({label})..." });
+                await _queueService.WaitForTranscodeSlotAsync(cancellationToken);
+                held = true;
+            }
+            await EncodeOutputAsync(inputPath, presetName, cancellationToken, progress, label);
+        }
+        finally
+        {
+            if (held) _queueService!.ReleaseTranscodeSlot();
+        }
+    }
+
     private async Task EncodeOutputAsync(string inputPath, string presetName, CancellationToken cancellationToken, IProgress<DownloadProgress>? progress = null, string? label = null)
     {
         var preset = _encodingService?.GetPreset(presetName);
@@ -3073,8 +3096,17 @@ public class DownloadService : IDownloadService
             // Quality flag depends on the codec (CRF for software, -cq/-global_quality/-rc
             // for the various hardware encoders); mirrors upstream Helpers.GetQualityOption.
             args.AddRange(GetEncodeQualityOption(preset));
-            args.Add("-vf");
-            args.Add($"scale={preset.Resolution},fps={preset.FrameRate}");
+            // Only build a -vf filter from the parts the preset actually sets. A preset with
+            // empty Resolution AND FrameRate keeps the SOURCE resolution/fps (no filter) —
+            // previously this emitted "-vf scale=,fps=" which ffmpeg rejects.
+            var filters = new List<string>();
+            if (!string.IsNullOrWhiteSpace(preset.Resolution)) filters.Add($"scale={preset.Resolution}");
+            if (!string.IsNullOrWhiteSpace(preset.FrameRate)) filters.Add($"fps={preset.FrameRate}");
+            if (filters.Count > 0)
+            {
+                args.Add("-vf");
+                args.Add(string.Join(",", filters));
+            }
         }
 
         // AdditionalParameters (e.g. "-map 0", which maps EVERY stream so all audio/sub

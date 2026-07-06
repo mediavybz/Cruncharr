@@ -1207,6 +1207,14 @@
                                             : ep.historyDownloadState === 'PartlyDownloaded' ? 'Partly downloaded'
                                             : ep.historyDownloadState === 'NotDownloaded' ? 'Not downloaded' : ''}"></div>`
                                         : '';
+                                    // Choose the dub to request: in a consolidated (all-languages)
+                                    // card prefer the user's default audio if the episode offers it,
+                                    // else the first available locale; a language-filtered card has a
+                                    // single audioLocale. Guarantees a locale that EXISTS for this
+                                    // episode so the backend can resolve it (no mux/transcode failure).
+                                    const epLocales = (ep.audioLocales && ep.audioLocales.length) ? ep.audioLocales : (ep.audioLocale ? [ep.audioLocale] : []);
+                                    const preferredAudio = config?.download?.defaultAudio || authStatus?.preferredAudioLanguage || '';
+                                    const chosenDub = epLocales.includes(preferredAudio) ? preferredAudio : (epLocales[0] || '');
                                     return `
                                     <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''}">
                                         ${historyMark}
@@ -1220,7 +1228,7 @@
                                             ? `<div class="calendar-episode-langs">${ep.audioLocales.map(l => `<span class="cal-lang">${escapeHtml(l)}</span>`).join('')}</div>`
                                             : (ep.audioLocale ? `<div class="calendar-episode-locale">${escapeHtml(ep.audioLocale)}</div>` : '')}
                                         ${ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : ''}
-                                        ${ep.hasAired ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(ep.audioLocale || '')}')">Download</button>` : ''}
+                                        ${ep.hasAired ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(chosenDub)}')">Download</button>` : ''}
                                     </div>
                                     `;
                                 }).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
@@ -1253,7 +1261,12 @@
                 const epNum = parseInt(episodeNumber, 10);
                 if (Number.isFinite(epNum)) payload.episodeNumber = epNum;
                 if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
-                if (audioLocale) { payload.locale = audioLocale; payload.audioLocale = audioLocale; }
+                // Send the chosen language as selectedDubs (NOT locale/audioLocale). Passing
+                // locale pinned the version to the client-provided guid+locale, so if it didn't
+                // match the resolved dub the audio track was dropped and mux/transcode failed.
+                // As selectedDubs the backend refetches versions and resolves the real per-dub
+                // stream — same path as Add Download (add-path invariant).
+                if (audioLocale) payload.selectedDubs = [audioLocale];
                 const res = await fetch('/api/v1/queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2795,7 +2808,8 @@
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input w-80" id="setting-queue-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs||2)}" min="1"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div><div class="setting-desc">How many downloads may be in the mux/encode phase at once</div></div><input type="number" class="form-input w-80" id="setting-queue-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs||2)}" min="1"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Transcodes</div><div class="setting-desc">Max concurrent transcodes (the CPU-heavy encode step). Downloads/muxing stay parallel; only encoding is limited. Keep at 1 for software encoding; raise it for hardware encoders.</div></div><input type="number" class="form-input w-80" id="setting-queue-transcodes" value="${escapeHtmlAttribute(q.maxSimultaneousTranscodes||1)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Queue File Path</div></div><input type="text" class="form-input w-250" id="setting-queue-path" value="${escapeHtmlAttribute(q.queueFilePath||'Cruncharr/queue.json')}"></div>
                             </div>
                         </div>
@@ -3259,6 +3273,8 @@
                     if (autoDl !== undefined) q.autoDownload = autoDl;
                     const procJobs = getFieldValue('setting-queue-proc-jobs', 'int');
                     if (procJobs !== undefined) q.simultaneousProcessingJobs = procJobs;
+                    const transcodes = getFieldValue('setting-queue-transcodes', 'int');
+                    if (transcodes !== undefined) q.maxSimultaneousTranscodes = transcodes;
                     const queuePath = getFieldValue('setting-queue-path');
                     if (queuePath !== undefined) q.queueFilePath = queuePath;
                     if (Object.keys(q).length) newConfig.queue = q;

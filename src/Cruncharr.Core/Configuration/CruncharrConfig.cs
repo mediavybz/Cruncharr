@@ -587,6 +587,12 @@ public class QueueConfig
     [YamlMember(Alias = "simultaneous_processing_jobs", ApplyNamingConventions = false)]
     public int SimultaneousProcessingJobs { get; set; } = 2;
 
+    // Max concurrent TRANSCODES (encode step) — separate from processing jobs (which also cover
+    // muxing). Lets many downloads/muxes run in parallel while serializing the CPU-heavy encode
+    // (default 1). Raise it for hardware encoders that can run several at once.
+    [YamlMember(Alias = "max_simultaneous_transcodes", ApplyNamingConventions = false)]
+    public int MaxSimultaneousTranscodes { get; set; } = 1;
+
     [YamlMember(Alias = "queue_file_path", ApplyNamingConventions = false)]
     public string QueueFilePath { get; set; } = "/config/queue.json";
 

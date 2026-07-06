@@ -313,6 +313,34 @@ public class CalendarService : ICalendarService
             }
         }
 
+        // [PT] Merge AniList upcoming into the week so FUTURE days are populated. CR's "new
+        // episodes" API feed only returns already-released episodes, so without this the custom
+        // calendar shows only today + past days (looked like "only today" early in the week).
+        // AniList entries are marked AnilistEpisode and shown regardless of dub filter (upstream
+        // CalendarManager behaviour). Best-effort — never fail the calendar over the merge.
+        try
+        {
+            await LoadAnilistUpcomingAsync(language);
+            foreach (var day in week.CalendarDays)
+            {
+                if (!_anilistCache.TryGetValue(day.DateTime.ToString("yyyy-MM-dd"), out var anilistForDay) || anilistForDay.Count == 0)
+                    continue;
+                foreach (var anilistEp in anilistForDay)
+                {
+                    // Skip if a CR (released) episode for the same series + number is already there.
+                    bool dup = day.CalendarEpisodes.Any(e => !e.AnilistEpisode &&
+                        !string.IsNullOrEmpty(e.CrSeriesID) &&
+                        string.Equals(e.CrSeriesID, anilistEp.CrSeriesID, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(e.EpisodeNumber, anilistEp.EpisodeNumber, StringComparison.OrdinalIgnoreCase));
+                    if (!dup) day.CalendarEpisodes.Add(anilistEp);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to merge AniList upcoming into custom calendar");
+        }
+
         // Sort episodes
         foreach (var day in week.CalendarDays)
         {

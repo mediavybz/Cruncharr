@@ -34,6 +34,11 @@ public class CalendarService : ICalendarService
     // Singleton service hit by concurrent requests -> caches must be thread-safe. A plain Dictionary
     // read+written from two requests at once can corrupt internally (throw / hang).
     private readonly ConcurrentDictionary<string, CalendarWeek> _calendarCache = new();
+    // Custom-calendar entries expire so newly RELEASED episodes replace their "Upcoming"
+    // placeholder without the user pressing Refresh (the cache previously lived until
+    // restart, so the whole week went stale). 30 min balances freshness vs CR API load.
+    private static readonly TimeSpan CustomCalendarTtl = TimeSpan.FromMinutes(30);
+    private readonly ConcurrentDictionary<string, DateTime> _calendarCacheFetchedUtc = new();
     private readonly ConcurrentDictionary<string, List<CalendarEpisode>> _anilistCache = new();
     private readonly SemaphoreSlim _anilistLoadLock = new(1, 1);
     private DateTime? _anilistUpcomingLoadedDate;
@@ -216,7 +221,9 @@ public class CalendarService : ICalendarService
     {
         var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}";
 
-        if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek))
+        if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek) &&
+            _calendarCacheFetchedUtc.TryGetValue(cacheKey, out var fetchedUtc) &&
+            DateTime.UtcNow - fetchedUtc < CustomCalendarTtl)
         {
             await RefreshHistoryStatusesAsync(cachedWeek);
             return cachedWeek;
@@ -247,6 +254,13 @@ public class CalendarService : ICalendarService
         // Don't poison the cache with an empty week when the API fetch failed
         // (e.g. auth not ready yet right after startup)
         var fetchSucceeded = newEpisodes != null;
+
+        // TTL-expired rebuild that failed: serve the stale cached week instead of an empty one.
+        if (!fetchSucceeded && _calendarCache.TryGetValue(cacheKey, out var staleWeek))
+        {
+            await RefreshHistoryStatusesAsync(staleWeek);
+            return staleWeek;
+        }
 
         if (newEpisodes != null && newEpisodes.Count > 0)
         {
@@ -327,11 +341,13 @@ public class CalendarService : ICalendarService
                     continue;
                 foreach (var anilistEp in anilistForDay)
                 {
-                    // Skip if a CR (released) episode for the same series + number is already there.
-                    bool dup = day.CalendarEpisodes.Any(e => !e.AnilistEpisode &&
-                        !string.IsNullOrEmpty(e.CrSeriesID) &&
-                        string.Equals(e.CrSeriesID, anilistEp.CrSeriesID, StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(e.EpisodeNumber, anilistEp.EpisodeNumber, StringComparison.OrdinalIgnoreCase));
+                    // Once Crunchyroll has RELEASED an episode of this show on this day, the
+                    // AniList schedule entry is a redundant placeholder — drop it so the real
+                    // (downloadable) card replaces "Upcoming" instead of sitting next to it.
+                    // Match at SERIES level: episode numbers can't be compared reliably
+                    // (AniList absolute vs CR per-season, CR "1-2" merges), and some AniList
+                    // entries have no parseable CR series id — so fall back to fuzzy title.
+                    bool dup = day.CalendarEpisodes.Any(e => !e.AnilistEpisode && IsSameShow(e, anilistEp));
                     if (!dup) day.CalendarEpisodes.Add(anilistEp);
                 }
             }
@@ -363,10 +379,30 @@ public class CalendarService : ICalendarService
         if (fetchSucceeded)
         {
             _calendarCache[cacheKey] = week;
+            _calendarCacheFetchedUtc[cacheKey] = DateTime.UtcNow;
         }
         await RefreshHistoryStatusesAsync(week);
         return week;
     }
+
+    // Same show? CR series id when both sides have one; otherwise normalized fuzzy title
+    // (AniList "english" title vs CR season title differ in punctuation/suffixes).
+    // (internal for the guard test)
+    internal static bool IsSameShow(CalendarEpisode a, CalendarEpisode b)
+    {
+        if (!string.IsNullOrEmpty(a.CrSeriesID) && !string.IsNullOrEmpty(b.CrSeriesID))
+        {
+            return string.Equals(a.CrSeriesID, b.CrSeriesID, StringComparison.OrdinalIgnoreCase);
+        }
+        var ta = NormalizeTitle(a.SeasonName);
+        var tb = NormalizeTitle(b.SeasonName);
+        if (ta.Length == 0 || tb.Length == 0) return false;
+        if (ta == tb || ta.Contains(tb) || tb.Contains(ta)) return true;
+        return Utils.StringSimilarity.CalculateSimilarity(ta, tb) >= 0.8;
+    }
+
+    private static string NormalizeTitle(string? title) =>
+        new string((title ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 
     private async Task<List<CalendarEpisode>?> GetNewEpisodesFromApiAsync(string language, DateTime? firstWeekDay = null)
     {

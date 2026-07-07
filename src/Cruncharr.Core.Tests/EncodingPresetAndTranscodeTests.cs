@@ -15,7 +15,7 @@ public class EncodingPresetAndTranscodeTests
 
         Assert.NotNull(preset);
         Assert.Equal("libsvtav1", preset!.Codec);
-        Assert.Equal(22, preset.Crf);
+        Assert.Equal(24, preset.Crf);
         // Source-preserving: no scale/fps filter should be emitted for this preset.
         Assert.True(string.IsNullOrEmpty(preset.Resolution));
         Assert.True(string.IsNullOrEmpty(preset.FrameRate));

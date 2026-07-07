@@ -28,7 +28,7 @@ public class EncodingService : IEncodingService
         // User-provided SVT-AV1 Main10 recipe. Keeps SOURCE resolution and fps (empty
         // Resolution/FrameRate => no scale/fps filter), stream-copies audio/subs/fonts, and
         // stamps CrunchArr metadata. -progress/-nostats are added by the encoder, not here.
-        new(){ PresetName = "[CrunchArr] AV1 Main10 Source (SVT preset 8)", Codec = "libsvtav1", Resolution = "", FrameRate = "", Crf = 22,
+        new(){ PresetName = "[CrunchArr] AV1 Main10 Source (SVT preset 8)", Codec = "libsvtav1", Resolution = "", FrameRate = "", Crf = 24,
                AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 8",
                    "-svtav1-params tune=0:lookahead=120:aq-mode=2:keyint=240:scd=1:enable-overlays=1",
                    "-c:a copy", "-c:s copy", "-c:t copy",

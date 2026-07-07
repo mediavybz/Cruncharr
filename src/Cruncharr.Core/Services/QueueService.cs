@@ -130,6 +130,15 @@ public class QueueService : IQueueService, IDisposable
             {
                 foreach (var item in savedQueue)
                 {
+                    // An item saved mid-flight has no running task after a restart. Left as
+                    // Downloading/Processing the pump would skip it forever (stuck). Requeue it
+                    // so it restarts. Paused/Done/Error/retry states are intentional — keep them.
+                    if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing)
+                    {
+                        item.DownloadProgress.State = DownloadState.Queued;
+                        item.DownloadProgress.Percent = 0;
+                        item.DownloadProgress.Doing = "Queued";
+                    }
                     _queue[item.Id] = item;
                 }
                 _logger?.LogInformation("Restored {Count} items from persisted queue", savedQueue.Count);
@@ -293,6 +302,9 @@ public class QueueService : IQueueService, IDisposable
     {
         if (_queue.TryGetValue(queueItemId, out var item))
         {
+            // Clear any pending pause request so a still-winding-down cancel from a rapid
+            // pause->resume doesn't re-park this item as Paused after we requeue it.
+            _pauseRequested.TryRemove(queueItemId, out _);
             item.DownloadProgress.State = DownloadState.Queued;
             item.DownloadProgress.Doing = "Queued";
             _logger?.LogInformation("Resumed item {QueueItemId}", queueItemId);
@@ -519,6 +531,20 @@ public class QueueService : IQueueService, IDisposable
         });
     }
 
+    // Which download states the auto-download pump may (re)start. Excludes terminal/in-flight
+    // states AND — critically — Paused/Cancelled, which only an explicit Resume (-> Queued)
+    // may requeue. Without the Paused exclusion the pump restarted a download the instant it
+    // was paused, so Pause appeared to do nothing. (internal for the guard test.)
+    internal static bool IsAutoStartEligibleState(DownloadProgress p)
+    {
+        if (p.IsError) return false;
+        if (p.IsWaitingForRetry) return false;
+        if (p.IsDone) return false;
+        if (p.State is DownloadState.Paused or DownloadState.Cancelled) return false;
+        if (p.State is DownloadState.Downloading or DownloadState.Processing) return false;
+        return true;
+    }
+
     // Ported from upstream QueueManager.PumpQueue
 #pragma warning disable CS1998
     private async Task PumpQueueAsync()
@@ -563,16 +589,7 @@ public class QueueService : IQueueService, IDisposable
                 if (freeSlots == 0)
                     break;
 
-                if (item.DownloadProgress.IsError)
-                    continue;
-
-                if (item.DownloadProgress.IsWaitingForRetry)
-                    continue;
-
-                if (item.DownloadProgress.IsDone)
-                    continue;
-
-                if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing)
+                if (!IsAutoStartEligibleState(item.DownloadProgress))
                     continue;
 
                 if (_activeOrStarting.Contains(item.Id))
@@ -713,7 +730,14 @@ public class QueueService : IQueueService, IDisposable
         }
         catch (OperationCanceledException)
         {
-            if (_pauseRequested.TryRemove(item.Id, out _))
+            bool wasPause = _pauseRequested.TryRemove(item.Id, out _);
+            // If Resume/Retry re-queued this item while cancellation was still in flight, honor
+            // that intent instead of clobbering it back to Paused/Cancelled.
+            if (item.DownloadProgress.State == DownloadState.Queued)
+            {
+                _logger?.LogInformation("Download cancelled but item re-queued; leaving it queued: {EpisodeId}", item.Episode.Id);
+            }
+            else if (wasPause)
             {
                 // Cancelled BY PauseItem: park it as Paused so Resume can restart it.
                 item.DownloadProgress.State = DownloadState.Paused;

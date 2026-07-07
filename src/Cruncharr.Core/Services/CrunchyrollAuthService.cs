@@ -43,6 +43,9 @@ public interface ICrunchyrollAuthService
 public class CrunchyrollAuthService : ICrunchyrollAuthService
 {
     private readonly ILogger<CrunchyrollAuthService>? _logger;
+    // Multi-profile is fetched on every login/refresh; when the account/region doesn't expose it
+    // (often 403) that warning would repeat dozens of times. Log it once, then stay quiet.
+    private bool _multiProfileUnavailableLogged;
     private readonly HttpClientWrapper _httpClient;
     private readonly CrAuthSettings _authSettings;
     private readonly string _tokenFilePath;
@@ -1356,8 +1359,17 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         else
         {
             // Non-fatal: some accounts/regions don't expose the multi-profile endpoint
-            // (often 403). The app continues with the single active profile.
-            _logger?.LogWarning("Multi-profile unavailable (continuing with single profile): {Error}", error);
+            // (often 403). The app continues with the single active profile. Warn once, then
+            // demote to Debug so it doesn't flood the log on every refresh.
+            if (!_multiProfileUnavailableLogged)
+            {
+                _multiProfileUnavailableLogged = true;
+                _logger?.LogWarning("Multi-profile unavailable (continuing with single profile): {Error}", error);
+            }
+            else
+            {
+                _logger?.LogDebug("Multi-profile still unavailable: {Error}", error);
+            }
         }
     }
 

@@ -753,12 +753,14 @@ public class CalendarService : ICalendarService
 
     private async Task LoadAnilistUpcomingAsync(string language)
     {
-        var today = DateTime.Today.ToString("yyyy-MM-dd");
-
-        // [PT] Upstream: don't re-query AniList more than once per day
-        if (_anilistUpcomingLoadedDate == DateTime.Today || _anilistCache.ContainsKey(today))
+        // Refetch AniList at most once per calendar day. NOTE: the guard is ONLY the
+        // loaded-date — do NOT also gate on `_anilistCache.ContainsKey(today)`. Every fetch
+        // spans today..+8, so today's key is always present after the first load, which made
+        // that extra check permanently true and froze the upcoming data for the process
+        // lifetime (stale "Upcoming" that never advanced, and re-fetches would have appended
+        // duplicates into existing date lists).
+        if (_anilistUpcomingLoadedDate == DateTime.Today)
         {
-            _anilistUpcomingLoadedDate = DateTime.Today;
             return;
         }
 
@@ -767,9 +769,8 @@ public class CalendarService : ICalendarService
         await _anilistLoadLock.WaitAsync();
         try
         {
-        if (_anilistUpcomingLoadedDate == DateTime.Today || _anilistCache.ContainsKey(today))
+        if (_anilistUpcomingLoadedDate == DateTime.Today)
         {
-            _anilistUpcomingLoadedDate = DateTime.Today;
             return;
         }
 
@@ -902,6 +903,10 @@ public class CalendarService : ICalendarService
 
             calendarEpisodes.Add(calEp);
         }
+
+        // Fresh fetch succeeded: replace the previous window wholesale so re-fetches never
+        // append duplicates into an existing date's list and old dates can't accumulate.
+        _anilistCache.Clear();
 
         // Group by date
         foreach (var episode in calendarEpisodes)

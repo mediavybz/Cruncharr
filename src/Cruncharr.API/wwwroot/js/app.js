@@ -139,8 +139,13 @@
             document.addEventListener('click', (e) => {
                 const sel = window.getSelection && window.getSelection();
                 if (!sel || sel.toString().length === 0) return;
-                if (e.target.closest('button, a, input, textarea, select, label, .btn-icon, .header-btn, .toggle-switch')) return;
-                const card = e.target.closest('.clickable, .history-poster, .calendar-episode, .search-result-item, .download-item, .history-table tr');
+                // Don't interfere with real interactive controls.
+                if (e.target.closest('button, a, input, textarea, select, label, .btn-icon, .header-btn, .toggle-switch, .dub-option')) return;
+                // Any element wired with an inline onclick is a "clickable card" (episode rows,
+                // search results, history/calendar/queue cards, …). If text is selected when the
+                // click lands on one, treat it as a select gesture and cancel the navigation so
+                // the highlight survives and can be copied.
+                const card = e.target.closest('[onclick]');
                 if (card) { e.stopPropagation(); e.preventDefault(); }
             }, true);
         }

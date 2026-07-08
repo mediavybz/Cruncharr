@@ -578,8 +578,10 @@ public class HistoryConfig
 
 public class QueueConfig
 {
+    // Default ON so the queue survives a container stop/restart (backup jobs, updates) and
+    // resumes automatically — interrupted items are re-queued on load. Mirrors the *arr apps.
     [YamlMember(Alias = "persist", ApplyNamingConventions = false)]
-    public bool PersistQueue { get; set; } = false;
+    public bool PersistQueue { get; set; } = true;
 
     [YamlMember(Alias = "auto_download", ApplyNamingConventions = false)]
     public bool AutoDownload { get; set; } = false;

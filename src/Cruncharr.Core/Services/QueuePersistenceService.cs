@@ -21,8 +21,11 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
     private readonly ILogger<QueuePersistenceService>? _logger;
     private readonly CruncharrConfig? _config;
 
-    // When false (PersistQueue disabled), load/save are no-ops (upstream QueuePersistenceManager).
-    private bool PersistEnabled => _config?.Queue.PersistQueue ?? true;
+    // Queue persistence is always on: a downloader that loses its queue on every container
+    // restart (backup jobs, updates) is worse than a small queue.json in /config. This
+    // guarantees downloads/transcodes resume after a restart regardless of the (legacy)
+    // PersistQueue toggle, which some users had saved as false before this was the default.
+    private bool PersistEnabled => true;
 
     public QueuePersistenceService(string queueFilePath, ILogger<QueuePersistenceService>? logger = null, CruncharrConfig? config = null)
     {

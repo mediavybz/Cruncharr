@@ -1387,6 +1387,17 @@ public class DownloadService : IDownloadService
                 }
             }
 
+            // Verify the muxed output actually exists before reporting success. Previously a mux
+            // that "succeeded" but wrote nothing (e.g. a mangled non-ASCII path) still returned
+            // Success=true, so the item showed "Complete" with only an empty series folder. Fail
+            // loudly instead so it errors/retries. Skip-mux mode moves raw files, checked separately.
+            if (!config.Download.SkipMuxing && !File.Exists(outputPath))
+            {
+                throw new DownloadException(
+                    $"Muxing/encoding produced no output file at '{outputPath}'. The download did not complete.",
+                    DownloadErrorType.Unknown);
+            }
+
             progress?.Report(new DownloadProgress { State = DownloadState.Done, Percent = 100, Doing = "Complete" });
 
             // Record in history

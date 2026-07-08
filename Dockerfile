@@ -70,6 +70,13 @@ RUN chmod +x ./docker-entrypoint.sh
 COPY docker-build/${TARGETARCH}/publish/wwwroot ./wwwroot
 
 # Set environment
+# UTF-8 locale is REQUIRED so non-ASCII output paths (é, ñ, Japanese, …) survive the trip to
+# child processes. Without it the container runs the POSIX "C" locale and mkvmerge/ffmpeg
+# mis-decode UTF-8 argv — e.g. "…My Fiancée…" got truncated to "…My Fianc", the muxer wrote a
+# bogus filename, and the download produced only a folder. C.UTF-8 is built into glibc (no
+# locales package needed).
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 ENV ASPNETCORE_URLS=http://+:8585
 ENV CRUNCHYROLL_CONFIG_PATH=/config/cruncharr.yaml
 ENV CRUNCHYROLL_OUTPUT_DIR=/downloads

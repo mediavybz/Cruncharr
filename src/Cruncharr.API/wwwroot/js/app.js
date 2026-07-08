@@ -105,6 +105,7 @@
             if (navItem) navItem.classList.add('active');
             startPolling();
             setupNavigation();
+            setupTextSelectionGuard();
             setupMultiSelectDropdowns();
             updateTopbarProfile();
             // Remove splash once app shell is rendered
@@ -128,6 +129,20 @@
             document.body.addEventListener('mousemove', function(e) {
                 if (e.target.closest('select[multiple]')) e.preventDefault();
             });
+        }
+
+        // Let users highlight + copy text inside clickable cards. Those cards navigate on click,
+        // so drag-selecting their text used to fire the navigation and clear the selection ("can't
+        // highlight text here"). In the capture phase, if a click lands while text is selected on a
+        // clickable card (but not on an actual button/link/input), cancel it so the selection stays.
+        function setupTextSelectionGuard() {
+            document.addEventListener('click', (e) => {
+                const sel = window.getSelection && window.getSelection();
+                if (!sel || sel.toString().length === 0) return;
+                if (e.target.closest('button, a, input, textarea, select, label, .btn-icon, .header-btn, .toggle-switch')) return;
+                const card = e.target.closest('.clickable, .history-poster, .calendar-episode, .search-result-item, .download-item, .history-table tr');
+                if (card) { e.stopPropagation(); e.preventDefault(); }
+            }, true);
         }
 
         function setupNavigation() {
@@ -2806,7 +2821,7 @@
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Queue Settings</span><span class="settings-section-desc">Queue behavior options</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Persist Queue</div><div class="setting-desc">Save queue on exit</div></div><label class="toggle-switch"><input type="checkbox" id="setting-persist-queue" ${q.persistQueue?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Persist Queue</div><div class="setting-desc">Always on — the queue is saved to /config so downloads and transcodes resume automatically after a container restart.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-persist-queue" checked disabled><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>

@@ -39,14 +39,20 @@ public class CalendarService : ICalendarService
     // restart, so the whole week went stale). 30 min balances freshness vs CR API load.
     private static readonly TimeSpan CustomCalendarTtl = TimeSpan.FromMinutes(30);
     private readonly ConcurrentDictionary<string, DateTime> _calendarCacheFetchedUtc = new();
-    private readonly ConcurrentDictionary<string, List<CalendarEpisode>> _anilistCache = new();
+    // Immutable snapshot swapped atomically by the loader so a concurrent calendar request never
+    // reads a half-cleared map while the window is rebuilt (readers take no lock). Reassigned as a
+    // whole; never mutated in place.
+    private volatile IReadOnlyDictionary<string, List<CalendarEpisode>> _anilistCache =
+        new Dictionary<string, List<CalendarEpisode>>();
     private readonly SemaphoreSlim _anilistLoadLock = new(1, 1);
     // Upcoming placeholders must expire, not live until restart. When CR releases an episode
     // mid-day it drops out of the AniList airing window (airingAt_greater: todayMidnight), so
     // a stale once-per-day cache kept showing "Upcoming" next to the now-downloadable CR card
-    // until the container restarted. Refetch on the same cadence as the custom calendar.
-    private DateTime _anilistUpcomingLoadedUtc = DateTime.MinValue;
+    // until the container restarted. Refetch on the same cadence as the custom calendar; after a
+    // failed fetch retry sooner (backoff) instead of blocking for a full TTL, but not every call.
+    private DateTime _anilistNextFetchUtc = DateTime.MinValue;
     private static readonly TimeSpan AnilistUpcomingTtl = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan AnilistFailureBackoff = TimeSpan.FromMinutes(2);
 
     // [PT] Upstream CalendarManager.GenericSeasonLabelRegex
     private static readonly Regex GenericSeasonLabelRegex = new(
@@ -78,7 +84,9 @@ public class CalendarService : ICalendarService
         _logger = logger;
         _historyService = historyService;
         _config = config;
-        _httpClient = new HttpClientWrapper();
+        // Pass config so a configured proxy / FlareSolverr covers the simulcast-calendar scrape,
+        // not just login. Without it these Crunchyroll fetches went direct and bypassed the proxy.
+        _httpClient = new HttpClientWrapper(_config);
     }
 
     public async Task<CalendarWeek> GetCalendarForDateAsync(string weeksMondayDate, string language, bool forceUpdate = false)
@@ -555,20 +563,32 @@ public class CalendarService : ICalendarService
             return;
         }
 
+        // Index by series id once (first match wins, mirroring the previous FirstOrDefault) so
+        // each episode is an O(1) lookup instead of a linear scan over the whole history. This
+        // runs on every calendar return, per episode + child episode.
+        var historyBySeriesId = new Dictionary<string, HistorySeries>(StringComparer.OrdinalIgnoreCase);
+        foreach (var series in historyList)
+        {
+            if (!string.IsNullOrWhiteSpace(series.SeriesId) && !historyBySeriesId.ContainsKey(series.SeriesId))
+            {
+                historyBySeriesId[series.SeriesId] = series;
+            }
+        }
+
         foreach (var calendarEpisode in week.CalendarDays.SelectMany(day => day.CalendarEpisodes))
         {
-            RefreshHistoryStatus(calendarEpisode, historyList);
+            RefreshHistoryStatus(calendarEpisode, historyBySeriesId);
         }
     }
 
-    private void RefreshHistoryStatus(CalendarEpisode calendarEpisode, List<HistorySeries> historyList)
+    private void RefreshHistoryStatus(CalendarEpisode calendarEpisode, IReadOnlyDictionary<string, HistorySeries> historyBySeriesId)
     {
         foreach (var childEpisode in calendarEpisode.CalendarEpisodes)
         {
-            ApplyHistoryStatus(childEpisode, historyList);
+            ApplyHistoryStatus(childEpisode, historyBySeriesId);
         }
 
-        ApplyHistoryStatus(calendarEpisode, historyList);
+        ApplyHistoryStatus(calendarEpisode, historyBySeriesId);
 
         if (calendarEpisode.CalendarEpisodes.Count > 0)
         {
@@ -576,7 +596,7 @@ public class CalendarService : ICalendarService
         }
     }
 
-    private void ApplyHistoryStatus(CalendarEpisode calEpisode, List<HistorySeries> historyList)
+    private void ApplyHistoryStatus(CalendarEpisode calEpisode, IReadOnlyDictionary<string, HistorySeries> historyBySeriesId)
     {
         calEpisode.ShowHistoryMark = _config?.Calendar?.ShowHistoryMark ?? true;
         calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.None;
@@ -587,10 +607,7 @@ public class CalendarService : ICalendarService
             return;
         }
 
-        var historySeries = historyList
-            .FirstOrDefault(series => string.Equals(series.SeriesId, calEpisode.CrSeriesID, StringComparison.OrdinalIgnoreCase));
-
-        if (historySeries == null)
+        if (!historyBySeriesId.TryGetValue(calEpisode.CrSeriesID, out var historySeries))
         {
             return;
         }
@@ -758,13 +775,13 @@ public class CalendarService : ICalendarService
 
     private async Task LoadAnilistUpcomingAsync(string language)
     {
-        // Refetch AniList when the cache is older than the TTL. NOTE: the guard is ONLY the
-        // load timestamp — do NOT also gate on `_anilistCache.ContainsKey(today)`. Every fetch
+        // Refetch AniList once the next-fetch time has passed. NOTE: the guard is ONLY the
+        // timestamp — do NOT also gate on `_anilistCache.ContainsKey(today)`. Every fetch
         // spans today..+8, so today's key is always present after the first load, which made
         // that extra check permanently true and froze the upcoming data for the process
         // lifetime (stale "Upcoming" that never advanced, and re-fetches would have appended
         // duplicates into existing date lists).
-        if (DateTime.UtcNow - _anilistUpcomingLoadedUtc < AnilistUpcomingTtl)
+        if (DateTime.UtcNow < _anilistNextFetchUtc)
         {
             return;
         }
@@ -774,7 +791,7 @@ public class CalendarService : ICalendarService
         await _anilistLoadLock.WaitAsync();
         try
         {
-        if (DateTime.UtcNow - _anilistUpcomingLoadedUtc < AnilistUpcomingTtl)
+        if (DateTime.UtcNow < _anilistNextFetchUtc)
         {
             return;
         }
@@ -845,6 +862,7 @@ public class CalendarService : ICalendarService
             if (!isOk)
             {
                 _logger?.LogError("AniList request failed: {Error}", error);
+                _anilistNextFetchUtc = DateTime.UtcNow + AnilistFailureBackoff;
                 return;
             }
 
@@ -854,6 +872,7 @@ public class CalendarService : ICalendarService
             if (response?.Data?.Page == null)
             {
                 _logger?.LogError("Anilist response could not be parsed for upcoming calendar episodes");
+                _anilistNextFetchUtc = DateTime.UtcNow + AnilistFailureBackoff;
                 return;
             }
 
@@ -909,23 +928,23 @@ public class CalendarService : ICalendarService
             calendarEpisodes.Add(calEp);
         }
 
-        // Fresh fetch succeeded: replace the previous window wholesale so re-fetches never
-        // append duplicates into an existing date's list and old dates can't accumulate.
-        _anilistCache.Clear();
-
-        // Group by date
+        // Fresh fetch succeeded: build a new window and swap it in wholesale so re-fetches never
+        // append duplicates into an existing date's list, old dates can't accumulate, and a
+        // concurrent reader never observes a partially-populated map.
+        var newCache = new Dictionary<string, List<CalendarEpisode>>();
         foreach (var episode in calendarEpisodes)
         {
             var airDate = episode.DateTime.ToString("yyyy-MM-dd");
-            if (!_anilistCache.TryGetValue(airDate, out var value))
+            if (!newCache.TryGetValue(airDate, out var value))
             {
                 value = new List<CalendarEpisode>();
-                _anilistCache[airDate] = value;
+                newCache[airDate] = value;
             }
             value.Add(episode);
         }
+        _anilistCache = newCache;
 
-        _anilistUpcomingLoadedUtc = DateTime.UtcNow;
+        _anilistNextFetchUtc = DateTime.UtcNow + AnilistUpcomingTtl;
         }
         finally
         {

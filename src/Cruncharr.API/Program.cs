@@ -96,7 +96,8 @@ public class Program
         // Register Cruncharr services
         builder.Services.AddSingleton<ICrunchyrollAuthService>(sp =>
             new CrunchyrollAuthService(config, sp.GetService<ILogger<CrunchyrollAuthService>>(), sp.GetService<INotificationService>()));
-        builder.Services.AddSingleton<ICrunchyrollApiService, CrunchyrollApiService>();
+        builder.Services.AddSingleton<ICrunchyrollApiService>(sp =>
+            new CrunchyrollApiService(sp.GetRequiredService<ICrunchyrollAuthService>(), config, sp.GetService<ILogger<CrunchyrollApiService>>()));
         builder.Services.AddSingleton<IDownloadService, DownloadService>();
         builder.Services.AddSingleton<IHistoryService>(sp =>
             new HistoryService(

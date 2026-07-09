@@ -150,7 +150,7 @@ public class HttpClientWrapper : IDisposable
         }
 
         // Use FlareSolverr if enabled and request is for Crunchyroll
-        if (_flareSolverrClient != null && request.RequestUri.Host.Contains("crunchyroll"))
+        if (ShouldUseFlareSolverr(request))
         {
             return await SendViaFlareSolverrAsync(request, cancellationToken);
         }
@@ -160,6 +160,18 @@ public class HttpClientWrapper : IDisposable
         CaptureResponseCookies(response, request.RequestUri);
         return response;
     }
+
+    // FlareSolverr solves Cloudflare challenges through request.get — GET only. A POST (login /
+    // token) routed here would be silently downgraded to a GET, so those must go direct.
+    private bool ShouldUseFlareSolverr(HttpRequestMessage request) =>
+        _flareSolverrClient != null && request.Method == HttpMethod.Get &&
+        request.RequestUri != null && IsCrunchyrollHost(request.RequestUri);
+
+    // Match the proxy's CR-detection instead of a loose substring ("crunchyroll") so an
+    // unrelated host like crunchyroll.com.evil.example can't be routed through FlareSolverr.
+    private static bool IsCrunchyrollHost(Uri uri) =>
+        uri.Host.Equals("crunchyroll.com", StringComparison.OrdinalIgnoreCase) ||
+        uri.Host.EndsWith(".crunchyroll.com", StringComparison.OrdinalIgnoreCase);
 
     private async Task<HttpResponseMessage> SendViaFlareSolverrAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -218,6 +230,17 @@ public class HttpClientWrapper : IDisposable
         var headers = new Dictionary<string, string>();
         try
         {
+            // Route Crunchyroll GETs through FlareSolverr when enabled so the Cloudflare challenge
+            // is solved. The request helpers previously always went direct, leaving FlareSolverr
+            // effective only for the rarely-used SendAsync path.
+            if (ShouldUseFlareSolverr(request))
+            {
+                using var fsResponse = await SendViaFlareSolverrAsync(request, cancellationToken);
+                content = await fsResponse.Content.ReadAsStringAsync(cancellationToken);
+                return (fsResponse.IsSuccessStatusCode, content,
+                    fsResponse.IsSuccessStatusCode ? "" : $"FlareSolverr returned {(int)fsResponse.StatusCode}", headers);
+            }
+
             if (attachCookies)
             {
                 AttachCookies(request);

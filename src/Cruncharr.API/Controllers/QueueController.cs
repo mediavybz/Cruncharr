@@ -77,8 +77,12 @@ public class QueueController : ControllerBase
                 Id = request.EpisodeId,
                 Title = request.Title ?? $"Episode {request.EpisodeId}",
                 SeriesTitle = request.SeriesTitle ?? "Unknown",
-                SeasonNumber = request.SeasonNumber ?? 1,
-                EpisodeNumber = request.EpisodeNumber ?? 1,
+                // 0 = "unknown, resolve on the backend". A queue-add (per the add-path contract)
+                // sends only episodeId + dubs, so season/episode arrive null; defaulting to a
+                // concrete 1 made DownloadService's "only fill when <= 0" guard skip the real
+                // CR season_number (e.g. a Season 5 episode saved under Season 1).
+                SeasonNumber = request.SeasonNumber ?? 0,
+                EpisodeNumber = request.EpisodeNumber ?? 0,
                 Locale = request.Locale ?? "ja-JP",
                 AudioLocale = request.AudioLocale ?? request.Locale ?? "ja-JP",
                 ThumbnailUrl = request.ThumbnailUrl,

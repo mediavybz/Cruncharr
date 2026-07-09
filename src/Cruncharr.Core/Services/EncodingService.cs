@@ -19,7 +19,7 @@ public interface IEncodingService
 
 public class EncodingService : IEncodingService
 {
-    // Built-in presets. The first 15 mirror upstream FfmpegEncoding.presets; the two
+    // Built-in presets. The first 15 mirror upstream FfmpegEncoding.presets; the
     // "[...] Anime" presets are Cruncharr additions (user-requested): unofficial
     // recreations of the settings anime mini-encode groups publish for small files at
     // high perceived quality. Video is re-encoded 10-bit; audio/subs/fonts are stream-
@@ -39,6 +39,11 @@ public class EncodingService : IEncodingService
         new(){ PresetName = "[EMBER] Anime HEVC 10-bit (unofficial)", Codec = "libx265", Resolution = "-2:1080", FrameRate = "24000/1001", Crf = 21,
                AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset slow",
                    "-x265-params limit-sao=1:bframes=8:psy-rd=1.5:psy-rdoq=2.0:aq-mode=3:deblock=-1,-1",
+                   "-c:a copy", "-c:s copy", "-c:t copy" } },
+        // neoHEVC-style: x265 10-bit, veryslow, animation-tuned psy/aq. Unofficial Cruncharr addition.
+        new(){ PresetName = "[neoHEVC] Anime HEVC 10-bit (unofficial)", Codec = "libx265", Resolution = "-2:1080", FrameRate = "24000/1001", Crf = 19,
+               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset veryslow",
+                   "-x265-params me=star:subme=7:psy-rd=2.0:psy-rdoq=1.0:aq-mode=3:aq-strength=0.8:deblock=-1,-1:bframes=8:ref=6",
                    "-c:a copy", "-c:s copy", "-c:t copy" } },
         // Trix-style: SVT-AV1 10-bit (tune=0 = subjective quality), even smaller files.
         new(){ PresetName = "[Trix] Anime AV1 10-bit (unofficial)", Codec = "libsvtav1", Resolution = "-2:1080", FrameRate = "24000/1001", Crf = 24,

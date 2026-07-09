@@ -41,7 +41,12 @@ public class CalendarService : ICalendarService
     private readonly ConcurrentDictionary<string, DateTime> _calendarCacheFetchedUtc = new();
     private readonly ConcurrentDictionary<string, List<CalendarEpisode>> _anilistCache = new();
     private readonly SemaphoreSlim _anilistLoadLock = new(1, 1);
-    private DateTime? _anilistUpcomingLoadedDate;
+    // Upcoming placeholders must expire, not live until restart. When CR releases an episode
+    // mid-day it drops out of the AniList airing window (airingAt_greater: todayMidnight), so
+    // a stale once-per-day cache kept showing "Upcoming" next to the now-downloadable CR card
+    // until the container restarted. Refetch on the same cadence as the custom calendar.
+    private DateTime _anilistUpcomingLoadedUtc = DateTime.MinValue;
+    private static readonly TimeSpan AnilistUpcomingTtl = TimeSpan.FromMinutes(30);
 
     // [PT] Upstream CalendarManager.GenericSeasonLabelRegex
     private static readonly Regex GenericSeasonLabelRegex = new(
@@ -753,13 +758,13 @@ public class CalendarService : ICalendarService
 
     private async Task LoadAnilistUpcomingAsync(string language)
     {
-        // Refetch AniList at most once per calendar day. NOTE: the guard is ONLY the
-        // loaded-date — do NOT also gate on `_anilistCache.ContainsKey(today)`. Every fetch
+        // Refetch AniList when the cache is older than the TTL. NOTE: the guard is ONLY the
+        // load timestamp — do NOT also gate on `_anilistCache.ContainsKey(today)`. Every fetch
         // spans today..+8, so today's key is always present after the first load, which made
         // that extra check permanently true and froze the upcoming data for the process
         // lifetime (stale "Upcoming" that never advanced, and re-fetches would have appended
         // duplicates into existing date lists).
-        if (_anilistUpcomingLoadedDate == DateTime.Today)
+        if (DateTime.UtcNow - _anilistUpcomingLoadedUtc < AnilistUpcomingTtl)
         {
             return;
         }
@@ -769,7 +774,7 @@ public class CalendarService : ICalendarService
         await _anilistLoadLock.WaitAsync();
         try
         {
-        if (_anilistUpcomingLoadedDate == DateTime.Today)
+        if (DateTime.UtcNow - _anilistUpcomingLoadedUtc < AnilistUpcomingTtl)
         {
             return;
         }
@@ -920,7 +925,7 @@ public class CalendarService : ICalendarService
             value.Add(episode);
         }
 
-        _anilistUpcomingLoadedDate = DateTime.Today;
+        _anilistUpcomingLoadedUtc = DateTime.UtcNow;
         }
         finally
         {

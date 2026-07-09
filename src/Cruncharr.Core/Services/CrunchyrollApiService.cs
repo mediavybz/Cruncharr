@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web;
+using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
 using Microsoft.Extensions.Logging;
@@ -48,11 +49,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     private readonly ICrunchyrollAuthService _authService;
     private readonly HttpClientWrapper _httpClient;
 
-    public CrunchyrollApiService(ICrunchyrollAuthService authService, ILogger<CrunchyrollApiService>? logger = null)
+    public CrunchyrollApiService(ICrunchyrollAuthService authService, CruncharrConfig? config = null, ILogger<CrunchyrollApiService>? logger = null)
     {
         _authService = authService;
         _logger = logger;
-        _httpClient = new HttpClientWrapper();
+        // Pass config so a configured proxy / FlareSolverr covers the Crunchyroll browse/episode
+        // API calls, not just login. Without it these fetches went direct and bypassed the proxy.
+        _httpClient = new HttpClientWrapper(config);
     }
 
     public async Task<List<SeriesInfo>> SearchAsync(string query, bool useBetaApi, CancellationToken cancellationToken = default)

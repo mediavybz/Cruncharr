@@ -6,10 +6,18 @@ namespace Cruncharr.Core.Utils.Files;
 
 public class FileNameManager
 {
+    // Compiled once and reused: these run per path segment and per sanitized variable on every
+    // download, so re-constructing them on each call was pure waste. Patterns unchanged.
+    private static readonly Regex VarRegex = new(@"\${[A-Za-z1-9]+}", RegexOptions.Compiled);
+    private static readonly Regex IllegalRe = new(@"[\/\?<>\\:\*\|"":]", RegexOptions.Compiled); // Illegal Characters on most Operating Systems
+    private static readonly Regex ControlRe = new(@"[\x00-\x1f\x80-\x9f]", RegexOptions.Compiled); // Unicode Control codes: C0 and C1
+    private static readonly Regex ReservedRe = new(@"^\.\.?$", RegexOptions.Compiled); // Reserved filenames on Unix-based systems (".", "..")
+    private static readonly Regex WindowsReservedRe = new(@"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsTrailingRe = new(@"[\. ]+$", RegexOptions.Compiled);
+
     public static List<string> ParseFileName(string input, List<Variable> variables, int numbers, string whiteSpaceReplace, List<string> @override)
     {
-        Regex varRegex = new Regex(@"\${[A-Za-z1-9]+}");
-        var matches = varRegex.Matches(input).Cast<Match>().Select(m => m.Value).ToList();
+        var matches = VarRegex.Matches(input).Cast<Match>().Select(m => m.Value).ToList();
         var overriddenVars = ParseOverride(variables, @override);
         if (!matches.Any())
             return new List<string>{
@@ -116,19 +124,13 @@ public class FileNameManager
     public static string CleanupFilename(string filename)
     {
         string fixingChar = "";
-        Regex illegalRe = new Regex(@"[\/\?<>\\:\*\|"":]"); // Illegal Characters on most Operating Systems
-        Regex controlRe = new Regex(@"[\x00-\x1f\x80-\x9f]"); // Unicode Control codes: C0 and C1
-        Regex reservedRe = new Regex(@"^\.\.?$"); // Reserved filenames on Unix-based systems (".", "..")
-        Regex windowsReservedRe = new Regex(@"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", RegexOptions.IgnoreCase);
-        /*  Reserved filenames in Windows ("CON", "PRN", "AUX", "NUL", "COM1"-"COM9", "LPT1"-"LPT9")
-            case-insensitively and with or without filename extensions. */
-        Regex windowsTrailingRe = new Regex(@"[\. ]+$");
-
-        filename = illegalRe.Replace(filename, fixingChar);
-        filename = controlRe.Replace(filename, fixingChar);
-        filename = reservedRe.Replace(filename, fixingChar);
-        filename = windowsReservedRe.Replace(filename, fixingChar);
-        filename = windowsTrailingRe.Replace(filename, fixingChar);
+        /*  WindowsReservedRe matches reserved filenames in Windows ("CON", "PRN", "AUX", "NUL",
+            "COM1"-"COM9", "LPT1"-"LPT9") case-insensitively and with or without extensions. */
+        filename = IllegalRe.Replace(filename, fixingChar);
+        filename = ControlRe.Replace(filename, fixingChar);
+        filename = ReservedRe.Replace(filename, fixingChar);
+        filename = WindowsReservedRe.Replace(filename, fixingChar);
+        filename = WindowsTrailingRe.Replace(filename, fixingChar);
 
         return filename;
     }

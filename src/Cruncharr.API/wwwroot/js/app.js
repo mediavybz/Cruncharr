@@ -4093,7 +4093,7 @@
                                     <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
                                 </div>
                             </div>
-                            ${!ep.wasDownloaded ? `<button class="btn-icon" onclick="event.stopPropagation(); toggleEpisodeOptions(event, '${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}', '${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}')" title="Pick dubs/subs">&#9881;</button><button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}')" title="Add to queue (default dubs/subs)">&#128229;</button>` : ''}
+                            ${!ep.wasDownloaded ? `<button class="btn-icon" onclick="event.stopPropagation(); toggleEpisodeOptions(event, '${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}', '${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Pick dubs/subs">&#9881;</button><button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Add to queue (default dubs/subs)">&#128229;</button>` : ''}
                         </div>
                     `;
                 }).join('');
@@ -4131,16 +4131,18 @@
             }
         }
         
-        async function addHistoryEpisodeToQueue(episodeId, seriesTitle, episodeTitle) {
+        async function addHistoryEpisodeToQueue(episodeId, seriesTitle, episodeTitle, thumbnailUrl = '') {
             try {
+                const payload = {
+                    episodeId: episodeId,
+                    title: episodeTitle || 'Unknown Episode',
+                    seriesTitle: seriesTitle || 'Unknown'
+                };
+                if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
                 const res = await fetch('/api/v1/queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        episodeId: episodeId,
-                        title: episodeTitle || 'Unknown Episode',
-                        seriesTitle: seriesTitle || 'Unknown'
-                    })
+                    body: JSON.stringify(payload)
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added to queue', 'success');
@@ -4150,7 +4152,7 @@
         }
 
         // Inline per-episode dub/sub picker (expands under the episode row; no modal -> no z-index risk).
-        async function toggleEpisodeOptions(ev, seriesId, seasonId, episodeId, seriesTitle, episodeTitle) {
+        async function toggleEpisodeOptions(ev, seriesId, seasonId, episodeId, seriesTitle, episodeTitle, thumbnailUrl = '') {
             const row = ev.target.closest('.history-episode');
             if (!row) return;
             const existing = row.nextElementSibling;
@@ -4174,30 +4176,32 @@
                 panel.innerHTML = `
                     <div style="margin-bottom:6px;"><strong>Dubs</strong><br>${cbs(dubs, defDubs, 'dub')}</div>
                     <div style="margin-bottom:8px;"><strong>Subtitles</strong><br>${cbs(subs, defSubs, 'sub')}</div>
-                    <button class="btn-icon" onclick="downloadEpisodeWithOptions(this, '${escapeJsString(episodeId)}', '${escapeJsString(seriesTitle)}', '${escapeJsString(episodeTitle)}')" title="Download with the selected dubs/subs">&#128229; Download selected</button>
+                    <button class="btn-icon" onclick="downloadEpisodeWithOptions(this, '${escapeJsString(episodeId)}', '${escapeJsString(seriesTitle)}', '${escapeJsString(episodeTitle)}', '${escapeJsString(thumbnailUrl)}')" title="Download with the selected dubs/subs">&#128229; Download selected</button>
                 `;
             } catch (e) {
                 panel.innerHTML = '<span class="hint" style="color:var(--accent-red);">Failed to load options for this episode</span>';
             }
         }
 
-        async function downloadEpisodeWithOptions(btn, episodeId, seriesTitle, episodeTitle) {
+        async function downloadEpisodeWithOptions(btn, episodeId, seriesTitle, episodeTitle, thumbnailUrl = '') {
             const panel = btn.closest('.episode-options-panel');
             if (!panel) return;
             const dubs = [...panel.querySelectorAll('input[data-dub]:checked')].map(i => i.getAttribute('data-dub'));
             const subs = [...panel.querySelectorAll('input[data-sub]:checked')].map(i => i.getAttribute('data-sub'));
             btn.disabled = true;
             try {
+                const payload = {
+                    episodeId: episodeId,
+                    title: episodeTitle || 'Unknown Episode',
+                    seriesTitle: seriesTitle || 'Unknown',
+                    selectedDubs: dubs.length ? dubs : null,
+                    selectedSubs: subs.length ? subs : null
+                };
+                if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
                 const res = await fetch('/api/v1/queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        episodeId: episodeId,
-                        title: episodeTitle || 'Unknown Episode',
-                        seriesTitle: seriesTitle || 'Unknown',
-                        selectedDubs: dubs.length ? dubs : null,
-                        selectedSubs: subs.length ? subs : null
-                    })
+                    body: JSON.stringify(payload)
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Added to queue with selected dubs/subs', 'success');

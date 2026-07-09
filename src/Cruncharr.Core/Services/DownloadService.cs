@@ -153,6 +153,11 @@ public class DownloadService : IDownloadService
                 if (fullEpisode.SeasonNumber > 0 && episode.SeasonNumber <= 0) episode.SeasonNumber = fullEpisode.SeasonNumber;
                 if (fullEpisode.EpisodeNumber > 0 && episode.EpisodeNumber <= 0) episode.EpisodeNumber = fullEpisode.EpisodeNumber;
                 if (!string.IsNullOrEmpty(fullEpisode.Episode)) episode.Episode = fullEpisode.Episode;
+                // Backfill artwork too: add-paths that send only an episode id (e.g. the History
+                // tab) leave the queue item with no thumbnail, so it rendered the 📺 placeholder.
+                if (string.IsNullOrEmpty(episode.ThumbnailUrl) && !string.IsNullOrEmpty(fullEpisode.ThumbnailUrl)) episode.ThumbnailUrl = fullEpisode.ThumbnailUrl;
+                if (string.IsNullOrEmpty(episode.CoverArtUrl) && !string.IsNullOrEmpty(fullEpisode.CoverArtUrl)) episode.CoverArtUrl = fullEpisode.CoverArtUrl;
+                if ((episode.Images == null || episode.Images.Count == 0) && fullEpisode.Images?.Count > 0) episode.Images = fullEpisode.Images;
                 _logger?.LogInformation("Fetched episode details: {EpisodeId}, Versions={VersionCount}, Series={Series}, Season={Season}",
                     fullEpisode.Id, fullEpisode.Versions?.Count ?? 0, fullEpisode.SeriesTitle, fullEpisode.SeasonTitle);
             }

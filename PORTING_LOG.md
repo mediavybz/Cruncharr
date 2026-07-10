@@ -1310,3 +1310,20 @@ Build 0 warnings; tests 134/134; node --check clean. Version 1.0.33. Shipping to
 ### Verification (Round 31)
 - `dotnet build`: 0 errors. `dotnet test`: 151/151 (new alias guard included).
 - Round 30 published-image smoke: `/api/v1/health` healthy at `1.0.47+37f9142`; served JS contains the relocated Sonarr poster badge.
+
+## Audit Round 32 — Trix AV1 preset recipe update (user-directed) (2026-07-10, complete)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core/Services/EncodingService.cs | Cruncharr-specific built-in preset (not upstream); user-supplied Trix SvtAv1EncApp recipe | User-directed: replaced "[Trix] Anime AV1 10-bit (unofficial)" params with the published Trix recipe (preset 2, CRF 25, keyint 193, scm 0, enable-tf 2, luminance-qp-bias 33, fast-decode 1), adapted to MAINLINE SVT-AV1 (verified v4.1.0 inside the shipping image): photon-noise/min-keyint/enable-alt-cdef are SVT-AV1-PSY-fork-only and abort encoder init; enable-dlf clamped 3→2; photon-noise 400 approximated with film-grain=8 synthesis (denoise off). Now source-preserving (no scale/fps), matching the recipe. Preset name unchanged, so no config alias needed. | 2026-07-10 |
+| src/Cruncharr.Core.Tests/EncodingPresetAndTranscodeTests.cs | Guard tests | Added TrixPreset_UsesMainlineSafeSvtParams: asserts adapted keys present and each PSY-fork-only key absent (any one of them kills every encode on mainline). | 2026-07-10 |
+| src/Cruncharr.API/Cruncharr.API.csproj + Controllers/HealthController.cs + wwwroot/index.html | Release metadata | [PT] Version 1.0.48 → 1.0.49; cache keys bumped. | 2026-07-10 |
+
+### API Contract
+- No route, request, response-shape, or status-code changes.
+
+### Verification (Round 32)
+- In-image ffmpeg probe: full PSY recipe fails encoder init ("Error parsing option photon-noise/min-keyint/enable-alt-cdef", "Invalid LoopFilterEnable"); adapted param set encodes successfully (output produced, no errors).
+- `dotnet build`: 0 errors. `dotnet test`: 152/152.
+- Round 31 published-image smoke: health at `1.0.48`, presets endpoint serves "SVT preset 6".

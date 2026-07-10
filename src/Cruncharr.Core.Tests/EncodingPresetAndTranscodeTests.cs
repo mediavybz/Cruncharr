@@ -42,6 +42,34 @@ public class EncodingPresetAndTranscodeTests
     }
 
     [Fact]
+    public void TrixPreset_UsesMainlineSafeSvtParams()
+    {
+        // The published Trix recipe targets the SVT-AV1-PSY fork. Our BtbN ffmpeg bundles
+        // MAINLINE SVT-AV1, where photon-noise/min-keyint/enable-alt-cdef abort encoder init
+        // ("Error parsing option") and enable-dlf must be <= 2 — one forbidden key kills every
+        // encode using the preset. Verified empirically against the shipping image (v4.1.0).
+        var svc = new EncodingService();
+        var preset = svc.GetPreset("[Trix] Anime AV1 10-bit (unofficial)");
+
+        Assert.NotNull(preset);
+        Assert.Equal("libsvtav1", preset!.Codec);
+        Assert.Equal(25, preset.Crf);
+        Assert.Contains("-preset 2", preset.AdditionalParameters);
+        var svtParams = preset.AdditionalParameters.FirstOrDefault(p => p.StartsWith("-svtav1-params"));
+        Assert.NotNull(svtParams);
+        // Mainline-safe substitutions present…
+        Assert.Contains("film-grain=8", svtParams);
+        Assert.Contains("keyint=193", svtParams);
+        Assert.Contains("luminance-qp-bias=33", svtParams);
+        Assert.Contains("enable-dlf=2", svtParams);
+        // …and PSY-fork-only keys absent (each is fatal on mainline).
+        Assert.DoesNotContain("photon-noise", svtParams);
+        Assert.DoesNotContain("min-keyint", svtParams);
+        Assert.DoesNotContain("enable-alt-cdef", svtParams);
+        Assert.DoesNotContain("enable-dlf=3", svtParams);
+    }
+
+    [Fact]
     public void QueueConfig_DefaultsToSingleTranscode()
     {
         // Default: allow parallel downloads but serialize transcoding to one at a time.

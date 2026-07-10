@@ -4528,7 +4528,7 @@
 
         async function maybeRefreshHistoryCoverArt() {
             if (window._historyCoverRefreshAttempted) return;
-            const migrationKey = 'cruncharr-history-series-posters-v2';
+            const migrationKey = 'cruncharr-history-series-posters-v3';
             try {
                 if (localStorage.getItem(migrationKey) === 'complete') return;
             } catch (e) { /* private browsing can deny storage; refresh once for this page */ }
@@ -4545,8 +4545,10 @@
             for (const series of candidates) {
                 try {
                     const res = await fetch(`/api/v1/history/update-series/${encodeURIComponent(series.seriesId)}`, { method: 'POST' });
-                    refreshed = res.ok || refreshed;
-                    completed = res.ok && completed;
+                    const result = res.ok ? await res.json() : null;
+                    const succeeded = res.ok && result?.success === true;
+                    refreshed = succeeded || refreshed;
+                    completed = succeeded && completed;
                 } catch (e) {
                     completed = false;
                 }

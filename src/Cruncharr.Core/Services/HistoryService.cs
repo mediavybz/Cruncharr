@@ -1167,12 +1167,26 @@ public class HistoryService : IHistoryService, IDisposable
             return false;
         }
 
+        var lang = string.IsNullOrEmpty(_config.History.Lang)
+            ? "en-US"
+            : _config.History.Lang;
+
+        // [PT] Desktop History.RefreshSeriesData calls SeriesById and always reapplies the
+        // series-level title, description, and poster. Season episode data only carries episode
+        // imagery, so it cannot correct a screenshot that was stored when the history row was
+        // first created.
+        SeriesInfo? seriesData = null;
+        try
+        {
+            seriesData = await _apiService.SeriesByIdAsync(seriesId, lang, true);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to refresh series metadata for {SeriesId}", seriesId);
+        }
+
         foreach (var season in seasons)
         {
-            var lang = string.IsNullOrEmpty(_config.History.Lang)
-                ? "en-US"
-                : _config.History.Lang;
-
             var candidateIds = new List<string>();
             candidateIds.Add(season.Id);
 
@@ -1209,6 +1223,13 @@ public class HistoryService : IHistoryService, IDisposable
 
             if (historySeries != null)
             {
+                if (seriesData != null)
+                {
+                    historySeries.SeriesDescription = seriesData.Description;
+                    historySeries.ThumbnailImageUrl = seriesData.CoverArtUrl ?? "";
+                    historySeries.SeriesTitle = seriesData.Title;
+                }
+
                 // Merge any episode that ended up in more than one season (a legacy fallback-keyed
                 // season + the real populated season) so a downloaded episode shows under its real
                 // season with its download state intact, not duplicated.

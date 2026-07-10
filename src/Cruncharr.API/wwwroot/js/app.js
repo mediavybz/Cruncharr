@@ -2013,6 +2013,10 @@
                 // Same endpoint feeds the series-detail modal - keep its cache fresh
                 historyRichData = historyData;
                 renderHistoryContent();
+                // Existing history files may contain the first episode screenshot in the series
+                // image slot. Desktop refreshes series metadata and loads poster_tall; detect that
+                // persisted shape once per session and ask the existing refresh endpoint to repair it.
+                maybeRefreshHistoryCoverArt();
                 // Auto-match against Sonarr once per session so matches "rope in" without the
                 // user manually opening the Sonarr menu (no-op if Sonarr disabled or all matched).
                 // Fire-and-forget so history paints immediately.
@@ -2030,13 +2034,7 @@
         function renderHistoryContent() {
             const content = document.getElementById('history-content');
             if (!content) return;
-            const filteredData = historyFilterText 
-                ? historyData.filter(item => 
-                    (item.seriesTitle || '').toLowerCase().includes(historyFilterText) ||
-                    (item.seriesDescription || '').toLowerCase().includes(historyFilterText) ||
-                    (item.sonarrSlugTitle || '').toLowerCase().includes(historyFilterText)
-                  )
-                : historyData;
+            const filteredData = getFilteredHistoryData();
             
             if (filteredData.length === 0) {
                 content.innerHTML = `
@@ -3786,7 +3784,34 @@
             } catch (e) { showToast('Delete failed', 'error'); }
         }
 
-        function refreshHistory() {             fetchHistoryData();
+        function getFilteredHistoryData() {
+            return historyFilterText
+                ? historyData.filter(item =>
+                    (item.seriesTitle || '').toLowerCase().includes(historyFilterText) ||
+                    (item.seriesDescription || '').toLowerCase().includes(historyFilterText) ||
+                    (item.sonarrSlugTitle || '').toLowerCase().includes(historyFilterText)
+                  )
+                : historyData;
+        }
+
+        async function refreshHistory() {
+            const filtered = getFilteredHistoryData();
+            if (!filtered.length) {
+                showToast('No filtered series to refresh', 'info');
+                return;
+            }
+
+            showToast(`Refreshing ${filtered.length} filtered series...`, 'info');
+            let refreshed = 0;
+            for (const series of filtered) {
+                if (!series.seriesId) continue;
+                try {
+                    const res = await fetch(`/api/v1/history/update-series/${encodeURIComponent(series.seriesId)}`, { method: 'POST' });
+                    if (res.ok) refreshed++;
+                } catch (e) { /* continue refreshing the remaining filtered series */ }
+            }
+            await fetchHistoryData();
+            showToast(`Refreshed ${refreshed} of ${filtered.length} filtered series`, refreshed === filtered.length ? 'success' : 'warning');
             // Restart history auto-refresh interval if it was cleared
             if (!historyIntervalId) {
                 historyIntervalId = setInterval(() => {
@@ -3808,6 +3833,7 @@
                     for (const season of (series.seasons || [])) {
                         for (const episode of (season.episodes || [])) {
                             if (episode.wasDownloaded === false && episode.episodeId) {
+                                if (episode.isEpisodeAvailableOnStreamingService === false) continue;
                                 const queueRes = await fetch('/api/v1/queue', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
@@ -3816,7 +3842,8 @@
                                         title: episode.episodeTitle || 'Unknown',
                                         seriesTitle: series.seriesTitle || 'Unknown',
                                         seasonNumber: season.seasonNum || 1,
-                                        episodeNumber: episode.episode || 1
+                                        episodeNumber: episode.episode || 1,
+                                        thumbnailUrl: episode.thumbnailImageUrl || ''
                                     })
                                 });
                                 if (queueRes.ok) added++;
@@ -3842,7 +3869,7 @@
         
         async function refreshSeries(id) {
             try {
-                const res = await fetch(`/api/v1/history/update-series/${id}`, { method: 'POST' });
+                const res = await fetch(`/api/v1/history/update-series/${encodeURIComponent(id)}`, { method: 'POST' });
                 if (res.ok) {
                     showToast('Series refreshed', 'success');
                     if (currentPage === 'history') fetchHistoryData();
@@ -3957,8 +3984,8 @@
             for (const series of historyData) {
                 if (series.seriesId) {
                     try {
-                        await fetch(`/api/v1/history/update-series/${series.seriesId}`, { method: 'POST' });
-                        refreshed++;
+                        const res = await fetch(`/api/v1/history/update-series/${encodeURIComponent(series.seriesId)}`, { method: 'POST' });
+                        if (res.ok) refreshed++;
                     } catch (e) {
                         console.error('Failed to refresh series:', series.seriesId);
                     }
@@ -4051,6 +4078,9 @@
         }
 
         function getEpisodeDownloadStatus(episode, series) {
+            if (episode.wasDownloaded && isEpisodePartiallyDownloaded(episode)) {
+                return { class: 'status-partial', icon: '&#10004;' };
+            }
             if (episode.wasDownloaded) {
                 return { class: 'status-full', icon: '&#10004;' };
             }
@@ -4058,9 +4088,6 @@
             const countSonarr = config?.history?.countSonarr !== false;
             if (countSonarr && series && series.sonarrSeriesId && episode.sonarrHasFile) {
                 return { class: 'status-full', icon: '&#10004;' };
-            }
-            if (isEpisodePartiallyDownloaded(episode)) {
-                return { class: 'status-partial', icon: '&#10004;' };
             }
             return { class: 'status-none', icon: '' };
         }
@@ -4363,7 +4390,7 @@
         async function downloadSeason(seriesId, seasonId) {
             if (!confirm('This will add all episodes in this season to the queue. Continue?')) return;
             try {
-                const res = await fetch(`/api/v1/series/${seriesId}/episodes`);
+                const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/episodes`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const episodes = await res.json();
                 let added = 0;
@@ -4479,6 +4506,30 @@
                     <div style="font-size:0.8em; color:var(--text-secondary);">${escapeHtml((item.seriesDescription || '').substring(0, 60))}${(item.seriesDescription || '').length > 60 ? '...' : ''}</div>
                 </div>
             `).join('');
+        }
+
+        async function maybeRefreshHistoryCoverArt() {
+            if (window._historyCoverRefreshAttempted) return;
+
+            const candidates = historyData.filter(series => {
+                const seriesImage = series.thumbnailImageUrl || '';
+                const episodeImages = (series.seasons || [])
+                    .flatMap(season => season.episodes || [])
+                    .map(episode => episode.thumbnailImageUrl)
+                    .filter(Boolean);
+                return !!series.seriesId && (!seriesImage || episodeImages.includes(seriesImage));
+            });
+            if (!candidates.length) return;
+
+            window._historyCoverRefreshAttempted = true;
+            let refreshed = false;
+            for (const series of candidates) {
+                try {
+                    const res = await fetch(`/api/v1/history/update-series/${encodeURIComponent(series.seriesId)}`, { method: 'POST' });
+                    refreshed = res.ok || refreshed;
+                } catch (e) { /* keep the current image when metadata refresh is unavailable */ }
+            }
+            if (refreshed && currentPage === 'history') await fetchHistoryData();
         }
         
         // ================== SONARR MENU ==================
@@ -4662,7 +4713,7 @@
             const softSubs = getMultiSelect('override-soft-subs');
             
             try {
-                const res = await fetch(`/api/v1/history/series/${seriesId}/settings`, {
+                const res = await fetch(`/api/v1/history/series/${encodeURIComponent(seriesId)}/settings`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4728,7 +4779,7 @@
             const softSubs = getMultiSelect('override-season-soft-subs');
             
             try {
-                const res = await fetch(`/api/v1/history/season/${seasonId}/settings`, {
+                const res = await fetch(`/api/v1/history/season/${encodeURIComponent(seasonId)}/settings`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4753,7 +4804,7 @@
             if (!confirm('This will add all episodes in this series to the queue. Continue?')) return;
             try {
                 // Get episodes and add all to queue
-                const res = await fetch(`/api/v1/series/${id}/episodes`);
+                const res = await fetch(`/api/v1/series/${encodeURIComponent(id)}/episodes`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const episodes = await res.json();
                 let added = 0;

@@ -152,8 +152,10 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
                 item.DownloadProgress.ResumeState = DownloadState.Downloading;
             }
         }
-        else if (!item.DownloadProgress.IsFinished)
+        else if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing)
         {
+            // Only work that was interrupted mid-flight is restarted. Paused/Cancelled are
+            // intentional user states and must survive a container restart unchanged.
             item.DownloadProgress.ResetForRetry();
         }
     }

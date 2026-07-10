@@ -1,5 +1,8 @@
+using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace Cruncharr.Core.Tests;
@@ -37,5 +40,229 @@ public class QueuePumpEligibilityTests
     public void Queued_IsAutoStartEligible()
     {
         Assert.True(QueueService.IsAutoStartEligibleState(P(DownloadState.Queued)));
+    }
+
+    [Fact]
+    public async Task AutoStartDelay_CanBePausedBeforeDownloadBegins()
+    {
+        var downloadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var downloadService = new Mock<IDownloadService>();
+        downloadService
+            .Setup(service => service.DownloadEpisodeAsync(
+                It.IsAny<EpisodeInfo>(),
+                It.IsAny<CruncharrConfig>(),
+                It.IsAny<IProgress<DownloadProgress>?>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Action?>()))
+            .Callback(() => downloadStarted.TrySetResult(true))
+            .ReturnsAsync(new DownloadResult { Success = true });
+
+        using var provider = new ServiceCollection()
+            .AddSingleton(downloadService.Object)
+            .BuildServiceProvider();
+        using var queue = new QueueService(provider);
+        using var stop = new CancellationTokenSource();
+        var config = new CruncharrConfig();
+        config.Queue.AutoDownload = true;
+        config.Download.CooldownDelaySeconds = 1;
+
+        var processor = queue.ProcessQueueAsync(config, cancellationToken: stop.Token);
+        queue.SetInitialized(true);
+        queue.AddToQueue(new EpisodeInfo { Id = "pause-during-delay", Title = "Episode" });
+
+        await WaitForAsync(() => queue.ActiveDownloads == 1);
+        var item = Assert.Single(queue.GetQueue());
+        Assert.True(queue.PauseItem(item.Id));
+
+        await Task.Delay(1200);
+        Assert.False(downloadStarted.Task.IsCompleted);
+        Assert.Equal(DownloadState.Paused, item.DownloadProgress.State);
+
+        stop.Cancel();
+        await processor;
+    }
+
+    [Fact]
+    public async Task RestoredRetry_WakesAndStartsWhenRetryTimeArrives()
+    {
+        var queuePath = Path.Combine(Path.GetTempPath(), $"cruncharr-queue-{Guid.NewGuid():N}.json");
+        try
+        {
+            using var persistence = new QueuePersistenceService(queuePath);
+            persistence.SaveQueue(new List<QueueItem>
+            {
+                new()
+                {
+                    Episode = new EpisodeInfo { Id = "restored-retry", Title = "Episode" },
+                    DownloadProgress = new DownloadProgress
+                    {
+                        State = DownloadState.Queued,
+                        RetryAtUtc = DateTimeOffset.UtcNow.AddMilliseconds(300)
+                    }
+                }
+            });
+
+            var downloadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var downloadService = new Mock<IDownloadService>();
+            downloadService
+                .Setup(service => service.DownloadEpisodeAsync(
+                    It.IsAny<EpisodeInfo>(),
+                    It.IsAny<CruncharrConfig>(),
+                    It.IsAny<IProgress<DownloadProgress>?>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<Action?>()))
+                .Callback(() => downloadStarted.TrySetResult(true))
+                .ReturnsAsync(new DownloadResult { Success = true });
+
+            using var provider = new ServiceCollection()
+                .AddSingleton(downloadService.Object)
+                .BuildServiceProvider();
+            using var queue = new QueueService(provider, persistenceService: persistence);
+            using var stop = new CancellationTokenSource();
+            var config = new CruncharrConfig();
+            config.Queue.AutoDownload = true;
+
+            var processor = queue.ProcessQueueAsync(config, cancellationToken: stop.Token);
+            queue.SetInitialized(true);
+
+            Assert.True(await downloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+
+            stop.Cancel();
+            await processor;
+        }
+        finally
+        {
+            File.Delete(queuePath);
+            File.Delete(queuePath + ".tmp");
+        }
+    }
+
+    [Fact]
+    public async Task ProcessorStart_RequestsPumpWhenInitializedFirst()
+    {
+        var downloadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var downloadService = new Mock<IDownloadService>();
+        downloadService
+            .Setup(service => service.DownloadEpisodeAsync(
+                It.IsAny<EpisodeInfo>(),
+                It.IsAny<CruncharrConfig>(),
+                It.IsAny<IProgress<DownloadProgress>?>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Action?>()))
+            .Callback(() => downloadStarted.TrySetResult(true))
+            .ReturnsAsync(new DownloadResult { Success = true });
+
+        using var provider = new ServiceCollection()
+            .AddSingleton(downloadService.Object)
+            .BuildServiceProvider();
+        using var queue = new QueueService(provider);
+        queue.AddToQueue(new EpisodeInfo { Id = "startup-order", Title = "Episode" });
+        queue.SetInitialized(true);
+
+        using var stop = new CancellationTokenSource();
+        var config = new CruncharrConfig();
+        config.Queue.AutoDownload = true;
+        var processor = queue.ProcessQueueAsync(config, cancellationToken: stop.Token);
+
+        Assert.True(await downloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+
+        stop.Cancel();
+        await processor;
+    }
+
+    [Fact]
+    public async Task ReplaceQueue_CancelsTheWorkItReplaces()
+    {
+        var downloadService = new BlockingDownloadService();
+        using var provider = new ServiceCollection()
+            .AddSingleton<IDownloadService>(downloadService)
+            .BuildServiceProvider();
+        using var queue = new QueueService(provider);
+        using var stop = new CancellationTokenSource();
+        var config = new CruncharrConfig();
+        var processor = queue.ProcessQueueAsync(config, cancellationToken: stop.Token);
+
+        queue.AddToQueue(new EpisodeInfo { Id = "old-item", Title = "Old" });
+        var oldItem = Assert.Single(queue.GetQueue());
+        Assert.True(queue.StartItem(oldItem.Id));
+        Assert.True(await downloadService.Started.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+
+        queue.ReplaceQueue(new List<QueueItem> { Item("new-item", DownloadState.Queued) });
+
+        Assert.True(await downloadService.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal("new-item", Assert.Single(queue.GetQueue()).Episode.Id);
+
+        stop.Cancel();
+        await processor;
+    }
+
+    [Fact]
+    public void Persistence_PreservesPausedAndCancelledButRequeuesInterruptedWork()
+    {
+        var queuePath = Path.Combine(Path.GetTempPath(), $"cruncharr-queue-{Guid.NewGuid():N}.json");
+        try
+        {
+            using var persistence = new QueuePersistenceService(queuePath);
+            persistence.SaveQueue(new List<QueueItem>
+            {
+                Item("paused", DownloadState.Paused),
+                Item("cancelled", DownloadState.Cancelled),
+                Item("downloading", DownloadState.Downloading),
+                Item("processing", DownloadState.Processing)
+            });
+
+            var restored = Assert.IsType<List<QueueItem>>(persistence.LoadQueue());
+            Assert.Equal(DownloadState.Paused, restored.Single(item => item.Episode.Id == "paused").DownloadProgress.State);
+            Assert.Equal(DownloadState.Cancelled, restored.Single(item => item.Episode.Id == "cancelled").DownloadProgress.State);
+            Assert.Equal(DownloadState.Queued, restored.Single(item => item.Episode.Id == "downloading").DownloadProgress.State);
+            Assert.Equal(DownloadState.Queued, restored.Single(item => item.Episode.Id == "processing").DownloadProgress.State);
+        }
+        finally
+        {
+            File.Delete(queuePath);
+            File.Delete(queuePath + ".tmp");
+        }
+    }
+
+    private static QueueItem Item(string id, DownloadState state) => new()
+    {
+        Episode = new EpisodeInfo { Id = id, Title = id },
+        DownloadProgress = new DownloadProgress { State = state }
+    };
+
+    private static async Task WaitForAsync(Func<bool> predicate)
+    {
+        var timeout = DateTime.UtcNow.AddSeconds(3);
+        while (!predicate() && DateTime.UtcNow < timeout)
+        {
+            await Task.Delay(20);
+        }
+        Assert.True(predicate(), "Condition was not reached before timeout.");
+    }
+
+    private sealed class BlockingDownloadService : IDownloadService
+    {
+        public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default, Action? onDownloadComplete = null)
+        {
+            Started.TrySetResult(true);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new DownloadResult { Success = true };
+            }
+            catch (OperationCanceledException)
+            {
+                Cancelled.TrySetResult(true);
+                throw;
+            }
+        }
+
+        public Task<DownloadResult> DownloadSeriesAsync(string seriesId, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
     }
 }

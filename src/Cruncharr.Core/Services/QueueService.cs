@@ -156,14 +156,14 @@ public class QueueService : IQueueService, IDisposable
         var retryTimes = retryItems.Select(i => i.DownloadProgress.RetryAtUtc).Where(t => t.HasValue).ToList();
         if (retryTimes.Count == 0) return;
 
-        var earliestRetry = retryTimes.Min();
-        if (earliestRetry.HasValue)
+        var latestRetry = retryTimes.Max();
+        if (latestRetry.HasValue)
         {
             lock (_autoDownloadBlockLock)
             {
-                _autoDownloadBlockedUntilUtc = earliestRetry.Value;
+                _autoDownloadBlockedUntilUtc = latestRetry.Value;
             }
-            _logger?.LogInformation("Restored retry state: {Count} items waiting, blocked until {Time}", retryItems.Count, earliestRetry.Value);
+            _logger?.LogInformation("Restored retry state: {Count} items waiting, blocked until {Time}", retryItems.Count, latestRetry.Value);
         }
     }
 
@@ -234,6 +234,13 @@ public class QueueService : IQueueService, IDisposable
 
     public void ReplaceQueue(List<QueueItem> newQueue)
     {
+        // Replacing the queue also replaces its active work. This is the REST equivalent of
+        // removing the old desktop queue items, which cancels each item's token.
+        foreach (var id in _itemCts.Keys.ToList())
+        {
+            CancelActiveItem(id);
+        }
+
         if (newQueue == null)
         {
             _logger?.LogWarning("ReplaceQueue called with null list, clearing queue");
@@ -253,6 +260,7 @@ public class QueueService : IQueueService, IDisposable
         _logger?.LogInformation("Queue replaced with {Count} items", newQueue.Count);
         OnQueueStateChanged();
         ScheduleSave();
+        RequestPump();
     }
 
     public bool RetryItem(string queueItemId)
@@ -331,7 +339,7 @@ public class QueueService : IQueueService, IDisposable
             {
                 try
                 {
-                    await RunDownloadAsync(item, _cancellationToken);
+                    await RunDownloadAsync(item, _cancellationToken, applyAutoStartDelay: false);
                 }
                 finally
                 {
@@ -450,6 +458,12 @@ public class QueueService : IQueueService, IDisposable
 
         _logger?.LogInformation("Queue processor started with {Downloads} concurrent downloads, {Processing} processing jobs, {Transcodes} transcodes",
             config.Download.SimultaneousDownloads, config.Queue.SimultaneousProcessingJobs, config.Queue.MaxSimultaneousTranscodes);
+
+        ScheduleRestoredRetryWakes();
+        // ProcessQueueAsync may begin before or after SetInitialized. Requesting here as well as
+        // in SetInitialized makes either startup order deterministic; PumpQueueAsync keeps the
+        // initialization gate used by the desktop source.
+        RequestPump();
 
         // Keep running until cancellation
         try
@@ -613,17 +627,7 @@ public class QueueService : IQueueService, IDisposable
             {
                 try
                 {
-                    // Apply cooldown delay between downloads (upstream #445)
-                    if (_config?.Download.CooldownDelaySeconds > 0)
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(_config.Download.CooldownDelaySeconds), _cancellationToken);
-                    }
-                    // [PT] Upstream: episode-based download delay (when dub-based delay is disabled)
-                    if (_config?.Download.DownloadDelaySeconds > 0 && !_config.Download.DownloadDelayUseDubBased)
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(_config.Download.DownloadDelaySeconds), _cancellationToken);
-                    }
-                    await RunDownloadAsync(item, _cancellationToken);
+                    await RunDownloadAsync(item, _cancellationToken, applyAutoStartDelay: true);
                 }
                 catch (Exception ex)
                 {
@@ -642,23 +646,50 @@ public class QueueService : IQueueService, IDisposable
     }
 
     // Extracted download execution logic
-    private async Task RunDownloadAsync(QueueItem item, CancellationToken outerCancellationToken)
+    private async Task RunDownloadAsync(QueueItem item, CancellationToken outerCancellationToken, bool applyAutoStartDelay)
     {
-        item.DownloadProgress.State = DownloadState.Downloading;
-        item.DownloadProgress.Doing = "Starting download...";
-        OnQueueStateChanged();
-        ScheduleSave();
-
-        _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
-
         // Per-item cancellation (linked to app shutdown) so removing/pausing this item
-        // cancels ITS download without touching the others.
+        // cancels ITS delay/download/mux/encode without touching the others. The desktop source
+        // renews its item CTS before entering any download delay for the same reason.
         using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancellationToken);
         _itemCts[item.Id] = itemCts;
         var cancellationToken = itemCts.Token;
 
         try
         {
+            // Reject a stale item captured before Pause/Remove/Replace won its race with the task.
+            if (!IsCurrentQueueItem(item) || item.DownloadProgress.State is DownloadState.Paused or DownloadState.Cancelled)
+            {
+                return;
+            }
+
+            if (applyAutoStartDelay)
+            {
+                // Apply cooldown delay between downloads (upstream #445).
+                if (_config?.Download.CooldownDelaySeconds > 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(_config.Download.CooldownDelaySeconds), cancellationToken);
+                }
+                // [PT] Upstream: episode-based download delay (when dub-based delay is disabled).
+                if (_config?.Download.DownloadDelaySeconds > 0 && !_config.Download.DownloadDelayUseDubBased)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(_config.Download.DownloadDelaySeconds), cancellationToken);
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentQueueItem(item) || item.DownloadProgress.State is DownloadState.Paused or DownloadState.Cancelled)
+            {
+                return;
+            }
+
+            item.DownloadProgress.State = DownloadState.Downloading;
+            item.DownloadProgress.Doing = "Starting download...";
+            OnQueueStateChanged();
+            ScheduleSave();
+
+            _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+
             var queueProgress = new Progress<DownloadProgress>(p =>
             {
                 item.DownloadProgress.State = p.State;
@@ -733,17 +764,17 @@ public class QueueService : IQueueService, IDisposable
             bool wasPause = _pauseRequested.TryRemove(item.Id, out _);
             // If Resume/Retry re-queued this item while cancellation was still in flight, honor
             // that intent instead of clobbering it back to Paused/Cancelled.
-            if (item.DownloadProgress.State == DownloadState.Queued)
-            {
-                _logger?.LogInformation("Download cancelled but item re-queued; leaving it queued: {EpisodeId}", item.Episode.Id);
-            }
-            else if (wasPause)
+            if (wasPause)
             {
                 // Cancelled BY PauseItem: park it as Paused so Resume can restart it.
                 item.DownloadProgress.State = DownloadState.Paused;
                 item.DownloadProgress.Doing = "Paused";
                 item.DownloadProgress.Percent = 0;
                 _logger?.LogInformation("Download paused (in-flight work cancelled): {EpisodeId}", item.Episode.Id);
+            }
+            else if (item.DownloadProgress.State == DownloadState.Queued)
+            {
+                _logger?.LogInformation("Download cancelled but item re-queued; leaving it queued: {EpisodeId}", item.Episode.Id);
             }
             else
             {
@@ -775,6 +806,44 @@ public class QueueService : IQueueService, IDisposable
 
         OnQueueStateChanged();
         ScheduleSave();
+    }
+
+    private bool IsCurrentQueueItem(QueueItem item)
+    {
+        return _queue.TryGetValue(item.Id, out var current) && ReferenceEquals(current, item);
+    }
+
+    // Ported from upstream QueueManager.RestoreRetryStateFromQueue/ScheduleRetryWake. Queue
+    // persistence is loaded in the constructor, before the host cancellation token exists, so
+    // delayed wakes are attached after ProcessQueueAsync installs that token.
+    private void ScheduleRestoredRetryWakes()
+    {
+        foreach (var item in _queue.Values.Where(i => i.DownloadProgress.IsWaitingForRetry).ToList())
+        {
+            var retryAtUtc = item.DownloadProgress.RetryAtUtc;
+            if (!retryAtUtc.HasValue) continue;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var remaining = retryAtUtc.Value - DateTimeOffset.UtcNow;
+                    if (remaining > TimeSpan.Zero)
+                    {
+                        await Task.Delay(remaining, _cancellationToken);
+                    }
+
+                    if (!IsCurrentQueueItem(item)) return;
+                    item.DownloadProgress.RetryAtUtc = null;
+                    OnQueueStateChanged();
+                    RequestPump();
+                }
+                catch (OperationCanceledException)
+                {
+                    // ignored
+                }
+            }, _cancellationToken);
+        }
     }
 
     public void ScheduleRetry(string queueItemId, TimeSpan delay, string statusText)

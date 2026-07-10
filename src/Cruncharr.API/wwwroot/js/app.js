@@ -80,6 +80,7 @@
         document.addEventListener('DOMContentLoaded', async () => {
             // Start config load in the background — don't block the UI shell
             const configPromise = fetchConfig();
+            setupProtectedImageLoading();
             loadLanguagePrefs(); // adaptive default language state (non-blocking)
             // Fetch version from backend (also non-blocking)
             fetch('/api/v1/health').then(res => res.ok ? res.json() : null).then(data => {
@@ -112,6 +113,7 @@
             const splash = document.getElementById('loading-splash');
             if (splash) { splash.classList.add('hidden'); setTimeout(() => splash.remove(), 500); }
             // Await config in background — pages that need it will re-render on arrival
+            // fetchConfig re-renders config-dependent pages when the first response arrives.
             await configPromise;
         });
 
@@ -447,7 +449,7 @@
                     return `
                         <div class="download-item">
                             <div class="download-thumb">
-                                ${item.episode?.thumbnailUrl && isSafeUrl(item.episode.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(item.episode.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                ${item.episode?.thumbnailUrl && isSafeUrl(item.episode.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(item.episode.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             </div>
                             <div class="download-content">
                                 <div class="download-header">
@@ -576,7 +578,7 @@
                 popup.innerHTML = globalSearchResults.map(s => `
                     <div class="search-result-item" onclick="selectGlobalResult('${escapeJsString(s.id)}')">
                         <div class="search-result-poster">
-                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                         </div>
                         <div class="search-result-info">
                             <div class="search-result-title">${escapeHtml(s.title)}</div>
@@ -700,7 +702,7 @@
                 return `
                     <div class="episode-multi-dub ${isSelected ? 'selected' : ''}" onclick="toggleEpisodeSelectionMultiDub('${escapeJsString(epKey)}')">
                         <div class="episode-thumb">
-                            ${ep.img && isSafeUrl(ep.img) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(ep.img))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                            ${ep.img && isSafeUrl(ep.img) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(ep.img)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                         </div>
                         <div class="episode-info">
                             <div class="episode-title">${escapeHtml(ep.name) || 'Unknown Episode'}</div>
@@ -854,49 +856,45 @@
             
             isAddingToQueue = true;
             try {
-                // Build the episodes dictionary for ItemSelectMultiDub
-                const episodes = {};
-                const selectedDubLangs = new Set();
-                
+                // ItemSelectMultiDub applies one dub list to every episode in a request. Group
+                // episodes by their own selected dub set so per-episode choices stay isolated.
+                const groups = new Map();
                 epKeys.forEach(epKey => {
                     if (addDownloadSeriesData[epKey]) {
-                        episodes[epKey] = addDownloadSeriesData[epKey];
-                        // Collect selected dubs
-                        const dubs = selectedEpisodeDubs.get(epKey);
-                        if (dubs) {
-                            dubs.forEach(d => selectedDubLangs.add(d));
-                        }
+                        const dubs = Array.from(selectedEpisodeDubs.get(epKey) || ['ja-JP']).sort();
+                        const groupKey = JSON.stringify(dubs);
+                        if (!groups.has(groupKey)) groups.set(groupKey, { dubs, episodes: {}, epKeys: [] });
+                        const group = groups.get(groupKey);
+                        group.episodes[epKey] = addDownloadSeriesData[epKey];
+                        group.epKeys.push(epKey);
                     }
                 });
                 
-                if (Object.keys(episodes).length === 0) {
+                if (groups.size === 0) {
                     showToast('No valid episodes selected', 'error');
                     return;
                 }
                 
-                // Call ItemSelectMultiDub to construct proper queue items
-                const dubLangArray = Array.from(selectedDubLangs);
-                if (dubLangArray.length === 0) {
-                    dubLangArray.push('ja-JP'); // Default fallback
-                }
-                
-                const res = await fetch('/api/v1/series/item-select-multi-dub', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        episodes: episodes,
-                        dubLang: dubLangArray,
-                        all: false,
-                        e: epKeys
-                    })
-                });
-                
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.message || 'ItemSelectMultiDub failed');
-                }
-                
-                const queueItems = await res.json();
+                const queueItems = {};
+                const groupedItems = await Promise.all(Array.from(groups.values(), async group => {
+                    const res = await fetch('/api/v1/series/item-select-multi-dub', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            episodes: group.episodes,
+                            dubLang: group.dubs,
+                            all: false,
+                            e: group.epKeys
+                        })
+                    });
+
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.message || 'ItemSelectMultiDub failed');
+                    }
+                    return res.json();
+                }));
+                groupedItems.forEach(items => Object.assign(queueItems, items));
                 
                 // Add each queue item to the queue
                 let added = 0;
@@ -912,7 +910,6 @@
                                 seriesTitle: item.seriesTitle || addDownloadSelectedSeries?.title || '',
                                 seasonNumber: item.season || 1,
                                 episodeNumber: item.episodeNumber || 1,
-                                locale: item.selectedDubs?.[0] || 'ja-JP',
                                 thumbnailUrl: item.image || '',
                                 coverArtUrl: addDownloadSelectedSeries?.coverArtUrl || '',
                                 selectedDubs: item.selectedDubs || [],
@@ -1064,7 +1061,7 @@
                             return `
                             <div style="padding: 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px;">
                                 <div style="width: 80px; height: 45px; background: var(--bg-tertiary); border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                                    ${thumb && isSafeUrl(thumb) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(thumb))}" style="width: 100%; height: 100%; object-fit: cover;" alt="" onerror="this.outerHTML='🎵'">` : '🎵'}
+                                    ${thumb && isSafeUrl(thumb) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(thumb)} style="width: 100%; height: 100%; object-fit: cover;" alt="" onerror="this.outerHTML='🎵'">` : '🎵'}
                                 </div>
                                 <div style="flex: 1;">
                                     <div style="font-weight: 500;">${escapeHtml(video.title || 'Unknown')}</div>
@@ -1266,7 +1263,7 @@
                                         ${historyMark}
                                         <div class="calendar-episode-time">${timeDisplay}</div>
                                         <div class="calendar-episode-thumb ${ep.isUpcoming ? 'poster' : ''}">
-                                            ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(ep.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                            ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(ep.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                             <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
                                         </div>
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
@@ -1390,7 +1387,7 @@
                         <div class="history-poster clickable" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')">
                             <div class="history-poster-img">
                                 <span class="poster-type-badge">Series</span>
-                                ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(series.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(series.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                 ${series.episodes?.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
                             </div>
                             <div class="history-poster-info">
@@ -1521,7 +1518,7 @@
                         <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
                             <div class="history-poster-img">
                                 <span class="poster-type-badge">Series</span>
-                                ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             </div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
@@ -1633,7 +1630,13 @@
         }
 
         function renderSeasonal(container) {
-            if (!seasonalSeason) { seasonalSeason = currentAnimeSeason(); seasonalYear = new Date().getFullYear(); }
+            if (!seasonalSeason) {
+                const now = new Date();
+                seasonalSeason = currentAnimeSeason();
+                // Anime Winter spans Dec-Feb but is named for Jan/Feb's year. In December,
+                // default to the upcoming Winter instead of the past January season.
+                seasonalYear = now.getFullYear() + (now.getMonth() === 11 ? 1 : 0);
+            }
             const seasons = [['winter','Winter'],['spring','Spring'],['summer','Summer'],['fall','Fall']];
             const thisYear = new Date().getFullYear();
             container.innerHTML = `
@@ -1695,7 +1698,7 @@
                     ${series.map(s => {
                         const clickable = s.id && s.id.length;
                         const img = (s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl)
-                            ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(s.coverArtUrl || s.thumbnailUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺';
+                            ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺';
                         const sd = fmtSeasonalDate(s.startDate);
                         const na = fmtNextAir(s);
                         const metaMain = (s.episodeCount ? `${s.episodeCount} ep` : 'On Crunchyroll') + (sd ? ` · ${sd}` : '');
@@ -1780,6 +1783,73 @@
                 return '/api/v1/images?url=' + encodeURIComponent(url);
             }
             return url;
+        }
+
+        const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+
+        function imageSourceAttributes(url) {
+            const source = crImg(url);
+            let protectedProxy = false;
+            try {
+                protectedProxy = !!localStorage.getItem('cruncharrApiKey') && /^\/api\//i.test(source || '');
+            } catch (e) { /* localStorage unavailable; use the normal image request. */ }
+            return protectedProxy
+                ? `src="${TRANSPARENT_IMAGE}" data-auth-src="${escapeHtmlAttribute(source)}"`
+                : `src="${escapeHtmlAttribute(source)}"`;
+        }
+
+        function setupProtectedImageLoading() {
+            const loadImage = async img => {
+                if (!img?.dataset?.authSrc || img.dataset.authLoading === 'true') return;
+                img.dataset.authLoading = 'true';
+                try {
+                    const res = await fetch(img.dataset.authSrc);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const objectUrl = URL.createObjectURL(await res.blob());
+                    if (!img.isConnected) {
+                        URL.revokeObjectURL(objectUrl);
+                        return;
+                    }
+                    const release = () => URL.revokeObjectURL(objectUrl);
+                    img.addEventListener('load', release, { once: true });
+                    img.addEventListener('error', release, { once: true });
+                    img.removeAttribute('data-auth-src');
+                    img.src = objectUrl;
+                } catch (e) {
+                    img.removeAttribute('data-auth-src');
+                    img.dispatchEvent(new Event('error'));
+                } finally {
+                    delete img.dataset.authLoading;
+                }
+            };
+
+            const intersection = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if (!entry.isIntersecting) return;
+                    intersection.unobserve(entry.target);
+                    loadImage(entry.target);
+                });
+            }, { rootMargin: '240px' });
+
+            const queueImage = img => intersection ? intersection.observe(img) : loadImage(img);
+            const scan = root => {
+                if (root.nodeType !== Node.ELEMENT_NODE) return;
+                if (root.matches?.('img[data-auth-src]')) queueImage(root);
+                root.querySelectorAll?.('img[data-auth-src]').forEach(queueImage);
+            };
+            const unscan = root => {
+                if (!intersection || root.nodeType !== Node.ELEMENT_NODE) return;
+                if (root.matches?.('img[data-auth-src]')) intersection.unobserve(root);
+                root.querySelectorAll?.('img[data-auth-src]').forEach(img => intersection.unobserve(img));
+            };
+
+            new MutationObserver(records => {
+                records.forEach(record => {
+                    record.addedNodes.forEach(scan);
+                    record.removedNodes.forEach(unscan);
+                });
+            }).observe(document.body, { childList: true, subtree: true });
+            scan(document.body);
         }
 
         function formatDate(dateStr) {
@@ -1983,7 +2053,7 @@
                     <div class="history-poster ${item.sonarrSeriesId ? 'sonarr-matched' : 'sonarr-unmatched'} clickable" onclick="showHistorySeriesDetail('${escapeJsString(item.seriesId)}')">
                         <div class="history-poster-img">
                             <span class="poster-type-badge">Series</span>
-                            ${item.thumbnailImageUrl && isSafeUrl(item.thumbnailImageUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(item.thumbnailImageUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                            ${item.thumbnailImageUrl && isSafeUrl(item.thumbnailImageUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(item.thumbnailImageUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
                         </div>
                         <div class="history-poster-info">
@@ -2085,7 +2155,7 @@
                 if (authStatus.isAuthenticated) {
                     if (nameEl) nameEl.textContent = authStatus.username || 'User';
                     if (subEl) subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free';
-                    if (avatarEl) { const au = resolveAvatarUrl(authStatus.avatar); avatarEl.innerHTML = au && isSafeUrl(au) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(au))}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">` : '<span>&#128100;</span>'; }
+                    if (avatarEl) { const au = resolveAvatarUrl(authStatus.avatar); avatarEl.innerHTML = au && isSafeUrl(au) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(au)} alt="" onerror="this.outerHTML='<span>&#128100;</span>'">` : '<span>&#128100;</span>'; }
                     if (loginBtn) loginBtn.style.display = 'none';
                     if (logoutBtn) logoutBtn.style.display = 'inline-block';
                     
@@ -2440,8 +2510,29 @@
             el._autosaveBound = true;
             el.addEventListener('change', () => {
                 clearTimeout(window._settingsSaveTimer);
-                window._settingsSaveTimer = setTimeout(() => { saveSettings(); }, 250);
+                window._settingsSaveTimer = setTimeout(() => {
+                    window._settingsSaveTimer = null;
+                    startSettingsSave();
+                }, 250);
             });
+        }
+
+        function startSettingsSave() {
+            // Serialize settings writes so a slower, older request can never finish after and
+            // overwrite a newer change. saveSettings handles failures and resolves to a boolean.
+            const previousSave = window._settingsSavePromise || Promise.resolve(true);
+            const pendingSave = previousSave
+                .catch(() => false)
+                .then(() => saveSettings())
+                .catch(() => {
+                    showToast('Error saving settings', 'error');
+                    return false;
+                });
+            window._settingsSavePromise = pendingSave;
+            pendingSave.finally(() => {
+                if (window._settingsSavePromise === pendingSave) window._settingsSavePromise = null;
+            });
+            return pendingSave;
         }
 
         async function loadEncodingPresets() {
@@ -2614,7 +2705,19 @@
             } catch (e) { showToast('Delete failed: ' + e.message, 'error'); }
         }
 
-        function setSettingsTab(tab, evt) {
+        async function setSettingsTab(tab, evt) {
+            const switchId = (window._settingsTabSwitchId || 0) + 1;
+            window._settingsTabSwitchId = switchId;
+            // Persist the current tab before replacing its DOM. Otherwise the debounced save
+            // reads the next tab's controls and silently loses the user's last change.
+            if (window._settingsSaveTimer) {
+                clearTimeout(window._settingsSaveTimer);
+                window._settingsSaveTimer = null;
+                if (!await startSettingsSave()) return;
+            } else if (window._settingsSavePromise) {
+                if (!await window._settingsSavePromise) return;
+            }
+            if (window._settingsTabSwitchId !== switchId) return;
             settingsTab = tab;
             document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
             if (evt && evt.target) evt.target.classList.add('active');
@@ -2988,7 +3091,7 @@
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Appearance Settings</span><span class="settings-section-desc">Customize the UI</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select mw-150" id="setting-theme" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Seerr" ${a.theme==='Seerr'||a.theme==='Nebula'?'selected':''}>Seerr</option><option value="Sonarr" ${a.theme==='Sonarr'?'selected':''}>Sonarr</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select mw-150" id="setting-theme" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Nebula" ${a.theme==='Nebula'?'selected':''}>Nebula</option><option value="Seerr" ${a.theme==='Seerr'?'selected':''}>Seerr</option><option value="Sonarr" ${a.theme==='Sonarr'?'selected':''}>Sonarr</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input w-80" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input w-300" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input w-100" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity ?? 0.5)}" min="0" max="1" step="0.1"></div>
@@ -3006,6 +3109,7 @@
         
         async function fetchConfig() {
             try {
+                const wasEmpty = !config || Object.keys(config).length === 0;
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 10000);
                 const res = await fetch('/api/v1/config', { signal: controller.signal });
@@ -3015,6 +3119,9 @@
                 applyTheme();
                 updateConnectionStatus(true);
                 fetchConfigRetryCount = 0;
+                if (wasEmpty && ['downloads', 'add-download', 'calendar'].includes(currentPage)) {
+                    loadPage(currentPage);
+                }
             } catch (e) {
                 console.error('Failed to load config:', e);
                 updateConnectionStatus(false);
@@ -3176,6 +3283,20 @@
                     if (newMethod !== undefined) dl.downloadMethodeNew = newMethod;
                     const replaceExisting = getFieldValue('setting-replace-existing', 'bool');
                     if (replaceExisting !== undefined) dl.replaceExistingFiles = replaceExisting;
+                    const qualityVideo = getFieldValue('setting-quality-video');
+                    if (qualityVideo !== undefined) dl.qualityVideo = qualityVideo;
+                    const qualityAudio = getFieldValue('setting-quality-audio');
+                    if (qualityAudio !== undefined) dl.qualityAudio = qualityAudio;
+                    const dlVideoEvery = getFieldValue('setting-dl-video-every', 'bool');
+                    if (dlVideoEvery !== undefined) dl.dlVideoOnce = !dlVideoEvery;
+                    const keepSeparate = getFieldValue('setting-keep-separate', 'bool');
+                    if (keepSeparate !== undefined) dl.keepDubsSeparate = keepSeparate;
+                    const downloadVideo = getFieldValue('setting-dl-video', 'bool');
+                    if (downloadVideo !== undefined) dl.noVideo = !downloadVideo;
+                    const downloadAudio = getFieldValue('setting-dl-audio', 'bool');
+                    if (downloadAudio !== undefined) dl.noAudio = !downloadAudio;
+                    const chapters = getFieldValue('setting-chapters', 'bool');
+                    if (chapters !== undefined) dl.includeChapters = chapters;
                     // (Allow Early Start / Skip Missing Languages live on the Queue tab as
                     // setting-queue-early-start / setting-queue-skip-missing.)
                     const defaultVideo = getFieldValue('setting-default-video');
@@ -3250,20 +3371,12 @@
                     
                 case 'muxing': {
                     const dl = {};
-                    const qualityVideo = getFieldValue('setting-quality-video');
-                    if (qualityVideo !== undefined) dl.qualityVideo = qualityVideo;
-                    const qualityAudio = getFieldValue('setting-quality-audio');
-                    if (qualityAudio !== undefined) dl.qualityAudio = qualityAudio;
                     const defaultVideo = getFieldValue('setting-default-video');
                     if (defaultVideo !== undefined) dl.defaultVideo = defaultVideo;
                     const defaultAudio = getFieldValue('setting-default-audio');
                     if (defaultAudio !== undefined) dl.defaultAudio = defaultAudio;
                     const syncDefaultsProfile = getFieldValue('setting-sync-defaults-profile', 'bool');
                     if (syncDefaultsProfile !== undefined) dl.syncDefaultsFromProfile = syncDefaultsProfile;
-                    const dlVideoEvery = getFieldValue('setting-dl-video-every', 'bool');
-                    if (dlVideoEvery !== undefined) dl.dlVideoOnce = !dlVideoEvery;
-                    const keepSeparate = getFieldValue('setting-keep-separate', 'bool');
-                    if (keepSeparate !== undefined) dl.keepDubsSeparate = keepSeparate;
                     const defaultSub = getFieldValue('setting-default-sub');
                     if (defaultSub !== undefined) dl.defaultSub = defaultSub;
                     const skipMux = getFieldValue('setting-skip-mux', 'bool');
@@ -3303,12 +3416,6 @@
                     if (encode !== undefined) dl.encodeEnabled = encode;
                     const encodePreset = getFieldValue('setting-encode-preset');
                     if (encodePreset !== undefined) dl.encodingPreset = encodePreset;
-                    const noVideo = getFieldValue('setting-dl-video', 'bool');
-                    if (noVideo !== undefined) dl.noVideo = !noVideo;
-                    const noAudio = getFieldValue('setting-dl-audio', 'bool');
-                    if (noAudio !== undefined) dl.noAudio = !noAudio;
-                    const chapters = getFieldValue('setting-chapters', 'bool');
-                    if (chapters !== undefined) dl.includeChapters = chapters;
                     if (Object.keys(dl).length) newConfig.download = dl;
                     break;
                 }
@@ -3450,7 +3557,7 @@
                     
                 default:
                     showToast('Unknown settings tab', 'error');
-                    return;
+                    return false;
             }
             
             try {
@@ -3468,9 +3575,14 @@
                         Object.assign(config[section], newConfig[section]);
                     });
                     applyTheme();
+                    return true;
                 }
-                else showToast('Failed to save settings', 'error');
-            } catch (e) { showToast('Error saving settings', 'error'); }
+                showToast('Failed to save settings', 'error');
+                return false;
+            } catch (e) {
+                showToast('Error saving settings', 'error');
+                return false;
+            }
         }
 
         // Reset just the current settings tab to its defaults. We load the factory
@@ -3480,12 +3592,15 @@
         async function resetCurrentTab() {
             const tabName = settingsTab;
             if (!confirm('Reset the "' + tabName + '" tab to default settings?')) return;
+            clearTimeout(window._settingsSaveTimer);
+            window._settingsSaveTimer = null;
             try {
+                if (window._settingsSavePromise) await window._settingsSavePromise;
                 const res = await fetch('/api/v1/config/defaults');
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 config = await res.json();
                 renderSettingsTab();
-                await saveSettings();
+                if (!await saveSettings()) throw new Error('Failed to save defaults');
                 await fetchConfig();
                 renderSettingsTab();
                 showToast('"' + tabName + '" tab reset to default', 'success');
@@ -3499,7 +3614,10 @@
         // saved stream endpoints, and the token path so the user stays logged in.
         async function resetAllSettings() {
             if (!confirm('Reset ALL settings to default?\n\nYour Crunchyroll login is kept, but every other setting reverts. This cannot be undone.')) return;
+            clearTimeout(window._settingsSaveTimer);
+            window._settingsSaveTimer = null;
             try {
+                if (window._settingsSavePromise) await window._settingsSavePromise;
                 const res = await fetch('/api/v1/config/reset', { method: 'POST' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 await fetchConfig();
@@ -4068,7 +4186,7 @@
             let html = `
                 <div class="history-detail-header">
                     <div class="history-detail-poster">
-                        ${series.thumbnailImageUrl && isSafeUrl(series.thumbnailImageUrl) ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(series.thumbnailImageUrl))}" alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                        ${series.thumbnailImageUrl && isSafeUrl(series.thumbnailImageUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(series.thumbnailImageUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                     </div>
                     <div class="history-detail-info">
                         <div class="history-detail-title">${escapeHtml(series.seriesTitle || 'Unknown')}</div>
@@ -4192,12 +4310,15 @@
                 const res = await fetch(`/api/v1/history/episode-with-dubs/${encodeURIComponent(seriesId)}/${encodeURIComponent(seasonId)}/${encodeURIComponent(episodeId)}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const d = await res.json();
-                const dubs = d.dubList || d.DubList || [];
-                const subs = d.subList || d.SubList || [];
-                const defDubs = config?.download?.dubLanguages || ['ja-JP'];
-                const defSubs = config?.download?.softSubs || ['en-US'];
+                const episode = d.episode || d.Episode || {};
+                const dubs = episode.historyEpisodeAvailableDubLang || episode.HistoryEpisodeAvailableDubLang || episode.availableDubLang || episode.AvailableDubLang || [];
+                const subs = episode.historyEpisodeAvailableSoftSubs || episode.HistoryEpisodeAvailableSoftSubs || episode.availableSoftSubs || episode.AvailableSoftSubs || [];
+                const overrideDubs = d.dubList || d.DubList || [];
+                const overrideSubs = d.subList || d.SubList || [];
+                const defDubs = overrideDubs.length ? overrideDubs : (config?.download?.dubLanguages || ['ja-JP']);
+                const defSubs = overrideSubs.length ? overrideSubs : (config?.download?.softSubs || ['en-US']);
                 const cbs = (arr, defs, name) => arr.length
-                    ? arr.map(x => `<label style="margin:0 10px 4px 0; white-space:nowrap; display:inline-block;"><input type="checkbox" data-${name}="${escapeHtml(x)}" ${defs.includes(x) ? 'checked' : ''}> ${escapeHtml(x)}</label>`).join('')
+                    ? arr.map(x => `<label style="margin:0 10px 4px 0; white-space:nowrap; display:inline-block;"><input type="checkbox" data-${name}="${escapeHtmlAttribute(x)}" ${defs.includes(x) ? 'checked' : ''}> ${escapeHtml(x)}</label>`).join('')
                     : '<span class="hint">none available</span>';
                 panel.innerHTML = `
                     <div style="margin-bottom:6px;"><strong>Dubs</strong><br>${cbs(dubs, defDubs, 'dub')}</div>
@@ -4257,8 +4378,7 @@
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
-                                episodeNumber: ep.episodeNumber || 1,
-                                locale: ep.locale || 'ja-JP'
+                                episodeNumber: ep.episodeNumber || 1
                             })
                         });
                         if (queueRes.ok) added++;
@@ -4648,8 +4768,7 @@
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
-                                episodeNumber: ep.episodeNumber || 1,
-                                locale: ep.locale || 'ja-JP'
+                                episodeNumber: ep.episodeNumber || 1
                             })
                         });
                         if (queueRes.ok) added++;
@@ -4908,7 +5027,7 @@
                     const url = resolveAvatarUrl(s.avatar);
                     if (avatarEl) {
                         avatarEl.innerHTML = url && isSafeUrl(url)
-                            ? `<img loading="lazy" decoding="async" src="${escapeHtml(crImg(url))}" alt="" onerror="this.outerHTML='<span>&#128100;</span>'">`
+                            ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(url)} alt="" onerror="this.outerHTML='<span>&#128100;</span>'">`
                             : '<span>&#128100;</span>';
                     }
                 } else {

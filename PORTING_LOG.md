@@ -1271,3 +1271,26 @@ Build 0 warnings; tests 134/134; node --check clean. Version 1.0.33. Shipping to
 ### Release Status (Round 29)
 - `testing` branch commit `2aeb83a` pushed to `origin/testing`.
 - Multi-architecture GHCR image pushed: `ghcr.io/mediavybz/cruncharr:testing`, index digest `sha256:a3f8b5e178cb24b408878c9744d7cfdecbc02f633a97a3c3bf0d4c9662088efd` (linux/amd64 + linux/arm64).
+
+## Audit Round 30 — Sonarr badge relocation (2026-07-10, complete)
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Changes | Date |
+|------|-------------------|-------------------|---------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | History library poster tile Sonarr match indicator | GET /api/v1/history/rich | Moved the Sonarr match badge out of the ellipsized title line (long titles truncated it away) onto the poster artwork as a fixed bottom-left overlay pill, alongside the existing Series/New overlays. Table view badge unchanged. | 2026-07-10 |
+| src/Cruncharr.API/wwwroot/css/app.css | History library poster tile | none | Added `.sonarr-poster-badge` overlay variant (absolute bottom-left on `.history-poster-img`). | 2026-07-10 |
+| src/Cruncharr.API/wwwroot/index.html | Application shell | none | Cache keys ?v=1.0.46 → ?v=1.0.47. | 2026-07-10 |
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.API/Cruncharr.API.csproj | Release metadata | [PT] Version 1.0.46 → 1.0.47. | 2026-07-10 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing REST health adapter | [PT] Unreachable informational-version fallback → 1.0.47. | 2026-07-10 |
+
+### API Contract
+- No route, request, response-shape, or status-code changes.
+
+### Verification (Round 30)
+- `dotnet build`: 0 errors. `dotnet test`: 150/150 (re-run twice; one earlier failure was contention with a locally running API instance, not code).
+- `node --check app.js`: clean.
+- Playwright Firefox 393px: badge renders inside the artwork bounds for both short ("Arda Show") and maximal-length titles; absent when unmatched; title line clean.

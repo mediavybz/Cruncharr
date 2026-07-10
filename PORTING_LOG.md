@@ -1294,3 +1294,19 @@ Build 0 warnings; tests 134/134; node --check clean. Version 1.0.33. Shipping to
 - `dotnet build`: 0 errors. `dotnet test`: 150/150 (re-run twice; one earlier failure was contention with a locally running API instance, not code).
 - `node --check app.js`: clean.
 - Playwright Firefox 393px: badge renders inside the artwork bounds for both short ("Arda Show") and maximal-length titles; absent when unmatched; title line clean.
+
+## Audit Round 31 — AV1 preset tuning (user-directed) (2026-07-10, complete)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core/Services/EncodingService.cs | Cruncharr-specific built-in preset (not upstream) | User-directed: "[CrunchArr] AV1 Main10 Source" SVT-AV1 preset 8 → 6 (slower encode, better compression: higher quality and smaller files at unchanged CRF 24; user chose this over a literal 8→10 after the reversed-semantics explanation). Preset renamed "(SVT preset 8)" → "(SVT preset 6)"; `encoding_preset` in cruncharr.yaml references presets BY NAME, so a rename alias map in GetPreset/IsBuiltIn keeps legacy configs resolving. | 2026-07-10 |
+| src/Cruncharr.Core.Tests/EncodingPresetAndTranscodeTests.cs | Guard tests | Updated preset guard to `-preset 6`; added RenamedBuiltInPreset_OldNameStillResolves so the legacy-name alias can never be dropped silently. | 2026-07-10 |
+| src/Cruncharr.API/Cruncharr.API.csproj + Controllers/HealthController.cs + wwwroot/index.html | Release metadata | [PT] Version 1.0.47 → 1.0.48; cache keys bumped. | 2026-07-10 |
+
+### API Contract
+- No route, request, response-shape, or status-code changes (preset list content changed: one built-in renamed).
+
+### Verification (Round 31)
+- `dotnet build`: 0 errors. `dotnet test`: 151/151 (new alias guard included).
+- Round 30 published-image smoke: `/api/v1/health` healthy at `1.0.47+37f9142`; served JS contains the relocated Sonarr poster badge.

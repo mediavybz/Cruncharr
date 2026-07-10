@@ -28,8 +28,11 @@ public class EncodingService : IEncodingService
         // User-provided SVT-AV1 Main10 recipe. Keeps SOURCE resolution and fps (empty
         // Resolution/FrameRate => no scale/fps filter), stream-copies audio/subs/fonts, and
         // stamps CrunchArr metadata. -progress/-nostats are added by the encoder, not here.
-        new(){ PresetName = "[CrunchArr] AV1 Main10 Source (SVT preset 8)", Codec = "libsvtav1", Resolution = "", FrameRate = "", Crf = 24,
-               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 8",
+        // User-tuned 2026-07-10: SVT preset 8 -> 6 (slower encode, better compression
+        // efficiency: higher quality AND smaller files at the same CRF 24). Config stores the
+        // preset by NAME, so the old "(SVT preset 8)" name is aliased below — do not remove it.
+        new(){ PresetName = "[CrunchArr] AV1 Main10 Source (SVT preset 6)", Codec = "libsvtav1", Resolution = "", FrameRate = "", Crf = 24,
+               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 6",
                    "-svtav1-params tune=0:lookahead=120:aq-mode=2:keyint=240:scd=1:enable-overlays=1",
                    "-c:a copy", "-c:s copy", "-c:t copy",
                    "-metadata encoder=CrunchArr", "-metadata encoded_by=CrunchArr",
@@ -109,13 +112,28 @@ public class EncodingService : IEncodingService
 
     public List<VideoPreset> GetCustomPresets() { lock (_lock) return _custom.ToList(); }
 
-    public bool IsBuiltIn(string presetName) => _builtIn.Any(p => p.PresetName == presetName);
+    // Renamed built-in presets: configs (encoding_preset in cruncharr.yaml) reference presets by
+    // NAME, so every historical name must keep resolving or existing setups silently stop encoding.
+    private static readonly Dictionary<string, string> _renamedBuiltIns = new()
+    {
+        ["[CrunchArr] AV1 Main10 Source (SVT preset 8)"] = "[CrunchArr] AV1 Main10 Source (SVT preset 6)",
+    };
+
+    private static string NormalizePresetName(string presetName) =>
+        _renamedBuiltIns.TryGetValue(presetName, out var current) ? current : presetName;
+
+    public bool IsBuiltIn(string presetName)
+    {
+        var name = NormalizePresetName(presetName);
+        return _builtIn.Any(p => p.PresetName == name);
+    }
 
     public VideoPreset? GetPreset(string presetName)
     {
+        var name = NormalizePresetName(presetName);
         lock (_lock)
         {
-            return _builtIn.Concat(_custom).FirstOrDefault(x => x.PresetName == presetName);
+            return _builtIn.Concat(_custom).FirstOrDefault(x => x.PresetName == name);
         }
     }
 

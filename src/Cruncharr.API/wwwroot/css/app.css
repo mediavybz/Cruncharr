@@ -2661,21 +2661,24 @@
   .calendar-grid{gap:14px}
   .calendar-day{border-radius:12px;overflow:hidden}
 
-  /* Toolbars become swipeable action rails rather than tall wrapped button walls. */
+  /* Keep every History action inside the viewport. Firefox exposes negative-margin
+     horizontal rails as page width, which clipped the search and first action. */
   .history-toolbar{
-    flex-wrap:nowrap;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
     align-items:stretch;
     gap:8px;
-    margin:0 -16px 18px;
-    padding:2px 16px 10px;
-    overflow-x:auto;
-    scroll-snap-type:x proximity;
+    width:100%;
+    min-width:0;
+    margin:0 0 18px;
+    padding:2px 0 10px;
+    overflow:visible;
     scrollbar-width:none;
   }
-  .history-toolbar>*{flex:0 0 auto;scroll-snap-align:start}
-  .history-filter{order:-1;width:min(230px,76vw);margin-left:0!important}
+  .history-toolbar>*{min-width:0;width:100%}
+  .history-filter{order:-1;grid-column:1/-1;width:100%;margin-left:0!important}
   .history-filter .header-search{height:44px}
-  .history-view-toggle{margin-left:0!important;display:flex!important;gap:8px!important}
+  .history-view-toggle{grid-column:1/-1;margin-left:0!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px!important}
   .toolbar-btn{min-width:auto;min-height:44px;padding:9px 12px;flex-direction:row;justify-content:center;gap:6px;font-size:.78rem;white-space:nowrap}
   .toolbar-btn .icon{font-size:1.1rem}
   .history-poster-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
@@ -2788,7 +2791,7 @@
 
 @media (max-width:520px){
   .content{padding-inline:14px}
-  .history-toolbar,.settings-tabs,.season-tabs{margin-inline:-14px;padding-inline:14px}
+  .settings-tabs,.season-tabs{margin-inline:-14px;padding-inline:14px}
 
   /* Compact queue cards keep artwork and controls visible without a full-width image wall. */
   .download-item{flex-direction:row;align-items:flex-start;padding:12px}

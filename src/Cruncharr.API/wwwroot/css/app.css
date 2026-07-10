@@ -2540,3 +2540,275 @@
 .mt-6{margin-top:6px}.mt-10{margin-top:10px}
 .mh-120{min-height:120px}
 .clickable{cursor:pointer}
+
+/* ============================================================
+   MOBILE PARITY OVERHAUL (1.0.43)
+   Desktop components stay unchanged. These rules map the current
+   desktop navigation, toolbars, tables, settings, and dialogs to
+   touch-first layouts instead of shrinking legacy desktop boxes.
+   ============================================================ */
+@media (max-width:768px){
+  :root{
+    --mobile-nav-height:68px;
+    --header-height:60px;
+  }
+
+  html,body,.app-container{height:100%;height:100dvh;min-height:0}
+  body{min-width:0;overscroll-behavior:none}
+  .app-container{overflow:hidden}
+  .main-content{height:100dvh;min-height:0;padding-bottom:0}
+  .content{
+    min-width:0;
+    padding:20px 16px calc(var(--mobile-nav-height) + max(18px,env(safe-area-inset-bottom,0px)));
+    overscroll-behavior:contain;
+    scroll-padding-bottom:calc(var(--mobile-nav-height) + 20px);
+  }
+
+  /* Mobile app bar: global search gets the full row; Account remains in More. */
+  .header{height:var(--header-height);flex:0 0 var(--header-height);padding:8px 14px}
+  .topbar-profile{display:none!important}
+  .global-search{width:100%;max-width:none;min-width:0;margin-right:0}
+  .header-search{width:100%;max-width:none;min-height:44px;padding:8px 12px}
+  .search-popup{max-width:calc(100vw - 28px);max-height:min(60dvh,420px)}
+
+  /* Five stable destinations; secondary + system pages remain available in More. */
+  .sidebar{
+    height:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom,0px));
+    min-height:var(--mobile-nav-height);
+    padding:0 4px env(safe-area-inset-bottom,0px);
+    background:var(--glass-bg);
+    backdrop-filter:blur(22px);
+    -webkit-backdrop-filter:blur(22px);
+    box-shadow:0 -10px 32px rgba(0,0,0,.24);
+  }
+  .nav-secondary,.nav-mobile-overflow{display:none!important}
+  .nav-item{
+    min-width:0;
+    min-height:var(--mobile-nav-height);
+    margin:0;
+    padding:7px 2px 6px;
+    gap:3px;
+    border:0;
+    border-top:2px solid transparent;
+    border-radius:0;
+    color:var(--text-muted);
+    font-size:.74rem;
+    line-height:1;
+  }
+  .nav-item.active{
+    background:var(--accent-soft)!important;
+    color:var(--accent)!important;
+    border-top-color:var(--accent)!important;
+    box-shadow:none!important;
+  }
+  .nav-item.active .nav-icon{color:var(--accent)!important}
+  .nav-item span{font-size:.7rem;line-height:1.15}
+  .nav-item[data-page="add-download"]>span:last-child::after{font-size:.7rem}
+  .nav-icon,.nav-icon svg{width:23px;height:23px}
+
+  /* More uses a roomy, labelled bottom sheet instead of an unlabeled list. */
+  .more-sheet-overlay{z-index:1300;padding-top:20dvh}
+  .more-sheet{
+    max-height:80dvh;
+    overflow-y:auto;
+    padding:8px 16px calc(18px + env(safe-area-inset-bottom,0px));
+    border-radius:20px 20px 0 0;
+  }
+  .more-sheet-handle{margin-bottom:4px}
+  .more-sheet-heading{display:flex;align-items:center;justify-content:space-between;padding:4px 4px 10px;font-size:1.1rem;font-weight:700}
+  .more-sheet-close{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border:0;border-radius:50%;background:var(--bg-tertiary);color:var(--text-primary);font-size:1.5rem}
+  .more-sheet-item{min-height:52px;padding:12px;border:1px solid transparent;font-weight:600}
+  .more-sheet-item:focus-visible{background:var(--accent-soft);border-color:var(--accent)}
+
+  .page-title{font-size:1.55rem;line-height:1.25;margin-bottom:4px}
+  .page-subtitle{font-size:.92rem;line-height:1.4;margin-bottom:20px}
+  .card{padding:16px;margin-bottom:14px}
+  .empty-state{min-height:38dvh;padding:48px 18px}
+  .empty-state-icon{font-size:3rem;margin-bottom:14px}
+
+  /* Queue: retain all six desktop metrics without spending three rows of the page. */
+  .queue-stats{
+    display:grid!important;
+    grid-template-columns:none!important;
+    grid-auto-flow:column;
+    grid-auto-columns:minmax(108px,36vw);
+    gap:10px!important;
+    margin-inline:-16px;
+    padding:2px 16px 10px;
+    overflow-x:auto;
+    scroll-snap-type:x proximity;
+    scrollbar-width:none;
+  }
+  .queue-stats::-webkit-scrollbar,.history-toolbar::-webkit-scrollbar,.settings-tabs::-webkit-scrollbar,.season-tabs::-webkit-scrollbar{display:none}
+  .queue-stats .stat-tile{scroll-snap-align:start;padding:12px 10px}
+  .queue-stats .stat-num{font-size:1.45rem}
+  .queue-toolbar{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px!important;align-items:center!important}
+  .queue-toolbar>#scheduler-status{grid-column:1/2;min-width:0}
+  .queue-toolbar>#btn-scheduler-run{justify-self:end}
+  .queue-actions{grid-column:1/-1;width:100%;margin-left:0!important;padding:2px 0;overflow-x:auto;display:flex!important;gap:8px!important}
+  .queue-actions .btn-icon{flex:0 0 auto}
+  .download-item{gap:12px;padding:14px}
+  .download-header{gap:8px}
+  .download-footer{gap:8px;flex-wrap:wrap;line-height:1.35}
+
+  /* Calendar controls keep Prev/Next obvious and give refresh/language a full row. */
+  .calendar-controls{display:grid!important;grid-template-columns:1fr 1fr;gap:10px!important;margin-bottom:16px!important}
+  .calendar-controls>button:first-child{grid-column:1;grid-row:1}
+  .calendar-controls>button:last-child{grid-column:2;grid-row:1}
+  .calendar-controls>button:last-child{justify-self:stretch}
+  .calendar-controls>button{width:100%;min-height:44px}
+  .calendar-center-controls{grid-column:1/-1;grid-row:2;display:grid!important;grid-template-columns:auto minmax(0,1fr);gap:10px!important;width:100%}
+  .calendar-center-controls .form-select{width:100%;min-width:0}
+  .calendar-grid{gap:14px}
+  .calendar-day{border-radius:12px;overflow:hidden}
+
+  /* Toolbars become swipeable action rails rather than tall wrapped button walls. */
+  .history-toolbar{
+    flex-wrap:nowrap;
+    align-items:stretch;
+    gap:8px;
+    margin:0 -16px 18px;
+    padding:2px 16px 10px;
+    overflow-x:auto;
+    scroll-snap-type:x proximity;
+    scrollbar-width:none;
+  }
+  .history-toolbar>*{flex:0 0 auto;scroll-snap-align:start}
+  .history-filter{order:-1;width:min(230px,76vw);margin-left:0!important}
+  .history-filter .header-search{height:44px}
+  .history-view-toggle{margin-left:0!important;display:flex!important;gap:8px!important}
+  .toolbar-btn{min-width:auto;min-height:44px;padding:9px 12px;flex-direction:row;justify-content:center;gap:6px;font-size:.78rem;white-space:nowrap}
+  .toolbar-btn .icon{font-size:1.1rem}
+  .history-poster-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .history-poster-info{padding:9px 7px}
+  .history-poster-title{font-size:.84rem}
+
+  /* History table keeps every desktop field, presented as readable mobile cards. */
+  .history-table{overflow:visible;background:transparent}
+  .history-table table{min-width:0;width:100%;display:block}
+  .history-table thead{display:none}
+  .history-table tbody{display:grid;gap:12px}
+  .history-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 12px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px}
+  .history-table td{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:2px 0;border:0;min-width:0;font-size:.84rem}
+  .history-table td:first-child{grid-column:1/-1;display:block;padding-bottom:8px;border-bottom:1px solid var(--border-color);font-size:1rem}
+  .history-table td:nth-child(n+2):nth-child(-n+5)::before{color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .history-table td:nth-child(2)::before{content:"Status"}
+  .history-table td:nth-child(3)::before{content:"Sonarr"}
+  .history-table td:nth-child(4)::before{content:"Progress"}
+  .history-table td:nth-child(5)::before{content:"New"}
+  .history-table td:nth-child(6){grid-column:1/-1;justify-content:flex-end;padding-top:8px;border-top:1px solid var(--border-color)}
+
+  /* Current History detail classes were absent from the old mobile stylesheet. */
+  .history-detail-header{gap:14px;margin-bottom:16px;padding-bottom:16px}
+  .history-detail-poster{width:96px;border-radius:10px}
+  .history-detail-title{font-size:1.15rem;line-height:1.25}
+  .history-detail-meta{font-size:.82rem;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+  .history-season{margin-bottom:12px;border-radius:10px}
+  .history-season-header{padding:12px;gap:10px;flex-wrap:wrap}
+  .history-season-header>div:first-child{min-width:0;flex:1 1 180px}
+  .history-season-actions{margin-left:auto}
+  .history-season-body{padding:0 10px 10px}
+  .history-episode{display:grid;grid-template-columns:32px minmax(0,1fr) auto auto;gap:7px 8px;padding:11px 4px}
+  .history-episode-number{grid-column:1;grid-row:1/3;width:32px;align-self:start;padding-top:2px}
+  .history-episode-title{grid-column:2/-1;grid-row:1;line-height:1.35}
+  .history-episode-langs{grid-column:2/4;grid-row:2;align-self:center}
+  .history-episode-status{grid-column:4;grid-row:2;justify-self:end}
+  .history-episode>.btn-icon{grid-row:3;min-width:40px;min-height:40px;justify-self:end}
+  .history-episode>.btn-icon:nth-last-child(2){grid-column:3}
+  .history-episode>.btn-icon:last-child{grid-column:4}
+  .tooltip-container:focus-within .tooltip-text{visibility:visible}
+  .tooltip-text{position:fixed;left:16px;right:16px;bottom:calc(var(--mobile-nav-height) + 12px);transform:none;white-space:normal;max-width:none}
+
+  /* One horizontally scrollable Settings strip carries every current desktop tab. */
+  .settings-tabs{
+    position:sticky;
+    top:0;
+    z-index:25;
+    display:flex;
+    flex-direction:row;
+    gap:0;
+    margin:0 -16px 18px;
+    padding:8px 16px;
+    overflow-x:auto;
+    flex-wrap:nowrap;
+    background:var(--glass-bg);
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border-block:1px solid var(--border-color);
+    scrollbar-width:none;
+  }
+  .settings-cat,.settings-cat-tabs{display:contents}
+  .settings-cat-label{display:none}
+  .settings-tab{flex:0 0 auto;min-height:42px;margin-right:7px;padding:8px 13px;border:1px solid var(--border-color);border-radius:999px;background:var(--bg-tertiary);font-size:.82rem;white-space:nowrap}
+  .settings-tab.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+  .settings-cat+.settings-cat .settings-tab:first-child{margin-left:8px}
+  .settings-section{margin-bottom:14px;border-radius:12px}
+  .settings-section-header{padding:14px 16px;align-items:flex-start;flex-direction:column;gap:3px}
+  .settings-section-desc{margin-left:0;font-size:.79rem}
+  .settings-section-body{padding:8px 16px 12px}
+  .setting-row{padding:12px 0;gap:9px}
+  .setting-row:has(>.toggle-switch){flex-direction:row;align-items:center}
+  .setting-row:has(>.toggle-switch)>.toggle-switch{margin-left:auto;flex:0 0 auto}
+  .setting-row .setting-control{width:100%;flex-wrap:wrap}
+  .setting-row input[type="color"]{width:64px!important;min-height:44px}
+  .settings-footer{display:grid!important;grid-template-columns:1fr 1fr;gap:10px!important}
+  .settings-footer>.setting-desc{grid-column:1/-1}
+  .settings-footer>.header-btn{width:100%;min-height:44px;margin-left:0!important}
+
+  .season-tabs{flex-wrap:nowrap;margin:0 -16px 18px;padding:0 16px 8px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none}
+  .season-tab{flex:0 0 auto;min-height:44px;padding:8px 16px;scroll-snap-align:start}
+  .season-year-select{flex:0 0 104px;margin-left:0!important;min-height:44px}
+  .browse-header-row{align-items:flex-start!important}
+  .browse-filter-bar .form-select{flex:1 1 180px;min-height:44px}
+  .account-container{padding-top:20px}
+  .account-avatar{width:124px;height:124px;font-size:3rem;margin-bottom:16px}
+
+  /* Phone dialogs are bottom sheets with fixed header/footer and a scrolling body. */
+  .modal-overlay{z-index:1400;align-items:flex-end;justify-content:center;padding:0}
+  .modal{
+    width:100%;
+    max-width:100%;
+    max-height:calc(100dvh - 12px);
+    margin:0;
+    border-radius:20px 20px 0 0;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .modal-header{flex:0 0 auto;padding:14px 16px}
+  .modal-title{font-size:1.05rem;line-height:1.3}
+  .modal-close{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;font-size:1.5rem}
+  .modal-body{min-height:0;overflow-y:auto;padding:16px}
+  .modal-footer{flex:0 0 auto;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));flex-wrap:wrap;background:var(--glass-bg);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+  .modal-footer .header-btn{min-height:44px;flex:1 1 auto}
+
+  .header-btn,.action-btn{min-height:44px}
+  .btn-icon{min-height:40px;min-width:40px;justify-content:center}
+  .form-input,.form-select{min-height:44px;font-size:16px}
+}
+
+@media (max-width:520px){
+  .content{padding-inline:14px}
+  .queue-stats,.history-toolbar,.settings-tabs,.season-tabs{margin-inline:-14px;padding-inline:14px}
+
+  /* Compact queue cards keep artwork and controls visible without a full-width image wall. */
+  .download-item{flex-direction:row;align-items:flex-start;padding:12px}
+  .download-thumb{width:104px;height:auto;aspect-ratio:16/9}
+  .download-header{flex-direction:column;align-items:stretch}
+  .download-title{font-size:.96rem;line-height:1.3}
+  .download-info{font-size:.8rem;margin-bottom:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .download-actions{width:auto;justify-content:flex-start;gap:6px}
+  .download-footer{font-size:.75rem}
+
+  .series-grid,.history-poster-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .history-detail-poster{width:82px}
+  .history-detail-meta{-webkit-line-clamp:3}
+  .settings-footer{grid-template-columns:1fr}
+  .settings-footer>*{grid-column:1!important}
+  .list-row{align-items:stretch}
+  .list-row .header-btn{flex:0 0 auto}
+}
+
+@media (hover:none) and (pointer:coarse){
+  .history-poster:hover,.series-card:hover,.episode-card:hover,.calendar-episode:hover{transform:none;box-shadow:none}
+}

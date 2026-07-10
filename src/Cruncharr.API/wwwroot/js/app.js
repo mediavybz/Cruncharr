@@ -99,11 +99,7 @@
             const validPages = ['downloads','add-download','calendar','seasons','history','browse','seasonal','account','settings'];
             if (!validPages.includes(savedPage)) savedPage = 'downloads';
             loadPage(savedPage);
-            // Mark nav item active for restored page
-            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-            const escapedPage = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(savedPage) : savedPage.replace(/(["\\])/g, '\\$1');
-            const navItem = document.querySelector(`.nav-item[data-page="${escapedPage}"]`);
-            if (navItem) navItem.classList.add('active');
+            updateNavigationState(savedPage);
             startPolling();
             setupNavigation();
             setupTextSelectionGuard();
@@ -161,32 +157,50 @@
                     navigateTo(item.dataset.page);
                 });
             });
+            window.addEventListener('resize', () => updateNavigationState(currentPage));
+        }
+
+        function updateNavigationState(page) {
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            const escapedPage = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(page) : page.replace(/(["\\])/g, '\\$1');
+            const navItem = document.querySelector(`.nav-item[data-page="${escapedPage}"]`);
+            const isMobile = window.matchMedia('(max-width: 768px)').matches;
+            const isMobileOverflow = navItem && (navItem.classList.contains('nav-secondary') || navItem.classList.contains('nav-mobile-overflow'));
+            if (navItem && !(isMobile && isMobileOverflow)) {
+                navItem.classList.add('active');
+            } else {
+                const more = document.querySelector('.nav-more');
+                if (more) more.classList.add('active');
+            }
         }
 
         function navigateTo(page) {
             localStorage.setItem('cruncharr_current_page', page);
             loadPage(page);
-            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-            const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
-            if (navItem) navItem.classList.add('active');
-            // On mobile, secondary pages live behind "More"; keep that cell lit so the
-            // bottom bar still shows where you are.
-            else {
-                const more = document.querySelector('.nav-more');
-                if (more) more.classList.add('active');
-            }
+            // Secondary/system pages live behind More on phones; keep the visible destination
+            // active rather than highlighting a hidden desktop sidebar item.
+            updateNavigationState(page);
             closeMoreSheet();
         }
 
-        // Mobile "More" bottom sheet (Seasons / Browse / Seasonal / Account).
+        // Mobile "More" bottom sheet (Seasons / Browse / Seasonal / Account / Settings).
         function toggleMoreSheet(event) {
             if (event) event.preventDefault();
             const sheet = document.getElementById('more-sheet');
-            if (sheet) sheet.classList.toggle('open');
+            if (!sheet) return;
+            const willOpen = !sheet.classList.contains('open');
+            sheet.classList.toggle('open', willOpen);
+            sheet.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+            document.getElementById('mobile-more-nav')?.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            if (willOpen) requestAnimationFrame(() => sheet.querySelector('.more-sheet-close')?.focus());
         }
         function closeMoreSheet() {
             const sheet = document.getElementById('more-sheet');
-            if (sheet) sheet.classList.remove('open');
+            if (sheet) {
+                sheet.classList.remove('open');
+                sheet.setAttribute('aria-hidden', 'true');
+            }
+            document.getElementById('mobile-more-nav')?.setAttribute('aria-expanded', 'false');
         }
 
         function loadPage(page) {
@@ -207,6 +221,7 @@
             if (historySearchPopupOpen) closeHistorySearchPopup();
             currentPage = page;
             const content = document.getElementById('content');
+            if (content) content.scrollTop = 0;
             switch(page) {
                 case 'downloads': renderDownloads(content); break;
                 case 'add-download': renderAddDownload(content); break;
@@ -234,7 +249,7 @@
                 <div class="page-subtitle">Manage your download queue</div>
                 
                 <!-- Queue Stats -->
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:20px;">
+                <div class="queue-stats" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:20px;">
                     <div class="card stat-tile">
                         <div class="stat-num" style="color:var(--accent-blue);" id="stat-total">-</div>
                         <div class="hint">Total</div>
@@ -261,7 +276,7 @@
                     </div>
                 </div>
                 
-                <div style="display:flex; gap:15px; align-items:center; flex-wrap:wrap; margin-bottom:20px;">
+                <div class="queue-toolbar" style="display:flex; gap:15px; align-items:center; flex-wrap:wrap; margin-bottom:20px;">
                     <label class="toggle-switch">
                         <input type="checkbox" id="toggle-remove-finished" ${removeFinished ? 'checked' : ''} onchange="toggleSetting('removeFinished', this.checked)">
                         <span class="toggle-slider"></span>
@@ -280,7 +295,7 @@
                         &#9889; Run now
                     </button>
 
-                    <div style="margin-left:auto; display:flex; gap:8px;">
+                    <div class="queue-actions" style="margin-left:auto; display:flex; gap:8px;">
                         <button class="btn-icon" id="btn-global-pause" onclick="toggleGlobalPause()" title="Pause/Resume Queue" style="display:none;">
                             &#10074;&#10074; Pause All
                         </button>
@@ -1109,7 +1124,7 @@
                 <div class="page-subtitle">Upcoming episode releases</div>
                 <div class="calendar-controls" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                     <button class="header-btn" onclick="changeWeek(-1)">&#9664; Prev</button>
-                    <div style="display:flex; gap:10px; align-items:center;">
+                    <div class="calendar-center-controls" style="display:flex; gap:10px; align-items:center;">
                         <button class="header-btn" onclick="fetchCalendar(true)">&#128260; Refresh</button>
                         <select class="form-select mw-170" id="calendar-dub-filter" onchange="onCalendarDubFilterChange(this.value)" title="Filter by audio (dub) language">
                             <option value="none">All Languages</option>
@@ -1644,7 +1659,7 @@
                 <div class="page-subtitle">The season's lineup from AniList, matched to Crunchyroll</div>
                 <div class="season-tabs" id="season-tabs">
                     ${seasons.map(([v,l]) => `<button class="season-tab ${seasonalSeason===v?'active':''}" data-season="${v}" onclick="selectSeasonTab('${v}')">${l}</button>`).join('')}
-                    <select class="form-select" id="season-year-select" style="margin-left:auto; width:110px;" onchange="selectSeasonYear(this.value)">
+                    <select class="form-select season-year-select" id="season-year-select" style="margin-left:auto; width:110px;" onchange="selectSeasonYear(this.value)">
                         ${Array.from({length: 6}, (_, i) => { const y = thisYear + 1 - i; return `<option value="${y}" ${y===seasonalYear?'selected':''}>${y}</option>`; }).join('')}
                     </select>
                 </div>
@@ -1955,7 +1970,7 @@
                         <span class="icon">&#128229;</span>
                         <span>Add To Queue</span>
                     </button>
-                    <div style="position:relative; margin-left:8px;">
+                    <div class="history-filter" style="position:relative; margin-left:8px;">
                         <div class="header-search w-220" onclick="openHistorySearchPopup()">
                             <span>&#128269;</span>
                             <input type="text" id="history-search-input" placeholder="Filter history..." 
@@ -1972,7 +1987,7 @@
                         <span class="icon">&#127758;</span>
                         <span>Sonarr</span>
                     </button>
-                    <div style="margin-left:auto; display:flex; gap:5px;">
+                    <div class="history-view-toggle" style="margin-left:auto; display:flex; gap:5px;">
                         <button class="toolbar-btn ${historyViewMode === 'poster' ? 'active' : ''}" onclick="setHistoryView('poster')">
                             <span class="icon">&#9645;</span>
                             <span>Poster</span>
@@ -2490,7 +2505,7 @@
                 <div id="settings-content">
                     <div class="loading"><div class="spinner"></div>Loading settings...</div>
                 </div>
-                <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                <div class="settings-footer" style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
                     <span class="setting-desc" id="autosave-hint">Changes are saved automatically</span>
                     <button class="header-btn" onclick="resetCurrentTab()" title="Reset only the settings on this tab to their defaults">Reset Tab to Default</button>
                     <button class="header-btn" onclick="resetAllSettings()" title="Reset every setting to default (keeps you logged in)" style="margin-left:auto; color:var(--accent-orange);">Reset ALL Settings</button>
@@ -2720,6 +2735,9 @@
             document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
             if (evt && evt.target) evt.target.classList.add('active');
             renderSettingsTab();
+            if (evt?.target && window.matchMedia('(max-width: 768px)').matches) {
+                requestAnimationFrame(() => evt.target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }));
+            }
             populateHwAccels();
         }
 
@@ -4259,7 +4277,7 @@
                                 ${(ep.downloadedDubLang || []).map(d => `<span class="lang-badge downloaded">${escapeHtml(d)}</span>`).join('')}
                             </div>
                             <div class="history-episode-status">
-                                <div class="tooltip-container">
+                                <div class="tooltip-container" tabindex="0" aria-label="${escapeHtmlAttribute(tooltip)}">
                                     <div class="status-icon ${status.class}">${status.icon}</div>
                                     <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
                                 </div>
@@ -4850,6 +4868,7 @@
                 });
                 // Close history search popup
                 if (historySearchPopupOpen) closeHistorySearchPopup();
+                closeMoreSheet();
             }
         });
 

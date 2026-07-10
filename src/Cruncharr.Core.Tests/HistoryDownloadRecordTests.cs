@@ -1,6 +1,7 @@
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
+using Moq;
 using Xunit;
 
 namespace Cruncharr.Core.Tests;
@@ -92,5 +93,69 @@ public class HistoryDownloadRecordTests : IDisposable
         Assert.NotNull(after);
         Assert.True(after!.WasDownloaded);
         Assert.False(after.IsPartiallyDownloaded(new[] { "ja-JP", "en-US" }, Array.Empty<string>()));
+    }
+
+    // Guard: desktop History.RefreshSeriesData always replaces episode imagery with the series'
+    // poster_tall cover during a refresh. A first-download screenshot must not remain the History
+    // poster after CrUpdateSeriesAsync has retrieved series metadata.
+    [Fact]
+    public async Task RefreshSeries_ReplacesEpisodeScreenshotWithSeriesCoverArt()
+    {
+        const string seriesId = "G_SERIES_COVER";
+        const string seasonId = "G_SEASON_COVER";
+        const string episodeId = "G_EPISODE_COVER";
+        const string screenshotUrl = "https://example.test/episode-screenshot.jpg";
+        const string coverArtUrl = "https://example.test/series-cover.jpg";
+
+        var api = new Mock<ICrunchyrollApiService>();
+        api.Setup(x => x.ParseSeriesByIdAsync(seriesId, It.IsAny<string?>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeasonInfo> { new() { Id = seasonId, Title = "Season 1", SeasonNumber = 1 } });
+        api.Setup(x => x.GetSeasonDataByIdAsync(seasonId, It.IsAny<string?>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<EpisodeInfo>
+            {
+                new()
+                {
+                    Id = episodeId,
+                    SeriesId = seriesId,
+                    SeriesTitle = "Cover Show",
+                    SeasonId = seasonId,
+                    SeasonTitle = "Season 1",
+                    SeasonNumber = 1,
+                    EpisodeNumber = 1,
+                    Title = "Episode 1",
+                    ThumbnailUrl = screenshotUrl
+                }
+            });
+        api.Setup(x => x.SeriesByIdAsync(seriesId, It.IsAny<string?>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesInfo
+            {
+                Id = seriesId,
+                Title = "Cover Show",
+                Description = "Series description",
+                CoverArtUrl = coverArtUrl
+            });
+
+        using var history = new HistoryService(_path, null, null, api.Object, null, null, new CruncharrConfig());
+        await history.UpdateWithSeasonDataAsync(new List<EpisodeInfo>
+        {
+            new()
+            {
+                Id = episodeId,
+                SeriesId = seriesId,
+                SeriesTitle = "Cover Show",
+                SeasonId = seasonId,
+                SeasonTitle = "Season 1",
+                SeasonNumber = 1,
+                EpisodeNumber = 1,
+                Title = "Episode 1",
+                ThumbnailUrl = screenshotUrl
+            }
+        });
+
+        Assert.True(await history.CrUpdateSeriesAsync(seriesId, null));
+
+        var series = Assert.Single(await history.GetHistorySeriesAsync());
+        Assert.Equal(coverArtUrl, series.ThumbnailImageUrl);
+        Assert.Equal(screenshotUrl, Assert.Single(Assert.Single(series.Seasons).EpisodesList).ThumbnailImageUrl);
     }
 }

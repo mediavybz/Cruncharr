@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.RegularExpressions;
 
@@ -123,7 +124,8 @@ public class Languages
         }
     }
 
-    public static List<T> SortSubtitles<T>(List<T> data, string sortKey = "locale")
+    public static List<T> SortSubtitles<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties)] T>(List<T> data, string sortKey = "locale")
     {
         var idx = new Dictionary<string, int>();
         var tags = new HashSet<string>(languages.Select(e => e.Locale));

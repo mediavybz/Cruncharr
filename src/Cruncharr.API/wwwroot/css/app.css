@@ -2556,14 +2556,21 @@
   html,body,.app-container{height:100%;height:100svh;min-height:0}
   body{min-width:0;overscroll-behavior:none}
   .app-container{overflow:hidden}
-  .main-content{width:100%;max-width:100vw;height:calc(100svh - var(--mobile-nav-height) - env(safe-area-inset-bottom,0px));min-height:0;padding-bottom:0}
+  /* .main-content is the only in-flow flex child of .app-container on phones, so flex:1
+     stretches it to the FULL viewport height — a height:calc(100svh - nav) here silently
+     loses to that stretch (measured: computed height == viewport). Size it full-height on
+     purpose and make the scroller clear the fixed bottom nav with padding instead, so the
+     last card/button/footer is always reachable above the nav (the 1.0.45 height-calc
+     variant left the bottom ~68px of every page hidden under the nav glass; worse on
+     Firefox for Android where the browser's own dynamic toolbar stacks on top). */
+  .main-content{width:100%;max-width:100vw;min-height:0;padding-bottom:0}
   .content{
     width:100%;
     min-width:0;
-    padding:20px 16px;
+    padding:20px 16px calc(var(--mobile-nav-height) + env(safe-area-inset-bottom,0px) + 24px);
     overflow-x:hidden;
     overscroll-behavior:contain;
-    scroll-padding-bottom:20px;
+    scroll-padding-bottom:calc(var(--mobile-nav-height) + 24px);
   }
 
   /* Mobile app bar: global search gets the full row; Account remains in More. */

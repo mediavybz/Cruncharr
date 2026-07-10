@@ -48,10 +48,17 @@ public class EncodingService : IEncodingService
                AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset veryslow",
                    "-x265-params me=star:subme=7:psy-rd=2.0:psy-rdoq=1.0:aq-mode=3:aq-strength=0.8:deblock=-1,-1:bframes=8:ref=6",
                    "-c:a copy", "-c:s copy", "-c:t copy" } },
-        // Trix-style: SVT-AV1 10-bit (tune=0 = subjective quality), even smaller files.
-        new(){ PresetName = "[Trix] Anime AV1 10-bit (unofficial)", Codec = "libsvtav1", Resolution = "-2:1080", FrameRate = "24000/1001", Crf = 24,
-               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 4",
-                   "-svtav1-params tune=0:keyint=240:enable-overlays=1:scd=1",
+        // Trix-style: SVT-AV1 10-bit. Updated 2026-07-10 to the published Trix SvtAv1EncApp
+        // recipe (--preset 2 --crf 25 --photon-noise 400 --min-keyint 65 --keyint 193 --scm 0
+        // --enable-tf 2 --luminance-qp-bias 33 --fast-decode 1 --enable-dlf 3 --enable-alt-cdef 2),
+        // adapted to the MAINLINE SVT-AV1 bundled in our BtbN ffmpeg (verified v4.1.0 in-image):
+        // photon-noise / min-keyint / enable-alt-cdef are SVT-AV1-PSY-fork options that ABORT
+        // encoder init here ("Error parsing option"), and enable-dlf tops out at 2. photon-noise
+        // approximated with film-grain=8 synthesis (denoise off); PSY-only keys dropped; dlf
+        // clamped. Source-preserving like the recipe itself (no scale/fps filter).
+        new(){ PresetName = "[Trix] Anime AV1 10-bit (unofficial)", Codec = "libsvtav1", Resolution = "", FrameRate = "", Crf = 25,
+               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 2",
+                   "-svtav1-params film-grain=8:film-grain-denoise=0:keyint=193:scm=0:enable-tf=2:luminance-qp-bias=33:fast-decode=1:enable-dlf=2",
                    "-c:a copy", "-c:s copy", "-c:t copy" } },
         new(){ PresetName = "AV1 1080p24", Codec = "libaom-av1", Resolution = "1920:1080", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },
         new(){ PresetName = "AV1 720p24", Codec = "libaom-av1", Resolution = "1280:720", FrameRate = "24000/1001", Crf = 30, AdditionalParameters ={ "-map 0" } },

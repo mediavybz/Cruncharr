@@ -162,18 +162,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         try
         {
-            var result = JsonConvert.DeserializeObject<CrCmsResponse<CrSeriesDetail>>(content);
-            if (result?.Data == null) return null;
-
-            var series = new SeriesInfo
-            {
-                Id = result.Data.Id,
-                Title = result.Data.Title,
-                Description = result.Data.Description,
-                Images = ExtractImageUrls(result.Data.Images),
-                CoverArtUrl = ExtractBestImage(result.Data.Images, "poster_tall"),
-                ThumbnailUrl = ExtractBestImage(result.Data.Images, "poster_wide")
-            };
+            var series = ParseSeriesBaseResponse(content);
+            if (series == null) return null;
 
             // Get seasons
             var seasons = await GetSeasonsAsync(id, useBetaApi, cancellationToken);
@@ -186,6 +176,28 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             _logger?.LogError(ex, "Failed to parse series data");
             return null;
         }
+    }
+
+    // [PT] CR's /content/v2/cms/series/{id} wraps the series in a data ARRAY (upstream
+    // CrSeriesBase.Data is SeriesBaseItem[], read via Data.First()). This was deserialized into a
+    // single-object Data, so Newtonsoft threw on every real response and SeriesByIdAsync returned
+    // null — history posters were never repaired and kept the download-time episode screenshot.
+    // Guard: SeriesBaseParsingTests.
+    internal static SeriesInfo? ParseSeriesBaseResponse(string content)
+    {
+        var result = JsonConvert.DeserializeObject<CrCmsListResponse<CrSeriesDetail>>(content);
+        var item = result?.Data?.FirstOrDefault();
+        if (item == null) return null;
+
+        return new SeriesInfo
+        {
+            Id = item.Id,
+            Title = item.Title,
+            Description = item.Description,
+            Images = ExtractImageUrls(item.Images),
+            CoverArtUrl = ExtractBestImage(item.Images, "poster_tall"),
+            ThumbnailUrl = ExtractBestImage(item.Images, "poster_wide")
+        };
     }
 
     public async Task<List<EpisodeInfo>> GetEpisodesAsync(string seriesId, bool useBetaApi, CancellationToken cancellationToken = default)

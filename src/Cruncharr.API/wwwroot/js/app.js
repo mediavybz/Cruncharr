@@ -4528,7 +4528,9 @@
 
         async function maybeRefreshHistoryCoverArt() {
             if (window._historyCoverRefreshAttempted) return;
-            const migrationKey = 'cruncharr-history-series-posters-v3';
+            // v4: v3 ran while the backend series fetch was broken (data-array parse bug), so it
+            // stamped 'complete' without actually repairing any poster. Bump forces one re-run.
+            const migrationKey = 'cruncharr-history-series-posters-v4';
             try {
                 if (localStorage.getItem(migrationKey) === 'complete') return;
             } catch (e) { /* private browsing can deny storage; refresh once for this page */ }

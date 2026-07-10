@@ -1241,3 +1241,23 @@ Build 0 warnings; tests 134/134; node --check clean. Version 1.0.33. Shipping to
 ### Release Status
 - `testing` branch source commit `6ea3130` pushed to `origin/testing`.
 - Multi-architecture GHCR image pushed: `ghcr.io/mediavybz/cruncharr:testing`, index digest `sha256:9502c1b116c1fe47fd502adeab98ee44ed9ff4e3ab8cc3227ac911339e667ba3` (linux/amd64 + linux/arm64).
+
+## Audit Round 29 — History cover art root cause + mobile bottom-nav clearance (2026-07-10, in progress)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core/Services/CrunchyrollApiService.cs | CRD/Utils/Structs/Crunchyroll/Series/CrSeriesBase.cs:8 (`SeriesBaseItem[]? Data`), CRD/Downloader/History.cs:617-667 (RefreshSeriesData consumes `Data.First()`) | [PT] `GetSeriesAsync` deserialized CR's `/content/v2/cms/series/{id}` response into a single-object `Data`; CR (and upstream `CrSeriesBase`) return a data ARRAY, so Newtonsoft threw on every live response and `SeriesByIdAsync` returned null. History posters were therefore never repaired (episode screenshot stayed in the series slot) — the true root cause behind rounds 27–28. Parse now uses `CrCmsListResponse<CrSeriesDetail>` + `First()`, extracted into internal `ParseSeriesBaseResponse` for the guard test. | 2026-07-10 |
+| src/Cruncharr.Core.Tests/SeriesBaseParsingTests.cs | Guard test (new) | Guards the data-array shape of the series response and that the series cover comes from `poster_tall` — the History "screenshot instead of cover art" regression cannot silently return. | 2026-07-10 |
+| src/Cruncharr.API/Cruncharr.API.csproj | Release metadata | [PT] Version 1.0.45 → 1.0.46. | 2026-07-10 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing REST health adapter | [PT] Unreachable informational-version fallback 1.0.45 → 1.0.46; route/shape/status unchanged. | 2026-07-10 |
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Changes | Date |
+|------|-------------------|-------------------|---------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | History library poster refresh | POST /api/v1/history/update-series/{seriesId} | Advanced poster migration key v3 → v4: v3 ran while the backend series fetch was broken and stamped 'complete' without repairing anything; v4 forces one re-run against the fixed backend. | 2026-07-10 |
+| src/Cruncharr.API/wwwroot/css/app.css | Persistent application navigation / page scroll region | none | Fixed bottom-nav overlap on phones: `.main-content` is the only in-flow flex child so `flex:1` stretches it to full viewport height and the 1.0.45 `height:calc(100svh - nav)` never applied (measured: computed height == viewport) — the last ~68px of every page hid under the nav glass, worst on Firefox for Android where the browser toolbar stacks on top. The scroller now clears the fixed nav with bottom padding + scroll-padding (verified in Playwright Firefox + Chromium at 393/360/320px: last interactive element clears the nav on all audited pages). | 2026-07-10 |
+| src/Cruncharr.API/wwwroot/index.html | Application shell | none | Cache keys ?v=1.0.45 → ?v=1.0.46. | 2026-07-10 |
+
+### API Contract
+- No route, request, response-shape, or status-code changes.

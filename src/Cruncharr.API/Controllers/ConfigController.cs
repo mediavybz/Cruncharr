@@ -10,6 +10,7 @@ namespace Cruncharr.API.Controllers;
 [Route("api/v1/[controller]")]
 public class ConfigController : ControllerBase
 {
+    private const string ConfiguredSecret = "[configured]";
     private readonly CruncharrConfig _config;
     private readonly ILogger<ConfigController> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -305,7 +306,7 @@ public class ConfigController : ControllerBase
                     WebhookEnabled = _config.Notifications?.WebhookEnabled ?? false,
                     WebhookMethod = _config.Notifications?.WebhookMethod ?? "POST",
                     WebhookContentType = _config.Notifications?.WebhookContentType ?? "application/json",
-                    WebhookHeaders = _config.Notifications?.WebhookHeaders ?? new Dictionary<string, string>(),
+                    WebhookHeaders = SanitizeWebhookHeaders(_config.Notifications?.WebhookHeaders),
                     WebhookBodyTemplate = _config.Notifications?.WebhookBodyTemplate ?? "",
                     NotifyQueueFinished = _config.Notifications?.NotifyQueueFinished ?? false,
                     NotifyDownloadFinished = _config.Notifications?.NotifyDownloadFinished ?? false,
@@ -480,6 +481,16 @@ public class ConfigController : ControllerBase
         return dict;
     }
 
+    private static Dictionary<string, string> SanitizeWebhookHeaders(Dictionary<string, string>? headers)
+    {
+        var sanitized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in headers ?? new Dictionary<string, string>())
+        {
+            sanitized[pair.Key] = string.IsNullOrEmpty(pair.Value) ? "" : ConfiguredSecret;
+        }
+        return sanitized;
+    }
+
     private static string ValidatePath(string? path, string fieldName)
     {
         if (string.IsNullOrWhiteSpace(path)) return path ?? "";
@@ -640,7 +651,27 @@ public class ConfigController : ControllerBase
             if (n.WebhookEnabled.HasValue) _config.Notifications.WebhookEnabled = n.WebhookEnabled.Value;
             if (!string.IsNullOrEmpty(n.WebhookMethod)) _config.Notifications.WebhookMethod = n.WebhookMethod;
             if (!string.IsNullOrEmpty(n.WebhookContentType)) _config.Notifications.WebhookContentType = n.WebhookContentType;
-            if (n.WebhookHeaders != null) _config.Notifications.WebhookHeaders = n.WebhookHeaders;
+            if (n.WebhookHeaders != null)
+            {
+                var mergedHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var existingHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var existing in _config.Notifications.WebhookHeaders ?? new Dictionary<string, string>())
+                {
+                    existingHeaders[existing.Key] = existing.Value;
+                }
+                foreach (var pair in n.WebhookHeaders)
+                {
+                    if (pair.Value == ConfiguredSecret && existingHeaders.TryGetValue(pair.Key, out var existingValue))
+                    {
+                        mergedHeaders[pair.Key] = existingValue;
+                    }
+                    else
+                    {
+                        mergedHeaders[pair.Key] = pair.Value;
+                    }
+                }
+                _config.Notifications.WebhookHeaders = mergedHeaders;
+            }
             if (n.WebhookBodyTemplate != null) _config.Notifications.WebhookBodyTemplate = n.WebhookBodyTemplate;
             if (n.NotifyQueueFinished.HasValue) _config.Notifications.NotifyQueueFinished = n.NotifyQueueFinished.Value;
             if (n.NotifyDownloadFinished.HasValue) _config.Notifications.NotifyDownloadFinished = n.NotifyDownloadFinished.Value;

@@ -1,4 +1,5 @@
 using Cruncharr.API.Services;
+using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +14,7 @@ public class QueueController : ControllerBase
     private readonly IQueueService _queueService;
     private readonly IHistoryService _historyService;
     private readonly ILanguagePrefsService _languagePrefs;
+    private readonly CruncharrConfig _config;
     private readonly ILogger<QueueController> _logger;
     private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings
     {
@@ -21,11 +23,12 @@ public class QueueController : ControllerBase
         NullValueHandling = NullValueHandling.Ignore
     };
 
-    public QueueController(IQueueService queueService, IHistoryService historyService, ILanguagePrefsService languagePrefs, ILogger<QueueController> logger)
+    public QueueController(IQueueService queueService, IHistoryService historyService, ILanguagePrefsService languagePrefs, CruncharrConfig config, ILogger<QueueController> logger)
     {
         _queueService = queueService;
         _historyService = historyService;
         _languagePrefs = languagePrefs;
+        _config = config;
         _logger = logger;
     }
 
@@ -185,7 +188,35 @@ public class QueueController : ControllerBase
         // Some flat-history ids append the audio locale (e.g. <id>JAJP), so match exact OR prefix.
         var match = history.LastOrDefault(h => h.EpisodeId == epId)
                     ?? history.LastOrDefault(h => h.EpisodeId != null && h.EpisodeId.StartsWith(epId, StringComparison.Ordinal));
-        return match?.OutputPath;
+        return GetSafeOutputPath(match?.OutputPath);
+    }
+
+    private string? GetSafeOutputPath(string? outputPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath)) return null;
+
+        try
+        {
+            var root = System.IO.Path.GetFullPath(_config.Download.OutputDirectory);
+            var candidate = System.IO.Path.GetFullPath(outputPath);
+            var relative = System.IO.Path.GetRelativePath(root, candidate);
+            var escapesRoot = System.IO.Path.IsPathRooted(relative)
+                              || relative == ".."
+                              || relative.StartsWith(".." + System.IO.Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                              || relative.StartsWith(".." + System.IO.Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
+            if (escapesRoot)
+            {
+                _logger.LogWarning("Rejected queue file path outside configured output directory for {Path}", candidate);
+                return null;
+            }
+
+            return candidate;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            _logger.LogWarning("Rejected invalid queue file path");
+            return null;
+        }
     }
 
     /// <summary>

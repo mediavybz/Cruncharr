@@ -2076,8 +2076,8 @@
                 border-top: 3px solid transparent;
                 border-radius: 0;
                 margin-right: 0;
-                flex: 1 0 auto;
-                min-width: 64px;
+                flex: 1 1 0;
+                min-width: 0;
                 justify-content: center;
                 text-align: center;
             }

@@ -2553,15 +2553,17 @@
     --header-height:60px;
   }
 
-  html,body,.app-container{height:100%;height:100dvh;min-height:0}
+  html,body,.app-container{height:100%;height:100svh;min-height:0}
   body{min-width:0;overscroll-behavior:none}
   .app-container{overflow:hidden}
-  .main-content{height:100dvh;min-height:0;padding-bottom:0}
+  .main-content{width:100%;max-width:100vw;height:calc(100svh - var(--mobile-nav-height) - env(safe-area-inset-bottom,0px));min-height:0;padding-bottom:0}
   .content{
+    width:100%;
     min-width:0;
-    padding:20px 16px calc(var(--mobile-nav-height) + max(18px,env(safe-area-inset-bottom,0px)));
+    padding:20px 16px;
+    overflow-x:hidden;
     overscroll-behavior:contain;
-    scroll-padding-bottom:calc(var(--mobile-nav-height) + 20px);
+    scroll-padding-bottom:20px;
   }
 
   /* Mobile app bar: global search gets the full row; Account remains in More. */
@@ -2626,18 +2628,15 @@
   .empty-state{min-height:38dvh;padding:48px 18px}
   .empty-state-icon{font-size:3rem;margin-bottom:14px}
 
-  /* Queue: retain all six desktop metrics without spending three rows of the page. */
+  /* Queue: bounded grids avoid Firefox exposing off-canvas controls as clipped page width. */
   .queue-stats{
     display:grid!important;
-    grid-template-columns:none!important;
-    grid-auto-flow:column;
-    grid-auto-columns:minmax(108px,36vw);
+    grid-template-columns:repeat(3,minmax(0,1fr))!important;
+    grid-auto-flow:row;
     gap:10px!important;
-    margin-inline:-16px;
-    padding:2px 16px 10px;
-    overflow-x:auto;
-    scroll-snap-type:x proximity;
-    scrollbar-width:none;
+    margin-inline:0;
+    padding:2px 0 10px;
+    overflow:visible;
   }
   .queue-stats::-webkit-scrollbar,.history-toolbar::-webkit-scrollbar,.settings-tabs::-webkit-scrollbar,.season-tabs::-webkit-scrollbar{display:none}
   .queue-stats .stat-tile{scroll-snap-align:start;padding:12px 10px}
@@ -2645,8 +2644,8 @@
   .queue-toolbar{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px!important;align-items:center!important}
   .queue-toolbar>#scheduler-status{grid-column:1/2;min-width:0}
   .queue-toolbar>#btn-scheduler-run{justify-self:end}
-  .queue-actions{grid-column:1/-1;width:100%;margin-left:0!important;padding:2px 0;overflow-x:auto;display:flex!important;gap:8px!important}
-  .queue-actions .btn-icon{flex:0 0 auto}
+  .queue-actions{grid-column:1/-1;width:100%;margin-left:0!important;padding:2px 0;overflow:visible;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px!important}
+  .queue-actions .btn-icon{width:100%;min-width:0}
   .download-item{gap:12px;padding:14px}
   .download-header{gap:8px}
   .download-footer{gap:8px;flex-wrap:wrap;line-height:1.35}
@@ -2789,7 +2788,7 @@
 
 @media (max-width:520px){
   .content{padding-inline:14px}
-  .queue-stats,.history-toolbar,.settings-tabs,.season-tabs{margin-inline:-14px;padding-inline:14px}
+  .history-toolbar,.settings-tabs,.season-tabs{margin-inline:-14px;padding-inline:14px}
 
   /* Compact queue cards keep artwork and controls visible without a full-width image wall. */
   .download-item{flex-direction:row;align-items:flex-start;padding:12px}
@@ -2807,6 +2806,12 @@
   .settings-footer>*{grid-column:1!important}
   .list-row{align-items:stretch}
   .list-row .header-btn{flex:0 0 auto}
+}
+
+@media (max-width:360px){
+  .queue-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .queue-toolbar{grid-template-columns:1fr!important}
+  .queue-toolbar>#scheduler-status,.queue-toolbar>#btn-scheduler-run{grid-column:1;justify-self:stretch}
 }
 
 @media (hover:none) and (pointer:coarse){

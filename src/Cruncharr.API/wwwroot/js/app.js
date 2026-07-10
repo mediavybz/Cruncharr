@@ -4528,24 +4528,31 @@
 
         async function maybeRefreshHistoryCoverArt() {
             if (window._historyCoverRefreshAttempted) return;
+            const migrationKey = 'cruncharr-history-series-posters-v2';
+            try {
+                if (localStorage.getItem(migrationKey) === 'complete') return;
+            } catch (e) { /* private browsing can deny storage; refresh once for this page */ }
 
-            const candidates = historyData.filter(series => {
-                const seriesImage = series.thumbnailImageUrl || '';
-                const episodeImages = (series.seasons || [])
-                    .flatMap(season => season.episodes || [])
-                    .map(episode => episode.thumbnailImageUrl)
-                    .filter(Boolean);
-                return !!series.seriesId && (!seriesImage || episodeImages.includes(seriesImage));
-            });
+            // Legacy rows may contain a download-time episode still instead of a series poster.
+            // URL equality cannot reliably identify those rows because Crunchyroll rotates image
+            // variants. Refresh every existing series once so the backend reapplies poster_tall.
+            const candidates = historyData.filter(series => !!series?.seriesId);
             if (!candidates.length) return;
 
             window._historyCoverRefreshAttempted = true;
             let refreshed = false;
+            let completed = true;
             for (const series of candidates) {
                 try {
                     const res = await fetch(`/api/v1/history/update-series/${encodeURIComponent(series.seriesId)}`, { method: 'POST' });
                     refreshed = res.ok || refreshed;
-                } catch (e) { /* keep the current image when metadata refresh is unavailable */ }
+                    completed = res.ok && completed;
+                } catch (e) {
+                    completed = false;
+                }
+            }
+            if (completed) {
+                try { localStorage.setItem(migrationKey, 'complete'); } catch (e) { /* optional cache */ }
             }
             if (refreshed && currentPage === 'history') await fetchHistoryData();
         }

@@ -2068,9 +2068,10 @@
                             <span class="poster-type-badge">Series</span>
                             ${item.thumbnailImageUrl && isSafeUrl(item.thumbnailImageUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(item.thumbnailImageUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                             ${item.hasNewEpisodes ? `<div class="history-poster-badge">New</div>` : ''}
+                            ${item.sonarrSeriesId ? '<span class="sonarr-match-badge sonarr-poster-badge">Sonarr</span>' : ''}
                         </div>
                         <div class="history-poster-info">
-                                <div class="history-poster-title" title="${escapeHtmlAttribute(item.seriesTitle || '')}">${escapeHtml(item.seriesTitle) || 'Unknown'}${item.sonarrSeriesId ? '<span class="sonarr-match-badge">Sonarr</span>' : ''}</div>
+                                <div class="history-poster-title" title="${escapeHtmlAttribute(item.seriesTitle || '')}">${escapeHtml(item.seriesTitle) || 'Unknown'}</div>
                             <div class="history-poster-meta">${escapeHtml(item.sonarrNextAirDate || '')}</div>
                             <div class="history-poster-meta" style="font-size:0.7em; margin-top:4px;">
                                 ${seriesHaveCount(item)} / ${seriesTotalCount(item)} available

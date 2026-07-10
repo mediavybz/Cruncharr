@@ -1261,3 +1261,13 @@ Build 0 warnings; tests 134/134; node --check clean. Version 1.0.33. Shipping to
 
 ### API Contract
 - No route, request, response-shape, or status-code changes.
+
+### Verification (Round 29)
+- `dotnet build cruncharr.sln`: 0 warnings, 0 errors. `dotnet test`: 150/150 passed (includes new SeriesBaseParsingTests guards).
+- `node --check src/Cruncharr.API/wwwroot/js/app.js`: clean.
+- Playwright dual-engine audit (Firefox + Chromium, 393/360/320px, real local API + mocked data endpoints): no horizontal overflow or cut-off controls on downloads/history/calendar/settings/add-download incl. dropdowns, table view, detail modal; bottom-clearance audit confirms last interactive element clears the fixed nav on all pages in both engines (pre-fix: bottom ~68px hidden).
+- Published-image smoke: `/api/v1/health` healthy at `1.0.46+2aeb83a`; served HTML carries ?v=1.0.46; served CSS contains the nav-clearance padding; served JS carries poster migration key v4.
+
+### Release Status (Round 29)
+- `testing` branch commit `2aeb83a` pushed to `origin/testing`.
+- Multi-architecture GHCR image pushed: `ghcr.io/mediavybz/cruncharr:testing`, index digest `sha256:a3f8b5e178cb24b408878c9744d7cfdecbc02f633a97a3c3bf0d4c9662088efd` (linux/amd64 + linux/arm64).

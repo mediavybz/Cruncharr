@@ -197,7 +197,11 @@ public class Program
                     {
                         ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                         ctx.Response.Headers["WWW-Authenticate"] = "ApiKey";
-                        await ctx.Response.WriteAsJsonAsync(new { error = "Unauthorized", message = "A valid API key is required (X-Api-Key header)." });
+                        // Write the fixed contract directly: WriteAsJsonAsync needs generated
+                        // metadata for an anonymous type, which the self-contained trimmed image
+                        // does not retain. The intended 401 otherwise became a runtime 500.
+                        ctx.Response.ContentType = "application/json; charset=utf-8";
+                        await ctx.Response.WriteAsync("{\"error\":\"Unauthorized\",\"message\":\"A valid API key is required (X-Api-Key header).\"}");
                         return;
                     }
                 }

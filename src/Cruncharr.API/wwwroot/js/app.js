@@ -463,7 +463,7 @@
                                                 : `<button class="btn-icon" onclick="togglePauseResume('${escapeJsString(item.id)}', ${isActive})" title="${isActive ? 'Pause (stops the current download/encode; Resume restarts it)' : 'Resume'}">${isActive ? '&#10074;&#10074;' : '&#9654;'}</button>`
                                         }
                                         ${isDone
-                                            ? `<a class="btn-icon" href="/api/v1/queue/${escapeJsString(item.id)}/file" download title="Save a copy to this device">&#128190;</a>
+                                            ? `<button class="btn-icon" onclick="downloadQueueFile('${escapeJsString(item.id)}')" title="Save a copy to this device">&#128190;</button>
                                                <button class="btn-icon" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="Remove from list (file kept on server)">&#10005;</button>
                                                <button class="btn-icon danger" onclick="deleteDownloadedFile('${escapeJsString(item.id)}')" title="Delete the downloaded file from the server">&#128465;</button>`
                                             : `<button class="btn-icon danger" onclick="removeFromQueue('${escapeJsString(item.id)}')" title="${isActive ? 'Cancel and remove' : 'Remove'}">&#128465;</button>`
@@ -482,6 +482,32 @@
                         </div>
                     `;
                 }).join('');
+        }
+
+        async function downloadQueueFile(id) {
+            try {
+                // Use fetch so the API-key wrapper attaches X-Api-Key. A plain anchor cannot
+                // send headers, which made this action fail with 401 on protected instances.
+                const res = await fetch(`/api/v1/queue/${encodeURIComponent(id)}/file`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename\*?=(?:UTF-8''|\")?([^;\"]+)/i);
+                let filename = match ? match[1].trim() : 'download';
+                try { filename = decodeURIComponent(filename); } catch { /* Keep a literal % in a valid filename. */ }
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                showToast('Failed to save download', 'error');
+            }
         }
 
         // ================== ADD DOWNLOAD ==================

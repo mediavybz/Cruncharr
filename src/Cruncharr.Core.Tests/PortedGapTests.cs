@@ -48,6 +48,41 @@ public class PortedGapTests
     }
 
     [Fact]
+    public void FormatFilename_LegacyTitleToken_SanitizesDynamicPathSeparators()
+    {
+        var svc = new FilenameService();
+        var episode = MakeEpisode();
+        var opts = new FilenameOptions
+        {
+            UseSonarrNumbering = true,
+            SonarrEpisode = new SonarrEpisode
+            {
+                SeasonNumber = 1,
+                EpisodeNumber = 1,
+                Title = "Part One / Part Two: Finale?"
+            }
+        };
+
+        var name = svc.FormatFilename("{Episode Title}", episode, opts);
+
+        Assert.Equal("Part One  Part Two Finale", name);
+        Assert.DoesNotContain(Path.DirectorySeparatorChar, name);
+        Assert.DoesNotContain(Path.AltDirectorySeparatorChar, name);
+    }
+
+    [Fact]
+    public void DownloadSeriesFolder_UsesDesktopCrossPlatformSanitization()
+    {
+        var method = typeof(DownloadService).GetMethod(
+            "SanitizeFolderName",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        var folder = (string?)method?.Invoke(null, new object[] { "Wistoria: Wand and Sword" });
+
+        Assert.Equal("Wistoria Wand and Sword", folder);
+    }
+
+    [Fact]
     public void FormatFilename_BareHeightQuality_SourceQualified()
     {
         // The post-download resolution probe passes a bare height ("1080");

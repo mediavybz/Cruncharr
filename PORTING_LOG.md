@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-10 (Round 27 complete: mobile layout and navigation parity)
+## Last Updated: 2026-07-15 (Round 33 in progress: live download naming and organization)
 
 ---
 
@@ -1327,3 +1327,44 @@ Build 0 warnings; tests 134/134; node --check clean. Version 1.0.33. Shipping to
 - In-image ffmpeg probe: full PSY recipe fails encoder init ("Error parsing option photon-noise/min-keyint/enable-alt-cdef", "Invalid LoopFilterEnable"); adapted param set encodes successfully (output produced, no errors).
 - `dotnet build`: 0 errors. `dotnet test`: 152/152.
 - Round 31 published-image smoke: health at `1.0.48`, presets endpoint serves "SVT preset 6".
+
+## Audit Round 33 — Live download naming and organization (2026-07-15, in progress)
+
+Live instance `192.168.10.10:8585` (`1.0.49+4dc7e44`) showed two distinct failures. Wistoria rich
+history had exact Sonarr/TVDB mappings (CR absolute 15 → S02E03 and 19 → S02E07), while completed
+paths fell back to S02E15/S02E19. The Klutzy Class Monitor episode titles contained `/`; the legacy
+`{Episode Title}` adapter inserted those characters as Linux directory separators, producing nested
+folders inside what should have been one filename.
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core/Services/FilenameService.cs | CRD/Utils/Files/FileNameManager.cs:33-43 | [PT] Legacy/web `{Token}` replacements now apply the same per-variable `CleanupFilename` and whitespace substitution as desktop `${token}` replacements. Dynamic `/`, `:`, `?`, and other illegal title characters can no longer become path structure. Literal separators authored in the template remain supported. | 2026-07-15 |
+| src/Cruncharr.Core/Services/SonarrService.cs | CRD/Utils/Sonarr/SonarrClient.cs:228-239 | [PT] Ported exact `GetEpisode(int episodeId)` lookup through the existing Docker HTTP client as `GetEpisodeAsync`; uses Sonarr `/api/v3/episode/{id}` and does not alter Cruncharr's REST contract. | 2026-07-15 |
+| src/Cruncharr.Core/Services/DownloadService.cs | CRD/Downloader/Crunchyroll/CrunchyrollManager.cs:1303-1313; CRD/Utils/Structs/History/HistorySeries.cs:480-488 | [PT] Filename identity now resolves History's saved `SonarrEpisodeId` through the exact Sonarr episode route before the existing unmapped-item fallback. Series folders now use desktop `FileNameManager.CleanupFilename` rules instead of Docker-runtime invalid characters, removing Windows-illegal `:` consistently. Existing files are not moved or renamed. | 2026-07-15 |
+| src/Cruncharr.Core.Tests/PortedGapTests.cs | Guard tests for the same desktop filename/folder source | [PT] Added guards that legacy dynamic title tokens cannot inject path separators and Docker series folders remove cross-platform-illegal characters. | 2026-07-15 |
+| src/Cruncharr.Core.Tests/SonarrServiceTests.cs | Guard test for CRD/Utils/Sonarr/SonarrClient.cs:228-239 | [PT] Added exact-route guard for `/api/v3/episode/{id}` and its Sonarr episode-number response mapping. | 2026-07-15 |
+| src/Cruncharr.API/Cruncharr.API.csproj | Release metadata | [PT] Version 1.0.49 → 1.0.50 for the testing release. | 2026-07-15 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing REST health adapter | [PT] Unreachable informational-version fallback 1.0.49 → 1.0.50; route/shape/status unchanged. | 2026-07-15 |
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Changes | Date |
+|------|-------------------|-------------------|---------|------|
+| src/Cruncharr.API/wwwroot/index.html | Application shell release-asset loading | none | Cache keys 1.0.49 → 1.0.50; no UI behavior or component change. | 2026-07-15 |
+
+### API Contract
+- No route, request, response-shape, or status-code changes.
+
+### Verification (Round 33)
+- Pre-change guards: 28/28 passed (`DownloadVersionResolutionTests`, `PortedGapTests`, `SonarrServiceTests`).
+- Post-change build: `dotnet build cruncharr.sln --no-restore` — 0 warnings, 0 errors.
+- Post-change targeted guards: 31/31 passed (same suites, including the three new regression tests).
+- Full suite: `dotnet test cruncharr.sln --no-build` — 155/155 passed.
+- Release build: `dotnet build cruncharr.sln -c Release --no-restore` — 0 warnings, 0 errors.
+- Release full suite: `dotnet test cruncharr.sln -c Release --no-build` — 155/155 passed.
+- Frontend syntax: `node --check src/Cruncharr.API/wwwroot/js/app.js` — clean; `git diff --check` — clean.
+- Dual-architecture publish: provided `publish-docker.sh` completed for linux-x64 and linux-arm64; each API single-file apphost is 48 MB and no loose `Cruncharr.API.dll` was produced.
+- Pre-commit amd64 image smoke: local `cruncharr:1.0.50-local` was Docker-healthy; `/api/v1/health` returned healthy at 1.0.50 and served HTML contained both 1.0.50 cache keys. Final publish will be regenerated after commit so `AssemblyInformationalVersion` carries the fix commit rather than the prior HEAD.
+
+### Release Status (Round 33)
+- Verified code is ready for the `testing` branch and `ghcr.io/mediavybz/cruncharr:testing`; publish pending the source commit.

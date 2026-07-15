@@ -6,6 +6,7 @@ using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.DRM;
+using Cruncharr.Core.Utils.Files;
 using Cruncharr.Core.Utils.HLS;
 using Cruncharr.Core.Utils.Muxing;
 using Cruncharr.Core.Utils.Muxing.Structs;
@@ -102,10 +103,8 @@ public class DownloadService : IDownloadService
     private static string SanitizeFolderName(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return string.Empty;
-        var invalid = Path.GetInvalidFileNameChars();
-        var sb = new System.Text.StringBuilder(name.Length);
-        foreach (var c in name) sb.Append(invalid.Contains(c) ? ' ' : c);
-        return System.Text.RegularExpressions.Regex.Replace(sb.ToString(), @"\s+", " ").Trim().TrimEnd('.', ' ');
+        var sanitized = FileNameManager.CleanupFilename(name);
+        return System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s+", " ").Trim().TrimEnd('.', ' ');
     }
 
     public async Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default, Action? onDownloadComplete = null)
@@ -381,26 +380,50 @@ public class DownloadService : IDownloadService
         {
             try
             {
-                sonarrSeries = await _sonarrService.GetSeriesByTitleAsync(episode.SeriesTitle, config.Sonarr);
-                if (sonarrSeries != null)
+                // Desktop source resolves filename identity through History's saved SonarrEpisodeId
+                // and then fetches that exact Sonarr episode. This avoids re-guessing an already
+                // matched episode from mutable list metadata on every download.
+                var historyEpisode = _history != null
+                    ? await _history.GetHistoryEpisodeAsync(episode.SeriesId, episode.SeasonId, episode.Id)
+                    : null;
+                if (int.TryParse(historyEpisode?.SonarrEpisodeId, out var storedSonarrEpisodeId))
                 {
-                    var sonarrEpisodes = await _sonarrService.GetEpisodesAsync(sonarrSeries.Id, config.Sonarr);
-                    // CR and Sonarr/TVDB often number episodes differently: CR groups long-running
-                    // anime into a few "seasons" with CONTINUOUS episode numbers, while Sonarr/TVDB
-                    // splits them into many seasons. So (season, episode) equality usually misses and
-                    // UseSonarrNumbering silently fell back to CR numbers (e.g. CR Fairy Tail S3E278 ->
-                    // Sonarr has it as S8E1, absoluteEpisodeNumber 278). Try, in order: exact
-                    // season+episode, then absolute number (CR episode no. == Sonarr absolute), then
-                    // air date.
-                    sonarrEpisode =
-                        sonarrEpisodes.FirstOrDefault(ep => ep.SeasonNumber == episode.SeasonNumber && ep.EpisodeNumber == episode.EpisodeNumber)
-                        ?? sonarrEpisodes.FirstOrDefault(ep => ep.AbsoluteEpisodeNumber > 0 && ep.AbsoluteEpisodeNumber == episode.EpisodeNumber)
-                        ?? (episode.ReleaseDate.HasValue
-                            ? sonarrEpisodes.FirstOrDefault(ep => ep.AirDateUtc != default && ep.AirDateUtc.UtcDateTime.Date == episode.ReleaseDate.Value.Date)
-                            : null);
-                    _logger?.LogInformation("Sonarr match: {SeriesTitle} CR S{CrS}E{CrE} -> Sonarr S{SnS}E{SnE} (abs {Abs}) \"{EpTitle}\"",
-                        sonarrSeries.Title, episode.SeasonNumber, episode.EpisodeNumber,
-                        sonarrEpisode?.SeasonNumber, sonarrEpisode?.EpisodeNumber, sonarrEpisode?.AbsoluteEpisodeNumber, sonarrEpisode?.Title);
+                    sonarrEpisode = await _sonarrService.GetEpisodeAsync(storedSonarrEpisodeId, config.Sonarr);
+                    if (sonarrEpisode != null)
+                    {
+                        var sonarrSeriesList = await _sonarrService.GetSeriesAsync(config.Sonarr);
+                        sonarrSeries = sonarrSeriesList.FirstOrDefault(series => series.Id == sonarrEpisode.SeriesId);
+                        _logger?.LogInformation(
+                            "Sonarr history match: {EpisodeId} -> Sonarr S{SnS}E{SnE} (abs {Abs}) \"{EpTitle}\"",
+                            storedSonarrEpisodeId, sonarrEpisode.SeasonNumber, sonarrEpisode.EpisodeNumber,
+                            sonarrEpisode.AbsoluteEpisodeNumber, sonarrEpisode.Title);
+                    }
+                }
+
+                // Preserve the current fallback for queue items that have no saved History match.
+                if (sonarrEpisode == null)
+                {
+                    sonarrSeries = await _sonarrService.GetSeriesByTitleAsync(episode.SeriesTitle, config.Sonarr);
+                    if (sonarrSeries != null)
+                    {
+                        var sonarrEpisodes = await _sonarrService.GetEpisodesAsync(sonarrSeries.Id, config.Sonarr);
+                        // CR and Sonarr/TVDB often number episodes differently: CR groups long-running
+                        // anime into a few "seasons" with CONTINUOUS episode numbers, while Sonarr/TVDB
+                        // splits them into many seasons. So (season, episode) equality usually misses and
+                        // UseSonarrNumbering silently fell back to CR numbers (e.g. CR Fairy Tail S3E278 ->
+                        // Sonarr has it as S8E1, absoluteEpisodeNumber 278). Try, in order: exact
+                        // season+episode, then absolute number (CR episode no. == Sonarr absolute), then
+                        // air date.
+                        sonarrEpisode =
+                            sonarrEpisodes.FirstOrDefault(ep => ep.SeasonNumber == episode.SeasonNumber && ep.EpisodeNumber == episode.EpisodeNumber)
+                            ?? sonarrEpisodes.FirstOrDefault(ep => ep.AbsoluteEpisodeNumber > 0 && ep.AbsoluteEpisodeNumber == episode.EpisodeNumber)
+                            ?? (episode.ReleaseDate.HasValue
+                                ? sonarrEpisodes.FirstOrDefault(ep => ep.AirDateUtc != default && ep.AirDateUtc.UtcDateTime.Date == episode.ReleaseDate.Value.Date)
+                                : null);
+                        _logger?.LogInformation("Sonarr match: {SeriesTitle} CR S{CrS}E{CrE} -> Sonarr S{SnS}E{SnE} (abs {Abs}) \"{EpTitle}\"",
+                            sonarrSeries.Title, episode.SeasonNumber, episode.EpisodeNumber,
+                            sonarrEpisode?.SeasonNumber, sonarrEpisode?.EpisodeNumber, sonarrEpisode?.AbsoluteEpisodeNumber, sonarrEpisode?.Title);
+                    }
                 }
             }
             catch (Exception ex)

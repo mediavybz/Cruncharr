@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-15 (Round 33 in progress: live download naming and organization)
+## Last Updated: 2026-07-15 (Round 33 complete: live download naming and organization)
 
 ---
 
@@ -1328,7 +1328,7 @@ Build 0 warnings; tests 134/134; node --check clean. Version 1.0.33. Shipping to
 - `dotnet build`: 0 errors. `dotnet test`: 152/152.
 - Round 31 published-image smoke: health at `1.0.48`, presets endpoint serves "SVT preset 6".
 
-## Audit Round 33 — Live download naming and organization (2026-07-15, in progress)
+## Audit Round 33 — Live download naming and organization (2026-07-15, complete)
 
 Live instance `192.168.10.10:8585` (`1.0.49+4dc7e44`) showed two distinct failures. Wistoria rich
 history had exact Sonarr/TVDB mappings (CR absolute 15 → S02E03 and 19 → S02E07), while completed
@@ -1365,6 +1365,15 @@ folders inside what should have been one filename.
 - Frontend syntax: `node --check src/Cruncharr.API/wwwroot/js/app.js` — clean; `git diff --check` — clean.
 - Dual-architecture publish: provided `publish-docker.sh` completed for linux-x64 and linux-arm64; each API single-file apphost is 48 MB and no loose `Cruncharr.API.dll` was produced.
 - Pre-commit amd64 image smoke: local `cruncharr:1.0.50-local` was Docker-healthy; `/api/v1/health` returned healthy at 1.0.50 and served HTML contained both 1.0.50 cache keys. Final publish will be regenerated after commit so `AssemblyInformationalVersion` carries the fix commit rather than the prior HEAD.
+- Post-commit published-image smoke: freshly pulled `ghcr.io/mediavybz/cruncharr:testing` returned healthy at `1.0.50+8080ebf1ebfd469e1d1424d96723e345d4c6ec99`; served HTML contained both 1.0.50 cache keys.
+- Registry manifest inspection: `linux/amd64` and `linux/arm64` both present under index digest `sha256:ace1aecf1c3abb5ff3bef44e722b90480eb018cffb569d7ebb8d5b942f35964c`.
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Docker image | Multi-architecture testing image for version 1.0.50 and source commit 8080ebf; `linux/amd64` + `linux/arm64`; index digest `sha256:ace1aecf1c3abb5ff3bef44e722b90480eb018cffb569d7ebb8d5b942f35964c` | 2026-07-15 |
 
 ### Release Status (Round 33)
-- Verified code is ready for the `testing` branch and `ghcr.io/mediavybz/cruncharr:testing`; publish pending the source commit.
+- Source commit `8080ebf` pushed to `origin/testing`.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, index digest `sha256:ace1aecf1c3abb5ff3bef44e722b90480eb018cffb569d7ebb8d5b942f35964c`.
+- Stable `master`, `:latest`, and version tags were not changed.

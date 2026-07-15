@@ -326,6 +326,46 @@ public class SonarrServiceTests
     }
 
     [Fact]
+    public async Task GetEpisodeAsync_UsesExactSavedEpisodeRoute()
+    {
+        var expectedEpisode = new SonarrEpisode
+        {
+            Id = 27447,
+            SeriesId = 91,
+            EpisodeNumber = 3,
+            SeasonNumber = 2,
+            Title = "One Single Magic Spell",
+            AbsoluteEpisodeNumber = 15
+        };
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.Method == HttpMethod.Get &&
+                    req.RequestUri!.AbsolutePath == "/api/v3/episode/27447" &&
+                    req.Headers.Contains("X-Api-Key")),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(JsonSerializer.Serialize(expectedEpisode))
+            });
+        var service = new SonarrService(
+            new TestHttpClientFactory(new HttpClient(handlerMock.Object)),
+            _loggerMock.Object);
+
+        var result = await service.GetEpisodeAsync(27447, CreateTestConfig());
+
+        Assert.NotNull(result);
+        Assert.Equal(27447, result!.Id);
+        Assert.Equal(2, result.SeasonNumber);
+        Assert.Equal(3, result.EpisodeNumber);
+        Assert.Equal(15, result.AbsoluteEpisodeNumber);
+    }
+
+    [Fact]
     public async Task GetEpisodesAsync_Failure_ReturnsEmptyList()
     {
         var handlerMock = new Mock<HttpMessageHandler>();

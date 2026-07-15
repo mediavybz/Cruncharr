@@ -15,6 +15,7 @@ public interface ISonarrService
     Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config);
     Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config);
+    Task<SonarrEpisode?> GetEpisodeAsync(int episodeId, SonarrConfig config);
 }
 
 /// <summary>Outcome of a Sonarr connection test, with a human-readable reason.</summary>
@@ -221,6 +222,31 @@ public class SonarrService : ISonarrService
         {
             _logger?.LogError(ex, "Failed to get Sonarr episodes");
             return new List<SonarrEpisode>();
+        }
+    }
+
+    public virtual async Task<SonarrEpisode?> GetEpisodeAsync(int episodeId, SonarrConfig config)
+    {
+        try
+        {
+            var url = $"{BuildBaseUrl(config)}/episode/{episodeId}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("X-Api-Key", config.ApiKey);
+
+            using var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.LogWarning("Sonarr GetEpisode returned HTTP {Status} {Reason}", (int)response.StatusCode, response.ReasonPhrase);
+                return null;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            return Newtonsoft.Json.JsonConvert.DeserializeObject<SonarrEpisode>(content);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to get Sonarr episode {EpisodeId}", episodeId);
+            return null;
         }
     }
 }

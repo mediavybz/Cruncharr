@@ -152,6 +152,18 @@ public class FilenameService : IFilenameService
 
             var value = variable.ReplaceWith?.ToString() ?? string.Empty;
 
+            // The desktop ${var} path sanitizes every Variable marked Sanitize before inserting
+            // it. Apply that same rule to the legacy/web {Var} adapter so title text such as "/"
+            // cannot become an unintended directory separator.
+            if (variable.Sanitize)
+            {
+                value = FileNameManager.CleanupFilename(value);
+                if (variable.Type == "string" && !string.IsNullOrEmpty(options.WhitespaceReplace))
+                {
+                    value = value.Replace(" ", options.WhitespaceReplace);
+                }
+            }
+
             if (format != null && int.TryParse(value, out var num))
             {
                 if (format == "00" || format == "D2") return num.ToString("D2");

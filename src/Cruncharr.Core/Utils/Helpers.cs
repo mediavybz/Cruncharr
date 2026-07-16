@@ -4,6 +4,20 @@ namespace Cruncharr.Core.Utils;
 
 public static class Helpers
 {
+    public static string LimitFileNameLength(string fileName, int maxFileNameLength)
+    {
+        string directory = Path.GetDirectoryName(fileName) ?? string.Empty;
+        string name = Path.GetFileNameWithoutExtension(fileName);
+        string extension = Path.GetExtension(fileName);
+
+        if (name.Length > maxFileNameLength - extension.Length)
+        {
+            name = name.Substring(0, maxFileNameLength - extension.Length);
+        }
+
+        return Path.Combine(directory, name + extension);
+    }
+
     public static string? ExtractNumberAfterS(string? identifier)
     {
         if (string.IsNullOrEmpty(identifier))

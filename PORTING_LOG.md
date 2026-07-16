@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-15 (Round 33 complete: live download naming and organization)
+## Last Updated: 2026-07-15 (Round 34 in progress: output filename length parity)
 
 ---
 
@@ -1377,3 +1377,46 @@ folders inside what should have been one filename.
 - Source commit `8080ebf` pushed to `origin/testing`.
 - Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, index digest `sha256:ace1aecf1c3abb5ff3bef44e722b90480eb018cffb569d7ebb8d5b942f35964c`.
 - Stable `master`, `:latest`, and version tags were not changed.
+
+## Audit Round 34 — Output filename length parity (2026-07-15, in progress)
+
+The live 1.0.50 retry for The Klutzy Class Monitor episode 5 reached muxing with a sanitized,
+single-component basename but both mkvmerge and ffmpeg rejected it as `File name too long`. The
+reported `.mkv` name is 261 ASCII bytes, exceeding Linux `NAME_MAX` (255); the desktop backend
+already reserves headroom by limiting the template result to 220 characters.
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core/Utils/Helpers.cs | CRD/Utils/Helpers.cs:827-837 | [PT] Ported `LimitFileNameLength` exactly: preserve the directory and extension while truncating only the final filename component to the requested desktop limit. | 2026-07-15 |
+| src/Cruncharr.Core/Services/DownloadService.cs | CRD/Downloader/Crunchyroll/CrunchyrollManager.cs:1963-1990 | [PT] Ported the desktop 220-character output-name cap at both Docker filename-generation points, including its raw episode-title length check. Title-aware shortening recognizes the port's equivalent `${episodeTitle}` and legacy/web `{Episode Title}` aliases, preserves suffix fields such as `WEBDL-1080p`, and falls back to the exact desktop helper for non-title templates. | 2026-07-15 |
+| src/Cruncharr.Core.Tests/PortedGapTests.cs | Regression guard for CRD/Downloader/Crunchyroll/CrunchyrollManager.cs:1963-1990 | [PT] Reproduces the exact episode-5 Sonarr title/template: the pre-fix `.mkv` component exceeds 255 characters; the ported result is exactly 220 before extension while retaining S01E05 and `WEBDL-1080p`. | 2026-07-15 |
+| src/Cruncharr.API/Cruncharr.API.csproj | Release metadata | [PT] Advanced the testing release version 1.0.50 → 1.0.51. | 2026-07-15 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing REST health adapter | [PT] Updated the unreachable informational-version fallback 1.0.50 → 1.0.51; route, response shape, and status code are unchanged. | 2026-07-15 |
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Changes | Date |
+|------|-------------------|-------------------|---------|------|
+| src/Cruncharr.API/wwwroot/index.html | Application shell release-asset loading | none | Advanced the existing CSS/JS cache keys 1.0.50 → 1.0.51; no component or behavior change. | 2026-07-15 |
+
+### In Progress
+| File | Mode | Blocker |
+|------|------|---------|
+| Targeted and full verification | A | Running the invariant guards and build/test suites; no blocker. |
+
+### API Contract
+- No route, request, response-shape, or status-code changes.
+
+### Verification (Round 34, in progress)
+- Pre-change protected guards: 21/21 passed (`DownloadVersionResolutionTests`, `PortedGapTests`, `EncodingPresetAndTranscodeTests`).
+- Post-change protected guards: 22/22 passed, including the exact long Sonarr-title regression.
+- Debug build: `dotnet build cruncharr.sln --no-restore` — 0 warnings, 0 errors.
+- Debug full suite: `dotnet test cruncharr.sln --no-build` — 156/156 passed.
+- Release build: `dotnet build cruncharr.sln --configuration Release --no-restore` — 0 warnings, 0 errors.
+- Release full suite: `dotnet test cruncharr.sln --configuration Release --no-build` — 156/156 passed.
+- Linux-container full suite (`mcr.microsoft.com/dotnet/sdk:8.0`): 156/156 passed, including the Linux path-semantics regression.
+- Frontend syntax: `node --check src/Cruncharr.API/wwwroot/js/app.js` — clean; `docker compose config -q` — clean.
+- `git diff --check`: clean.
+- Dual-architecture publish: the repository `publish-docker.sh` completed for linux-x64 and linux-arm64; each API apphost is approximately 48 MB and neither output contains a loose `Cruncharr.API.dll`.
+- Pre-commit amd64 image smoke: local `cruncharr:1.0.51-local` became Docker-healthy; `/api/v1/health` returned healthy at 1.0.51 and the served HTML contained both 1.0.51 cache keys. The publish will be regenerated after commit so the informational version carries the fix commit.
+- Final pre-ship rerun after aligning the raw-title condition exactly with desktop: Release 156/156 passed; Linux-container `PortedGapTests` 14/14 passed.

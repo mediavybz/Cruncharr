@@ -107,6 +107,52 @@ public class DownloadService : IDownloadService
         return System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s+", " ").Trim().TrimEnd('.', ' ');
     }
 
+    internal static string LimitOutputFileName(
+        string fileName,
+        string filenameTemplate,
+        string episodeTitle,
+        string? whitespaceReplace)
+    {
+        const int maxLength = 220;
+        var onlyFileName = Path.GetFileName(fileName);
+
+        if (onlyFileName.Length <= maxLength)
+        {
+            return fileName;
+        }
+
+        var templateFileName = filenameTemplate.Replace('\\', '/').Split('/').Last();
+        var containsTitle = templateFileName.Contains("${title}", StringComparison.Ordinal) ||
+                            templateFileName.Contains("${episodeTitle}", StringComparison.Ordinal) ||
+                            Regex.IsMatch(templateFileName, @"\{(?:episode\s*)?title(?::[^}]*)?\}", RegexOptions.IgnoreCase);
+        var renderedTitle = FileNameManager.CleanupFilename(episodeTitle);
+        if (!string.IsNullOrEmpty(whitespaceReplace))
+        {
+            renderedTitle = renderedTitle.Replace(" ", whitespaceReplace);
+        }
+
+        if (containsTitle &&
+            !string.IsNullOrEmpty(renderedTitle) &&
+            onlyFileName.Length - episodeTitle.Length < maxLength)
+        {
+            var excessLength = onlyFileName.Length - maxLength;
+            if (excessLength > 0 && renderedTitle.Length > excessLength)
+            {
+                var shortenedTitle = renderedTitle.Substring(0, renderedTitle.Length - excessLength);
+                onlyFileName = onlyFileName.Replace(renderedTitle, shortenedTitle, StringComparison.Ordinal);
+                var directory = Path.GetDirectoryName(fileName) ?? string.Empty;
+                fileName = Path.Combine(directory, onlyFileName);
+            }
+        }
+
+        if (Path.GetFileName(fileName).Length > maxLength)
+        {
+            fileName = Helpers.LimitFileNameLength(fileName, maxLength);
+        }
+
+        return fileName;
+    }
+
     public async Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default, Action? onDownloadComplete = null)
     {
         _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", episode.Id, episode.Title);
@@ -452,6 +498,21 @@ public class DownloadService : IDownloadService
                 : config.Download.DubLanguages
         };
         var fileName = _filenameService.FormatFilename(filenameTemplate, episode, filenameOptions);
+        var filenameEpisodeTitle = filenameOptions.UseSonarrNumbering &&
+                                   !string.IsNullOrEmpty(filenameOptions.SonarrEpisode?.Title)
+            ? filenameOptions.SonarrEpisode.Title!
+            : episode.Title;
+        var limitedFileName = LimitOutputFileName(
+            fileName,
+            filenameTemplate,
+            filenameEpisodeTitle,
+            filenameOptions.WhitespaceReplace);
+        if (!string.Equals(fileName, limitedFileName, StringComparison.Ordinal))
+        {
+            _logger?.LogWarning("Filename too long {FileName}", Path.GetFileName(fileName));
+            _logger?.LogWarning("Filename changed to {FileName}", Path.GetFileName(limitedFileName));
+            fileName = limitedFileName;
+        }
 
         // Organize into <Series Title>/Season NN/ folders (Sonarr/Plex layout) when enabled. The
         // season mirrors what the FILENAME uses (Sonarr numbering when active) so folder + name
@@ -1275,6 +1336,17 @@ public class DownloadService : IDownloadService
                                 : config.Download.DubLanguages
                         };
                         var newFileName = _filenameService.FormatFilename(filenameTemplate, episode, newFilenameOptions);
+                        var limitedNewFileName = LimitOutputFileName(
+                            newFileName,
+                            filenameTemplate,
+                            filenameEpisodeTitle,
+                            newFilenameOptions.WhitespaceReplace);
+                        if (!string.Equals(newFileName, limitedNewFileName, StringComparison.Ordinal))
+                        {
+                            _logger?.LogWarning("Filename too long {FileName}", Path.GetFileName(newFileName));
+                            _logger?.LogWarning("Filename changed to {FileName}", Path.GetFileName(limitedNewFileName));
+                            newFileName = limitedNewFileName;
+                        }
                         var newOutputPath = Path.Combine(outputDir, newFileName + outputExtension);
 
                         // Handle collisions or replace existing

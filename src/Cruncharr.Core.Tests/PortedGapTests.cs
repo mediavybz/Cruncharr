@@ -83,6 +83,42 @@ public class PortedGapTests
     }
 
     [Fact]
+    public void DownloadFilename_LongSonarrTitle_IsLimitedWithoutDroppingQualitySuffix()
+    {
+        const string template = "{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}";
+        const string sonarrTitle = "The Klutzy Health Representative and the Schoolgirl Who Slips Often / Taking More Supplementary Lessons With the Klutz on the Day Her Little Sister Is Touring the Klutz's School";
+        var episode = new EpisodeInfo
+        {
+            Title = "Crunchyroll title",
+            SeriesTitle = "The Klutzy Class Monitor and the Girl with the Short Skirt",
+            SeasonNumber = 1,
+            EpisodeNumber = 5,
+            Episode = "5"
+        };
+        var options = new FilenameOptions
+        {
+            Quality = "1080",
+            UseSonarrNumbering = true,
+            SonarrEpisode = new SonarrEpisode
+            {
+                SeasonNumber = 1,
+                EpisodeNumber = 5,
+                Title = sonarrTitle
+            }
+        };
+        var rawName = new FilenameService().FormatFilename(template, episode, options);
+
+        Assert.True((rawName + ".mkv").Length > 255);
+
+        var limitedName = DownloadService.LimitOutputFileName(rawName, template, sonarrTitle, string.Empty);
+
+        Assert.Equal(220, Path.GetFileName(limitedName).Length);
+        Assert.Contains(" - S01E05 - ", limitedName);
+        Assert.EndsWith(" WEBDL-1080p", limitedName);
+        Assert.True((limitedName + ".mkv").Length < 255);
+    }
+
+    [Fact]
     public void FormatFilename_BareHeightQuality_SourceQualified()
     {
         // The post-download resolution probe passes a bare height ("1080");

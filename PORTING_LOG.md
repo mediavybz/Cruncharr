@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-15 (Round 34 in progress: output filename length parity)
+## Last Updated: 2026-07-15 (Round 34 complete: output filename length parity)
 
 ---
 
@@ -1378,7 +1378,7 @@ folders inside what should have been one filename.
 - Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, index digest `sha256:ace1aecf1c3abb5ff3bef44e722b90480eb018cffb569d7ebb8d5b942f35964c`.
 - Stable `master`, `:latest`, and version tags were not changed.
 
-## Audit Round 34 — Output filename length parity (2026-07-15, in progress)
+## Audit Round 34 — Output filename length parity (2026-07-15, complete)
 
 The live 1.0.50 retry for The Klutzy Class Monitor episode 5 reached muxing with a sanitized,
 single-component basename but both mkvmerge and ffmpeg rejected it as `File name too long`. The
@@ -1402,12 +1402,12 @@ already reserves headroom by limiting the template result to 220 characters.
 ### In Progress
 | File | Mode | Blocker |
 |------|------|---------|
-| Targeted and full verification | A | Running the invariant guards and build/test suites; no blocker. |
+| Targeted and full verification | A | [completed] Protected/full Windows and Linux tests, dual-architecture publish, registry inspection, and published-image smoke all passed. |
 
 ### API Contract
 - No route, request, response-shape, or status-code changes.
 
-### Verification (Round 34, in progress)
+### Verification (Round 34)
 - Pre-change protected guards: 21/21 passed (`DownloadVersionResolutionTests`, `PortedGapTests`, `EncodingPresetAndTranscodeTests`).
 - Post-change protected guards: 22/22 passed, including the exact long Sonarr-title regression.
 - Debug build: `dotnet build cruncharr.sln --no-restore` — 0 warnings, 0 errors.
@@ -1420,3 +1420,16 @@ already reserves headroom by limiting the template result to 220 characters.
 - Dual-architecture publish: the repository `publish-docker.sh` completed for linux-x64 and linux-arm64; each API apphost is approximately 48 MB and neither output contains a loose `Cruncharr.API.dll`.
 - Pre-commit amd64 image smoke: local `cruncharr:1.0.51-local` became Docker-healthy; `/api/v1/health` returned healthy at 1.0.51 and the served HTML contained both 1.0.51 cache keys. The publish will be regenerated after commit so the informational version carries the fix commit.
 - Final pre-ship rerun after aligning the raw-title condition exactly with desktop: Release 156/156 passed; Linux-container `PortedGapTests` 14/14 passed.
+- Post-commit published-image smoke: a fresh pull of `ghcr.io/mediavybz/cruncharr:testing` became Docker-healthy; `/api/v1/health` returned `1.0.51+07bb8f34a6547722ad073850a549fe713df66a0d`; served HTML contained both 1.0.51 cache keys.
+- Registry manifest inspection: linux/amd64 and linux/arm64 are present under index digest `sha256:885afd68b513d52fd0f12db4d51eae67899b52270447f9b62c899c36f87fa169`.
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Docker image | Multi-architecture testing image for version 1.0.51 and source commit 07bb8f3; `linux/amd64` + `linux/arm64`; index digest `sha256:885afd68b513d52fd0f12db4d51eae67899b52270447f9b62c899c36f87fa169` | 2026-07-15 |
+
+### Release Status (Round 34)
+- Source commit `07bb8f3` pushed to `origin/testing`.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, index digest `sha256:885afd68b513d52fd0f12db4d51eae67899b52270447f9b62c899c36f87fa169`.
+- Live LAN check still returned 1.0.50 with one active download, so no forced restart/update was attempted; it must re-pull `:testing` before retrying the episode.
+- Stable `master`, `:latest`, and version tags were not changed.

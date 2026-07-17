@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 38 in progress: Docker dependency reproducibility)
+## Last Updated: 2026-07-17 (Round 38 complete: Docker dependency reproducibility)
 
 ---
 
@@ -37,7 +37,16 @@
 - No API route, request, response-shape, or status-code changes.
 
 ### Status (Round 38)
-- Local verification complete; testing commit and image publication pending.
+- Complete on `testing`.
+
+### Release Status (Round 38)
+- Testing release version: 1.0.54.
+- Source commit: `74a69e1` (`build(docker): make builds reproducible`).
+- `testing` pushed to the source commit.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`.
+- Registry index digest: `sha256:71a7c30ae90fbef1e55102825aa250973f8ec12e134f150b68c1febcd0cf7985` (linux/amd64 + linux/arm64, with attestations).
+- Pulled-image smoke passed at `1.0.54+74a69e1d358ebad583c6f5337358af77287a03a1`; health and index returned 200 with both 1.0.54 cache keys; Development Swagger returned 200; FFmpeg remained N-125649-g8d394252d8; effective API user remained 1234:1234.
+- Stable `master`, `:latest`, and version tags were not changed.
 
 ---
 

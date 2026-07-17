@@ -148,12 +148,26 @@ public class CalendarController : ControllerBase
                 Date = day.DateTime,
                 DayName = day.DayName ?? day.DateTime.ToString("dddd"),
                 Episodes = day.CalendarEpisodes
+                    .SelectMany(FlattenCalendarEpisodes)
                     .Where(e => !e.FilteredOut)
                     .Where(e => IncludeCustomEpisode(e, dubFilter, hideDubs))
                     .Select(MapEpisodeToResponse)
                     .ToList()
             }).ToList() ?? new List<CalendarDayResponse>()
         };
+    }
+
+    private static IEnumerable<CalendarEpisode> FlattenCalendarEpisodes(CalendarEpisode episode)
+    {
+        yield return episode;
+
+        foreach (var mergedEpisode in episode.CalendarEpisodes)
+        {
+            foreach (var flattenedEpisode in FlattenCalendarEpisodes(mergedEpisode))
+            {
+                yield return flattenedEpisode;
+            }
+        }
     }
 
     private static bool IncludeCustomEpisode(CalendarEpisode episode, string? dubFilter, bool hideDubs)
@@ -170,7 +184,7 @@ public class CalendarController : ControllerBase
             return true;
         }
 
-        if (hasFilter && !MatchesFilter(episode) && !episode.CalendarEpisodes.Any(MatchesFilter))
+        if (hasFilter && !MatchesFilter(episode))
         {
             return false;
         }
@@ -212,7 +226,10 @@ public class CalendarController : ControllerBase
             Title = episode.EpisodeName ?? "",
             SeriesTitle = episode.SeasonName ?? "",
             SeriesId = episode.CrSeriesID,
-            EpisodeNumber = episode.EpisodeNumber ?? "",
+            EpisodeNumber = episode.CalendarEpisodes.Count > 0 &&
+                            episode.EpisodeNumber?.Contains('-') == true
+                ? episode.EpisodeNumber.Split('-')[0]
+                : episode.EpisodeNumber ?? "",
             AirDate = episode.DateTime,
             IsPremiumOnly = episode.IsPremiumOnly,
             IsPremiere = episode.IsPremiere,

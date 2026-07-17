@@ -6,8 +6,10 @@ set -e
 # temp segment files). Defaults to 1000:1000.
 PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
+UMASK="${UMASK:-002}"
+umask "$UMASK"
 
-echo "[Cruncharr] Setting up user directories (PUID=${PUID} PGID=${PGID})..."
+echo "[Cruncharr] Setting up user directories (PUID=${PUID} PGID=${PGID} UMASK=${UMASK})..."
 
 # Create user-facing directories at runtime (after volumes are mounted)
 mkdir -p /config /config/logs /downloads /widevine /tools /tmp/cruncharr

@@ -83,6 +83,43 @@ public class PortedGapTests
     }
 
     [Fact]
+    public void DownloadSeriesFolder_PrefersSonarrPathBasename()
+    {
+        var episode = MakeEpisode();
+        var sonarrSeries = new SonarrSeries
+        {
+            Title = "Sonarr Display Title",
+            Path = "/tv/My Show (2026)"
+        };
+
+        var folder = DownloadService.ResolveSeriesFolderName(episode, sonarrSeries);
+
+        Assert.Equal("My Show (2026)", folder);
+    }
+
+    [Fact]
+    public void DownloadSeriesFolder_UsesSonarrTitleWhenPathIsMissing()
+    {
+        var episode = MakeEpisode();
+        var sonarrSeries = new SonarrSeries
+        {
+            Title = "Sonarr: Display Title"
+        };
+
+        var folder = DownloadService.ResolveSeriesFolderName(episode, sonarrSeries);
+
+        Assert.Equal("Sonarr Display Title", folder);
+    }
+
+    [Fact]
+    public void DownloadSeriesFolder_WithoutSonarrMatch_UsesCrunchyrollTitle()
+    {
+        var folder = DownloadService.ResolveSeriesFolderName(MakeEpisode(), null);
+
+        Assert.Equal("My Show", folder);
+    }
+
+    [Fact]
     public void DownloadFilename_LongSonarrTitle_IsLimitedWithoutDroppingQualitySuffix()
     {
         const string template = "{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}";

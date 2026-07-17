@@ -2993,8 +2993,9 @@
                                 <div class="setting-row"><div><div class="setting-label">Remove Missing Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-missing" ${h.removeMissingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Check Partial Downloads</div><div class="setting-desc">Track missing dubs/subs on downloaded episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-partial" ${h.checkPartialDownloads!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">History Language</div></div><select class="form-select mw-150" id="setting-history-lang">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${h.lang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div></div><input type="number" class="form-input w-100" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0"></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div></div><select class="form-select mw-150" id="setting-history-mode"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div><div class="setting-desc">Set above 0 to run the tracked-show scheduler automatically.</div></div><input type="number" class="form-input w-100" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0"></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div><div class="setting-desc">Fast New Releases checks Crunchyroll's release feed; the other modes refresh tracked History series.</div></div><select class="form-select mw-150" id="setting-history-mode"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto-add Missing Episodes to Queue</div><div class="setting-desc">After each scheduler refresh, queue newly missing tracked episodes using season/series language overrides. Enable Queue → Auto Download if they should start without manual approval.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-auto-add" ${h.autoRefreshAddToQueue!==false?'checked':''}><span class="toggle-slider"></span></label></div>
 
                             </div>
                         </div>
@@ -3485,7 +3486,8 @@
                         checkPartialDownloads: document.getElementById('setting-history-partial')?.checked ?? true,
                         lang: document.getElementById('setting-history-lang')?.value || 'en-US',
                         autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
-                        autoRefreshMode: isNaN(histMode) ? 0 : histMode
+                        autoRefreshMode: isNaN(histMode) ? 0 : histMode,
+                        autoRefreshAddToQueue: document.getElementById('setting-history-auto-add')?.checked ?? true
                     };
                     break;
                 }
@@ -4424,7 +4426,10 @@
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
-                                episodeNumber: ep.episodeNumber || 1
+                                episodeNumber: ep.episodeNumber || 1,
+                                thumbnailUrl: ep.thumbnailUrl || null,
+                                coverArtUrl: ep.coverArtUrl || null,
+                                description: ep.description || null
                             })
                         });
                         if (queueRes.ok) added++;
@@ -4849,7 +4854,10 @@
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
-                                episodeNumber: ep.episodeNumber || 1
+                                episodeNumber: ep.episodeNumber || 1,
+                                thumbnailUrl: ep.thumbnailUrl || null,
+                                coverArtUrl: ep.coverArtUrl || null,
+                                description: ep.description || null
                             })
                         });
                         if (queueRes.ok) added++;

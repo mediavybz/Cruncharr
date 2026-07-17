@@ -138,7 +138,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
         if (config.History.AutoRefreshAddToQueue)
         {
             _logger.LogInformation("Adding missing episodes to queue...");
-            await AddNewMissingToQueueAsync(historyService, queueService, cancellationToken);
+            await AddNewMissingToQueueAsync(historyService, queueService, config, cancellationToken);
         }
     }
 
@@ -229,7 +229,11 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
         }
     }
 
-    private async Task AddNewMissingToQueueAsync(IHistoryService historyService, IQueueService queueService, CancellationToken cancellationToken)
+    private async Task AddNewMissingToQueueAsync(
+        IHistoryService historyService,
+        IQueueService queueService,
+        CruncharrConfig config,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -247,42 +251,61 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
 
                     if (series.Seasons == null || series.Seasons.Count == 0) continue;
 
-                    foreach (var season in series.Seasons)
+                    foreach (var (season, episode) in EnumerateMissingEpisodes(series, config))
                     {
-                        if (season.EpisodesList == null || season.EpisodesList.Count == 0) continue;
+                        // Skip episodes already in queue
+                        bool inQueue = queueItems.Any(q =>
+                            q.Episode?.Id == episode.EpisodeId ||
+                            (q.Episode?.SeriesId == series.SeriesId &&
+                             q.Episode?.Episode == episode.Episode));
 
-                        foreach (var episode in season.EpisodesList)
+                        if (inQueue) continue;
+
+                        var requestedDubs = GetEffectiveDubLang(series, season, config)
+                            .Where(locale => !string.Equals(locale, "none", StringComparison.OrdinalIgnoreCase))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                        var selectedDubs = episode.HistoryEpisodeAvailableDubLang.Count > 0
+                            ? requestedDubs
+                                .Where(locale => episode.HistoryEpisodeAvailableDubLang.Contains(locale, StringComparer.OrdinalIgnoreCase))
+                                .ToList()
+                            : requestedDubs;
+
+                        // Desktop EpisodeMeta only creates queue data for requested dubs that the
+                        // episode actually offers. When availability is known and none match, wait
+                        // for a later history refresh instead of downloading the wrong language.
+                        if (selectedDubs.Count == 0) continue;
+
+                        var selectedSubs = GetEffectiveSoftSubs(series, season, episode, config)
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                        var requestLocale = !string.IsNullOrWhiteSpace(config.History?.Lang)
+                            ? config.History.Lang
+                            : selectedDubs[0];
+
+                        // Add to queue
+                        var episodeInfo = new EpisodeInfo
                         {
-                            // Skip already downloaded episodes
-                            if (episode.WasDownloaded) continue;
+                            Id = episode.EpisodeId ?? $"{series.SeriesId}-{season.SeasonNum}-{episode.Episode}",
+                            Title = episode.EpisodeTitle ?? $"Episode {episode.Episode}",
+                            SeriesTitle = series.SeriesTitle ?? "Unknown",
+                            SeriesId = series.SeriesId,
+                            SeasonNumber = int.TryParse(season.SeasonNum, out var seasonNum) ? seasonNum : 0,
+                            EpisodeNumber = int.TryParse(episode.Episode, out var epNum) ? epNum : 0,
+                            Episode = episode.Episode,
+                            SeasonTitle = season.SeasonTitle,
+                            SeasonId = season.SeasonId,
+                            AudioLocale = selectedDubs[0],
+                            Locale = requestLocale,
+                            Description = episode.EpisodeDescription,
+                            ThumbnailUrl = episode.ThumbnailImageUrl ?? series.ThumbnailImageUrl,
+                            CoverArtUrl = series.ThumbnailImageUrl,
+                            SelectedDubs = selectedDubs,
+                            SelectedSubs = selectedSubs
+                        };
 
-                            // Skip episodes already in queue
-                            bool inQueue = queueItems.Any(q =>
-                                q.Episode?.Id == episode.EpisodeId ||
-                                (q.Episode?.SeriesId == series.SeriesId &&
-                                 q.Episode?.Episode == episode.Episode));
-
-                            if (inQueue) continue;
-
-                            // Add to queue
-                            var episodeInfo = new EpisodeInfo
-                            {
-                                Id = episode.EpisodeId ?? $"{series.SeriesId}-{season.SeasonNum}-{episode.Episode}",
-                                Title = episode.EpisodeTitle ?? $"Episode {episode.Episode}",
-                                SeriesTitle = series.SeriesTitle ?? "Unknown",
-                                SeriesId = series.SeriesId,
-                                SeasonNumber = int.TryParse(season.SeasonNum, out var seasonNum) ? seasonNum : 0,
-                                EpisodeNumber = int.TryParse(episode.Episode, out var epNum) ? epNum : 0,
-                                Episode = episode.Episode,
-                                SeasonTitle = season.SeasonTitle,
-                                SeasonId = season.SeasonId,
-                                AudioLocale = "ja-JP",
-                                Locale = "ja-JP"
-                            };
-
-                            queueService.AddToQueue(episodeInfo);
-                            addedCount++;
-                        }
+                        queueService.AddToQueue(episodeInfo);
+                        addedCount++;
                     }
                 }
                 catch (Exception ex)
@@ -300,6 +323,138 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
         {
             _logger.LogError(ex, "Add missing to queue failed");
         }
+    }
+
+    private static IEnumerable<(HistorySeason Season, HistoryEpisode Episode)> EnumerateMissingEpisodes(
+        HistorySeries series,
+        CruncharrConfig config)
+    {
+        bool foundWatched = false;
+        bool historyAddSpecials = config.History?.AddSpecials ?? false;
+        bool sonarrEnabled = series.SeriesType != SeriesType.Artist &&
+                             config.Sonarr?.Enabled == true &&
+                             !string.IsNullOrEmpty(series.SonarrSeriesId);
+        bool skipUnmonitored = config.History?.SkipUnmonitored ?? false;
+        bool countMissing = config.History?.CountMissing ?? false;
+        bool useSonarr = sonarrEnabled && (config.History?.CountSonarr ?? false);
+        var candidates = new List<(HistorySeason Season, HistoryEpisode Episode)>();
+
+        for (int i = series.Seasons.Count - 1; i >= 0; i--)
+        {
+            var season = series.Seasons[i];
+            var episodes = season.EpisodesList;
+
+            if (season.SpecialSeason)
+            {
+                if (historyAddSpecials)
+                {
+                    for (int j = episodes.Count - 1; j >= 0; j--)
+                    {
+                        var episode = episodes[j];
+                        if (skipUnmonitored && sonarrEnabled && !episode.SonarrIsMonitored) continue;
+                        if (ShouldCountEpisode(series, season, episode, useSonarr, countMissing, false, config))
+                            candidates.Add((season, episode));
+                    }
+                }
+                continue;
+            }
+
+            for (int j = episodes.Count - 1; j >= 0; j--)
+            {
+                var episode = episodes[j];
+                if (skipUnmonitored && sonarrEnabled && !episode.SonarrIsMonitored) continue;
+
+                if (episode.SpecialEpisode)
+                {
+                    if (historyAddSpecials &&
+                        ShouldCountEpisode(series, season, episode, useSonarr, countMissing, false, config))
+                    {
+                        candidates.Add((season, episode));
+                    }
+                    continue;
+                }
+
+                if (ShouldCountEpisode(series, season, episode, useSonarr, countMissing, foundWatched, config))
+                {
+                    candidates.Add((season, episode));
+                }
+                else if (episode.WasDownloaded && !IsPartialDownloadActionable(series, season, episode, config))
+                {
+                    foundWatched = true;
+                }
+            }
+        }
+
+        candidates.Reverse();
+        return candidates;
+    }
+
+    private static bool ShouldCountEpisode(
+        HistorySeries series,
+        HistorySeason season,
+        HistoryEpisode episode,
+        bool useSonarr,
+        bool countMissing,
+        bool foundWatched,
+        CruncharrConfig config)
+    {
+        if (useSonarr)
+            return !string.IsNullOrEmpty(episode.SonarrEpisodeId) && !episode.SonarrHasFile;
+
+        return IsPartialDownloadActionable(series, season, episode, config) ||
+               !episode.WasDownloaded && (!foundWatched || countMissing);
+    }
+
+    private static bool IsPartialDownloadActionable(
+        HistorySeries series,
+        HistorySeason season,
+        HistoryEpisode episode,
+        CruncharrConfig config)
+    {
+        if (config.History?.CheckPartialDownloads != true) return false;
+
+        var requestedDubs = GetEffectiveDubLang(series, season, config);
+        var requestedSoftSubs = GetEffectiveSoftSubs(series, season, episode, config);
+        return episode.HasAvailableMissingDownloadedMedia(requestedDubs, requestedSoftSubs);
+    }
+
+    private static IEnumerable<string> GetEffectiveDubLang(
+        HistorySeries? series,
+        HistorySeason? season,
+        CruncharrConfig config)
+    {
+        if (season?.HistorySeasonDubLangOverride.Count > 0)
+            return season.HistorySeasonDubLangOverride;
+
+        if (series?.HistorySeriesDubLangOverride.Count > 0)
+            return series.HistorySeriesDubLangOverride;
+
+        return string.Equals(series?.SeriesStreamingService, "Crunchyroll", StringComparison.OrdinalIgnoreCase)
+            ? config.Download.DubLanguages
+            : [];
+    }
+
+    private static IEnumerable<string> GetEffectiveSoftSubs(
+        HistorySeries? series,
+        HistorySeason? season,
+        HistoryEpisode episode,
+        CruncharrConfig config)
+    {
+        IEnumerable<string> requested;
+
+        if (season?.HistorySeasonSoftSubsOverride.Count > 0)
+            requested = season.HistorySeasonSoftSubsOverride;
+        else if (series?.HistorySeriesSoftSubsOverride.Count > 0)
+            requested = series.HistorySeriesSoftSubsOverride;
+        else
+            requested = string.Equals(series?.SeriesStreamingService, "Crunchyroll", StringComparison.OrdinalIgnoreCase)
+                ? config.Download.SoftSubs
+                : [];
+
+        var requestedList = requested.ToList();
+        return requestedList.Contains("all", StringComparer.OrdinalIgnoreCase)
+            ? episode.HistoryEpisodeAvailableSoftSubs
+            : requestedList.Where(item => !string.Equals(item, "none", StringComparison.OrdinalIgnoreCase));
     }
 
     public void Dispose()

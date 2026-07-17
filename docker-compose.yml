@@ -42,6 +42,9 @@ services:
       # settings and download files. Defaults to 1000:1000.
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
+      # Group-writable files/directories (0664/0775) so Sonarr can rename/import
+      # when it shares PGID with Cruncharr but runs under a different PUID.
+      - UMASK=${UMASK:-002}
 
       # Crunchyroll credentials (optional - can also be in config file)
       - CRUNCHYROLL_EMAIL=${CRUNCHYROLL_EMAIL:-}

@@ -147,7 +147,11 @@ public class QueueController : ControllerBase
             return NotFound(new { Error = "File not found - it may have been deleted, moved, or not finished." });
         }
         var fileName = System.IO.Path.GetFileName(path);
-        var stream = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
+        var stream = new System.IO.FileStream(
+            path,
+            System.IO.FileMode.Open,
+            System.IO.FileAccess.Read,
+            System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete);
         return File(stream, "application/octet-stream", fileName, enableRangeProcessing: true);
     }
 

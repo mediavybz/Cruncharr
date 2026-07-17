@@ -1,7 +1,61 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-15 (Round 34 complete: output filename length parity)
+## Last Updated: 2026-07-17 (Round 35 complete: download/calendar/scheduler reliability)
+
+---
+
+## Round 35 — Download, Calendar, Scheduler, and Sonarr Reliability (2026-07-17)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core/Services/DownloadService.cs | CRD/Utils/Helpers.cs : 444-503; CRD/Utils/Muxing/Merger.cs : 31-56; CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 1306-1314 | [PT] Encode temp output now preserves the requested container extension; replacement requires ffmpeg exit code 0 and failed/cancelled partial output is deleted while the valid muxed input remains; mux success is propagated so a partial output left by a failed mux cannot be reported complete; organized series folders now prefer Sonarr's actual path basename/title before the Crunchyroll title | 2026-07-17 |
+| src/Cruncharr.API/Services/AutoDownloadSchedulerService.cs | CRD/Utils/Structs/History/HistorySeries.cs : 249-365; CRD/Downloader/ProgramManager.cs : 170-197 | [PT] Replaced the simplified every-undownloaded/hard-coded-ja-JP scheduler loop with desktop eligibility rules (specials, Sonarr missing state, monitoring, CountMissing, partial downloads), season→series→global language overrides, "all"/"none" subtitle handling, available-dub filtering, and complete queue metadata (selected languages, locale, description, thumbnail, identifiers); wired the current config into the add-missing pass | 2026-07-17 |
+| src/Cruncharr.API/Controllers/CalendarController.cs | CRD/Utils/Structs/CalendarStructs.cs : 133-149 | [PT] Flatten merged same-day calendar children into independent API episode entries so every episode the desktop recursively queues can be selected from the web calendar; retained the existing route and response object shape; language/hide-dub filters apply per exposed episode and the parent card shows its own first episode number instead of the aggregate range | 2026-07-17 |
+| src/Cruncharr.API/Controllers/QueueController.cs | CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 701-709 | [PT] Open completed-file browser streams with FileShare.ReadWrite \| FileShare.Delete so an active/range HTTP response does not prevent Sonarr or the user from renaming/moving the completed file; route and response unchanged | 2026-07-17 |
+| src/Cruncharr.API/Cruncharr.API.csproj | N/A (release metadata) | [PT] Bumped testing release version 1.0.51 → 1.0.52 | 2026-07-17 |
+| src/Cruncharr.Core.Tests/Cruncharr.Core.Tests.csproj | CRD/Utils/Structs/CalendarStructs.cs : 145-149 | [PT] Added test-only references to Cruncharr.API, the ASP.NET Core shared framework, and the existing Microsoft.Extensions.Http 8.0.0 dependency so the current suite can execute the calendar REST mapping guard; no production dependency change | 2026-07-17 |
+| src/Cruncharr.Core.Tests/CalendarLanguageFilterTests.cs | CRD/Utils/Structs/CalendarStructs.cs : 145-149 | [PT] Added regression coverage proving merged same-day episodes are returned by GET /api/v1/calendar/custom as separate selectable IDs with their own episode numbers | 2026-07-17 |
+| src/Cruncharr.Core.Tests/EncodingPresetAndTranscodeTests.cs | CRD/Utils/Helpers.cs : 449-489 | [PT] Added regression guards that encode temp output preserves the input container extension and can replace the muxed source only when ffmpeg exits with code 0 and the output exists | 2026-07-17 |
+| src/Cruncharr.Core.Tests/PortedGapTests.cs | CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 1306-1314 | [PT] Added regression coverage that organized folders prefer Sonarr's actual path basename, then Sonarr title, then the Crunchyroll title | 2026-07-17 |
+| src/Cruncharr.Core.Tests/QueuePumpEligibilityTests.cs | CRD/Utils/Structs/History/HistorySeries.cs : 257-365 | [PT] Added scheduler regression coverage for season-over-series language overrides, "all" subtitle expansion, queue metadata propagation, and configured exclusion of unmonitored Sonarr episodes | 2026-07-17 |
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| docker-entrypoint.sh | [PT] Apply configurable UMASK (default 002) before creating/writing bind-mounted content so files are group-writable for Sonarr when containers share a PGID; existing media is not recursively modified | 2026-07-17 |
+| docker-compose.yml | [PT] Expose UMASK beside PUID/PGID with default 002 and document group-writable Sonarr import behavior | 2026-07-17 |
+| templates/cruncharr.xml | [PT] Expose advanced UMASK=002 setting in the stable Unraid template for group-writable Sonarr imports | 2026-07-17 |
+| templates/cruncharr-test.xml | [PT] Expose advanced UMASK=002 setting in the testing-channel Unraid template for group-writable Sonarr imports | 2026-07-17 |
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | History whole-season/whole-series download actions; History auto-refresh/add-missing settings | GET /api/v1/series/{seriesId}/episodes; POST /api/v1/queue; GET/POST /api/v1/config | Added episode thumbnail/cover/description metadata to History bulk queue requests; exposed and saved AutoRefreshAddToQueue with scheduler/Queue Auto Download guidance; no backend imports or shared code | 2026-07-17 |
+| src/Cruncharr.API/wwwroot/index.html | Web release cache refresh | none | Bumped app.js cache key 1.0.51 → 1.0.52 | 2026-07-17 |
+
+### Verification
+- Baseline before Round 35 changes: 156/156 tests passing (Debug)
+- Calendar regression tests: 21/21 passing (`CalendarLanguageFilterTests`, Debug)
+- Download/encode/Sonarr targeted guards: 46/46 passing (`EncodingPresetAndTranscodeTests`, `PortedGapTests`, and calendar tests, Debug)
+- Scheduler guards: 2/2 passing (override languages/metadata and unmonitored Sonarr exclusion, Debug)
+- Note: a class-wide queue test run hit the existing Windows temp-file cleanup race in `RestoredRetry_WakesAndStartsWhenRetryTimeArrives`; new scheduler guards were rerun in isolation and passed
+- Final Debug full suite: 168/168 passing
+- Final Release full suite: 168/168 passing
+- Frontend syntax: `node --check src/Cruncharr.API/wwwroot/js/app.js` passed
+- Infrastructure validation: `docker compose config -q` passed; both Unraid XML templates parsed successfully
+- Source hygiene: `git diff --check` passed
+- Dual-architecture self-contained publish completed for linux/amd64 and linux/arm64
+
+### API Contract
+- No API route, request, response-shape, or status-code changes. Calendar merged episodes are exposed as additional objects using the existing response shape.
+
+### Release Status (Round 35)
+- Testing release version: 1.0.52
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`.
+- Registry index digest: `sha256:67a7785e2d448bc8b7b506a7eec486742e6b8ead07b28fe1ce0dee2d1c67de6a` (linux/amd64 + linux/arm64).
+- Stable `master`, `:latest`, and version tags were not changed.
 
 ---
 
@@ -429,6 +483,11 @@ Vendored CRD/ folder synced from upstream c123093 → 245cf78. All functional ch
 ## Future Update Notes
 | Desktop Component | Docker Equivalent | Notes for Future Updates |
 |-------------------|-------------------|--------------------------|
+| CRD/Utils/Structs/CalendarStructs.cs (merged `CalendarEpisodes`) | src/Cruncharr.API/Controllers/CalendarController.cs | The desktop recursively queues merged same-day children. The REST adapter must flatten the parent and all nested children into separate objects while preserving the existing calendar response shape, IDs, per-episode numbers, and per-episode language filtering. |
+| Desktop completed-file access | src/Cruncharr.API/Controllers/QueueController.cs (`GET /api/v1/queue/{id}/file`) | Web downloads use an HTTP `FileStream`; keep `FileShare.ReadWrite | FileShare.Delete` so an open/range browser response does not block Sonarr or the user from renaming/deleting the completed file. Route, response headers/shape, and status codes remain frozen. |
+| CRD/Utils/Structs/History/HistorySeries.cs:249-365 + CRD/Downloader/ProgramManager.cs:170-197 | src/Cruncharr.API/Services/AutoDownloadSchedulerService.cs | Scheduler missing-episode eligibility mirrors desktop specials/Sonarr/monitoring/CountMissing/partial rules. Language precedence is season override -> series override -> global config; `all` subtitles expand to episode availability and `none` is omitted. Queue items carry selected languages and episode/series artwork metadata; do not post or synthesize client `versions`. |
+| CRD/Utils/Helpers.cs:444-503 + CRD/Utils/Muxing/Merger.cs:31-56 + CRD/Downloader/Crunchyroll/CrunchyrollManager.cs:1306-1314 | src/Cruncharr.Core/Services/DownloadService.cs | Encoding temp files retain the requested container extension; only ffmpeg exit 0 plus an existing output may replace the valid muxed source, and partial encode output is deleted on failure/cancel. Mux success must be enforced. Organized folders prefer Sonarr path basename, then Sonarr title, then Crunchyroll title. |
+| Docker process permission setup (no desktop filesystem equivalent) | docker-entrypoint.sh + docker-compose.yml + templates/cruncharr.xml + templates/cruncharr-test.xml | `UMASK` defaults to `002` and is applied before bind-mounted directories/files are created, yielding normal 0775 directories/0664 files for a shared Sonarr PGID. Do not recursively chmod/chown existing media during startup. |
 | CRD auth client tokens (data.json) | src/Cruncharr.Core/Services/CrunchyrollAuthService.cs (UpdateAuthCredentialsAsync, EmbeddedAuthData, DefaultAndroidTvAuthSettings) | **Live auth source: `https://codeberg.org/YomuLoad/CRD/raw/branch/pages/data.json`** (fallback `https://yomuload.codeberg.page/CRD/data.json`). Schema: `{type, version_name, version_code, Authorization}`. TV UA = `ANDROIDTV/{version_name}_{version_code} Android/16`; mobile UA = `Crunchyroll/{version_name} Android/16 okhttp/4.12.0` (no code). When CR deactivates the TV client, copy the latest TV token/version from that data.json into `DefaultAndroidTvAuthSettings` + `EmbeddedAuthData` (the runtime updater also pulls it automatically). Old Crunchy-Downloader GitHub URLs are dead. |
 | upstream_src/History.cs | src/Cruncharr.Core/Services/HistoryService.cs | Uses ICrunchyrollApiService for series data, IMusicService for artist data. HistoryPageProperties added to CruncharrConfig. |
 | upstream_src/CrSeries.cs | src/Cruncharr.Core/Services/CrunchyrollApiService.cs | Added ParseSeriesByIdAsync, GetSeasonDataByIdAsync, SeriesByIdAsync wrappers around existing methods |

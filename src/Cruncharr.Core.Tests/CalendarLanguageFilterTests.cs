@@ -1,4 +1,11 @@
+using Cruncharr.API.Controllers;
+using Cruncharr.Core.Configuration;
+using Cruncharr.Core.Models;
+using Cruncharr.Core.Services;
 using Cruncharr.Core.Utils;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Cruncharr.Core.Tests;
@@ -66,5 +73,60 @@ public class CalendarLanguageFilterTests
 
         Assert.Single(filtered);
         Assert.Contains("Witch Hat Atelier Season 1 (Français)", filtered);
+    }
+    [Fact]
+    public async Task CustomCalendar_MergedSameDayEpisodes_AreReturnedIndividually()
+    {
+        var firstEpisode = new CalendarEpisode
+        {
+            EpisodeName = "Episode 1",
+            EpisodeUrl = "/en-us/watch/EPISODE1/episode-1",
+            EpisodeNumber = "1-2",
+            AudioLocale = "en-US",
+            CrSeriesID = "SERIES"
+        };
+        firstEpisode.CalendarEpisodes.Add(new CalendarEpisode
+        {
+            EpisodeName = "Episode 2",
+            EpisodeUrl = "/en-us/watch/EPISODE2/episode-2",
+            EpisodeNumber = "2",
+            AudioLocale = "en-US",
+            CrSeriesID = "SERIES"
+        });
+
+        var week = new CalendarWeek
+        {
+            FirstDayOfWeek = new DateTime(2026, 7, 13),
+            CalendarDays =
+            [
+                new CalendarDay
+                {
+                    DateTime = new DateTime(2026, 7, 17),
+                    DayName = "Friday",
+                    CalendarEpisodes = [firstEpisode]
+                }
+            ]
+        };
+
+        var calendarService = new Mock<ICalendarService>();
+        calendarService
+            .Setup(service => service.GetCustomCalendarAsync(
+                It.IsAny<DateTime>(),
+                It.IsAny<string>(),
+                It.IsAny<bool>()))
+            .ReturnsAsync(week);
+
+        var controller = new CalendarController(
+            calendarService.Object,
+            new CruncharrConfig(),
+            NullLogger<CalendarController>.Instance);
+
+        var result = await controller.GetCustomCalendar("2026-07-17", "en-us", false, "en-US");
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<CalendarWeekResponse>(ok.Value);
+        var episodes = Assert.Single(response.Days).Episodes;
+
+        Assert.Equal(["EPISODE1", "EPISODE2"], episodes.Select(episode => episode.Id));
+        Assert.Equal(["1", "2"], episodes.Select(episode => episode.EpisodeNumber));
     }
 }

@@ -96,7 +96,7 @@ public class NotificationService : INotificationService
         if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
         if (!config.Notifications.NotifyDownloadFinished) return; // the UI toggle for this event
 
-        _logger?.LogInformation("Sending completion notification to {WebhookUrl}", config.Notifications.WebhookUrl);
+        _logger?.LogInformation("Sending completion webhook notification");
 
         var payload = new
         {
@@ -116,7 +116,7 @@ public class NotificationService : INotificationService
         if (string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
         if (!config.Notifications.NotifyDownloadFailed) return; // the UI toggle for this event
 
-        _logger?.LogError("Sending error notification to {WebhookUrl}: {Error}", config.Notifications.WebhookUrl, result.ErrorMessage);
+        _logger?.LogError("Sending error webhook notification: {Error}", result.ErrorMessage);
 
         var payload = new
         {

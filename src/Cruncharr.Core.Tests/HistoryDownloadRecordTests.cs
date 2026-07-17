@@ -152,6 +152,10 @@ public class HistoryDownloadRecordTests : IDisposable
             }
         });
 
+        var beforeRefresh = Assert.Single(await history.GetHistorySeriesAsync());
+        Assert.Null(beforeRefresh.ThumbnailImageUrl);
+        Assert.Equal(screenshotUrl, Assert.Single(Assert.Single(beforeRefresh.Seasons).EpisodesList).ThumbnailImageUrl);
+
         Assert.True(await history.CrUpdateSeriesAsync(seriesId, null));
 
         var series = Assert.Single(await history.GetHistorySeriesAsync());

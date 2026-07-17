@@ -204,10 +204,10 @@ public class HistoryService : IHistoryService, IDisposable
             if (historySeries != null)
             {
                 historySeries.HistorySeriesAddDate ??= DateTime.Now;
-                // Backfill the series poster so History shows an icon (downloads created series rows
-                // with no image). Prefer the series poster, fall back to the episode thumbnail.
-                if (string.IsNullOrEmpty(historySeries.ThumbnailImageUrl))
-                    historySeries.ThumbnailImageUrl = !string.IsNullOrEmpty(firstEpisode.CoverArtUrl) ? firstEpisode.CoverArtUrl : firstEpisode.ThumbnailUrl;
+                // A series card must never use an episode screenshot. Leave it empty until series
+                // metadata supplies poster_tall rather than persisting the episode thumbnail here.
+                if (string.IsNullOrEmpty(historySeries.ThumbnailImageUrl) && !string.IsNullOrEmpty(firstEpisode.CoverArtUrl))
+                    historySeries.ThumbnailImageUrl = firstEpisode.CoverArtUrl;
                 var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == firstEpisode.SeasonId);
 
                 if (historySeason != null)
@@ -251,7 +251,7 @@ public class HistoryService : IHistoryService, IDisposable
                     HistorySeriesAddDate = DateTime.Now,
                     SeriesType = SeriesType.Series,
                     SeriesStreamingService = "Crunchyroll",
-                    ThumbnailImageUrl = !string.IsNullOrEmpty(firstEpisode.CoverArtUrl) ? firstEpisode.CoverArtUrl : firstEpisode.ThumbnailUrl
+                    ThumbnailImageUrl = firstEpisode.CoverArtUrl
                 };
                 _historyList.Add(historySeries);
 

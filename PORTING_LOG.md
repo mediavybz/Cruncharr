@@ -5,6 +5,48 @@
 
 ---
 
+## Round 36 — Full-Stack Security and Browser Reliability Audit (2026-07-17)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.CLI/Cruncharr.CLI.csproj | N/A (Docker/runtime dependency manifest) | [PT] Updated Microsoft.Extensions.DependencyInjection, Logging, and Logging.Console 8.0.0 → 8.0.1 so System.Text.Json receives its security fixes without dependency downgrades; no CLI behavior change | 2026-07-17 |
+| src/Cruncharr.Core.Tests/Cruncharr.Core.Tests.csproj | N/A (test dependency manifest) | [PT] Migrated deprecated xUnit 2.5.3 → xunit.v3 3.2.2 and runner 2.5.3 → 3.1.5, removing vulnerable legacy NETStandard packages; pinned the runner's Windows access-control transitive dependency to its patched 6.0.1 release so the resolved test graph contains no deprecated packages | 2026-07-17 |
+| src/Cruncharr.API/Controllers/ImagesController.cs | Existing REST image proxy for desktop catalog artwork | [PT] Replaced the static redirect-following client with a request-scoped factory client so redirects cannot bypass the validated Crunchyroll HTTPS host boundary and client wrappers are disposed after each fetch; existing route and response contract unchanged | 2026-07-17 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing API release metadata response | [PT] Aligned the stale fallback version with release 1.0.53; route and response shape unchanged | 2026-07-17 |
+| src/Cruncharr.API/Program.cs | Existing API service registration and API documentation | [PT] Configured the CruncharrImages client with redirects disabled; registered Swagger's Newtonsoft support so schema generation uses the API's serializer and works in the trimmed image; default IHttpClientFactory behavior remains available to other services | 2026-07-17 |
+| src/Cruncharr.API/Cruncharr.API.csproj | N/A (API serializer/Swagger integration and release metadata) | [PT] Added matching Swashbuckle Newtonsoft integration for trimmed-image schema generation and bumped release metadata 1.0.52 → 1.0.53 | 2026-07-17 |
+| src/Cruncharr.Core/Services/NotificationService.cs | CRD notification logging adapted for the remotely readable Docker API log | [PT] Stopped writing full webhook URLs to API-visible logs because webhook paths and query strings can contain credentials; notification behavior and payloads unchanged | 2026-07-17 |
+| src/Cruncharr.Core/Services/HistoryService.cs | CRD/Utils/Structs/History/HistorySeries.cs desktop series-level poster behavior | [PT] Removed the web-only episode-thumbnail fallback from HistorySeries.ThumbnailImageUrl; series cards now remain empty until poster_tall metadata is available, so a first-episode screenshot cannot be persisted as cover art | 2026-07-17 |
+| src/Cruncharr.Core.Tests/UnitTest1.cs | Existing test placeholder | [PT] Replaced the empty placeholder with a cancellation-aware regression guard proving an upstream image redirect is returned as a 502 and is not followed to an untrusted host | 2026-07-17 |
+| src/Cruncharr.Core.Tests/CalendarLanguageFilterTests.cs | Existing calendar language regression suite | [PT] Marked the theory's deliberate null season-name case nullable, clearing the xUnit v3 nullability diagnostic without changing coverage | 2026-07-17 |
+| src/Cruncharr.Core.Tests/HistoryDownloadRecordTests.cs | Desktop History series poster behavior | [PT] Extended the cover-art guard to prove an episode screenshot remains episode-only before refresh and poster_tall becomes the series card image after refresh | 2026-07-17 |
+| src/Cruncharr.Core.Tests/QueuePumpEligibilityTests.cs | Existing queue scheduler regression suite | [PT] Passed the xUnit test cancellation token to delays and bounded waits, and made restored-retry cleanup wait for the final persisted snapshot operation before deleting its Windows temp files; assertions and production behavior unchanged | 2026-07-17 |
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | History cover/details, persisted navigation, API-key access, protected artwork, and live queue updates | Existing `/api/v1/*` routes only | Added guarded browser-storage helpers so privacy/storage-denied modes and invalid persisted pages cannot break fetch/navigation/artwork/migration/SSE setup; escaped external episode-number text; bumped the one-time poster repair to v5 after removing the persisted episode-screenshot fallback | 2026-07-17 |
+| src/Cruncharr.API/wwwroot/index.html | Web release cache refresh | none | Aligned CSS and JavaScript cache keys at 1.0.53 so browsers cannot retain mixed release assets | 2026-07-17 |
+
+### Verification
+- NuGet restore completed with no vulnerable or deprecated direct/transitive packages.
+- Debug build: 0 warnings, 0 errors; full suite: 168/168 passing (three consecutive runs after queue-race correction).
+- Release build: 0 warnings, 0 errors; full suite: 168/168 passing.
+- `dotnet format analyzers --verify-no-changes --severity warn`: clean.
+- Frontend syntax, guarded-storage scan, HTML ID uniqueness, CSS brace balance, Compose, shell syntax, Unraid XML, Git integrity, diff whitespace, and tracked-secret scan: clean.
+- Self-contained single-file trimmed linux/amd64 publish and Docker build completed.
+- Trimmed-image smoke: health returned healthy at 1.0.53; HTML served both 1.0.53 cache keys; Swagger generated 85 operations with 0 duplicate method/routes.
+
+### API Contract
+- No route, request, response-shape, or status-code changes.
+
+### Release Status (Round 36)
+- Release version: 1.0.53.
+- Source commit, registry digests, stable promotion, and GitHub release pending publication.
+
+---
+
 ## Round 35 — Download, Calendar, Scheduler, and Sonarr Reliability (2026-07-17)
 
 ### Backend (Mode A)

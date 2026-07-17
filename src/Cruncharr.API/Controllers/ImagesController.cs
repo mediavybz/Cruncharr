@@ -17,9 +17,7 @@ namespace Cruncharr.API.Controllers;
 public class ImagesController : ControllerBase
 {
     private readonly ILogger<ImagesController> _logger;
-
-    // One shared client; CR image CDN is happy with default settings.
-    private static readonly HttpClient _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+    private readonly IHttpClientFactory _httpClientFactory;
 
     // Persistent cache dir (lives on the /config volume so it survives restarts; not the temp dir,
     // which a user may point at a RAM disk for transcoding).
@@ -32,9 +30,10 @@ public class ImagesController : ControllerBase
     private static long _writeCounter;
     private static int _pruneGate; // 0 = idle, 1 = prune running (Interlocked CAS)
 
-    public ImagesController(ILogger<ImagesController> logger)
+    public ImagesController(ILogger<ImagesController> logger, IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     private static string ResolveCacheDir()
@@ -77,7 +76,8 @@ public class ImagesController : ControllerBase
         // Cache miss: fetch from Crunchyroll once, persist, then serve.
         try
         {
-            using var resp = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var http = _httpClientFactory.CreateClient("CruncharrImages");
+            using var resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Image fetch {Url} returned {Status}", url, (int)resp.StatusCode);

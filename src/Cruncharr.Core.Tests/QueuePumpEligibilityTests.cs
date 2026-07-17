@@ -76,7 +76,7 @@ public class QueuePumpEligibilityTests
         var item = Assert.Single(queue.GetQueue());
         Assert.True(queue.PauseItem(item.Id));
 
-        await Task.Delay(1200);
+        await Task.Delay(1200, TestContext.Current.CancellationToken);
         Assert.False(downloadStarted.Task.IsCompleted);
         Assert.Equal(DownloadState.Paused, item.DownloadProgress.State);
 
@@ -259,7 +259,8 @@ public class QueuePumpEligibilityTests
             var processor = queue.ProcessQueueAsync(config, cancellationToken: stop.Token);
             queue.SetInitialized(true);
 
-            Assert.True(await downloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+            Assert.True(await downloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
+            await WaitForAsync(() => !File.Exists(queuePath) && !File.Exists(queuePath + ".tmp"));
 
             stop.Cancel();
             await processor;
@@ -298,7 +299,7 @@ public class QueuePumpEligibilityTests
         config.Queue.AutoDownload = true;
         var processor = queue.ProcessQueueAsync(config, cancellationToken: stop.Token);
 
-        Assert.True(await downloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.True(await downloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
 
         stop.Cancel();
         await processor;
@@ -319,11 +320,11 @@ public class QueuePumpEligibilityTests
         queue.AddToQueue(new EpisodeInfo { Id = "old-item", Title = "Old" });
         var oldItem = Assert.Single(queue.GetQueue());
         Assert.True(queue.StartItem(oldItem.Id));
-        Assert.True(await downloadService.Started.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.True(await downloadService.Started.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
 
         queue.ReplaceQueue(new List<QueueItem> { Item("new-item", DownloadState.Queued) });
 
-        Assert.True(await downloadService.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.True(await downloadService.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
         Assert.Equal("new-item", Assert.Single(queue.GetQueue()).Episode.Id);
 
         stop.Cancel();
@@ -369,7 +370,7 @@ public class QueuePumpEligibilityTests
         var timeout = DateTime.UtcNow.AddSeconds(3);
         while (!predicate() && DateTime.UtcNow < timeout)
         {
-            await Task.Delay(20);
+            await Task.Delay(20, TestContext.Current.CancellationToken);
         }
         Assert.True(predicate(), "Condition was not reached before timeout.");
     }

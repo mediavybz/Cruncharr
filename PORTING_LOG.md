@@ -1,7 +1,71 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 35 complete: download/calendar/scheduler reliability)
+## Last Updated: 2026-07-17 (Round 38 in progress: Docker dependency reproducibility)
+
+---
+
+## Round 38 — Docker Dependency Reproducibility and Scan Follow-up (2026-07-17)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.API/Cruncharr.API.csproj | N/A (testing release metadata) | [PT] Bumped assembly, file, and package version 1.0.53 → 1.0.54 for the checksum-enforced testing image; no application behavior or dependency change | 2026-07-17 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing API release metadata response | [PT] Aligned the no-attribute fallback version with 1.0.54; route, response shape, and status unchanged | 2026-07-17 |
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/index.html | Existing web UI release asset refresh | none | Bumped CSS and JavaScript cache keys 1.0.53 → 1.0.54 so browsers cannot retain mixed release assets | 2026-07-17 |
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Dockerfile | [PT] Replaced floating .NET 8 and Debian Bookworm tags with verified exact version/date tags; replaced the rolling FFmpeg `latest` asset with the dated N-125649-g8d394252d8 release and per-architecture SHA-256 checks; replaced Bento4 HEAD cloning with the exact b8c50a0 commit archive and its SHA-256 check; removed `git` from the native builder; accepts the release source revision as an MSBuild property so container-built informational versions retain commit identity without copying `.git` | 2026-07-17 |
+| publish-docker.sh | [PT] Resolves the current Git HEAD (or honors explicit `SOURCE_REVISION`) and passes it to BuildKit so the container-built API/CLI informational version identifies the source commit; keeps cache-only validation and explicit publication behavior unchanged | 2026-07-17 |
+
+### Verification
+- Verified exact tags resolve to .NET SDK 8.0.423 manifest `sha256:89ce6291bde9acdf59594e79fb8277c6d84c46e4b1f5bf126a4f18766e4bd597` and Debian Bookworm 20260713 slim index `sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818`.
+- Checksum-enforced linux/amd64 and linux/arm64 builds completed through `bash publish-docker.sh`; the pinned AMD64 inputs reproduced the previously validated final image manifest before the version bump.
+- Full Release test suite: 168/168 passing.
+- 1.0.54 candidate smoke: health returned healthy at 1.0.54; HTML served one 1.0.54 CSS key and one 1.0.54 JavaScript key; Docker health became healthy; effective process user was 1234:1234; native linkage and graceful shutdown passed.
+- Revision-aware release-helper build returned `1.0.54+<full Git SHA>` from the health endpoint, preserving published-image source traceability without adding `.git` to the Docker context.
+- Trivy 0.72.0 scan found 0 fixable high/critical vulnerabilities. The unfiltered scan reported 29 inherited Debian advisories whose statuses provide no fixed Bookworm version (`affected`, `fix_deferred`, or `will_not_fix`).
+- Dockerfile check reported no warnings; Compose config, frontend JavaScript syntax, shell syntax, and `git diff --check` passed.
+
+### API Contract
+- No API route, request, response-shape, or status-code changes.
+
+### Status (Round 38)
+- Local verification complete; testing commit and image publication pending.
+
+---
+
+## Round 37 — Docker Build Engineering Audit (2026-07-17)
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Dockerfile | [PT] Moved the existing self-contained API/CLI publish from ignored host-generated `docker-build` artifacts into a .NET 8 SDK build stage on `BUILDPLATFORM`; restores project manifests with the same single-file/trimming properties used by the no-restore publish so linker assets remain present and the released API size is preserved; cross-publishes the existing linux-x64/linux-arm64 runtime identifiers; preserved the Debian slim runtime, native tools, paths, entrypoint, volumes, port, and health check | 2026-07-17 |
+| .dockerignore | [PT] Excluded obsolete host publish output plus local skill examples, test sources, and deployment templates that no Dockerfile stage consumes, reducing the build context without hiding production inputs | 2026-07-17 |
+| publish-docker.sh | [PT] Replaced host-side dual-RID publish/delete logic with a Buildx wrapper that validates both architectures cache-only by default and accepts explicit standard Buildx tag/push options for publication; documents `bash publish-docker.sh` because the repository tracks this Windows-authored helper without an executable mode bit | 2026-07-17 |
+
+### Verification
+- `docker buildx build --check .`: complete with no warnings.
+- Clean-context linux/amd64 image built and loaded from repository source; `bash publish-docker.sh` then built linux/amd64 and linux/arm64 successfully with cache-only output and no registry publication.
+- Corrected multi-platform repeat build completed in 2.2 seconds with 30 cached build steps.
+- Corrected-image smoke: `/api/v1/health` returned healthy at 1.0.53; `/` returned 200 with both 1.0.53 cache keys; Docker health became healthy; the CLI executed; termination completed within the 10-second grace window.
+- Effective API process ran as configured UID/GID 1234:1234 after root-only bind-mount setup; `ldd` found no missing libraries for the API apphost or mp4decrypt.
+- FFmpeg, ffprobe, mkvmerge, mp4decrypt, and the CLI were executable; no SDK, compiler, source tree, or apt package indexes remained in the runtime image.
+- Corrected local image size: 215,830,424 bytes versus 215,826,038 bytes for released 1.0.53 (4,386-byte delta); API trimming preserved at 49,646,865 bytes versus 49,623,681 bytes released.
+- `docker compose config -q`, shell syntax checks, and `git diff --check`: clean.
+- Docker Scout was available but CVE scanning could not run because the local Scout installation requires Docker ID authentication; no login was attempted.
+
+### API Contract
+- No API route, request, response-shape, or status-code changes.
+
+### Status (Round 37)
+- Complete locally on `testing`; not committed or published.
 
 ---
 

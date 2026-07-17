@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 39 in progress: full-stack verification and Docker cache optimization)
+## Last Updated: 2026-07-17 (Round 39 complete: full-stack verification and Docker cache optimization)
 
 ---
 
@@ -24,19 +24,29 @@
 | Dockerfile | [PT] Moved the stage-scoped `SOURCE_REVISION` declaration below the stable project-manifest restore layer, so a new source commit invalidates publish metadata without forcing both architecture-specific NuGet restores to run again; image inputs and runtime behavior unchanged | 2026-07-17 |
 
 ### Verification
-- In progress: pushed-image inspection and pulled-image smoke.
+- Pulled-image inspection and smoke completed successfully.
 - Repeat-build cache proof passed: changing only `SOURCE_REVISION` kept the architecture-specific restore instruction cached and reran only publish. The already-completed first revision resolved in 0.62 seconds; the second revision completed its publish in 40.11 seconds without either NuGet restore.
 - Baseline before edits: 168/168 Release tests passed; warning-as-error build and 151–211 analyzer sets reported zero warnings; NuGet reported no vulnerable or deprecated direct/transitive packages.
 - Firefox 592 px and 1440 px live checks covered all nine routes plus History poster/table/detail views and the mobile More sheet; document/content widths matched their clients with no clipped descendants. Mocked distinct series-cover and episode-shot inputs proved History cards used the series cover.
 - Final restored Release test suite passed 168/168; warning-as-error build and analyzer verification remained clean. Exact release-reference, frontend JavaScript, Dockerfile check, Compose config, shell syntax, whitespace, repository integrity, and secret/pattern checks passed.
 - Complete cache-only linux/amd64 and linux/arm64 images built from 1.0.55 source. The loaded amd64 candidate returned healthy at `1.0.55+local-audit`, served exactly one 1.0.55 CSS and JavaScript key, reached Docker healthy state, ran as UID/GID 1234, linked all native binaries, preserved FFmpeg N-125649-g8d394252d8, and shut down gracefully in 0.92 seconds with exit code 0.
 - Trivy 0.72.0 found 0 fixable high/critical vulnerabilities in the 1.0.55 candidate. GitHub repository triage found no open issues or pull requests.
+- Pulled GHCR testing image repeated the clean Trivy result and returned `1.0.55+8321049db257c660b6c96d3d23d14afd4849bc9d`; Firefox at 592 px confirmed exact document/content widths, two 274 px History columns, the series cover on every card, and no episode-thumbnail leak. Runtime health, UID/GID 1234, native linkage, FFmpeg revision, 1.0.55 assets, graceful 0.44-second shutdown, and exit code 0 passed.
 
 ### API Contract
 - No API route, request, response-shape, or status-code changes.
 
 ### Status (Round 39)
-- In progress on `testing`.
+- Complete on `testing`.
+
+### Release Status (Round 39)
+- Testing release version: 1.0.55.
+- Source commit: `8321049` (`perf(docker): preserve restore cache`).
+- `testing` pushed to the source commit.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`.
+- Registry index digest: `sha256:24dc07551887b7e518e8c0ba2c645246f208d110b17a76af0a71edaf51d2f7a5`.
+- linux/amd64 manifest: `sha256:0f5a763230e02411332c80cd3b8fa5f5891a2157b844c751342e5ae5b049ec77`; linux/arm64 manifest: `sha256:71fb8912f10cb1535dbd6382e0257f5fbb952d4eeb9469b21db104cc5338d9de`; both include provenance attestations.
+- Stable `master`, `:latest`, and version tags were not changed.
 
 ---
 

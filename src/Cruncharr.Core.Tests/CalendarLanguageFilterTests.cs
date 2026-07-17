@@ -31,7 +31,7 @@ public class CalendarLanguageFilterTests
     [InlineData(null, "en-us", true)]
     [InlineData("", "en-us", true)]
     [InlineData("Season 1 (Uncut)", "en-us", true)]
-    public void MatchesLanguage_ReturnsCorrectResult(string seasonName, string language, bool expected)
+    public void MatchesLanguage_ReturnsCorrectResult(string? seasonName, string language, bool expected)
     {
         var result = CrSimulcastCalendarFilter.MatchesLanguage(seasonName, language);
         Assert.Equal(expected, result);

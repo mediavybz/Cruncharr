@@ -1,3 +1,17 @@
+        function readLocalStorage(key) {
+            try { return localStorage.getItem(key); }
+            catch (e) { return null; }
+        }
+
+        function writeLocalStorage(key, value) {
+            try {
+                localStorage.setItem(key, value);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
         // API-key support. If the server is started with CRUNCHARR_API_KEY set, every
         // /api/* call must carry the key. We attach it from localStorage and, on a 401,
         // prompt for it once and reload. When no key is configured server-side, nothing
@@ -10,7 +24,7 @@
                 const url = typeof input === 'string' ? input : (input && input.url) || '';
                 const isApi = url.indexOf('/api/') !== -1;
                 if (isApi) {
-                    const k = localStorage.getItem(KEY);
+                    const k = readLocalStorage(KEY);
                     if (k) {
                         const headers = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
                         if (!headers.has('X-Api-Key')) headers.set('X-Api-Key', k);
@@ -26,7 +40,7 @@
                     const challenge = res && res.headers ? (res.headers.get('WWW-Authenticate') || '') : '';
                     if (res && res.status === 401 && isApi && /apikey/i.test(challenge)) {
                         const entered = prompt('This Cruncharr server requires an API key. Enter it:');
-                        if (entered) { localStorage.setItem(KEY, entered); location.reload(); }
+                        if (entered && writeLocalStorage(KEY, entered)) location.reload();
                     }
                     return res;
                 });
@@ -90,12 +104,7 @@
                 }
             }).catch(() => {});
             // Restore last visited page or default to downloads
-            let savedPage = 'downloads';
-            try {
-                savedPage = localStorage.getItem('cruncharr_current_page') || 'downloads';
-            } catch (e) {
-                console.warn('localStorage unavailable:', e);
-            }
+            let savedPage = readLocalStorage('cruncharr_current_page') || 'downloads';
             const validPages = ['downloads','add-download','calendar','seasons','history','browse','seasonal','account','settings'];
             if (!validPages.includes(savedPage)) savedPage = 'downloads';
             loadPage(savedPage);
@@ -175,7 +184,7 @@
         }
 
         function navigateTo(page) {
-            localStorage.setItem('cruncharr_current_page', page);
+            writeLocalStorage('cruncharr_current_page', page);
             loadPage(page);
             // Secondary/system pages live behind More on phones; keep the visible destination
             // active rather than highlighting a hidden desktop sidebar item.
@@ -1804,10 +1813,7 @@
 
         function imageSourceAttributes(url) {
             const source = crImg(url);
-            let protectedProxy = false;
-            try {
-                protectedProxy = !!localStorage.getItem('cruncharrApiKey') && /^\/api\//i.test(source || '');
-            } catch (e) { /* localStorage unavailable; use the normal image request. */ }
+            const protectedProxy = !!readLocalStorage('cruncharrApiKey') && /^\/api\//i.test(source || '');
             return protectedProxy
                 ? `src="${TRANSPARENT_IMAGE}" data-auth-src="${escapeHtmlAttribute(source)}"`
                 : `src="${escapeHtmlAttribute(source)}"`;
@@ -4273,7 +4279,7 @@
 
                     return `
                         <div class="history-episode">
-                            <div class="history-episode-number">${ep.episode || '?'}</div>
+                            <div class="history-episode-number">${escapeHtml(ep.episode || '?')}</div>
                             <div class="history-episode-title">${escapeHtml(ep.episodeTitle || 'Unknown Episode')}${airStr ? `<span class="history-episode-airdate"> · ${escapeHtml(airStr)}</span>` : ''}</div>
                             <div class="history-episode-langs">
                                 ${sonarrBadge}
@@ -4534,12 +4540,10 @@
 
         async function maybeRefreshHistoryCoverArt() {
             if (window._historyCoverRefreshAttempted) return;
-            // v4: v3 ran while the backend series fetch was broken (data-array parse bug), so it
-            // stamped 'complete' without actually repairing any poster. Bump forces one re-run.
-            const migrationKey = 'cruncharr-history-series-posters-v4';
-            try {
-                if (localStorage.getItem(migrationKey) === 'complete') return;
-            } catch (e) { /* private browsing can deny storage; refresh once for this page */ }
+            // v5 removes the legacy episode-thumbnail fallback from the series-poster field. Re-run
+            // once for browsers that completed v4 while a screenshot was still persisted there.
+            const migrationKey = 'cruncharr-history-series-posters-v5';
+            if (readLocalStorage(migrationKey) === 'complete') return;
 
             // Legacy rows may contain a download-time episode still instead of a series poster.
             // URL equality cannot reliably identify those rows because Crunchyroll rotates image
@@ -4562,7 +4566,7 @@
                 }
             }
             if (completed) {
-                try { localStorage.setItem(migrationKey, 'complete'); } catch (e) { /* optional cache */ }
+                writeLocalStorage(migrationKey, 'complete');
             }
             if (refreshed && currentPage === 'history') await fetchHistoryData();
         }
@@ -5006,7 +5010,7 @@
             
             // EventSource cannot set request headers, so when an API key is configured
             // it must travel in the query string (the one place ?apiKey= is required).
-            const sseKey = localStorage.getItem('cruncharrApiKey');
+            const sseKey = readLocalStorage('cruncharrApiKey');
             eventSource = new EventSource('/api/v1/queue/sse' + (sseKey ? ('?apiKey=' + encodeURIComponent(sseKey)) : ''));
             
             eventSource.onmessage = (event) => {

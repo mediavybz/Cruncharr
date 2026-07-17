@@ -60,6 +60,7 @@ public class Program
                 Description = "Crunchyroll Downloader API for *arr stack integration"
             });
         });
+        builder.Services.AddSwaggerGenNewtonsoftSupport();
 
         // Load configuration
         var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
@@ -124,7 +125,14 @@ public class Program
         builder.Services.AddSingleton<IMovieService, MovieService>();
         builder.Services.AddSingleton<IMusicService, MusicService>();
         builder.Services.AddSingleton<IEncodingService, EncodingService>();
-        builder.Services.AddHttpClient();
+        builder.Services.AddHttpClient("CruncharrImages", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false
+        });
         builder.Services.AddSingleton<AutoDownloadSchedulerService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<AutoDownloadSchedulerService>());
         builder.Services.AddSingleton<UpdateCheckerService>();

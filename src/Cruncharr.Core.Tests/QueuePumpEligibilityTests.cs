@@ -1,7 +1,9 @@
+using Cruncharr.API.Services;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -80,6 +82,138 @@ public class QueuePumpEligibilityTests
 
         stop.Cancel();
         await processor;
+    }
+
+    [Fact]
+    public async Task Scheduler_UsesSeasonLanguagesAndPopulatesEpisodeMetadata()
+    {
+        var episode = new HistoryEpisode
+        {
+            EpisodeId = "EP1",
+            Episode = "1",
+            EpisodeTitle = "First Episode",
+            EpisodeDescription = "Description",
+            ThumbnailImageUrl = "https://img/episode.jpg",
+            IsEpisodeAvailableOnStreamingService = true,
+            HistoryEpisodeAvailableDubLang = ["ja-JP", "en-US"],
+            HistoryEpisodeAvailableSoftSubs = ["en-US", "es-419"]
+        };
+        var season = new HistorySeason
+        {
+            SeasonId = "SEASON1",
+            SeasonNum = "1",
+            SeasonTitle = "Season 1",
+            HistorySeasonDubLangOverride = ["en-US"],
+            HistorySeasonSoftSubsOverride = ["all"],
+            EpisodesList = [episode]
+        };
+        var series = new HistorySeries
+        {
+            SeriesId = "SERIES1",
+            SeriesTitle = "Example Show",
+            SeriesDescription = "Series description",
+            ThumbnailImageUrl = "https://img/series.jpg",
+            HistorySeriesDubLangOverride = ["ja-JP"],
+            Seasons = [season]
+        };
+
+        var history = new Mock<IHistoryService>();
+        history.Setup(service => service.GetHistorySeriesAsync()).ReturnsAsync([series]);
+        history.Setup(service => service.CrUpdateSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>())).ReturnsAsync(true);
+
+        EpisodeInfo? queuedEpisode = null;
+        var queue = new Mock<IQueueService>();
+        queue.Setup(service => service.GetQueue()).Returns([]);
+        queue.Setup(service => service.AddToQueue(It.IsAny<EpisodeInfo>()))
+            .Callback<EpisodeInfo>(item => queuedEpisode = item);
+
+        using var provider = new ServiceCollection()
+            .AddSingleton(history.Object)
+            .AddSingleton(queue.Object)
+            .AddSingleton(Mock.Of<ICrunchyrollApiService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .BuildServiceProvider();
+        var scheduler = new AutoDownloadSchedulerService(
+            provider,
+            NullLogger<AutoDownloadSchedulerService>.Instance);
+        var config = new CruncharrConfig();
+        config.History.Enabled = true;
+        config.History.AutoRefreshMode = 0;
+        config.History.AutoRefreshAddToQueue = true;
+        config.History.CountMissing = true;
+        config.History.Lang = "fr-FR";
+
+        await scheduler.RunCheckAsync(provider, config, CancellationToken.None);
+
+        Assert.NotNull(queuedEpisode);
+        Assert.Equal(["en-US"], queuedEpisode!.SelectedDubs);
+        Assert.Equal(["en-US", "es-419"], queuedEpisode.SelectedSubs);
+        Assert.Equal("en-US", queuedEpisode.AudioLocale);
+        Assert.Equal("fr-FR", queuedEpisode.Locale);
+        Assert.Equal("Description", queuedEpisode.Description);
+        Assert.Equal("https://img/episode.jpg", queuedEpisode.ThumbnailUrl);
+        Assert.Equal("https://img/series.jpg", queuedEpisode.CoverArtUrl);
+        Assert.Equal("SEASON1", queuedEpisode.SeasonId);
+        Assert.Equal("SERIES1", queuedEpisode.SeriesId);
+    }
+
+    [Fact]
+    public async Task Scheduler_SkipsUnmonitoredSonarrEpisodeWhenConfigured()
+    {
+        var series = new HistorySeries
+        {
+            SeriesId = "SERIES1",
+            SeriesTitle = "Example Show",
+            SonarrSeriesId = "10",
+            Seasons =
+            [
+                new HistorySeason
+                {
+                    SeasonId = "SEASON1",
+                    SeasonNum = "1",
+                    EpisodesList =
+                    [
+                        new HistoryEpisode
+                        {
+                            EpisodeId = "EP1",
+                            Episode = "1",
+                            SonarrEpisodeId = "100",
+                            SonarrHasFile = false,
+                            SonarrIsMonitored = false,
+                            HistoryEpisodeAvailableDubLang = ["en-US"]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var history = new Mock<IHistoryService>();
+        history.Setup(service => service.GetHistorySeriesAsync()).ReturnsAsync([series]);
+        history.Setup(service => service.CrUpdateSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>())).ReturnsAsync(true);
+
+        var queue = new Mock<IQueueService>();
+        queue.Setup(service => service.GetQueue()).Returns([]);
+
+        using var provider = new ServiceCollection()
+            .AddSingleton(history.Object)
+            .AddSingleton(queue.Object)
+            .AddSingleton(Mock.Of<ICrunchyrollApiService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .BuildServiceProvider();
+        var scheduler = new AutoDownloadSchedulerService(
+            provider,
+            NullLogger<AutoDownloadSchedulerService>.Instance);
+        var config = new CruncharrConfig();
+        config.Sonarr.Enabled = true;
+        config.History.Enabled = true;
+        config.History.SkipUnmonitored = true;
+        config.History.CountSonarr = true;
+        config.History.AutoRefreshMode = 0;
+        config.History.AutoRefreshAddToQueue = true;
+
+        await scheduler.RunCheckAsync(provider, config, CancellationToken.None);
+
+        queue.Verify(service => service.AddToQueue(It.IsAny<EpisodeInfo>()), Times.Never);
     }
 
     [Fact]

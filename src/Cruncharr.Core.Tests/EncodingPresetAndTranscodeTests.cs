@@ -75,4 +75,31 @@ public class EncodingPresetAndTranscodeTests
         // Default: allow parallel downloads but serialize transcoding to one at a time.
         Assert.Equal(1, new QueueConfig().MaxSimultaneousTranscodes);
     }
+
+    [Theory]
+    [InlineData(0, true, true)]
+    [InlineData(0, false, false)]
+    [InlineData(1, true, false)]
+    [InlineData(-1, true, false)]
+    public void EncodedOutput_ReplacesMuxedSourceOnlyAfterSuccessfulFfmpeg(
+        int exitCode,
+        bool tempOutputExists,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DownloadService.ShouldReplaceEncodedOutput(exitCode, tempOutputExists));
+    }
+
+    [Theory]
+    [InlineData("episode.mp4", "episode.encoding.mp4")]
+    [InlineData("episode.mkv", "episode.encoding.mkv")]
+    public void EncodingTempOutput_PreservesContainerExtension(string inputName, string expectedName)
+    {
+        var inputPath = Path.Combine("downloads", inputName);
+
+        var tempPath = DownloadService.GetEncodingTempOutputPath(inputPath);
+
+        Assert.Equal(Path.Combine("downloads", expectedName), tempPath);
+    }
 }

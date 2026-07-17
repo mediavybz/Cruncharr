@@ -107,6 +107,37 @@ public class DownloadService : IDownloadService
         return System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s+", " ").Trim().TrimEnd('.', ' ');
     }
 
+    internal static string ResolveSeriesFolderName(EpisodeInfo episode, SonarrSeries? sonarrSeries)
+    {
+        if (sonarrSeries != null)
+        {
+            var sonarrPath = sonarrSeries.Path?.Replace('\\', '/').TrimEnd('/');
+            var sonarrFolder = sonarrPath?.Split('/').LastOrDefault();
+            if (!string.IsNullOrWhiteSpace(sonarrFolder))
+            {
+                return SanitizeFolderName(sonarrFolder);
+            }
+
+            if (!string.IsNullOrWhiteSpace(sonarrSeries.Title))
+            {
+                return SanitizeFolderName(sonarrSeries.Title);
+            }
+        }
+
+        return SanitizeFolderName(episode.SeriesTitle);
+    }
+
+    internal static bool ShouldReplaceEncodedOutput(int exitCode, bool tempOutputExists) =>
+        exitCode == 0 && tempOutputExists;
+
+    internal static string GetEncodingTempOutputPath(string inputPath)
+    {
+        var directory = Path.GetDirectoryName(inputPath) ?? string.Empty;
+        var fileName = Path.GetFileNameWithoutExtension(inputPath);
+        var extension = Path.GetExtension(inputPath);
+        return Path.Combine(directory, $"{fileName}.encoding{extension}");
+    }
+
     internal static string LimitOutputFileName(
         string fileName,
         string filenameTemplate,
@@ -522,7 +553,7 @@ public class DownloadService : IDownloadService
             var folderSeason = (config.Sonarr.UseSonarrNumbering && sonarrEpisode != null)
                 ? sonarrEpisode.SeasonNumber
                 : episode.SeasonNumber;
-            var seriesFolder = SanitizeFolderName(episode.SeriesTitle);
+            var seriesFolder = ResolveSeriesFolderName(episode, sonarrSeries);
             if (!string.IsNullOrEmpty(seriesFolder))
             {
                 outputDir = Path.Combine(outputDir, seriesFolder, $"Season {folderSeason:00}");
@@ -1412,7 +1443,13 @@ public class DownloadService : IDownloadService
                                 : groupOutputPath;
 
                             progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 90, Doing = $"Muxing {locale}..." });
-                            await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupWorkPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: locale);
+                            var muxed = await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupWorkPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: locale);
+                            if (!muxed)
+                            {
+                                throw new DownloadException(
+                                    $"Muxing failed for audio locale '{locale}'.",
+                                    DownloadErrorType.Unknown);
+                            }
 
                             // Post-process encoding for this group if configured
                             if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
@@ -1439,7 +1476,11 @@ public class DownloadService : IDownloadService
                         // when they picked English in Add Download), so the player auto-plays it
                         // instead of the global ja-JP default. Bare adds (no selection) fall back.
                         var primaryDub = episode.SelectedDubs?.FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
-                        await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, workPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: primaryDub);
+                        var muxed = await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, workPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: primaryDub);
+                        if (!muxed)
+                        {
+                            throw new DownloadException("Muxing failed.", DownloadErrorType.Unknown);
+                        }
 
                         // Post-process encoding if configured
                         if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
@@ -2811,7 +2852,7 @@ public class DownloadService : IDownloadService
     private static string FormatKey(byte[] keyBytes) =>
         BitConverter.ToString(keyBytes).Replace("-", "").ToLower();
 
-    private async Task MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang, bool Cc, bool Signs)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null, string? descriptionPath = null, string? preferredAudioLang = null)
+    private async Task<bool> MuxFilesAsync(List<string> mediaFiles, List<(string Path, string Lang)> audioTracks, List<(string Path, string Lang, bool Cc, bool Signs)> subtitles, string? chapterFile, List<FontAttachment> fonts, string? coverPath, string outputPath, CruncharrConfig config, CancellationToken cancellationToken, Dictionary<string, int>? audioDelays = null, Dictionary<string, string>? videoLocales = null, string? descriptionPath = null, string? preferredAudioLang = null)
     {
         // The DEFAULT audio track (what a player auto-plays) is the user's chosen dub for THIS
         // download, not the global DefaultAudio. Without this, picking English in Add Download but
@@ -2980,6 +3021,8 @@ public class DownloadService : IDownloadService
         {
             merger.CleanUp();
         }
+
+        return success;
     }
 
     private static string EscapeProcessArgument(string arg)
@@ -3191,7 +3234,7 @@ public class DownloadService : IDownloadService
             return;
         }
 
-        var tempOutput = inputPath + ".encoding.mkv";
+        var tempOutput = GetEncodingTempOutputPath(inputPath);
         var args = new List<string>
         {
             "-nostdin",
@@ -3237,9 +3280,21 @@ public class DownloadService : IDownloadService
         args.Add(tempOutput);
 
         var durationSeconds = await ProbeVideoDurationAsync(inputPath, cancellationToken);
-        await RunFfmpegWithEncodeProgressAsync(ffmpegPath, args, durationSeconds, progress, label, cancellationToken);
+        int exitCode;
+        try
+        {
+            exitCode = await RunFfmpegWithEncodeProgressAsync(ffmpegPath, args, durationSeconds, progress, label, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (File.Exists(tempOutput))
+            {
+                File.Delete(tempOutput);
+            }
+            throw;
+        }
 
-        if (File.Exists(tempOutput))
+        if (ShouldReplaceEncodedOutput(exitCode, File.Exists(tempOutput)))
         {
             File.Delete(inputPath);
             File.Move(tempOutput, inputPath);
@@ -3247,7 +3302,15 @@ public class DownloadService : IDownloadService
         }
         else
         {
-            _logger?.LogWarning("Encoding produced no output for {Path} with preset {Preset}; keeping muxed file", inputPath, presetName);
+            if (File.Exists(tempOutput))
+            {
+                File.Delete(tempOutput);
+            }
+            _logger?.LogWarning(
+                "Encoding failed with exit code {ExitCode} for {Path} with preset {Preset}; keeping muxed file",
+                exitCode,
+                inputPath,
+                presetName);
         }
     }
 
@@ -3283,7 +3346,7 @@ public class DownloadService : IDownloadService
     /// percentage + ETA through the queue progress (Percent stays in the 95-99 processing
     /// band; Doing carries the human-readable "Encoding... N%"). Kills ffmpeg on cancel.
     /// </summary>
-    private async Task RunFfmpegWithEncodeProgressAsync(string ffmpegPath, List<string> args, double? durationSeconds, IProgress<DownloadProgress>? progress, string? label, CancellationToken cancellationToken)
+    private async Task<int> RunFfmpegWithEncodeProgressAsync(string ffmpegPath, List<string> args, double? durationSeconds, IProgress<DownloadProgress>? progress, string? label, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -3301,7 +3364,7 @@ public class DownloadService : IDownloadService
         if (process == null)
         {
             _logger?.LogError("Failed to start process: {Executable}", ffmpegPath);
-            return;
+            return -1;
         }
 
         await using var killRegistration = cancellationToken.Register(() =>
@@ -3377,6 +3440,8 @@ public class DownloadService : IDownloadService
         {
             _logger?.LogDebug("Process stderr: {Error}", error);
         }
+
+        return process.ExitCode;
     }
 
     // Codec-aware quality option (mirrors upstream Helpers.GetQualityOption).

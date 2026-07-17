@@ -43,7 +43,12 @@
 
 ### Release Status (Round 36)
 - Release version: 1.0.53.
-- Source commit, registry digests, stable promotion, and GitHub release pending publication.
+- Source commit: `be4ff44` (`fix: harden history and API runtime`).
+- `testing` and stable `master` pushed to the audited source commit.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, `:latest`, and `:1.0.53`.
+- Registry index digest: `sha256:b4570cc27de89c180d452025e10db99450c2a46f4ccd54f1dc4d86c78b0c8f60` (linux/amd64 + linux/arm64, with attestations).
+- Pulled-image smoke passed for `:testing` and `:latest` at `1.0.53+be4ff44af18c32ff00cfb585740a7224b1a932e2`; testing Swagger returned 200.
+- Tag `v1.0.53` pushed and GitHub release published: https://github.com/mediavybz/Cruncharr/releases/tag/v1.0.53
 
 ---
 

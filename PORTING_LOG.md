@@ -1,7 +1,42 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 38 complete: Docker dependency reproducibility)
+## Last Updated: 2026-07-17 (Round 39 in progress: full-stack verification and Docker cache optimization)
+
+---
+
+## Round 39 — Full-Stack Verification and Docker Cache Optimization (2026-07-17)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.API/Cruncharr.API.csproj | N/A (testing release metadata) | [PT] Bumped assembly, file, and package version 1.0.54 → 1.0.55 for the cache-optimized testing image; no framework, dependency, or application behavior change | 2026-07-17 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing API release metadata response | [PT] Aligned the no-attribute fallback version with 1.0.55; route, response shape, status, and health logic unchanged | 2026-07-17 |
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/index.html | Existing web UI release asset refresh | none | Bumped CSS and JavaScript cache keys 1.0.54 → 1.0.55 so browsers cannot retain mixed release assets | 2026-07-17 |
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Dockerfile | [PT] Moved the stage-scoped `SOURCE_REVISION` declaration below the stable project-manifest restore layer, so a new source commit invalidates publish metadata without forcing both architecture-specific NuGet restores to run again; image inputs and runtime behavior unchanged | 2026-07-17 |
+
+### Verification
+- In progress: pushed-image inspection and pulled-image smoke.
+- Repeat-build cache proof passed: changing only `SOURCE_REVISION` kept the architecture-specific restore instruction cached and reran only publish. The already-completed first revision resolved in 0.62 seconds; the second revision completed its publish in 40.11 seconds without either NuGet restore.
+- Baseline before edits: 168/168 Release tests passed; warning-as-error build and 151–211 analyzer sets reported zero warnings; NuGet reported no vulnerable or deprecated direct/transitive packages.
+- Firefox 592 px and 1440 px live checks covered all nine routes plus History poster/table/detail views and the mobile More sheet; document/content widths matched their clients with no clipped descendants. Mocked distinct series-cover and episode-shot inputs proved History cards used the series cover.
+- Final restored Release test suite passed 168/168; warning-as-error build and analyzer verification remained clean. Exact release-reference, frontend JavaScript, Dockerfile check, Compose config, shell syntax, whitespace, repository integrity, and secret/pattern checks passed.
+- Complete cache-only linux/amd64 and linux/arm64 images built from 1.0.55 source. The loaded amd64 candidate returned healthy at `1.0.55+local-audit`, served exactly one 1.0.55 CSS and JavaScript key, reached Docker healthy state, ran as UID/GID 1234, linked all native binaries, preserved FFmpeg N-125649-g8d394252d8, and shut down gracefully in 0.92 seconds with exit code 0.
+- Trivy 0.72.0 found 0 fixable high/critical vulnerabilities in the 1.0.55 candidate. GitHub repository triage found no open issues or pull requests.
+
+### API Contract
+- No API route, request, response-shape, or status-code changes.
+
+### Status (Round 39)
+- In progress on `testing`.
 
 ---
 

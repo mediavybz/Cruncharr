@@ -17,7 +17,6 @@ ARG SOURCE_REVISION
 # -- Stage 1: .NET build -------------------------------------------------------
 FROM --platform=$BUILDPLATFORM ${DOTNET_SDK_IMAGE} AS dotnet-build
 ARG TARGETARCH
-ARG SOURCE_REVISION
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
     NUGET_XMLDOC_MODE=skip
@@ -44,6 +43,7 @@ RUN set -eux; \
 COPY src/Cruncharr.Core/ src/Cruncharr.Core/
 COPY src/Cruncharr.API/ src/Cruncharr.API/
 COPY src/Cruncharr.CLI/ src/Cruncharr.CLI/
+ARG SOURCE_REVISION
 RUN set -eux; \
     case "$TARGETARCH" in \
         amd64) RID=linux-x64 ;; \

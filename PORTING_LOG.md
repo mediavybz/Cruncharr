@@ -47,14 +47,17 @@
 - Infrastructure validation: `docker compose config -q` passed; both Unraid XML templates parsed successfully
 - Source hygiene: `git diff --check` passed
 - Dual-architecture self-contained publish completed for linux/amd64 and linux/arm64
+- Post-commit published-image smoke: `/api/v1/health` returned healthy at `1.0.52+2846b7f674ee8f37c8fae78c65b07692fb07af59`; served HTML referenced `app.js?v=1.0.52`; served JS contained the scheduler UI control
 
 ### API Contract
 - No API route, request, response-shape, or status-code changes. Calendar merged episodes are exposed as additional objects using the existing response shape.
 
 ### Release Status (Round 35)
 - Testing release version: 1.0.52
+- Source commit: `2846b7f` (`fix: harden downloads and scheduler`)
 - Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`.
-- Registry index digest: `sha256:67a7785e2d448bc8b7b506a7eec486742e6b8ead07b28fe1ce0dee2d1c67de6a` (linux/amd64 + linux/arm64).
+- Initial pre-commit registry index digest: `sha256:67a7785e2d448bc8b7b506a7eec486742e6b8ead07b28fe1ce0dee2d1c67de6a` [superseded].
+- Final post-commit registry index digest: `sha256:35b3164630ea08ba1b14af07a36fbc4af1d7c6b730d00e8b59fcc6d9887376f0` (linux/amd64 + linux/arm64).
 - Stable `master`, `:latest`, and version tags were not changed.
 
 ---

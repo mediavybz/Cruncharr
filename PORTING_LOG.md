@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 40 in progress: language metadata and track audit)
+## Last Updated: 2026-07-17 (Round 40 complete: language metadata and track audit)
 
 ---
 
@@ -33,6 +33,7 @@
 - Frontend JavaScript syntax, exact 26-locale backend/web catalog parity, Compose config, Git-Bash syntax for both shell scripts, exact 1.0.56 release references, and `git diff --check` passed.
 - Dockerfile check completed with no warnings; cache-only linux/amd64 and linux/arm64 builds completed from the 1.0.56 working source.
 - Loaded linux/amd64 smoke returned `1.0.56+local-language-audit`, served exactly one 1.0.56 CSS/JavaScript key, contained all four restored web locales, contained no hard-coded false rate-limit label, linked the apphost without missing libraries, retained FFmpeg N-125649-g8d394252d8, became Docker healthy, ran PID 1 as UID/GID 1234, and stopped gracefully with exit code 0.
+- Freshly pulled GHCR testing image became Docker healthy and returned `1.0.56+d9baf9993fbe23357fe03aa6efa44c8c4b7b3020`; it served exactly one 1.0.56 CSS and JavaScript key, contained all restored web locales and no hard-coded false rate-limit label, ran PID 1 as UID/GID 1234, linked without missing libraries, retained FFmpeg N-125649-g8d394252d8, and stopped gracefully with exit code 0.
 
 ### Frontend (Mode B)
 | File | Desktop Equivalent | API Endpoints Used | Date |
@@ -41,10 +42,19 @@
 | src/Cruncharr.API/wwwroot/index.html | Existing web release asset refresh | none | Bumped aligned CSS and JavaScript cache keys 1.0.55 → 1.0.56 so browsers cannot retain the pre-fix language/status script | 2026-07-17 |
 
 ### API Contract
-- No API route, request, response-shape, or status-code changes planned.
+- No API route, request, response-shape, or status-code changes.
 
 ### Status (Round 40)
-- In progress on `testing`.
+- Complete on `testing`.
+
+### Release Status (Round 40)
+- Testing release version: 1.0.56.
+- Source commit: `d9baf99` (`fix(download): preserve language metadata`).
+- `testing` pushed to the source commit.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`.
+- Registry index digest: `sha256:5c7b2e779dc90f0ad02330ad0f0ee3383af170e09a8346c4a92583f10b786845`.
+- linux/amd64 manifest: `sha256:688ec183ef26402d8362a57200827de1fbfe28440b98ea57af7dd9338f7720ec`; linux/arm64 manifest: `sha256:b933c6468526f658e7f2dd327805460daad9e7a2b790b4384aedc6965e7557d8`; both include provenance attestations.
+- Stable `master`, `:latest`, and version tags were not changed.
 
 ---
 

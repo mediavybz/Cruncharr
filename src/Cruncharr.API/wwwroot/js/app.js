@@ -2383,13 +2383,16 @@
 
         // ================== SETTINGS ==================
         const LANG_OPTIONS = [
-            {value:'ja-JP',label:'Japanese'},{value:'en-US',label:'English'},{value:'de-DE',label:'German'},
+            {value:'ja-JP',label:'Japanese'},{value:'en-US',label:'English'},{value:'en-IN',label:'English (India)'},
+            {value:'de-DE',label:'German'},
             {value:'es-ES',label:'Spanish (Spain)'},{value:'es-419',label:'Spanish (Latin America)'},
             {value:'fr-FR',label:'French'},{value:'it-IT',label:'Italian'},{value:'pt-BR',label:'Portuguese (Brazil)'},
             {value:'pt-PT',label:'Portuguese (Portugal)'},{value:'ru-RU',label:'Russian'},{value:'hi-IN',label:'Hindi'},
-            {value:'ar-SA',label:'Arabic'},{value:'zh-CN',label:'Chinese (Simplified)'},{value:'ko-KR',label:'Korean'},
+            {value:'ar-SA',label:'Arabic'},{value:'zh-CN',label:'Chinese (Mainland China)'},
+            {value:'zh-HK',label:'Chinese (Hong Kong)'},{value:'zh-TW',label:'Chinese (Taiwan)'},{value:'ko-KR',label:'Korean'},
             {value:'pl-PL',label:'Polish'},{value:'tr-TR',label:'Turkish'},{value:'th-TH',label:'Thai'},
             {value:'vi-VN',label:'Vietnamese'},{value:'id-ID',label:'Indonesian'},{value:'ms-MY',label:'Malay'},
+            {value:'ca-ES',label:'Catalan'},
             {value:'ta-IN',label:'Tamil'},{value:'te-IN',label:'Telugu'}
         ];
 
@@ -4937,7 +4940,10 @@
                 const retryDate = new Date(progress.retryAtUtc);
                 if (!isNaN(retryDate.getTime()) && retryDate > new Date()) {
                     const retryTime = retryDate.toLocaleTimeString();
-                    return `Rate limited, retrying at ${escapeHtml(retryTime)}`;
+                    const reason = progress.doing && progress.doing.trim().length > 0
+                        ? escapeHtml(progress.doing.trim())
+                        : 'Retry scheduled';
+                    return `${reason} · retrying at ${escapeHtml(retryTime)}`;
                 }
             }
             // Use doing if not empty, otherwise derive from state

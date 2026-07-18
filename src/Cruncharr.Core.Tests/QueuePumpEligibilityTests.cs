@@ -45,6 +45,14 @@ public class QueuePumpEligibilityTests
     }
 
     [Fact]
+    public void MissingLanguage_IsNotRetried()
+    {
+        Assert.False(QueueService.IsRetryableDownloadError(DownloadErrorType.MissingLanguage));
+        Assert.True(QueueService.IsRetryableDownloadError(DownloadErrorType.RateLimited));
+        Assert.True(QueueService.IsRetryableDownloadError(DownloadErrorType.NetworkError));
+    }
+
+    [Fact]
     public async Task AutoStartDelay_CanBePausedBeforeDownloadBegins()
     {
         var downloadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

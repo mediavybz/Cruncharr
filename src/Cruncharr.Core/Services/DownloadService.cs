@@ -89,13 +89,104 @@ public class DownloadService : IDownloadService
         return string.IsNullOrWhiteSpace(episode.Guid) ? null : episode.Guid;
     }
 
-    public static bool ShouldRefetchVersions(EpisodeInfo episode)
+    public static bool ShouldRefetchVersions(EpisodeInfo episode, bool requireAudioRoles = false)
     {
         if (episode.Versions == null || episode.Versions.Count == 0) return true;
+        if (requireAudioRoles && !episode.Versions.Any(version => version.Roles != null)) return true;
         // A dub was explicitly requested -> never trust posted versions; the real per-dub
         // MediaGuid must come from Crunchyroll.
         if (episode.SelectedDubs != null && episode.SelectedDubs.Any(d => !string.IsNullOrWhiteSpace(d))) return true;
         return false;
+    }
+
+    internal static void ApplyRefreshedEpisodeMetadata(EpisodeInfo episode, EpisodeInfo fullEpisode, bool needVersions)
+    {
+        if (needVersions)
+        {
+            episode.Versions = fullEpisode.Versions;
+            episode.AudioLocale = fullEpisode.AudioLocale;
+        }
+
+        // subtitle_locales belongs to the authoritative episode response just like versions.
+        // Queue payloads intentionally do not need to duplicate it, so always carry it forward.
+        episode.SubtitleLocales = fullEpisode.SubtitleLocales?.Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+        episode.Guid = fullEpisode.Guid ?? episode.Guid;
+        if (!string.IsNullOrEmpty(fullEpisode.SeriesId)) episode.SeriesId = fullEpisode.SeriesId;
+        if (!string.IsNullOrEmpty(fullEpisode.SeriesTitle)) episode.SeriesTitle = fullEpisode.SeriesTitle;
+        if (!string.IsNullOrEmpty(fullEpisode.SeasonId)) episode.SeasonId = fullEpisode.SeasonId;
+        if (!string.IsNullOrEmpty(fullEpisode.SeasonTitle)) episode.SeasonTitle = fullEpisode.SeasonTitle;
+        if (fullEpisode.SeasonNumber > 0 && episode.SeasonNumber <= 0) episode.SeasonNumber = fullEpisode.SeasonNumber;
+        if (fullEpisode.EpisodeNumber > 0 && episode.EpisodeNumber <= 0) episode.EpisodeNumber = fullEpisode.EpisodeNumber;
+        if (!string.IsNullOrEmpty(fullEpisode.Episode)) episode.Episode = fullEpisode.Episode;
+        // Backfill artwork for ID-only add paths such as History.
+        if (string.IsNullOrEmpty(episode.ThumbnailUrl) && !string.IsNullOrEmpty(fullEpisode.ThumbnailUrl)) episode.ThumbnailUrl = fullEpisode.ThumbnailUrl;
+        if (string.IsNullOrEmpty(episode.CoverArtUrl) && !string.IsNullOrEmpty(fullEpisode.CoverArtUrl)) episode.CoverArtUrl = fullEpisode.CoverArtUrl;
+        if ((episode.Images == null || episode.Images.Count == 0) && fullEpisode.Images?.Count > 0) episode.Images = fullEpisode.Images;
+    }
+
+    internal static (List<string> MissingDubs, List<string> MissingSubs) FindMissingSelectedLanguages(
+        EpisodeInfo episode,
+        CruncharrConfig config)
+    {
+        static List<string> Normalize(IEnumerable<string>? values) => values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+
+        var availableDubs = Normalize(episode.Versions?.Select(version => version.AudioLocale));
+        var selectedDubs = Normalize(episode.SelectedDubs);
+        var requiredDubs = selectedDubs.Count > 0 ? selectedDubs : Normalize(config.Download.DubLanguages);
+        var missingDubs = config.Download.DownloadFirstAvailableDub
+            ? requiredDubs.Count > 0 && !requiredDubs.Any(required => availableDubs.Contains(required, StringComparer.OrdinalIgnoreCase))
+                ? requiredDubs
+                : []
+            : requiredDubs.Where(required => !availableDubs.Contains(required, StringComparer.OrdinalIgnoreCase)).ToList();
+
+        var selectedSubs = Normalize(episode.SelectedSubs);
+        var requiredSubs = selectedSubs.Count > 0 ? selectedSubs : Normalize(config.Download.SoftSubs);
+        var usesSubtitleSentinel = requiredSubs.Any(required =>
+            string.Equals(required, "all", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(required, "none", StringComparison.OrdinalIgnoreCase));
+        var availableSubs = Normalize(episode.SubtitleLocales);
+        var missingSubs = config.Download.SkipSubs || usesSubtitleSentinel
+            ? []
+            : requiredSubs.Where(required => !availableSubs.Contains(required, StringComparer.OrdinalIgnoreCase)).ToList();
+
+        return (missingDubs, missingSubs);
+    }
+
+    internal static void ApplySelectedVersionMetadata(EpisodeInfo episode, EpisodeVersion selectedVersion)
+    {
+        episode.AudioLocale = selectedVersion.AudioLocale;
+        episode.Locale = selectedVersion.AudioLocale;
+    }
+
+    internal static string ResolveRequestedAudioLanguage(EpisodeInfo episode, CruncharrConfig config) =>
+        episode.SelectedDubs?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim()
+        ?? config.Download.DefaultAudio;
+
+    internal static bool ShouldDownloadMultipleDubs(EpisodeInfo episode, CruncharrConfig config)
+    {
+        var explicitDubCount = episode.SelectedDubs?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count() ?? 0;
+        return !config.Download.NoAudio &&
+               !config.Download.DownloadFirstAvailableDub &&
+               (config.Download.DownloadMultipleDubs || explicitDubCount > 1) &&
+               episode.Versions is { Count: > 1 };
+    }
+
+    internal static EpisodeVersion? FindAudioDescriptionVersion(EpisodeInfo episode) =>
+        episode.Versions?.FirstOrDefault(version =>
+            version.Roles?.Any(role => string.Equals(role, "description", StringComparison.OrdinalIgnoreCase)) == true);
+
+    internal static bool IsAudioDescriptionFile(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return fileName.Contains("_ad.", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Contains("_ad.enc.", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Make a series/season string safe as a single path segment (strip invalid chars,
@@ -208,32 +299,19 @@ public class DownloadService : IDownloadService
         // under a per-episode id and show as its own "Episode N" row instead of nesting under the
         // show (upstream groups by the real CR series id).
         // [PT] Using ParseEpisodeByIdAsync instead of GetEpisodeAsync to get version deduplication.
-        bool needVersions = ShouldRefetchVersions(episode);
+        bool needVersions = ShouldRefetchVersions(episode, config.Download.DownloadDescriptionAudio);
         bool needSeriesMeta = string.IsNullOrWhiteSpace(episode.SeriesId) || string.IsNullOrWhiteSpace(episode.SeriesTitle);
-        if (needVersions || needSeriesMeta)
+        bool needSubtitleMeta = !config.Download.SkipSubs &&
+                                episode.SubtitleLocales.Count == 0 &&
+                                ((episode.SelectedSubs?.Any(value => !string.IsNullOrWhiteSpace(value)) ?? false) ||
+                                 config.Download.SoftSubs.Any(value => !string.IsNullOrWhiteSpace(value)));
+        if (needVersions || needSeriesMeta || needSubtitleMeta)
         {
             progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 10, Doing = "Fetching episode info..." });
             var fullEpisode = await _api.ParseEpisodeByIdAsync(episode.Id, null, false, cancellationToken);
             if (fullEpisode != null)
             {
-                if (needVersions)
-                {
-                    episode.Versions = fullEpisode.Versions;
-                    episode.AudioLocale = fullEpisode.AudioLocale;
-                }
-                episode.Guid = fullEpisode.Guid ?? episode.Guid;
-                if (!string.IsNullOrEmpty(fullEpisode.SeriesId)) episode.SeriesId = fullEpisode.SeriesId;
-                if (!string.IsNullOrEmpty(fullEpisode.SeriesTitle)) episode.SeriesTitle = fullEpisode.SeriesTitle;
-                if (!string.IsNullOrEmpty(fullEpisode.SeasonId)) episode.SeasonId = fullEpisode.SeasonId;
-                if (!string.IsNullOrEmpty(fullEpisode.SeasonTitle)) episode.SeasonTitle = fullEpisode.SeasonTitle;
-                if (fullEpisode.SeasonNumber > 0 && episode.SeasonNumber <= 0) episode.SeasonNumber = fullEpisode.SeasonNumber;
-                if (fullEpisode.EpisodeNumber > 0 && episode.EpisodeNumber <= 0) episode.EpisodeNumber = fullEpisode.EpisodeNumber;
-                if (!string.IsNullOrEmpty(fullEpisode.Episode)) episode.Episode = fullEpisode.Episode;
-                // Backfill artwork too: add-paths that send only an episode id (e.g. the History
-                // tab) leave the queue item with no thumbnail, so it rendered the 📺 placeholder.
-                if (string.IsNullOrEmpty(episode.ThumbnailUrl) && !string.IsNullOrEmpty(fullEpisode.ThumbnailUrl)) episode.ThumbnailUrl = fullEpisode.ThumbnailUrl;
-                if (string.IsNullOrEmpty(episode.CoverArtUrl) && !string.IsNullOrEmpty(fullEpisode.CoverArtUrl)) episode.CoverArtUrl = fullEpisode.CoverArtUrl;
-                if ((episode.Images == null || episode.Images.Count == 0) && fullEpisode.Images?.Count > 0) episode.Images = fullEpisode.Images;
+                ApplyRefreshedEpisodeMetadata(episode, fullEpisode, needVersions);
                 _logger?.LogInformation("Fetched episode details: {EpisodeId}, Versions={VersionCount}, Series={Series}, Season={Season}",
                     fullEpisode.Id, fullEpisode.Versions?.Count ?? 0, fullEpisode.SeriesTitle, fullEpisode.SeasonTitle);
             }
@@ -246,23 +324,7 @@ public class DownloadService : IDownloadService
         // Check if episode has all selected dubs/subs before downloading
         if (config.Download.DownloadOnlyWithAllSelectedDubSub)
         {
-            var availableDubs = episode.Versions?.Select(v => v.AudioLocale).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
-            // Use episode's SelectedDubs if set, otherwise fall back to config
-            var requiredDubs = episode.SelectedDubs?.Count > 0
-                ? episode.SelectedDubs
-                : config.Download.DubLanguages;
-            var missingDubs = requiredDubs
-                .Where(d => !availableDubs.Contains(d, StringComparer.OrdinalIgnoreCase))
-                .ToList();
-
-            var availableSubs = episode.SubtitleLocales ?? new List<string>();
-            // Use episode's SelectedSubs if set, otherwise fall back to config
-            var requiredSubs = episode.SelectedSubs?.Count > 0
-                ? episode.SelectedSubs
-                : config.Download.SoftSubs;
-            var missingSubs = requiredSubs
-                .Where(s => !availableSubs.Contains(s, StringComparer.OrdinalIgnoreCase))
-                .ToList();
+            var (missingDubs, missingSubs) = FindMissingSelectedLanguages(episode, config);
 
             if (missingDubs.Count > 0 || missingSubs.Count > 0)
             {
@@ -271,7 +333,7 @@ public class DownloadService : IDownloadService
                 if (missingSubs.Count > 0) reasons.Add($"missing subs: {string.Join(", ", missingSubs)}");
                 var message = $"Skipping download - episode does not have all selected languages ({string.Join("; ", reasons)})";
                 _logger?.LogWarning(message);
-                return new DownloadResult { Success = false, ErrorMessage = message };
+                return new DownloadResult { Success = false, ErrorMessage = message, ErrorType = DownloadErrorType.MissingLanguage };
             }
         }
 
@@ -350,6 +412,7 @@ public class DownloadService : IDownloadService
 
             if (currentVersion != null)
             {
+                ApplySelectedVersionMetadata(episode, currentVersion);
                 mediaGuid = currentVersion.Guid;
                 if (!string.IsNullOrEmpty(currentVersion.MediaGuid))
                 {
@@ -520,7 +583,7 @@ public class DownloadService : IDownloadService
             NumberPadding = config.Download.LeadingNumbers,
             WhitespaceReplace = config.Download.FilenameWhitespaceSubstitute,
             Quality = config.Download.QualityVideo,
-            AudioLanguage = config.Download.DefaultAudio,
+            AudioLanguage = ResolveRequestedAudioLanguage(episode, config),
             SonarrSeries = sonarrSeries,
             SonarrEpisode = sonarrEpisode,
             UseSonarrNumbering = config.Sonarr.UseSonarrNumbering,
@@ -635,9 +698,7 @@ public class DownloadService : IDownloadService
                     : config.Download.DubLanguages;
                 // DownloadFirstAvailableDub limits the result to a single (first-available) dub,
                 // so skip downloading any additional dubs when it is enabled.
-                if (!config.Download.NoAudio && !config.Download.DownloadFirstAvailableDub &&
-                    episode.Versions != null && episode.Versions.Count > 1 &&
-                    (config.Download.DownloadMultipleDubs || dashSelectedDubs.Count > 1))
+                if (ShouldDownloadMultipleDubs(episode, config))
                 {
                     var primaryLocale = episode.AudioLocale;
                     var extraDubs = dashSelectedDubs
@@ -648,7 +709,7 @@ public class DownloadService : IDownloadService
 
                     foreach (var dub in extraDubs)
                     {
-                        var dubVersion = episode.Versions.FirstOrDefault(v =>
+                        var dubVersion = episode.Versions!.FirstOrDefault(v =>
                             string.Equals(v.AudioLocale, dub, StringComparison.OrdinalIgnoreCase));
                         if (dubVersion == null) continue;
 
@@ -757,6 +818,38 @@ public class DownloadService : IDownloadService
                         }
                     }
                 }
+
+                // Desktop fetches AD as a separate playback role. A DASH primary therefore needs
+                // a second, audio-only DASH download with a distinct filename and track role.
+                if (!config.Download.NoAudio && config.Download.DownloadDescriptionAudio)
+                {
+                    var adVersion = FindAudioDescriptionVersion(episode);
+                    if (adVersion != null && !string.IsNullOrEmpty(adVersion.Guid))
+                    {
+                        var adGuid = adVersion.Guid.Contains(':') ? adVersion.Guid.Split(':')[1] : adVersion.Guid;
+                        try
+                        {
+                            var adPlayback = await GetPlaybackDataAsync(adGuid, true, cancellationToken, config);
+                            if (adPlayback?.VideoUrl != null &&
+                                (adPlayback.VideoUrl.Contains(".mpd") || adPlayback.VideoUrl.Contains("/dash/")))
+                            {
+                                var (_, adAudioPaths) = await DownloadDashTracksAsync(
+                                    adPlayback.VideoUrl, tempDir, config, progress, 78, 80, cancellationToken,
+                                    adPlayback.VideoToken, adGuid, [adVersion.AudioLocale], audioOnly: true,
+                                    audioFileSuffix: "_ad");
+                                foreach (var adAudio in adAudioPaths)
+                                {
+                                    downloadedFiles.Add(adAudio.Path);
+                                    audioTrackLanguages.Add(adAudio);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogWarning(ex, "Failed to download DASH audio description for {Locale}", adVersion.AudioLocale);
+                        }
+                    }
+                }
             }
             else
             {
@@ -832,8 +925,7 @@ public class DownloadService : IDownloadService
 
                 // Download additional dubs if configured (skip if NoAudio is enabled)
                 // Note: Video is only downloaded once (DlVideoOnce optimization). Additional dubs reuse the same video stream.
-                if (!config.Download.NoAudio && !config.Download.DownloadFirstAvailableDub &&
-                    config.Download.DownloadMultipleDubs && episode.Versions != null && episode.Versions.Count > 1)
+                if (ShouldDownloadMultipleDubs(episode, config))
                 {
                     var primaryLocale = episode.AudioLocale;
                     // Use episode's SelectedDubs if set, otherwise fall back to config
@@ -847,7 +939,7 @@ public class DownloadService : IDownloadService
 
                     foreach (var dub in selectedDubs)
                     {
-                        var dubVersion = episode.Versions.FirstOrDefault(v =>
+                        var dubVersion = episode.Versions!.FirstOrDefault(v =>
                             string.Equals(v.AudioLocale, dub, StringComparison.OrdinalIgnoreCase));
 
                         if (dubVersion == null) continue;
@@ -935,69 +1027,65 @@ public class DownloadService : IDownloadService
                     }
                 }
 
+                // A dub playback commonly exposes only signs/songs. The full dialogue subtitles
+                // live on the original version, so union them after the HLS audio work has settled.
+                await UnionOriginalVersionSubtitlesIfNeededAsync(
+                    episode, playbackData, mediaGuid, config, cancellationToken);
+
                 // Download Audio Description (AD) track if configured (skip if NoAudio is enabled)
                 if (!config.Download.NoAudio && config.Download.DownloadDescriptionAudio && episode.Versions != null)
                 {
-                    var adVersion = episode.Versions.FirstOrDefault(v =>
-                        v.Roles?.Any(r => string.Equals(r, "description", StringComparison.OrdinalIgnoreCase)) == true);
+                    var adVersion = FindAudioDescriptionVersion(episode);
 
                     if (adVersion != null)
                     {
                         var adLocale = adVersion.AudioLocale;
-                        // Skip if we already downloaded this locale (AD tracks share locale with main track)
-                        var alreadyDownloaded = audioTrackLanguages.Any(a =>
-                            string.Equals(a.Lang, adLocale, StringComparison.OrdinalIgnoreCase));
-
-                        if (!alreadyDownloaded)
+                        // AD is a distinct playback role and normally shares the standard track's
+                        // locale, so the normal locale must not suppress it.
+                        var adMediaGuid = adVersion.Guid;
+                        if (!string.IsNullOrEmpty(adMediaGuid))
                         {
-                            var adMediaGuid = adVersion.Guid;
-                            var adMediaId = adVersion.MediaGuid ?? adVersion.Guid;
+                            if (adMediaGuid.Contains(':')) adMediaGuid = adMediaGuid.Split(':')[1];
 
-                            if (!string.IsNullOrEmpty(adMediaId))
+                            _logger?.LogInformation("Fetching playback data for Audio Description: {Locale} (Guid={Guid})", adLocale, adMediaGuid);
+
+                            try
                             {
-                                if (adMediaId.Contains(':')) adMediaId = adMediaId.Split(':')[1];
-                                if (adMediaGuid.Contains(':')) adMediaGuid = adMediaGuid.Split(':')[1];
-
-                                _logger?.LogInformation("Fetching playback data for Audio Description: {Locale} (Guid={Guid})", adLocale, adMediaGuid);
-
-                                try
+                                var adPlayback = await GetPlaybackDataAsync(adMediaGuid, true, cancellationToken, config);
+                                if (adPlayback?.AudioUrl != null)
                                 {
-                                    var adPlayback = await GetPlaybackDataAsync(adMediaGuid, true, cancellationToken, config);
-                                    if (adPlayback?.AudioUrl != null)
+                                    progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 67, Doing = $"Downloading audio description ({adLocale})..." });
+
+                                    var adAudioPath = Path.Combine(tempDir, $"audio_{(adLocale ?? "unknown").Replace("-", "").ToLower()}_ad.m4a");
+                                    var adAudioIsHls = IsHlsUrl(adPlayback.AudioUrl);
+
+                                    if (adAudioIsHls)
                                     {
-                                        progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 67, Doing = $"Downloading audio description ({adLocale})..." });
-
-                                        var adAudioPath = Path.Combine(tempDir, $"audio_{(adLocale ?? "unknown").Replace("-", "").ToLower()}_ad.m4a");
-                                        var adAudioIsHls = IsHlsUrl(adPlayback.AudioUrl);
-
-                                        if (adAudioIsHls)
+                                        var hlsResult = await DownloadHlsStreamAsync(adPlayback.AudioUrl, adAudioPath, false, true, config, progress, 60, 80, cancellationToken);
+                                        if (hlsResult.Ok)
                                         {
-                                            var hlsResult = await DownloadHlsStreamAsync(adPlayback.AudioUrl, adAudioPath, false, true, config, progress, 60, 80, cancellationToken);
-                                            if (hlsResult.Ok)
-                                            {
-                                                downloadedFiles.Add(adAudioPath);
-                                                audioTrackLanguages.Add((adAudioPath, adLocale ?? "unknown"));
-                                                _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            await DownloadStreamAsync(adPlayback.AudioUrl, adAudioPath, progress, 60, 80, cancellationToken, adPlayback.VideoToken);
                                             downloadedFiles.Add(adAudioPath);
                                             audioTrackLanguages.Add((adAudioPath, adLocale ?? "unknown"));
                                             _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
                                         }
                                     }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger?.LogWarning(ex, "Failed to download audio description for {Locale}", adLocale);
+                                    else
+                                    {
+                                        await DownloadStreamAsync(adPlayback.AudioUrl, adAudioPath, progress, 60, 80, cancellationToken, adPlayback.VideoToken);
+                                        downloadedFiles.Add(adAudioPath);
+                                        audioTrackLanguages.Add((adAudioPath, adLocale ?? "unknown"));
+                                        _logger?.LogInformation("Downloaded audio description track: {Locale} -> {Path}", adLocale, adAudioPath);
+                                    }
                                 }
                             }
-                            else
+                            catch (Exception ex)
                             {
-                                _logger?.LogWarning("Audio Description version missing media ID");
+                                _logger?.LogWarning(ex, "Failed to download audio description for {Locale}", adLocale);
                             }
+                        }
+                        else
+                        {
+                            _logger?.LogWarning("Audio Description version missing media ID");
                         }
                     }
                 }
@@ -1022,9 +1110,10 @@ public class DownloadService : IDownloadService
                 foreach (var sub in playbackData.Subtitles)
                 {
                     var langCode = (sub.Lang ?? "unknown").Replace("-", "").ToLower();
-                    var shouldDownload = subLangs.Contains("all") ||
-                                         (sub.Lang != null && subLangs.Contains(sub.Lang)) ||
-                                         subLangs.Contains(langCode);
+                    var shouldDownload = subLangs.Contains("all", StringComparer.OrdinalIgnoreCase) ||
+                                         (sub.Lang != null && subLangs.Contains(sub.Lang, StringComparer.OrdinalIgnoreCase)) ||
+                                         subLangs.Any(requested => string.Equals(
+                                             requested.Replace("-", ""), langCode, StringComparison.OrdinalIgnoreCase));
 
                     if (!shouldDownload || string.IsNullOrEmpty(sub.Url))
                         continue;
@@ -1358,7 +1447,7 @@ public class DownloadService : IDownloadService
                             NumberPadding = config.Download.LeadingNumbers,
                             WhitespaceReplace = config.Download.FilenameWhitespaceSubstitute,
                             Quality = actualHeight.Value.ToString(),
-                            AudioLanguage = config.Download.DefaultAudio,
+                            AudioLanguage = ResolveRequestedAudioLanguage(episode, config),
                             SonarrSeries = sonarrSeries,
                             SonarrEpisode = sonarrEpisode,
                             UseSonarrNumbering = config.Sonarr.UseSonarrNumbering,
@@ -1674,6 +1763,67 @@ public class DownloadService : IDownloadService
             Success = successCount > 0,
             ErrorMessage = successCount < episodes.Count ? $"Downloaded {successCount}/{episodes.Count} episodes" : null
         };
+    }
+
+    private async Task UnionOriginalVersionSubtitlesIfNeededAsync(
+        EpisodeInfo episode,
+        PlaybackData playbackData,
+        string currentMediaGuid,
+        CruncharrConfig config,
+        CancellationToken cancellationToken)
+    {
+        if (config.Download.SkipSubs || episode.Versions == null) return;
+
+        var wantedSubs = episode.SelectedSubs?.Count > 0 ? episode.SelectedSubs : config.Download.SoftSubs;
+        if (wantedSubs == null || wantedSubs.Count == 0 ||
+            wantedSubs.Contains("none", StringComparer.OrdinalIgnoreCase)) return;
+
+        var havePool = playbackData.Subtitles ?? [];
+        var needsAll = wantedSubs.Contains("all", StringComparer.OrdinalIgnoreCase);
+        var stillMissing = needsAll || wantedSubs.Any(requested =>
+            !string.IsNullOrWhiteSpace(requested) &&
+            !havePool.Any(subtitle =>
+                string.Equals(subtitle.Lang, requested, StringComparison.OrdinalIgnoreCase) &&
+                !subtitle.IsCC &&
+                !IsSignsSubtitle(subtitle)));
+        if (!stillMissing) return;
+
+        var originalVersion = episode.Versions.FirstOrDefault(version => version.Original);
+        if (originalVersion == null || string.IsNullOrEmpty(originalVersion.Guid)) return;
+
+        var originalGuid = originalVersion.Guid.Contains(':')
+            ? originalVersion.Guid.Split(':')[1]
+            : originalVersion.Guid;
+        if (string.Equals(originalGuid, currentMediaGuid, StringComparison.OrdinalIgnoreCase)) return;
+
+        try
+        {
+            var originalPlayback = await GetPlaybackDataAsync(originalGuid, true, cancellationToken, config);
+            if (originalPlayback?.Subtitles == null || originalPlayback.Subtitles.Count == 0) return;
+
+            playbackData.Subtitles ??= [];
+            var existing = new HashSet<string>(
+                playbackData.Subtitles.Select(subtitle =>
+                    $"{subtitle.Lang}|{subtitle.IsCC}|{IsSignsSubtitle(subtitle)}"),
+                StringComparer.OrdinalIgnoreCase);
+            var added = 0;
+            foreach (var subtitle in originalPlayback.Subtitles)
+            {
+                if (!string.IsNullOrEmpty(subtitle.Lang) &&
+                    existing.Add($"{subtitle.Lang}|{subtitle.IsCC}|{IsSignsSubtitle(subtitle)}"))
+                {
+                    playbackData.Subtitles.Add(subtitle);
+                    added++;
+                }
+            }
+            _logger?.LogInformation(
+                "Unioned {Added} subtitles from original version {Guid} (late, subs-only)",
+                added, originalGuid);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to fetch original-version subtitles (late)");
+        }
     }
 
     private async Task<PlaybackData?> GetPlaybackDataAsync(string episodeId, bool useBetaApi, CancellationToken cancellationToken, CruncharrConfig? config = null, int retryAttempt = 0)
@@ -2230,7 +2380,7 @@ public class DownloadService : IDownloadService
         }
     }
 
-    private async Task<(string? VideoPath, List<(string Path, string Lang)> AudioPaths)> DownloadDashTracksAsync(string manifestUrl, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null, string? mediaGuid = null, List<string>? selectedDubs = null, bool audioOnly = false)
+    private async Task<(string? VideoPath, List<(string Path, string Lang)> AudioPaths)> DownloadDashTracksAsync(string manifestUrl, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null, string? mediaGuid = null, List<string>? selectedDubs = null, bool audioOnly = false, string audioFileSuffix = "")
     {
         // Download manifest with auth headers
         var manifestRequest = new HttpRequestMessage(HttpMethod.Get, manifestUrl);
@@ -2401,11 +2551,11 @@ public class DownloadService : IDownloadService
                 }
                 var langCode = (lang ?? "unknown").Replace("-", "").ToLower();
                 var audioFileName = chosenAudios.Count(a => a.Item2 == lang) > 1
-                    ? $"audio_{langCode}_{i}.m4s"
-                    : $"audio_{langCode}.m4s";
+                    ? $"audio_{langCode}_{i}{audioFileSuffix}.m4s"
+                    : $"audio_{langCode}{audioFileSuffix}.m4s";
                 var audioEncFileName = chosenAudios.Count(a => a.Item2 == lang) > 1
-                    ? $"audio_{langCode}_{i}.enc.m4s"
-                    : $"audio_{langCode}.enc.m4s";
+                    ? $"audio_{langCode}_{i}{audioFileSuffix}.enc.m4s"
+                    : $"audio_{langCode}{audioFileSuffix}.enc.m4s";
                 var audioOutput = audioItem.pssh != null
                     ? Path.Combine(tempDir, audioEncFileName)
                     : Path.Combine(tempDir, audioFileName);
@@ -2903,7 +3053,8 @@ public class DownloadService : IDownloadService
                 var mergerInput = new MergerInput
                 {
                     Path = file,
-                    Language = Languages.FindLang(audioTrack.Lang)
+                    Language = Languages.FindLang(audioTrack.Lang),
+                    IsAudioRoleDescription = IsAudioDescriptionFile(file)
                 };
                 // Apply sync delay if available
                 if (audioDelays != null && audioDelays.TryGetValue(audioTrack.Lang, out var delay))

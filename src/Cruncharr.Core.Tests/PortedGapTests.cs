@@ -1,6 +1,8 @@
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Cruncharr.Core.Utils;
+using Cruncharr.Core.Utils.Muxing.Commands;
+using Cruncharr.Core.Utils.Muxing.Structs;
 using Xunit;
 
 namespace Cruncharr.Core.Tests;
@@ -17,6 +19,38 @@ public class PortedGapTests
         EpisodeNumber = 5,
         Episode = "5"
     };
+
+    [Fact]
+    public void AudioDescription_IsNamedAndNeverDefaultInBothMuxers()
+    {
+        var english = Languages.FindLang("en-US");
+        var options = new MergerOptions
+        {
+            Output = "output.mkv",
+            DubLangList = ["en-US"],
+            Defaults = new Defaults { Audio = english },
+            OnlyAudio =
+            [
+                new MergerInput { Path = "normal.m4a", Language = english },
+                new MergerInput { Path = "description.m4a", Language = english, IsAudioRoleDescription = true }
+            ]
+        };
+
+        var ffmpeg = new FFmpegCommandBuilder(options).Build();
+        var mkvmerge = new MkvMergeCommandBuilder(options).Build();
+
+        Assert.Contains("-metadata:s:a:1 title=\"English [AD]\"", ffmpeg);
+        Assert.Contains("-disposition:a:0 default", ffmpeg);
+        Assert.Contains("-disposition:a:1 0", ffmpeg);
+        Assert.Contains("--track-name 0:\"English [AD]\" --language 0:eng --default-track 0:0", mkvmerge);
+    }
+
+    [Fact]
+    public void LanguageLookup_AcceptsCaseVariantsWithoutReturningUndefined()
+    {
+        Assert.Equal("en-US", Languages.FindLang("EN-us").CrLocale);
+        Assert.Equal("en-US", Languages.Locale2language("EN-us").CrLocale);
+    }
 
     [Fact]
     public void UseSonarrNumbering_OverridesEpisodeAndSeason()

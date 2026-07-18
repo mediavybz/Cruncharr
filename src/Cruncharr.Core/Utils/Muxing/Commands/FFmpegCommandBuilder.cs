@@ -101,6 +101,8 @@ public class FFmpegCommandBuilder : CommandBuilder
 
             metaData.Add($"-map {index}:a");
             metaData.Add($"-metadata:s:a:{audioIndex} language={aud.Language.Code}");
+            var audioTitle = aud.Language.Name + (aud.IsAudioRoleDescription ? " [AD]" : "");
+            metaData.Add($"-metadata:s:a:{audioIndex} title=\"{audioTitle}\"");
 
             AddAudioDisposition(aud);
 
@@ -111,7 +113,8 @@ public class FFmpegCommandBuilder : CommandBuilder
 
     private void AddAudioDisposition(MergerInput aud)
     {
-        if (Options.Defaults.Audio?.Code == aud.Language.Code &&
+        if (!aud.IsAudioRoleDescription &&
+            Options.Defaults.Audio?.Code == aud.Language.Code &&
             Options.Defaults.Audio != Languages.DEFAULT_lang)
         {
             metaData.Add($"-disposition:a:{audioIndex} default");

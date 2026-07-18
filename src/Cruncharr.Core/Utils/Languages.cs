@@ -47,7 +47,7 @@ public class Languages
     public static List<string> SortListByLangList(List<string> langList)
     {
         var orderMap = languages.Select((value, index) => new { Value = value.CrLocale, Index = index })
-            .ToDictionary(x => x.Value, x => x.Index);
+            .ToDictionary(x => x.Value, x => x.Index, StringComparer.OrdinalIgnoreCase);
         langList.Sort((x, y) =>
         {
             bool xExists = orderMap.ContainsKey(x);
@@ -100,7 +100,8 @@ public class Languages
 
     public static LanguageItem FindLang(string crLocale)
     {
-        LanguageItem? lang = languages.FirstOrDefault(l => l.CrLocale == crLocale);
+        LanguageItem? lang = languages.FirstOrDefault(l =>
+            string.Equals(l.CrLocale, crLocale, StringComparison.OrdinalIgnoreCase));
         if (lang?.CrLocale != null)
         {
             return lang;
@@ -113,7 +114,9 @@ public class Languages
 
     public static LanguageItem Locale2language(string locale)
     {
-        LanguageItem? filteredLocale = languages.FirstOrDefault(l => { return l.Locale == locale || l.CrLocale == locale; });
+        LanguageItem? filteredLocale = languages.FirstOrDefault(l =>
+            string.Equals(l.Locale, locale, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(l.CrLocale, locale, StringComparison.OrdinalIgnoreCase));
         if (filteredLocale != null)
         {
             return filteredLocale;

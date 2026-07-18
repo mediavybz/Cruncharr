@@ -464,13 +464,14 @@ public class HistoryService : IHistoryService, IDisposable
         historyEpisode.ThumbnailImageUrl = episode.ThumbnailUrl;
         historyEpisode.EpisodeSeriesType = SeriesType.Series;
         // Update available dub/sub metadata for existing episodes
-        if (!historyEpisode.HistoryEpisodeAvailableDubLang.Contains(episode.AudioLocale))
+        if (!historyEpisode.HistoryEpisodeAvailableDubLang.Contains(episode.AudioLocale, StringComparer.OrdinalIgnoreCase))
         {
             historyEpisode.HistoryEpisodeAvailableDubLang.Add(episode.AudioLocale);
         }
         if (episode.SubtitleLocales != null)
         {
-            foreach (var sub in episode.SubtitleLocales.Where(sub => !historyEpisode.HistoryEpisodeAvailableSoftSubs.Contains(sub)))
+            foreach (var sub in episode.SubtitleLocales.Where(sub =>
+                         !historyEpisode.HistoryEpisodeAvailableSoftSubs.Contains(sub, StringComparer.OrdinalIgnoreCase)))
             {
                 historyEpisode.HistoryEpisodeAvailableSoftSubs.Add(sub);
             }
@@ -1313,7 +1314,7 @@ public class HistoryService : IHistoryService, IDisposable
             if (episodeVersions != null)
             {
                 var version = episodeVersions.Find(a => a.Original);
-                if (version?.AudioLocale != episodeList.First().AudioLocale)
+                if (!string.Equals(version?.AudioLocale, episodeList.First().AudioLocale, StringComparison.OrdinalIgnoreCase))
                 {
                     await CrUpdateSeriesAsync(episodeList.First().SeriesId, version?.SeasonGuid);
                     return;

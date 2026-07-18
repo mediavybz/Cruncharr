@@ -1,7 +1,50 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 39 complete: full-stack verification and Docker cache optimization)
+## Last Updated: 2026-07-17 (Round 40 in progress: language metadata and track audit)
+
+---
+
+## Round 40 — Language Metadata and Track Audit (2026-07-17)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core.Tests/DownloadVersionResolutionTests.cs | CRD/Downloader/Crunchyroll/CrQueue.cs : 126-143; CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 1316-1338 | [PT] Added regression specifications for authoritative refreshed subtitle locales, sentinel/SkipSubs/first-available validation, selected audio/history/filename locale, explicit HLS multi-dub, AD-role metadata refresh/mapping/selection, and AD mux-file recognition across HLS/DASH/encrypted names | 2026-07-17 |
+| src/Cruncharr.Core/Services/DownloadService.cs | CRD/Downloader/Crunchyroll/CrQueue.cs : 126-143; CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 1316-1338, 1444-1452 | [PT] Existing metadata/artwork refresh now carries authoritative subtitle locales and refetches version roles for AD; validation honors sentinel/SkipSubs/first-available rules with a typed terminal failure; selected playback updates audio/history/filename locales; explicit multi-dub is consistent in DASH/HLS; subtitle matching is case-insensitive with late original full-dialogue union in both paths; real same-locale AD uses its GUID and `description` role with collision-free names and mux metadata | 2026-07-17 |
+| src/Cruncharr.Core/Services/CrunchyrollApiService.cs | CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 1321-1338; CRD episode/series language selection | [PT] Deserializes version `roles` and uses one complete EpisodeVersion mapper across episode, series, and queue metadata so media GUIDs and AD roles are never dropped; locale lookup and selected-dub filtering are case-insensitive across both multi-download paths; API routes and response contracts unchanged | 2026-07-17 |
+| src/Cruncharr.Core/Models/DownloadModels.cs | CRD/Downloader/Crunchyroll/CrQueue.cs : 132-143 | [PT] Added an internal MissingLanguage failure classification so a deterministic desktop-style language rejection can terminate cleanly instead of being mistaken for a transient network/rate-limit failure | 2026-07-17 |
+| src/Cruncharr.Core/Services/QueueService.cs | CRD/Downloader/Crunchyroll/CrQueue.cs : 132-143 | [PT] Preserves typed DownloadResult failures when entering queue error handling and classifies missing-language rejection with the existing non-retryable account/content failures; real transient network/rate-limit failures retain configured retry behavior | 2026-07-17 |
+| src/Cruncharr.Core.Tests/QueuePumpEligibilityTests.cs | CRD/Downloader/Crunchyroll/CrQueue.cs : 132-143 | [PT] Added a queue retry-classification guard proving missing-language rejection is terminal while actual rate-limit and network failures remain retryable | 2026-07-17 |
+| src/Cruncharr.Core.Tests/PortedGapTests.cs | CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 1345-1355; CRD/Utils/Languages.cs locale mapping | [PT] Added FFmpeg/mkvmerge guards requiring normal-before-AD defaults and `[AD]` naming, plus language lookup coverage proving case variants resolve to the canonical locale instead of `und` | 2026-07-17 |
+| src/Cruncharr.Core.Tests/HistoryDownloadRecordTests.cs | CRD/Utils/Structs/History/HistorySeries.cs language availability tracking | [PT] Added a guard proving case-only locale differences do not falsely mark an already-downloaded dub/subtitle as newly available in History | 2026-07-17 |
+| src/Cruncharr.Core/Models/HistoryModels.cs | CRD/Utils/Structs/History/HistorySeries.cs language availability tracking | [PT] Compares available/downloaded dub and subtitle locales case-insensitively when calculating HasNewEpisodes, matching the existing partial-download helpers and preventing duplicate language state | 2026-07-17 |
+| src/Cruncharr.Core/Services/HistoryService.cs | CRD/Utils/Structs/History/HistorySeries.cs episode language refresh | [PT] Deduplicates refreshed available dub/subtitle locales case-insensitively and compares original/current audio locales case-insensitively before deciding whether a full series refresh is required | 2026-07-17 |
+| src/Cruncharr.Core/Utils/Languages.cs | CRD/Utils/Languages.cs locale mapping | [PT] Resolves Crunchyroll and short locale identifiers and language sort priority case-insensitively, preventing valid API/config case variants from being labeled `und`; canonical language objects and codes are unchanged | 2026-07-17 |
+| src/Cruncharr.Core/Utils/Muxing/Commands/FFmpegCommandBuilder.cs | CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 1349-1355; CRD/Utils/Muxing/Merger.cs desktop AD metadata | [PT] Emits the desktop `[AD]` audio title and prevents a description-role track from receiving FFmpeg default disposition even when it shares the chosen dub's language code | 2026-07-17 |
+| src/Cruncharr.Core/Utils/Muxing/Commands/MkvMergeCommandBuilder.cs | CRD/Downloader/Crunchyroll/CrunchyrollManager.cs : 1349-1355; CRD/Utils/Muxing/Merger.cs desktop AD metadata | [PT] Keeps the existing `[AD]` title and now prevents a description-role track from receiving mkvmerge default status when normal and AD tracks share the selected language | 2026-07-17 |
+| src/Cruncharr.API/Cruncharr.API.csproj | N/A (testing release metadata) | [PT] Bumped assembly, file, and package version 1.0.55 → 1.0.56 for the audited language-fix testing image; framework and dependencies unchanged | 2026-07-17 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing API release metadata response | [PT] Aligned the no-attribute fallback version with 1.0.56; route, response shape, and health logic unchanged | 2026-07-17 |
+
+### Verification
+- Pre-change targeted language suite: 58/58 passing (Release).
+- Post-fix targeted language/history/queue/mux suite: 76/76 passing (Release).
+- Full Release suite: 187/187 passing; warning-as-error solution build and warning-level analyzer verification are clean.
+- Frontend JavaScript syntax, exact 26-locale backend/web catalog parity, Compose config, Git-Bash syntax for both shell scripts, exact 1.0.56 release references, and `git diff --check` passed.
+- Dockerfile check completed with no warnings; cache-only linux/amd64 and linux/arm64 builds completed from the 1.0.56 working source.
+- Loaded linux/amd64 smoke returned `1.0.56+local-language-audit`, served exactly one 1.0.56 CSS/JavaScript key, contained all four restored web locales, contained no hard-coded false rate-limit label, linked the apphost without missing libraries, retained FFmpeg N-125649-g8d394252d8, became Docker healthy, ran PID 1 as UID/GID 1234, and stopped gracefully with exit code 0.
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | Desktop Crunchyroll language catalog and queue retry status | Existing GET/POST `/api/v1/config`, GET `/api/v1/queue`, queue SSE | Added the four desktop-supported locales missing from web settings (`en-IN`, `ca-ES`, `zh-HK`, `zh-TW`) and replaced the hard-coded “Rate limited” retry label with the queue's actual failure reason plus retry time | 2026-07-17 |
+| src/Cruncharr.API/wwwroot/index.html | Existing web release asset refresh | none | Bumped aligned CSS and JavaScript cache keys 1.0.55 → 1.0.56 so browsers cannot retain the pre-fix language/status script | 2026-07-17 |
+
+### API Contract
+- No API route, request, response-shape, or status-code changes planned.
+
+### Status (Round 40)
+- In progress on `testing`.
 
 ---
 

@@ -334,7 +334,8 @@ public enum DownloadErrorType
     MaturityRating,
     RateLimited,
     NetworkError,
-    ParseError
+    ParseError,
+    MissingLanguage
 }
 
 public class DownloadException : Exception

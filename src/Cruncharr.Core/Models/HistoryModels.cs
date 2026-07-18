@@ -53,11 +53,13 @@ public class HistorySeries
             // Episode downloaded but selected dubs/subs may be missing
             // Check if any selected dubs are newly available but not downloaded
             var missingDubs = selectedDubs?
-                .Where(dub => e.HistoryEpisodeAvailableDubLang.Contains(dub) && !e.DownloadedDubLang.Contains(dub))
+                .Where(dub => e.HistoryEpisodeAvailableDubLang.Contains(dub, StringComparer.OrdinalIgnoreCase) &&
+                              !e.DownloadedDubLang.Contains(dub, StringComparer.OrdinalIgnoreCase))
                 .Any() ?? false;
 
             var missingSubs = selectedSubs?
-                .Where(sub => e.HistoryEpisodeAvailableSoftSubs.Contains(sub) && !e.DownloadedSoftSubs.Contains(sub))
+                .Where(sub => e.HistoryEpisodeAvailableSoftSubs.Contains(sub, StringComparer.OrdinalIgnoreCase) &&
+                              !e.DownloadedSoftSubs.Contains(sub, StringComparer.OrdinalIgnoreCase))
                 .Any() ?? false;
 
             return missingDubs || missingSubs;

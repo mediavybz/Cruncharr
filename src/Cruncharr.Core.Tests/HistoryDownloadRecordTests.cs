@@ -95,6 +95,36 @@ public class HistoryDownloadRecordTests : IDisposable
         Assert.False(after.IsPartiallyDownloaded(new[] { "ja-JP", "en-US" }, Array.Empty<string>()));
     }
 
+    [Fact]
+    public void HasNewEpisodes_LanguageTrackingIsCaseInsensitive()
+    {
+        var series = new HistorySeries
+        {
+            Seasons =
+            [
+                new HistorySeason
+                {
+                    EpisodesList =
+                    [
+                        new HistoryEpisode
+                        {
+                            WasDownloaded = true,
+                            IsEpisodeAvailableOnStreamingService = true,
+                            HistoryEpisodeAvailableDubLang = ["en-US"],
+                            HistoryEpisodeAvailableSoftSubs = ["en-US"],
+                            DownloadedDubLang = ["EN-us"],
+                            DownloadedSoftSubs = ["EN-us"]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        series.UpdateNewEpisodes(["en-US"], ["en-US"]);
+
+        Assert.False(series.HasNewEpisodes);
+    }
+
     // Guard: desktop History.RefreshSeriesData always replaces episode imagery with the series'
     // poster_tall cover during a refresh. A first-download screenshot must not remain the History
     // poster after CrUpdateSeriesAsync has retrieved series metadata.

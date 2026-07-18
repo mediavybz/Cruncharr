@@ -264,14 +264,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Locale = ep.AudioLocale ?? "ja-JP",
                 AudioLocale = ep.AudioLocale ?? "ja-JP",
                 IsPremium = ep.IsPremiumOnly,
-                Versions = ep.Versions?.Select(v => new EpisodeVersion
-                {
-                    AudioLocale = v.AudioLocale,
-                    Guid = v.Guid,
-                    MediaGuid = v.MediaGuid,
-                    Original = v.Original,
-                    SeasonGuid = v.SeasonGuid
-                }).ToList(),
+                Versions = ep.Versions?.Select(MapEpisodeVersion).ToList(),
                 Images = ExtractImageUrls(ep.Images),
                 ThumbnailUrl = ExtractBestImage(ep.Images, "thumbnail") ?? ExtractBestImage(ep.Images, "episode_thumbnail"),
                 SubtitleLocales = ep.SubtitleLocales ?? new List<string>()
@@ -438,6 +431,16 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         return targetDate;
     }
 
+    internal static EpisodeVersion MapEpisodeVersion(CrEpisodeVersion version) => new()
+    {
+        AudioLocale = version.AudioLocale,
+        Guid = version.Guid,
+        MediaGuid = version.MediaGuid,
+        Original = version.Original,
+        SeasonGuid = version.SeasonGuid,
+        Roles = version.Roles?.ToList()
+    };
+
     /// <summary>
     /// Parses episode by ID with version deduplication.
     /// Ported from upstream CrEpisode.ParseEpisodeById.
@@ -546,14 +549,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Locale = episode.AudioLocale ?? "ja-JP",
                 AudioLocale = episode.AudioLocale ?? "ja-JP",
                 IsPremium = episode.IsPremiumOnly,
-                Versions = episode.Versions?.Select(v => new EpisodeVersion
-                {
-                    AudioLocale = v.AudioLocale,
-                    Guid = v.Guid,
-                    MediaGuid = v.MediaGuid,
-                    Original = v.Original,
-                    SeasonGuid = v.SeasonGuid
-                }).ToList(),
+                Versions = episode.Versions?.Select(MapEpisodeVersion).ToList(),
                 Images = ExtractImageUrls(episode.Images),
                 ThumbnailUrl = ExtractBestImage(episode.Images, "thumbnail") ?? ExtractBestImage(episode.Images, "episode_thumbnail"),
                 CoverArtUrl = ExtractBestImage(episode.Images, "poster_tall"),
@@ -700,14 +696,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     Images = ExtractImageUrls(e.Images),
                     ThumbnailUrl = ExtractBestImage(e.Images, "thumbnail") ?? ExtractBestImage(e.Images, "episode_thumbnail"),
                     CoverArtUrl = ExtractBestImage(e.Images, "poster_tall"),
-                    Versions = e.Versions?.Select(v => new EpisodeVersion
-                    {
-                        AudioLocale = v.AudioLocale,
-                        Guid = v.Guid,
-                        MediaGuid = v.MediaGuid,
-                        Original = v.Original,
-                        SeasonGuid = v.SeasonGuid
-                    }).ToList(),
+                    Versions = e.Versions?.Select(MapEpisodeVersion).ToList(),
                     SubtitleLocales = e.SubtitleLocales ?? new List<string>()
                 };
             }).ToList();
@@ -884,7 +873,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     var (img, imgBig) = DownloadQueueItemFactory.GetThumbSmallBig(item.Images);
 
                     var selectedDubs = effectiveDubs
-                        .Where(d => episode.Variants.Any(x => !string.IsNullOrEmpty(x.Lang.CrLocale) && x.Lang.CrLocale == d))
+                        .Where(d => episode.Variants.Any(x =>
+                            !string.IsNullOrEmpty(x.Lang.CrLocale) &&
+                            string.Equals(x.Lang.CrLocale, d, StringComparison.OrdinalIgnoreCase)))
                         .ToList();
 
                     qItem = DownloadQueueItemFactory.CreateShell(
@@ -923,13 +914,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     mediaId: item.Id,
                     lang: lang,
                     playback: playback,
-                    versions: item.Versions?.Select(v => new EpisodeVersion
-                    {
-                        AudioLocale = v.AudioLocale,
-                        Guid = v.Guid,
-                        Original = v.Original,
-                        SeasonGuid = v.SeasonGuid
-                    }).ToList(),
+                    versions: item.Versions?.Select(MapEpisodeVersion).ToList(),
                     isSubbed: item.IsSubbed,
                     isDubbed: item.IsDubbed
                 ));
@@ -995,14 +980,16 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 {
                     foreach (var version in episode.Versions)
                     {
-                        var lang = Array.Find(Languages.languages, a => a.CrLocale == version.AudioLocale) ?? Languages.DEFAULT_lang;
+                        var lang = Array.Find(Languages.languages, a =>
+                            string.Equals(a.CrLocale, version.AudioLocale, StringComparison.OrdinalIgnoreCase)) ?? Languages.DEFAULT_lang;
                         item.AddUnique(episode, lang);
                     }
                 }
                 else
                 {
                     serieshasversions = false;
-                    var lang = Array.Find(Languages.languages, a => a.CrLocale == episode.AudioLocale) ?? Languages.DEFAULT_lang;
+                    var lang = Array.Find(Languages.languages, a =>
+                        string.Equals(a.CrLocale, episode.AudioLocale, StringComparison.OrdinalIgnoreCase)) ?? Languages.DEFAULT_lang;
                     item.AddUnique(episode, lang);
                 }
             }
@@ -1662,7 +1649,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         {
             foreach (var version in episode.Versions)
             {
-                var lang = Array.Find(Languages.languages, a => a.CrLocale == version.AudioLocale)
+                var lang = Array.Find(Languages.languages, a =>
+                    string.Equals(a.CrLocale, version.AudioLocale, StringComparison.OrdinalIgnoreCase))
                            ?? Languages.DEFAULT_lang;
                 data.EpisodeAndLanguages.AddUnique(detail, lang);
             }
@@ -1670,7 +1658,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         else
         {
             serieshasversions = false;
-            var lang = Array.Find(Languages.languages, a => a.CrLocale == episode.AudioLocale)
+            var lang = Array.Find(Languages.languages, a =>
+                string.Equals(a.CrLocale, episode.AudioLocale, StringComparison.OrdinalIgnoreCase))
                        ?? Languages.DEFAULT_lang;
             data.EpisodeAndLanguages.AddUnique(detail, lang);
         }
@@ -1733,7 +1722,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         var hslang = "none"; // Default, could be fetched from config if needed
 
         var selectedDubs = dubLang
-            .Where(d => episodeP.EpisodeAndLanguages.Variants.Any(v => v.Lang.CrLocale == d))
+            .Where(d => episodeP.EpisodeAndLanguages.Variants.Any(v =>
+                string.Equals(v.Lang.CrLocale, d, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         foreach (var v in episodeP.EpisodeAndLanguages.Variants)
@@ -1802,14 +1792,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 mediaId: item.Id,
                 lang: lang,
                 playback: playback,
-                versions: item.Versions?.Select(v => new EpisodeVersion
-                {
-                    AudioLocale = v.AudioLocale,
-                    Guid = v.Guid,
-                    MediaGuid = v.MediaGuid,
-                    Original = v.Original,
-                    SeasonGuid = v.SeasonGuid
-                }).ToList(),
+                versions: item.Versions?.Select(MapEpisodeVersion).ToList(),
                 isSubbed: item.IsSubbed,
                 isDubbed: item.IsDubbed
             ));
@@ -1950,6 +1933,7 @@ public class CrEpisodeVersion
     public bool Original { get; set; }
     [JsonProperty("season_guid")]
     public string SeasonGuid { get; set; } = "";
+    public List<string>? Roles { get; set; }
 }
 
 [JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]

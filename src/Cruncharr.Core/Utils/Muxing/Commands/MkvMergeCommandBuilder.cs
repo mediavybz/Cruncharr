@@ -163,12 +163,13 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
         Add($"--track-name {trackNum}:\"{name}\"");
         Add($"--language {trackNum}:{track.Language.Code}");
 
-        AddDefaultAudio(trackNum, track.Language);
+        AddDefaultAudio(trackNum, track);
     }
 
-    private void AddDefaultAudio(string trackNum, LanguageItem lang)
+    private void AddDefaultAudio(string trackNum, MergerInput track)
     {
-        if (Options.Defaults.Audio?.Code == lang.Code &&
+        if (!track.IsAudioRoleDescription &&
+            Options.Defaults.Audio?.Code == track.Language.Code &&
             Options.Defaults.Audio != Languages.DEFAULT_lang)
         {
             Add($"--default-track {trackNum}");

@@ -712,6 +712,10 @@ public class QueueService : IQueueService, IDisposable
 
             if (!result.Success)
             {
+                if (result.ErrorType is { } errorType)
+                {
+                    throw new DownloadException(result.ErrorMessage ?? "Download failed", errorType);
+                }
                 throw new Exception(result.ErrorMessage ?? "Download failed");
             }
 
@@ -743,12 +747,8 @@ public class QueueService : IQueueService, IDisposable
                 _ = Task.Run(async () => await _notificationService.NotifyErrorAsync(errorResult, _config));
             }
 
-            bool isAuthError = dex.ErrorType == DownloadErrorType.NotAuthenticated ||
-                              dex.ErrorType == DownloadErrorType.SubscriptionExpired ||
-                              dex.ErrorType == DownloadErrorType.PremiumContent ||
-                              dex.ErrorType == DownloadErrorType.MaturityRating;
-
-            if (!isAuthError && item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 5))
+            if (IsRetryableDownloadError(dex.ErrorType) &&
+                item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 5))
             {
                 var delay = TimeSpan.FromSeconds(Math.Max(1, (_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount)));
                 ScheduleRetry(item.Id, delay, $"Error: {dex.Message}");
@@ -807,6 +807,13 @@ public class QueueService : IQueueService, IDisposable
         OnQueueStateChanged();
         ScheduleSave();
     }
+
+    internal static bool IsRetryableDownloadError(DownloadErrorType errorType) => errorType is not (
+        DownloadErrorType.NotAuthenticated or
+        DownloadErrorType.SubscriptionExpired or
+        DownloadErrorType.PremiumContent or
+        DownloadErrorType.MaturityRating or
+        DownloadErrorType.MissingLanguage);
 
     private bool IsCurrentQueueItem(QueueItem item)
     {

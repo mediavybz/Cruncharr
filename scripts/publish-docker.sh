@@ -3,9 +3,9 @@
 #
 # With no arguments this performs a cache-only validation and does not publish.
 # Pass normal `docker buildx build` options to publish, for example:
-#   bash publish-docker.sh --tag ghcr.io/mediavybz/cruncharr:testing --push
+#   bash scripts/publish-docker.sh --tag ghcr.io/mediavybz/cruncharr:testing --push
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 PLATFORMS=${PLATFORMS:-linux/amd64,linux/arm64}
 SOURCE_REVISION=${SOURCE_REVISION:-}

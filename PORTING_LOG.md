@@ -1,7 +1,56 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 41 complete: canonical Sonarr naming reliability)
+## Last Updated: 2026-07-18 (Round 42 verified; testing release in progress)
+
+---
+
+## Round 42 — Repository Structure and Artifact Hygiene (2026-07-18)
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| docker/entrypoint.sh | [PT] Relocated the unchanged container entrypoint from the repository root; Dockerfile COPY path and LF enforcement follow the new location, with runtime command and behavior unchanged | 2026-07-18 |
+| Dockerfile | [PT] Reads the relocated entrypoint from `docker/entrypoint.sh`; stages, final image contents, entrypoint target, and API/CLI build remain unchanged | 2026-07-18 |
+| .gitattributes | Keeps LF enforcement on the relocated Linux entrypoint | 2026-07-18 |
+| scripts/publish-docker.sh | [PT] Relocated the multi-architecture BuildKit publisher from the repository root and resolved its working directory back to the repository root; default validation and explicit publish behavior remain unchanged | 2026-07-18 |
+| README.md | Documents the retained local Docker build plus the relocated multi-architecture validation/testing-publish workflow | 2026-07-18 |
+| designsystem/*.html (8 files, removed) | Removed standalone UI mockups that were not imported, served, tested, or used by the image build; production `wwwroot` assets remain intact | 2026-07-18 |
+| .dockerignore | Removed the obsolete design-mockup rule and excluded the host-only publisher script from the production build context; required `docker/entrypoint.sh` remains included | 2026-07-18 |
+| .gitignore | Consolidated generated-output, coverage, runtime-data, local-tooling, and instruction-file rules; removed redundant per-extension tool archive and Markdown entries | 2026-07-18 |
+| .dockerignore | Also excludes standard centralized artifacts/test coverage and local agent metadata, and simplifies the upstream-reference exclusion without changing required build inputs | 2026-07-18 |
+| Local ignored/untracked artifacts | Purged 2,288.84 MiB across 2,987 files: old desktop EXEs/DLLs, fetched upstream reference, downloaded tools, local runtime config/tokens/data, prior Docker publish output, SDK `bin/obj`, obsolete local notes, and empty placeholder directories; all were outside Git and excluded from the image | 2026-07-18 |
+
+### Backend Tests (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core.Tests/SecurityRegressionTests.cs | Existing image-proxy redirect security guard formerly stored as `UnitTest1.cs` | Renamed the file to match its existing `SecurityRegressionTests` class; test code and behavior are unchanged | 2026-07-18 |
+| src/Cruncharr.API/Serialization/PreserveDictionaryKeysContractResolver.cs | Existing API JSON dictionary-key contract | Relocated the unchanged resolver from the API project root into its serialization concern; namespace, registration, and JSON behavior are unchanged | 2026-07-18 |
+
+### Release Metadata
+| File | Change | Date |
+|------|--------|------|
+| src/Cruncharr.API/Cruncharr.API.csproj | [PT] Testing assembly/file/package version 1.0.57 → 1.0.58 | 2026-07-18 |
+| src/Cruncharr.API/Controllers/HealthController.cs | [PT] Unreachable informational-version fallback 1.0.57 → 1.0.58; route/shape/status unchanged | 2026-07-18 |
+| src/Cruncharr.API/wwwroot/index.html | Existing CSS/JS cache keys 1.0.57 → 1.0.58; no component or behavior change | 2026-07-18 |
+
+### API Contract
+- No route, request, response-shape, or status-code changes.
+
+### In Progress
+| File | Mode | Blocker |
+|------|------|---------|
+| Repository cleanup and verification | A | none |
+
+### Verification (pre-release)
+- Baseline Release suite before cleanup: 206/206 passed.
+- Post-cleanup Release build: 0 warnings, 0 errors; full suite: 206/206 passed.
+- Frontend JavaScript syntax, Docker Compose configuration, Git whitespace checks, and both relocated shell scripts passed.
+- Loaded linux/amd64 production image built successfully from the cleaned context; container health returned `1.0.58`, both 1.0.58 browser cache keys were served, the retained CLI help ran, and the relocated entrypoint was active.
+- Docker build context transferred only 33.17 KiB after exclusions; local working artifacts were purged only after tests and image smoke completed.
+
+### Release Status
+- Cleanup commit, final multi-architecture `:testing` publish, registry inspection, and fresh-pull smoke pending.
 
 ---
 

@@ -117,7 +117,7 @@ WORKDIR /app
 COPY --from=dotnet-build --chmod=0755 /out/api/Cruncharr.API ./cruncharr-api
 COPY --from=dotnet-build --chmod=0755 /out/cli/cruncharr /usr/local/bin/cruncharr
 COPY --from=dotnet-build /out/api/wwwroot ./wwwroot
-COPY --chmod=0755 docker-entrypoint.sh ./docker-entrypoint.sh
+COPY --chmod=0755 docker/entrypoint.sh ./docker-entrypoint.sh
 
 # C.UTF-8 is built into glibc and preserves non-ASCII paths passed to native tools.
 ENV LANG=C.UTF-8

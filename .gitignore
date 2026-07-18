@@ -1,9 +1,14 @@
-# Build outputs
-bin/
-obj/
+# Build and test outputs
+**/bin/
+**/obj/
+artifacts/
 out/
 publish/
 docker-build/
+src/publish/
+TestResults/
+coverage/
+coverage.*
 
 # IDE
 .vs/
@@ -49,11 +54,6 @@ logs/
 test_output*.txt
 test_cookies.txt
 
-# Binary archives
-tools/*.zip
-tools/*.7z
-tools/*.tar.gz
-
 # Runtime data - contains credentials and downloaded content
 config/
 downloads/
@@ -65,15 +65,14 @@ opencode.json
 status.md
 *.resume
 
-# Local-only documentation (not for repo)
-# Exclude ALL markdown files except README.md
+# Local agent/instruction material (not part of the application)
+.agents/
+.claude/
+examples/
+
+# Local-only documentation (the public repository keeps README only)
 *.md
 !README.md
-AGENTS.md
-PORTING_LOG.md
-*.local.md
-AUDIT_REPORT*.md
-ALIGNMENT_REPORT*.md
 
 # Upstream source reference (fetched on demand)
 upstream_src/

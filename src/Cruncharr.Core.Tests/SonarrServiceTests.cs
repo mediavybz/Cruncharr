@@ -240,6 +240,39 @@ public class SonarrServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesByTitleAsync_NormalizedCleanTitle_ReturnsCanonicalSeries()
+    {
+        var series = new List<SonarrSeries>
+        {
+            new()
+            {
+                Id = 801,
+                Title = "Canonical Display Title",
+                CleanTitle = "shiboyugiplayingdeathgamestoputfoodonthetable",
+                Path = "/tv/SHIBOYUGI - Playing Death Games to Put Food on the Table"
+            }
+        };
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(JsonResponse(JsonSerializer.Serialize(series)));
+        var service = new SonarrService(
+            new TestHttpClientFactory(new HttpClient(handlerMock.Object)),
+            _loggerMock.Object);
+
+        var result = await service.GetSeriesByTitleAsync(
+            "SHIBOYUGI: Playing Death Games to Put Food on the Table",
+            CreateTestConfig());
+
+        Assert.NotNull(result);
+        Assert.Equal(801, result!.Id);
+    }
+
+    [Fact]
     public async Task GetSeriesByTitleAsync_NoMatch_ReturnsNull()
     {
         var series = new List<SonarrSeries>{
@@ -406,6 +439,118 @@ public class SonarrServiceTests
         var result = await service.GetEpisodesAsync(1, config);
 
         Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task GetSeriesAsync_ConcurrentCacheMiss_CoalescesRequest()
+    {
+        var handler = new StubHttpMessageHandler(async (_, _, cancellationToken) =>
+        {
+            await Task.Delay(50, cancellationToken);
+            return JsonResponse("[{\"id\":801,\"title\":\"Canonical Series\",\"path\":\"/tv/Canonical Series\"}]");
+        });
+        var service = new SonarrService(
+            new TestHttpClientFactory(new HttpClient(handler)),
+            _loggerMock.Object);
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 8)
+            .Select(_ => service.GetSeriesAsync(CreateTestConfig())));
+
+        Assert.Equal(1, handler.CallCount);
+        Assert.All(results, series => Assert.Equal(801, Assert.Single(series).Id));
+    }
+
+    [Fact]
+    public async Task GetEpisodeAsync_TransientConnectionReset_Retries()
+    {
+        var handler = new StubHttpMessageHandler((_, call, _) =>
+        {
+            if (call == 1)
+            {
+                throw new HttpRequestException("Connection reset by peer", new IOException("reset"));
+            }
+
+            return Task.FromResult(JsonResponse(
+                "{\"id\":26363,\"seriesId\":801,\"seasonNumber\":1,\"episodeNumber\":5,\"title\":\"Canonical Episode\"}"));
+        });
+        var service = new SonarrService(
+            new TestHttpClientFactory(new HttpClient(handler)),
+            _loggerMock.Object);
+
+        var episode = await service.GetEpisodeAsync(26363, CreateTestConfig());
+
+        Assert.NotNull(episode);
+        Assert.Equal("Canonical Episode", episode!.Title);
+        Assert.Equal(2, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task GetEpisodeAsync_ReusesEpisodeListCache()
+    {
+        var handler = new StubHttpMessageHandler((request, _, _) =>
+        {
+            Assert.Contains("/episode?seriesId=801", request.RequestUri!.ToString());
+            return Task.FromResult(JsonResponse(
+                "[{\"id\":26363,\"seriesId\":801,\"seasonNumber\":1,\"episodeNumber\":5,\"title\":\"Cached Episode\"}]"));
+        });
+        var service = new SonarrService(
+            new TestHttpClientFactory(new HttpClient(handler)),
+            _loggerMock.Object);
+        var config = CreateTestConfig();
+
+        await service.GetEpisodesAsync(801, config);
+        var episode = await service.GetEpisodeAsync(26363, config);
+
+        Assert.NotNull(episode);
+        Assert.Equal("Cached Episode", episode!.Title);
+        Assert.Equal(1, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task GetNamingConfigAsync_MapsExistingSonarrContract()
+    {
+        var handler = new StubHttpMessageHandler((request, _, _) =>
+        {
+            Assert.EndsWith("/api/v3/config/naming", request.RequestUri!.AbsoluteUri);
+            return Task.FromResult(JsonResponse(
+                "{\"renameEpisodes\":true,\"replaceIllegalCharacters\":true,\"colonReplacementFormat\":4," +
+                "\"standardEpisodeFormat\":\"{Series Title} - S{season:00}E{episode:00} - {Episode Title}\"," +
+                "\"seriesFolderFormat\":\"{Series Title}\",\"seasonFolderFormat\":\"Season {season:00}\"," +
+                "\"specialsFolderFormat\":\"Specials\"}"));
+        });
+        var service = new SonarrService(
+            new TestHttpClientFactory(new HttpClient(handler)),
+            _loggerMock.Object);
+
+        var naming = await service.GetNamingConfigAsync(CreateTestConfig());
+
+        Assert.NotNull(naming);
+        Assert.True(naming!.RenameEpisodes);
+        Assert.Equal(SonarrColonReplacementFormat.Smart, naming.ColonReplacementFormat);
+        Assert.Equal("Season {season:00}", naming.SeasonFolderFormat);
+        Assert.Equal(1, handler.CallCount);
+    }
+
+    private static HttpResponseMessage JsonResponse(string json) => new()
+    {
+        StatusCode = HttpStatusCode.OK,
+        Content = new StringContent(json)
+    };
+
+    private sealed class StubHttpMessageHandler(
+        Func<HttpRequestMessage, int, CancellationToken, Task<HttpResponseMessage>> sendAsync) : HttpMessageHandler
+    {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var call = Interlocked.Increment(ref _callCount);
+            return sendAsync(request, call, cancellationToken);
+        }
     }
 
     private static SonarrConfig CreateTestConfig()

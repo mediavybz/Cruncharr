@@ -1,7 +1,43 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 40 complete: language metadata and track audit)
+## Last Updated: 2026-07-17 (Round 41 in progress: canonical Sonarr naming reliability)
+
+---
+
+## Round 41 — Canonical Sonarr Naming Reliability (2026-07-17)
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core.Tests/SonarrServiceTests.cs | Existing Sonarr v3 series/episode/naming read contracts | [PT] Added generic guards for normalized CleanTitle matching, concurrent series-read coalescing, transient connection-reset retry, episode-list cache reuse, and the existing `/api/v3/config/naming` response; cases use canonical IDs/titles rather than episode-specific substitutions | 2026-07-17 |
+| src/Cruncharr.Core.Tests/PortedGapTests.cs | Sonarr `FileNameBuilder` title replacement plus existing desktop Sonarr filename/folder identity | [PT] Added generic guards for all built-in colon replacement modes, Sonarr bad-character behavior, arbitrary repeated hyphen/dot/underscore collapse, matched series/episode identity, no-silent-fallback handling for saved matches, the explicit Crunchyroll-series alias, configured season/special folder formats, and long-name suffix preservation after title transformation | 2026-07-17 |
+| src/Cruncharr.Core/Services/SonarrService.cs | Existing Sonarr v3 series/episode reads + Sonarr `NamingConfigResource`/`FileNameBuilder` contracts | [PT] Coalesces metadata cache misses, retries only transient transport/408/429/5xx failures, reuses fresh episode-list identities and last-known-good metadata, normalizes punctuation for exact title matching, and reads the existing naming configuration so concurrent downloads cannot silently lose canonical Sonarr identity after a connection reset | 2026-07-17 |
+| src/Cruncharr.Core/Services/FilenameService.cs | Sonarr `FileNameBuilder.CleanFileName` + existing desktop Sonarr filename variables | [PT] Matched `{Series Title}`, `{Episode Title}`, and explicit Sonarr-title tokens now use canonical Sonarr identity, its configured illegal-character/colon replacements, and repeated-separator collapse; `{crSeriesTitle}` preserves an explicit Crunchyroll-title choice, and unmatched/disabled flows remain unchanged | 2026-07-17 |
+| src/Cruncharr.Core/Services/DownloadService.cs | Existing saved Sonarr episode resolution and Sonarr/Plex output organization | [PT] Carries the fetched naming configuration through initial/resolution-corrected filenames, passes the transformed episode title to length limiting so quality suffixes survive, uses Sonarr's configured season/special folder format with its canonical series path, and applies a nullable-safe guarded retryable deferral instead of silently writing a fallback name when a saved Sonarr identity cannot be resolved | 2026-07-17 |
+| src/Cruncharr.API/Cruncharr.API.csproj | N/A (testing release metadata) | [PT] Bumped assembly, file, and package version 1.0.56 → 1.0.57 for the canonical Sonarr-naming testing image; framework and dependencies unchanged | 2026-07-17 |
+| src/Cruncharr.API/Controllers/HealthController.cs | Existing API release metadata response | [PT] Aligned the no-attribute fallback version with 1.0.57; route, response shape, and health logic unchanged | 2026-07-17 |
+
+### Verification
+- Pre-change Sonarr/naming/history baseline: 46/46 passing (Release).
+- Post-fix targeted Sonarr/naming/history suite: 65/65 passing (Release).
+- Full post-fix Release suite: 206/206 passing.
+- Warning-as-error solution build, warning-level analyzer verification, and `git diff --check` passed.
+- Post-version verification repeated 206/206 tests, zero-warning build/analyzers, frontend JavaScript syntax, exact 1.0.57 release references, and whitespace checks successfully.
+- Dockerfile check completed with no warnings; cache-only linux/amd64 and linux/arm64 builds completed from the 1.0.57 working source; Compose and shell syntax checks passed.
+- Loaded linux/amd64 smoke became healthy at `1.0.57+local-naming-audit`, served exactly one 1.0.57 CSS/JavaScript key plus the corrected Sonarr naming help, ran PID 1 as UID/GID 1234, linked without missing libraries, and stopped gracefully with exit code 0.
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | Filename template help and Sonarr naming/TVDB-numbering setting | Existing GET/POST `/api/v1/config` | Updated the existing setting description to state canonical series path/title, naming replacements, season folder format, retry-without-fallback behavior, and the explicit Crunchyroll/Sonarr title tokens; no configuration contract or component change | 2026-07-17 |
+| src/Cruncharr.API/wwwroot/index.html | Existing web release asset refresh | none | Bumped aligned CSS and JavaScript cache keys 1.0.56 → 1.0.57 so browsers cannot retain the pre-fix naming/settings script | 2026-07-17 |
+
+### API Contract
+- No Cruncharr API route, request, response-shape, or status-code changes planned.
+
+### Status (Round 41)
+- In progress on `testing`.
 
 ---
 

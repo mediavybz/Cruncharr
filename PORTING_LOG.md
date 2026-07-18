@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-18 (Round 42 verified; testing release in progress)
+## Last Updated: 2026-07-18 (Round 42 complete: repository structure and artifact hygiene)
 
 ---
 
@@ -20,6 +20,7 @@
 | .gitignore | Consolidated generated-output, coverage, runtime-data, local-tooling, and instruction-file rules; removed redundant per-extension tool archive and Markdown entries | 2026-07-18 |
 | .dockerignore | Also excludes standard centralized artifacts/test coverage and local agent metadata, and simplifies the upstream-reference exclusion without changing required build inputs | 2026-07-18 |
 | Local ignored/untracked artifacts | Purged 2,288.84 MiB across 2,987 files: old desktop EXEs/DLLs, fetched upstream reference, downloaded tools, local runtime config/tokens/data, prior Docker publish output, SDK `bin/obj`, obsolete local notes, and empty placeholder directories; all were outside Git and excluded from the image | 2026-07-18 |
+| Docker image | Multi-architecture v1.0.58 testing image built from cleanup commit `ecc09f6`; linux/amd64 + linux/arm64 under OCI index `sha256:6ed52acec04a1406b4dc523bc81e04cb577f7ec55ff9e9572783cbdf30878efa` | 2026-07-18 |
 
 ### Backend Tests (Mode A)
 | File | Source File | Changes | Date |
@@ -40,7 +41,7 @@
 ### In Progress
 | File | Mode | Blocker |
 |------|------|---------|
-| Repository cleanup and verification | A | none |
+| Repository cleanup and verification | A | [completed] Structure, tests, image build, publish, registry inspection, and fresh-pull smoke passed |
 
 ### Verification (pre-release)
 - Baseline Release suite before cleanup: 206/206 passed.
@@ -48,9 +49,13 @@
 - Frontend JavaScript syntax, Docker Compose configuration, Git whitespace checks, and both relocated shell scripts passed.
 - Loaded linux/amd64 production image built successfully from the cleaned context; container health returned `1.0.58`, both 1.0.58 browser cache keys were served, the retained CLI help ran, and the relocated entrypoint was active.
 - Docker build context transferred only 33.17 KiB after exclusions; local working artifacts were purged only after tests and image smoke completed.
+- Multi-architecture publish completed for linux/amd64 (`sha256:786420fbbae775e3a5ed1db4c00ea13743f97364f3df395860b4ebd38f54af2c`) and linux/arm64 (`sha256:35ac44b2fbf278d8aa6d8a0bc3cfdbb694e10ec4d4e212f98c8a8e889dced426`) under OCI index `sha256:6ed52acec04a1406b4dc523bc81e04cb577f7ec55ff9e9572783cbdf30878efa`.
+- Freshly pulled GHCR testing image became healthy at `1.0.58+ecc09f696706d95b98bb98f79acc2fd4186cf7c6`, served both 1.0.58 cache keys, ran the retained CLI and FFmpeg `N-125649-g8d394252d8-20260717`, and used `./docker-entrypoint.sh`.
 
 ### Release Status
-- Cleanup commit, final multi-architecture `:testing` publish, registry inspection, and fresh-pull smoke pending.
+- Cleanup commit `ecc09f6` pushed to `origin/testing`.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, OCI index digest `sha256:6ed52acec04a1406b4dc523bc81e04cb577f7ec55ff9e9572783cbdf30878efa`.
+- Stable `master`, `:latest`, and numbered stable tags were not changed.
 
 ---
 

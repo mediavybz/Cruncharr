@@ -67,6 +67,109 @@ public class PortedGapTests
         Assert.Equal("S07E13", name);
     }
 
+    [Theory]
+    [InlineData(SonarrColonReplacementFormat.Smart, "CSI - Vegas")]
+    [InlineData(SonarrColonReplacementFormat.Dash, "CSI- Vegas")]
+    [InlineData(SonarrColonReplacementFormat.Delete, "CSI Vegas")]
+    [InlineData(SonarrColonReplacementFormat.SpaceDash, "CSI - Vegas")]
+    [InlineData(SonarrColonReplacementFormat.SpaceDashSpace, "CSI - Vegas")]
+    public void UseSonarrNumbering_AppliesCanonicalColonReplacement(
+        SonarrColonReplacementFormat replacement,
+        string expectedSeriesTitle)
+    {
+        var episode = MakeEpisode();
+        episode.SeriesTitle = "Crunchyroll Series";
+        var options = new FilenameOptions
+        {
+            UseSonarrNumbering = true,
+            SonarrSeries = new SonarrSeries { Title = "CSI: Vegas" },
+            SonarrEpisode = new SonarrEpisode
+            {
+                SeasonNumber = 1,
+                EpisodeNumber = 5,
+                Title = "Episode: Title"
+            },
+            SonarrNamingConfig = new SonarrNamingConfig
+            {
+                ReplaceIllegalCharacters = true,
+                ColonReplacementFormat = replacement
+            }
+        };
+
+        var name = new FilenameService().FormatFilename("{Series Title}", episode, options);
+
+        Assert.Equal(expectedSeriesTitle, name);
+    }
+
+    [Fact]
+    public void UseSonarrNumbering_UsesCanonicalSeriesAndEpisodeIdentity()
+    {
+        var episode = MakeEpisode();
+        episode.SeriesTitle = "Crunchyroll Series";
+        episode.Title = "Crunchyroll Episode";
+        var options = new FilenameOptions
+        {
+            Quality = "1080",
+            UseSonarrNumbering = true,
+            SonarrSeries = new SonarrSeries { Title = "Canonical: Series" },
+            SonarrEpisode = new SonarrEpisode
+            {
+                SeasonNumber = 3,
+                EpisodeNumber = 7,
+                Title = "Canonical: Episode"
+            },
+            SonarrNamingConfig = SonarrNamingConfig.Default
+        };
+
+        var name = new FilenameService().FormatFilename(
+            "{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}",
+            episode,
+            options);
+
+        Assert.Equal("Canonical - Series - S03E07 - Canonical - Episode WEBDL-1080p", name);
+    }
+
+    [Theory]
+    [InlineData("---- Is All You Need", "- Is All You Need")]
+    [InlineData("A....B", "A.B")]
+    [InlineData("A__B", "A_B")]
+    public void UseSonarrNumbering_CollapsesRepeatedSeparators(string sonarrTitle, string expected)
+    {
+        var options = new FilenameOptions
+        {
+            UseSonarrNumbering = true,
+            SonarrEpisode = new SonarrEpisode
+            {
+                SeasonNumber = 1,
+                EpisodeNumber = 1,
+                Title = sonarrTitle
+            },
+            SonarrNamingConfig = SonarrNamingConfig.Default
+        };
+
+        var name = new FilenameService().FormatFilename("{Episode Title}", MakeEpisode(), options);
+
+        Assert.Equal(expected, name);
+    }
+
+    [Fact]
+    public void UseSonarrNumbering_CrSeriesAliasKeepsCrunchyrollTitle()
+    {
+        var episode = MakeEpisode();
+        episode.SeriesTitle = "Crunchyroll: Series";
+        var options = new FilenameOptions
+        {
+            UseSonarrNumbering = true,
+            SonarrSeries = new SonarrSeries { Title = "Canonical: Series" },
+            SonarrEpisode = new SonarrEpisode { SeasonNumber = 2, EpisodeNumber = 5, Title = "Title" },
+            SonarrNamingConfig = SonarrNamingConfig.Default
+        };
+
+        var name = new FilenameService().FormatFilename("{crSeriesTitle}", episode, options);
+
+        Assert.Equal("Crunchyroll Series", name);
+    }
+
     [Fact]
     public void FormatFilename_SupportsSonarrStyleTokens()
     {
@@ -99,7 +202,7 @@ public class PortedGapTests
 
         var name = svc.FormatFilename("{Episode Title}", episode, opts);
 
-        Assert.Equal("Part One  Part Two Finale", name);
+        Assert.Equal("Part One + Part Two - Finale!", name);
         Assert.DoesNotContain(Path.DirectorySeparatorChar, name);
         Assert.DoesNotContain(Path.AltDirectorySeparatorChar, name);
     }
@@ -153,6 +256,36 @@ public class PortedGapTests
         Assert.Equal("My Show", folder);
     }
 
+    [Theory]
+    [InlineData(0, "Specials")]
+    [InlineData(1, "Season 01")]
+    [InlineData(12, "Season 12")]
+    public void DownloadSeasonFolder_UsesSonarrNamingFormat(int seasonNumber, string expected)
+    {
+        var naming = new SonarrNamingConfig
+        {
+            SeasonFolderFormat = "Season {season:00}",
+            SpecialsFolderFormat = "Specials"
+        };
+
+        var folder = DownloadService.ResolveSeasonFolderName(seasonNumber, naming);
+
+        Assert.Equal(expected, folder);
+    }
+
+    [Fact]
+    public void DownloadNaming_SavedSonarrIdentityNeverSilentlyFallsBack()
+    {
+        var series = new SonarrSeries { Id = 801, Title = "Canonical Series" };
+        var episode = new SonarrEpisode { Id = 26363, SeriesId = 801 };
+
+        Assert.True(DownloadService.ShouldDeferForMissingSonarrIdentity(true, 26363, null, null));
+        Assert.True(DownloadService.ShouldDeferForMissingSonarrIdentity(true, 26363, episode, null));
+        Assert.False(DownloadService.ShouldDeferForMissingSonarrIdentity(true, 26363, episode, series));
+        Assert.False(DownloadService.ShouldDeferForMissingSonarrIdentity(false, 26363, null, null));
+        Assert.False(DownloadService.ShouldDeferForMissingSonarrIdentity(true, null, null, null));
+    }
+
     [Fact]
     public void DownloadFilename_LongSonarrTitle_IsLimitedWithoutDroppingQualitySuffix()
     {
@@ -181,7 +314,14 @@ public class PortedGapTests
 
         Assert.True((rawName + ".mkv").Length > 255);
 
-        var limitedName = DownloadService.LimitOutputFileName(rawName, template, sonarrTitle, string.Empty);
+        var renderedSonarrTitle = FilenameService.ApplySonarrFilenameRules(
+            sonarrTitle,
+            SonarrNamingConfig.Default);
+        var limitedName = DownloadService.LimitOutputFileName(
+            rawName,
+            template,
+            renderedSonarrTitle,
+            string.Empty);
 
         Assert.Equal(220, Path.GetFileName(limitedName).Length);
         Assert.Contains(" - S01E05 - ", limitedName);

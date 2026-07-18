@@ -19,6 +19,7 @@ public class FilenameOptions
     public string? AudioLanguage { get; set; }
     public SonarrSeries? SonarrSeries { get; set; }
     public SonarrEpisode? SonarrEpisode { get; set; }
+    public SonarrNamingConfig? SonarrNamingConfig { get; set; }
     public List<string>? Overrides { get; set; }
     public List<string>? SelectedDubs { get; set; }
     // When true and SonarrEpisode is set, the {episode}/{season} variables use Sonarr's
@@ -28,6 +29,8 @@ public class FilenameOptions
 
 public class FilenameService : IFilenameService
 {
+    private static readonly Regex SonarrDuplicateSeparatorRegex = new(@"([- ._])\1+", RegexOptions.Compiled);
+
     public string FormatFilename(string template, EpisodeInfo episode, FilenameOptions? options = null)
     {
         options ??= new FilenameOptions();
@@ -39,9 +42,15 @@ public class FilenameService : IFilenameService
         // like Sonarr"). Off or unmatched, it keeps Crunchyroll's own title. The always-CR
         // aliases below let a Sonarr-numbered template still opt into the Crunchyroll title.
         bool useSonarrNumbering = options.UseSonarrNumbering && options.SonarrEpisode != null;
+        bool useSonarrSeries = options.UseSonarrNumbering &&
+                               !string.IsNullOrWhiteSpace(options.SonarrSeries?.Title);
+        var sonarrNaming = options.SonarrNamingConfig ?? SonarrNamingConfig.Default;
         var effectiveTitle = (useSonarrNumbering && !string.IsNullOrEmpty(options.SonarrEpisode!.Title))
-            ? options.SonarrEpisode!.Title!
+            ? ApplySonarrFilenameRules(options.SonarrEpisode!.Title!, sonarrNaming)
             : episode.Title;
+        var effectiveSeriesTitle = useSonarrSeries
+            ? ApplySonarrFilenameRules(options.SonarrSeries!.Title!, sonarrNaming)
+            : episode.SeriesTitle;
 
         variables.Add(new Variable("title", effectiveTitle, true));
         // Aliases so the names documented in the UI resolve.
@@ -49,6 +58,8 @@ public class FilenameService : IFilenameService
         // Always the Crunchyroll title, regardless of Sonarr numbering.
         variables.Add(new Variable("crTitle", episode.Title, true));
         variables.Add(new Variable("crEpisodeTitle", episode.Title, true));
+        variables.Add(new Variable("seriesTitle", effectiveSeriesTitle, true));
+        variables.Add(new Variable("crSeriesTitle", episode.SeriesTitle, true));
 
         // Episode: try to parse as double for fractional episodes (e.g., 12.5), fallback to int
         object episodeValue;
@@ -66,7 +77,6 @@ public class FilenameService : IFilenameService
         }
         variables.Add(new Variable("episode", episodeValue, false));
 
-        variables.Add(new Variable("seriesTitle", episode.SeriesTitle, true));
         variables.Add(new Variable("seasonTitle", episode.SeasonTitle ?? string.Empty, true));
         variables.Add(new Variable("season", useSonarrNumbering ? (double)options.SonarrEpisode!.SeasonNumber : (double)episode.SeasonNumber, false));
         variables.Add(new Variable("dubs", string.Join(", ", options.SelectedDubs ?? new List<string>()), true));
@@ -74,12 +84,18 @@ public class FilenameService : IFilenameService
         // Sonarr variables (ported from upstream FileNameManager)
         if (options.SonarrSeries != null)
         {
-            variables.Add(new Variable("sonarrSeriesTitle", options.SonarrSeries.Title ?? string.Empty, true));
+            variables.Add(new Variable(
+                "sonarrSeriesTitle",
+                ApplySonarrFilenameRules(options.SonarrSeries.Title ?? string.Empty, sonarrNaming),
+                true));
             variables.Add(new Variable("sonarrSeriesReleaseYear", options.SonarrSeries.Year, true));
         }
         if (options.SonarrEpisode != null)
         {
-            variables.Add(new Variable("sonarrEpisodeTitle", options.SonarrEpisode.Title ?? string.Empty, true));
+            variables.Add(new Variable(
+                "sonarrEpisodeTitle",
+                ApplySonarrFilenameRules(options.SonarrEpisode.Title ?? string.Empty, sonarrNaming),
+                true));
         }
 
         // Height/width from quality config when available
@@ -176,6 +192,50 @@ public class FilenameService : IFilenameService
         });
 
         return joinedResult;
+    }
+
+    internal static string ApplySonarrFilenameRules(string value, SonarrNamingConfig namingConfig)
+    {
+        var result = value;
+        if (namingConfig.ReplaceIllegalCharacters)
+        {
+            if (namingConfig.ColonReplacementFormat == SonarrColonReplacementFormat.Smart)
+            {
+                result = result.Replace(": ", " - ", StringComparison.Ordinal);
+                result = result.Replace(":", "-", StringComparison.Ordinal);
+            }
+            else
+            {
+                var replacement = namingConfig.ColonReplacementFormat switch
+                {
+                    SonarrColonReplacementFormat.Dash => "-",
+                    SonarrColonReplacementFormat.SpaceDash => " -",
+                    SonarrColonReplacementFormat.SpaceDashSpace => " - ",
+                    SonarrColonReplacementFormat.Custom => namingConfig.CustomColonReplacementFormat,
+                    _ => string.Empty
+                };
+                result = result.Replace(":", replacement, StringComparison.Ordinal);
+            }
+        }
+        else
+        {
+            result = result.Replace(":", string.Empty, StringComparison.Ordinal);
+        }
+
+        var badCharacters = new[] { "\\", "/", "<", ">", "?", "*", "|", "\"" };
+        var goodCharacters = new[] { "+", "+", string.Empty, string.Empty, "!", "-", string.Empty, string.Empty };
+        for (var index = 0; index < badCharacters.Length; index++)
+        {
+            result = result.Replace(
+                badCharacters[index],
+                namingConfig.ReplaceIllegalCharacters ? goodCharacters[index] : string.Empty,
+                StringComparison.Ordinal);
+        }
+
+        result = SonarrDuplicateSeparatorRegex.Replace(
+            result,
+            match => match.Captures[0].Value[0].ToString());
+        return result.TrimStart(' ', '.').TrimEnd(' ');
     }
 
     public string SanitizeFilename(string filename)

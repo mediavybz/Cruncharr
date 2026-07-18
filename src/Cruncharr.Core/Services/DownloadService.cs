@@ -218,6 +218,41 @@ public class DownloadService : IDownloadService
         return SanitizeFolderName(episode.SeriesTitle);
     }
 
+    internal static string ResolveSeasonFolderName(int seasonNumber, SonarrNamingConfig? namingConfig)
+    {
+        var fallback = seasonNumber == 0 ? "Specials" : $"Season {seasonNumber:00}";
+        var template = seasonNumber == 0
+            ? namingConfig?.SpecialsFolderFormat
+            : namingConfig?.SeasonFolderFormat;
+        if (string.IsNullOrWhiteSpace(template)) return fallback;
+
+        var resolved = Regex.Replace(
+            template,
+            @"\{season(?::(0+|D\d+))?\}",
+            match =>
+            {
+                var format = match.Groups[1].Value;
+                if (string.IsNullOrEmpty(format)) return seasonNumber.ToString();
+                if (format.StartsWith('D')) return seasonNumber.ToString(format);
+                return seasonNumber.ToString(new string('0', format.Length));
+            },
+            RegexOptions.IgnoreCase);
+        resolved = FilenameService.ApplySonarrFilenameRules(
+            resolved,
+            namingConfig ?? SonarrNamingConfig.Default);
+        resolved = SanitizeFolderName(resolved);
+        return string.IsNullOrWhiteSpace(resolved) ? fallback : resolved;
+    }
+
+    internal static bool ShouldDeferForMissingSonarrIdentity(
+        bool useSonarrNumbering,
+        int? savedSonarrEpisodeId,
+        SonarrEpisode? sonarrEpisode,
+        SonarrSeries? sonarrSeries) =>
+        useSonarrNumbering &&
+        savedSonarrEpisodeId.HasValue &&
+        (sonarrEpisode == null || sonarrSeries == null);
+
     internal static bool ShouldReplaceEncodedOutput(int exitCode, bool tempOutputExists) =>
         exitCode == 0 && tempOutputExists;
 
@@ -516,6 +551,8 @@ public class DownloadService : IDownloadService
         // Fetch Sonarr data for filename variables if enabled
         SonarrSeries? sonarrSeries = null;
         SonarrEpisode? sonarrEpisode = null;
+        SonarrNamingConfig? sonarrNamingConfig = null;
+        int? savedSonarrEpisodeId = null;
         if (config.Sonarr.Enabled && _sonarrService != null)
         {
             try
@@ -528,6 +565,7 @@ public class DownloadService : IDownloadService
                     : null;
                 if (int.TryParse(historyEpisode?.SonarrEpisodeId, out var storedSonarrEpisodeId))
                 {
+                    savedSonarrEpisodeId = storedSonarrEpisodeId;
                     sonarrEpisode = await _sonarrService.GetEpisodeAsync(storedSonarrEpisodeId, config.Sonarr);
                     if (sonarrEpisode != null)
                     {
@@ -565,11 +603,34 @@ public class DownloadService : IDownloadService
                             sonarrEpisode?.SeasonNumber, sonarrEpisode?.EpisodeNumber, sonarrEpisode?.AbsoluteEpisodeNumber, sonarrEpisode?.Title);
                     }
                 }
+
+                if (config.Sonarr.UseSonarrNumbering && sonarrSeries != null)
+                {
+                    sonarrNamingConfig = await _sonarrService.GetNamingConfigAsync(config.Sonarr)
+                        ?? SonarrNamingConfig.Default;
+                }
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "Failed to fetch Sonarr data for filename variables");
             }
+        }
+
+        if (ShouldDeferForMissingSonarrIdentity(
+                config.Sonarr.UseSonarrNumbering,
+                savedSonarrEpisodeId,
+                sonarrEpisode,
+                sonarrSeries))
+        {
+            var unavailableSonarrEpisodeId = savedSonarrEpisodeId.GetValueOrDefault();
+            var error = $"Sonarr naming metadata for saved episode {unavailableSonarrEpisodeId} is temporarily unavailable; refusing to create a fallback name";
+            _logger?.LogWarning(error);
+            return new DownloadResult
+            {
+                Success = false,
+                ErrorMessage = error,
+                ErrorType = DownloadErrorType.NetworkError
+            };
         }
 
         // Use FilenameTemplate if user configured it, otherwise fall back to Filename
@@ -586,6 +647,7 @@ public class DownloadService : IDownloadService
             AudioLanguage = ResolveRequestedAudioLanguage(episode, config),
             SonarrSeries = sonarrSeries,
             SonarrEpisode = sonarrEpisode,
+            SonarrNamingConfig = sonarrNamingConfig,
             UseSonarrNumbering = config.Sonarr.UseSonarrNumbering,
             SelectedDubs = episode.SelectedDubs?.Count > 0
                 ? episode.SelectedDubs
@@ -594,7 +656,9 @@ public class DownloadService : IDownloadService
         var fileName = _filenameService.FormatFilename(filenameTemplate, episode, filenameOptions);
         var filenameEpisodeTitle = filenameOptions.UseSonarrNumbering &&
                                    !string.IsNullOrEmpty(filenameOptions.SonarrEpisode?.Title)
-            ? filenameOptions.SonarrEpisode.Title!
+            ? FilenameService.ApplySonarrFilenameRules(
+                filenameOptions.SonarrEpisode.Title!,
+                filenameOptions.SonarrNamingConfig ?? SonarrNamingConfig.Default)
             : episode.Title;
         var limitedFileName = LimitOutputFileName(
             fileName,
@@ -619,7 +683,8 @@ public class DownloadService : IDownloadService
             var seriesFolder = ResolveSeriesFolderName(episode, sonarrSeries);
             if (!string.IsNullOrEmpty(seriesFolder))
             {
-                outputDir = Path.Combine(outputDir, seriesFolder, $"Season {folderSeason:00}");
+                var seasonFolder = ResolveSeasonFolderName(folderSeason, sonarrNamingConfig);
+                outputDir = Path.Combine(outputDir, seriesFolder, seasonFolder);
             }
         }
 
@@ -1450,6 +1515,7 @@ public class DownloadService : IDownloadService
                             AudioLanguage = ResolveRequestedAudioLanguage(episode, config),
                             SonarrSeries = sonarrSeries,
                             SonarrEpisode = sonarrEpisode,
+                            SonarrNamingConfig = sonarrNamingConfig,
                             UseSonarrNumbering = config.Sonarr.UseSonarrNumbering,
                             SelectedDubs = episode.SelectedDubs?.Count > 0
                                 ? episode.SelectedDubs

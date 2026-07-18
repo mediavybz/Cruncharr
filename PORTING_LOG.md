@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-17 (Round 41 in progress: canonical Sonarr naming reliability)
+## Last Updated: 2026-07-17 (Round 41 complete: canonical Sonarr naming reliability)
 
 ---
 
@@ -26,6 +26,7 @@
 - Post-version verification repeated 206/206 tests, zero-warning build/analyzers, frontend JavaScript syntax, exact 1.0.57 release references, and whitespace checks successfully.
 - Dockerfile check completed with no warnings; cache-only linux/amd64 and linux/arm64 builds completed from the 1.0.57 working source; Compose and shell syntax checks passed.
 - Loaded linux/amd64 smoke became healthy at `1.0.57+local-naming-audit`, served exactly one 1.0.57 CSS/JavaScript key plus the corrected Sonarr naming help, ran PID 1 as UID/GID 1234, linked without missing libraries, and stopped gracefully with exit code 0.
+- Freshly pulled GHCR testing image became healthy at `1.0.57+f736988127045c6e4693d546a02f2243aefc8923`, served the exact 1.0.57 assets and naming help, ran PID 1 as UID/GID 1234, linked without missing libraries, retained FFmpeg N-125649-g8d394252d8, and stopped gracefully with exit code 0.
 
 ### Frontend (Mode B)
 | File | Desktop Equivalent | API Endpoints Used | Date |
@@ -34,10 +35,19 @@
 | src/Cruncharr.API/wwwroot/index.html | Existing web release asset refresh | none | Bumped aligned CSS and JavaScript cache keys 1.0.56 → 1.0.57 so browsers cannot retain the pre-fix naming/settings script | 2026-07-17 |
 
 ### API Contract
-- No Cruncharr API route, request, response-shape, or status-code changes planned.
+- No Cruncharr API route, request, response-shape, or status-code changes.
 
 ### Status (Round 41)
-- In progress on `testing`.
+- Complete on `testing`.
+
+### Release Status (Round 41)
+- Testing release version: 1.0.57.
+- Source commit: `f736988` (`fix(sonarr): preserve canonical naming`).
+- `testing` pushed to the source commit.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`.
+- Registry index digest: `sha256:e7f9e462e1ccc0caffdb711f2ba7edef3dcbc4da59c1e0614b163e31638dd6ea`.
+- linux/amd64 manifest: `sha256:95d53e4d492ce4697f276b7e5dd1f6ce44957c93f03312061f003c9f56c9c2ea`; linux/arm64 manifest: `sha256:a1c4ed8e869e9f7be86e8c859556abaea6344f25c77652017321fa3113ae37c2`; both include provenance attestations.
+- Stable `master`, `:latest`, and version tags were not changed.
 
 ---
 

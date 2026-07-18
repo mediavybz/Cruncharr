@@ -150,6 +150,18 @@ docker build -t cruncharr .
 docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncharr
 ```
 
+Validate the production image for both supported architectures without publishing:
+
+```bash
+bash scripts/publish-docker.sh
+```
+
+Publish the testing image:
+
+```bash
+bash scripts/publish-docker.sh --tag ghcr.io/mediavybz/cruncharr:testing --push
+```
+
 ## API Endpoints
 
 The backend exposes a REST API at `http://localhost:8585/api/v1/`:

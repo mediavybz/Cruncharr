@@ -7,4 +7,4 @@ icon.png -filter -diff -merge -text
 # Shell scripts must keep LF endings or the Linux container can't exec them
 # (a CRLF shebang becomes "#!/bin/sh\r" -> bad interpreter).
 *.sh text eol=lf
-docker-entrypoint.sh text eol=lf
+docker/entrypoint.sh text eol=lf

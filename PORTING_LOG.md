@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-22 (Round 43 in progress: unavailable catalog episode handling)
+## Last Updated: 2026-07-22 (Round 43 complete: unavailable catalog episode handling)
 
 ---
 
@@ -36,11 +36,23 @@ successfully, isolating the failure to catalog entries without available content
 - Release solution restore and warning-as-error build completed with 0 warnings and 0 errors; the full Release suite passed 206/206 tests.
 - Cache-only production builds completed for `linux/amd64` and `linux/arm64` using the repository publisher.
 - Loaded linux/amd64 production image became healthy at `1.0.59+local-unavailable-episodes`, served both 1.0.59 cache keys and the corrected no-episodes/account-region state, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
+- Multi-architecture publish completed for linux/amd64 (`sha256:72e255a71916303e3ec5e79318a4817710516303bfc8d53923b3b88a61db1e22`) and linux/arm64 (`sha256:37f80a75371829e24eda58b47c31ebec888aca5a49d432976337b1bc3fb9a1f2`) under OCI index `sha256:c19b6c284814686170ae5b370522b9f399e8eb6b157af66970b02f1cfefd8ae4`.
+- Freshly pulled GHCR testing image became healthy at `1.0.59+7b0100b606be5d35d984ee68c23f40ab782da077`, served both 1.0.59 browser cache keys and the corrected no-episodes/account-region state, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
 
 ### In Progress
 | File | Mode | Blocker |
 |------|------|---------|
-| Testing release 1.0.59 | B/A metadata | Commit, testing-branch push, multi-architecture image publish, registry inspection, and fresh-pull smoke pending |
+| Testing release 1.0.59 | B/A metadata | [completed] Source push, multi-architecture image publish, registry inspection, and fresh-pull smoke passed |
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Docker image | Multi-architecture 1.0.59 testing image for source commit `7b0100b`; `linux/amd64` + `linux/arm64`; OCI index `sha256:c19b6c284814686170ae5b370522b9f399e8eb6b157af66970b02f1cfefd8ae4` | 2026-07-22 |
+
+### Release Status
+- Fix commit `7b0100b` pushed to `origin/testing`.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, OCI index digest `sha256:c19b6c284814686170ae5b370522b9f399e8eb6b157af66970b02f1cfefd8ae4`.
+- Stable `master`, `:latest`, and numbered stable tags were not changed.
 
 ---
 

@@ -1565,6 +1565,19 @@
                     const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
                     const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
                     const res = await fetch(`/api/v1/series/${seriesId}/list?${dubLangParam}`);
+                    if (res.status === 404) {
+                        showToast('No episodes are available for this series', 'info');
+                        if (listContainer) {
+                            listContainer.innerHTML = `
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">&#9432;</div>
+                                    <div class="empty-state-title">No episodes available</div>
+                                    <div>This Crunchyroll catalog entry has no episodes available for your account or region.</div>
+                                </div>
+                            `;
+                        }
+                        return;
+                    }
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const result = await res.json();
                     

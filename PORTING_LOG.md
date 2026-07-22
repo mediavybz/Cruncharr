@@ -1,7 +1,46 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-18 (Round 42 complete: repository structure and artifact hygiene)
+## Last Updated: 2026-07-22 (Round 43 in progress: unavailable catalog episode handling)
+
+---
+
+## Round 43 — Unavailable Catalog Episode Handling (2026-07-22)
+
+Live testing instance `192.168.10.10:8585` (`1.0.58+ecc09f6`) returned the Browse entry
+`GRZJEQ3V6` (Accel World), but Crunchyroll returned no seasons for that account/region. The existing
+`GET /api/v1/series/{seriesId}/list` contract therefore returned its established 404
+`Series not found or no episodes available`; the web UI incorrectly classified that expected empty
+catalog result as a transport failure and showed both “Failed to load series episodes” and “Failed
+to load episodes.” Other available English-only and multi-language series returned episode lists
+successfully, isolating the failure to catalog entries without available content.
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | Desktop series selection when the Crunchyroll series lookup returns no data | Existing GET `/api/v1/series/{seriesId}/list` | Handles the endpoint's established 404 as an informational no-episodes state for the current account/region while retaining the existing failure state for real request/server errors | 2026-07-22 |
+| src/Cruncharr.API/wwwroot/index.html | Existing web release asset refresh | none | Bumped aligned CSS and JavaScript cache keys 1.0.58 → 1.0.59 so browsers cannot retain the pre-fix episode-selection script | 2026-07-22 |
+
+### Release Metadata
+| File | Change | Date |
+|------|--------|------|
+| src/Cruncharr.API/Cruncharr.API.csproj | [PT] Testing assembly/file/package version 1.0.58 → 1.0.59; framework and dependencies unchanged | 2026-07-22 |
+| src/Cruncharr.API/Controllers/HealthController.cs | [PT] Unreachable informational-version fallback 1.0.58 → 1.0.59; route, response shape, status codes, and health logic unchanged | 2026-07-22 |
+
+### API Contract
+- No route, request, response-shape, or status-code changes.
+
+### Verification (pre-release)
+- Live 1.0.58 evidence: `GRZJEQ3V6` returned the established 404/no-episodes contract seven times; its Browse metadata identified Accel World and the same account returned no seasons. Available English-only controls (`GR49M7GP6`, `G5PHNMW59`, `GRDQNE7GY`) and multi-language control `G79H23Z8P` returned full episode lists, proving authentication and the general series parser were healthy.
+- Frontend JavaScript syntax, Docker Compose configuration, exact 1.0.59 release references, Git whitespace checks, and the protected API contract passed.
+- Release solution restore and warning-as-error build completed with 0 warnings and 0 errors; the full Release suite passed 206/206 tests.
+- Cache-only production builds completed for `linux/amd64` and `linux/arm64` using the repository publisher.
+- Loaded linux/amd64 production image became healthy at `1.0.59+local-unavailable-episodes`, served both 1.0.59 cache keys and the corrected no-episodes/account-region state, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
+
+### In Progress
+| File | Mode | Blocker |
+|------|------|---------|
+| Testing release 1.0.59 | B/A metadata | Commit, testing-branch push, multi-architecture image publish, registry inspection, and fresh-pull smoke pending |
 
 ---
 

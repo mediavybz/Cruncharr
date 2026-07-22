@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-22 (Round 44 in progress: zero-episode catalog filtering)
+## Last Updated: 2026-07-22 (Round 44 complete: zero-episode catalog filtering)
 
 ---
 
@@ -42,12 +42,23 @@ port's reduced browse model omitted it even though generic `SeriesInfo.EpisodeCo
 - Release warning-as-error solution build completed with 0 warnings and 0 errors.
 - Cache-only production builds completed for `linux/amd64` and `linux/arm64` using the repository publisher.
 - Loaded linux/amd64 production image became healthy at `1.0.60+local-zero-episode-filter`, served both 1.0.60 cache keys and the explicit-zero Browse filter, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
-- Source commit/push, registry publish/inspection, and fresh-pull smoke remain pending.
+- Multi-architecture publish completed for linux/amd64 (`sha256:ce7c216e5fe81a085a4f696d02f3b38620efa6de930d689e746672d81552957f`) and linux/arm64 (`sha256:34386c5573eab9a9c0be5d47aca0b8eed659804b5facc427f2b7469df9e04bdf`) under OCI index `sha256:ad50583e9e7c1004fc4087eef2e4ca8329a2fb914284796ec1a2313e81a76277`.
+- Freshly pulled GHCR testing image became healthy at `1.0.60+06f2c43e1f730a3fcc4ebd0e14e4a26be2237209`, served both 1.0.60 browser cache keys and the explicit-zero Browse filter, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
 
 ### In Progress
 | File | Mode | Blocker |
 |------|------|---------|
-| Testing release 1.0.60 | A/B | Commit/testing push, image publish, registry inspection, and fresh-pull smoke pending |
+| Testing release 1.0.60 | A/B | [completed] Source push, multi-architecture image publish, registry inspection, and fresh-pull smoke passed |
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Docker image | Multi-architecture 1.0.60 testing image for source commit `06f2c43`; `linux/amd64` + `linux/arm64`; OCI index `sha256:ad50583e9e7c1004fc4087eef2e4ca8329a2fb914284796ec1a2313e81a76277` | 2026-07-22 |
+
+### Release Status
+- Fix commit `06f2c43` pushed to `origin/testing`.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, OCI index digest `sha256:ad50583e9e7c1004fc4087eef2e4ca8329a2fb914284796ec1a2313e81a76277`.
+- Stable `master`, `:latest`, and numbered stable tags were not changed.
 
 ---
 

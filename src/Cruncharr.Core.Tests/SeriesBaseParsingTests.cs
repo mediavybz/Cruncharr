@@ -1,4 +1,5 @@
 using Cruncharr.Core.Services;
+using Newtonsoft.Json;
 using Xunit;
 
 namespace Cruncharr.Core.Tests;
@@ -54,5 +55,25 @@ public class SeriesBaseParsingTests
     {
         var series = CrunchyrollApiService.ParseSeriesBaseResponse(@"{ ""total"": 0, ""data"": [], ""meta"": {} }");
         Assert.Null(series);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(26)]
+    public void BrowseSeriesResponse_preservesAuthoritativeEpisodeCount(int episodeCount)
+    {
+        var response = JsonConvert.DeserializeObject<CrBrowseSeriesBase>($$"""
+            {
+                "total": 1,
+                "data": [{
+                    "id": "GSERIES1",
+                    "title": "Test Series",
+                    "series_metadata": { "episode_count": {{episodeCount}} }
+                }]
+            }
+            """);
+
+        var series = Assert.Single(response!.Data!);
+        Assert.Equal(episodeCount, series.SeriesMetadata!.EpisodeCount);
     }
 }

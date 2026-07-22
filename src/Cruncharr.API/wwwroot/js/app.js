@@ -1456,7 +1456,8 @@
                 const res = await fetch('/api/v1/series/all');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                allBrowseSeries = data || [];
+                allBrowseSeries = (data || []).filter(series =>
+                    series.episodeCount == null || series.episodeCount > 0);
                 renderBrowseFiltered();
             } catch (e) {
                 const content = document.getElementById('browse-content');

@@ -1,7 +1,53 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-22 (Round 43 complete: unavailable catalog episode handling)
+## Last Updated: 2026-07-22 (Round 44 in progress: zero-episode catalog filtering)
+
+---
+
+## Round 44 — Zero-Episode Catalog Filtering (2026-07-22)
+
+The 1.0.59 follow-up confirmed that relabeling the established 404 did not fix Browse: Accel World
+remained selectable and then showed the new no-episodes state. A direct live-shaped Crunchyroll
+catalog comparison identified the missing signal: `GRZJEQ3V6` reports authoritative
+`series_metadata.episode_count: 0` and `season_count: 0`, while available controls report nonzero
+counts. The desktop `CrBrowseSeriesMetaData` model already preserves `episode_count`; the Docker
+port's reduced browse model omitted it even though generic `SeriesInfo.EpisodeCount` already exists.
+
+### Backend (Mode A)
+| File | Source File | Changes | Date |
+|------|-------------|---------|------|
+| src/Cruncharr.Core/Services/CrunchyrollApiService.cs | CRD/Utils/Structs/Crunchyroll/Series/CrBrowseSeries.cs:74-84 | [PT] Restores desktop `series_metadata.episode_count` deserialization and maps it to the existing generic `SeriesInfo.EpisodeCount`; routes, response shape, status codes, and series-fetch behavior are unchanged | 2026-07-22 |
+| src/Cruncharr.Core.Tests/SeriesBaseParsingTests.cs | CRD/Utils/Structs/Crunchyroll/Series/CrBrowseSeries.cs:78-87 | [PT] Adds live-shaped zero/nonzero guards for the restored desktop Browse episode-count field | 2026-07-22 |
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | Desktop downloadable-series selection using authoritative Browse metadata | Existing GET `/api/v1/series/all` | Excludes explicit `episodeCount: 0` catalog shells from the selectable Browse grid while retaining entries whose count is absent for compatibility | 2026-07-22 |
+| src/Cruncharr.API/wwwroot/index.html | Existing web release asset refresh | none | Bumped aligned CSS and JavaScript cache keys 1.0.59 → 1.0.60 so browsers cannot retain the zero-episode selectable-grid behavior | 2026-07-22 |
+
+### Release Metadata
+| File | Change | Date |
+|------|--------|------|
+| src/Cruncharr.API/Cruncharr.API.csproj | [PT] Testing assembly/file/package version 1.0.59 → 1.0.60; framework and dependencies unchanged | 2026-07-22 |
+| src/Cruncharr.API/Controllers/HealthController.cs | [PT] Unreachable informational-version fallback 1.0.59 → 1.0.60; route, response shape, status codes, and health logic unchanged | 2026-07-22 |
+
+### API Contract
+- No route, request, response-shape, or status-code changes; existing `episodeCount` now carries the authoritative Crunchyroll value for all-series Browse results instead of `null`.
+
+### Verification (pre-release)
+- Direct live-shaped catalog comparison reported Accel World (`GRZJEQ3V6`) at 0 episodes/0 seasons, while available controls reported 26 episodes/1 season and 51 episodes/2 seasons; authentication and general Browse parsing were healthy.
+- Frontend JavaScript syntax, the explicit-zero compatibility filter guard, Docker Compose configuration, exact 1.0.60 release references, and Git whitespace checks passed.
+- Targeted Browse/version regression tests passed 23/23; the full Release suite passed 208/208 tests.
+- Release warning-as-error solution build completed with 0 warnings and 0 errors.
+- Cache-only production builds completed for `linux/amd64` and `linux/arm64` using the repository publisher.
+- Loaded linux/amd64 production image became healthy at `1.0.60+local-zero-episode-filter`, served both 1.0.60 cache keys and the explicit-zero Browse filter, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
+- Source commit/push, registry publish/inspection, and fresh-pull smoke remain pending.
+
+### In Progress
+| File | Mode | Blocker |
+|------|------|---------|
+| Testing release 1.0.60 | A/B | Commit/testing push, image publish, registry inspection, and fresh-pull smoke pending |
 
 ---
 

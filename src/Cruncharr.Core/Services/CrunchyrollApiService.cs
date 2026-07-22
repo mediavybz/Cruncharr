@@ -1410,6 +1410,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                         Images = ExtractImageUrls(item.Images),
                         CoverArtUrl = ExtractBestImage(item.Images, "poster_tall"),
                         ThumbnailUrl = ExtractBestImage(item.Images, "poster_wide"),
+                        EpisodeCount = item.SeriesMetadata?.EpisodeCount,
                         AudioLocales = item.SeriesMetadata?.AudioLocales ?? new List<string>(),
                         MaturityRatings = item.SeriesMetadata?.MaturityRatings ?? new List<string>()
                     });
@@ -1884,6 +1885,8 @@ public class CrBrowseSeriesItem
 
 public class CrBrowseSeriesMetadata
 {
+    [JsonProperty("episode_count")]
+    public int EpisodeCount { get; set; }
     [JsonProperty("audio_locales")]
     public List<string>? AudioLocales { get; set; }
     [JsonProperty("subtitle_locales")]

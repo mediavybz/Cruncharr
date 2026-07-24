@@ -140,6 +140,8 @@ public class ConfigController : ControllerBase
                 _config.LogMode = fresh.LogMode;
                 _config.RemoveFinishedDownload = fresh.RemoveFinishedDownload;
                 _config.TokenFilePath = tokenPath;
+                _queueService.SetProcessingLimit(_config.Queue.SimultaneousProcessingJobs);
+                _queueService.SetTranscodeLimit(_config.Queue.MaxSimultaneousTranscodes);
 
                 var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
                 configPath = ValidatePath(configPath, "ConfigPath");
@@ -163,229 +165,229 @@ public class ConfigController : ControllerBase
     private object BuildConfigDto(CruncharrConfig _config)
     {
         return new
+        {
+            Crunchyroll = new
             {
-                Crunchyroll = new
+                Email = _config.Crunchyroll?.Email ?? "",
+                UseBetaApi = _config.Crunchyroll?.UseBetaApi ?? true,
+                MarkAsWatched = _config.Crunchyroll?.MarkAsWatched ?? false,
+                SearchFetchFeaturedMusic = _config.Crunchyroll?.SearchFetchFeaturedMusic ?? false,
+                StreamEndpoint = SanitizeStreamEndpoint(_config.Crunchyroll?.StreamEndpoint),
+                StreamEndpointSecondary = SanitizeStreamEndpoint(_config.Crunchyroll?.StreamEndpointSecondary),
+                DefaultStreamEndpoint = new
                 {
-                    Email = _config.Crunchyroll?.Email ?? "",
-                    UseBetaApi = _config.Crunchyroll?.UseBetaApi ?? true,
-                    MarkAsWatched = _config.Crunchyroll?.MarkAsWatched ?? false,
-                    SearchFetchFeaturedMusic = _config.Crunchyroll?.SearchFetchFeaturedMusic ?? false,
-                    StreamEndpoint = SanitizeStreamEndpoint(_config.Crunchyroll?.StreamEndpoint),
-                    StreamEndpointSecondary = SanitizeStreamEndpoint(_config.Crunchyroll?.StreamEndpointSecondary),
-                    DefaultStreamEndpoint = new
-                    {
-                        Endpoint = "tv/android_tv",
-                        Authorization = "", // Server-managed, not exposed to client
-                        UserAgent = "ANDROIDTV/3.66.0_22348 Android/16",
-                        DeviceType = "Android TV",
-                        DeviceName = "Android TV",
-                        Video = true,
-                        Audio = true
-                    },
-                    DefaultStreamEndpointSecondary = new
-                    {
-                        Endpoint = "android/phone",
-                        Authorization = "", // Server-managed, not exposed to client
-                        UserAgent = "Crunchyroll/3.110.0 Android/16 okhttp/4.12.0",
-                        DeviceType = "OnePlus CPH2449",
-                        DeviceName = "CPH2449",
-                        Video = true,
-                        Audio = true
-                    }
+                    Endpoint = "tv/android_tv",
+                    Authorization = "", // Server-managed, not exposed to client
+                    UserAgent = "ANDROIDTV/3.66.0_22348 Android/16",
+                    DeviceType = "Android TV",
+                    DeviceName = "Android TV",
+                    Video = true,
+                    Audio = true
                 },
-                Download = new
+                DefaultStreamEndpointSecondary = new
                 {
-                    OutputDirectory = _config.Download?.OutputDirectory ?? "/downloads",
-                    OrganizeIntoFolders = _config.Download?.OrganizeIntoFolders ?? true,
-                    TempDirectory = _config.Download?.TempDirectory ?? "/downloads/temp",
-                    UseTempFolder = _config.Download?.UseTempFolder ?? false,
-                    Filename = _config.Download?.Filename ?? "{seriesTitle} - S{season}E{episode} - {title} [{height}p]",
-                    FilenameTemplate = _config.Download?.FilenameTemplate ?? "{seriesTitle} - S{season}E{episode} - {title} [{height}p]",
-                    FilenameWhitespaceSubstitute = _config.Download?.FilenameWhitespaceSubstitute ?? "",
-                    VideoTitle = _config.Download?.VideoTitle ?? "",
-                    IncludeVideoDescription = _config.Download?.IncludeVideoDescription ?? false,
-                    DescriptionLang = _config.Download?.DescriptionLang ?? "en-US",
-                    LeadingNumbers = _config.Download?.LeadingNumbers ?? 0,
-                    QualityVideo = _config.Download?.QualityVideo ?? "best",
-                    QualityAudio = _config.Download?.QualityAudio ?? "best",
-                    DubLanguages = _config.Download?.DubLanguages ?? new List<string> { "ja-JP" },
-                    DefaultAudio = _config.Download?.DefaultAudio ?? "ja-JP",
-                    SyncDefaultsFromProfile = _config.Download?.SyncDefaultsFromProfile ?? true,
-                    DownloadDescriptionAudio = _config.Download?.DownloadDescriptionAudio ?? false,
-                    DownloadFirstAvailableDub = _config.Download?.DownloadFirstAvailableDub ?? false,
-                    DlVideoOnce = _config.Download?.DlVideoOnce ?? false,
-                    KeepDubsSeparate = _config.Download?.KeepDubsSeparate ?? false,
-                    DownloadDelaySeconds = _config.Download?.DownloadDelaySeconds ?? 0,
-                    DownloadDelayUseDubBased = _config.Download?.DownloadDelayUseDubBased ?? false,
-                    CooldownDelaySeconds = _config.Download?.CooldownDelaySeconds ?? 0,
-                    HardSubLang = _config.Download?.HardSubLang ?? "",
-                    HardSubRawFallback = _config.Download?.HardSubRawFallback ?? false,
-                    Kstream = _config.Download?.Kstream ?? 0,
-                    StreamServer = _config.Download?.StreamServer ?? 0,
-                    SoftSubs = _config.Download?.SoftSubs ?? new List<string> { "en-US" },
-                    DefaultSub = _config.Download?.DefaultSub ?? "en-US",
-                    IncludeSignsSubs = _config.Download?.IncludeSignsSubs ?? false,
-                    SignsSubsAsForced = _config.Download?.SignsSubsAsForced ?? false,
-                    IncludeCcSubs = _config.Download?.IncludeCcSubs ?? false,
-                    CcSubsMuxingFlag = _config.Download?.CcSubsMuxingFlag ?? false,
-                    SubsDownloadDuplicate = _config.Download?.SubsDownloadDuplicate ?? false,
-                    FixCccSubtitles = _config.Download?.FixCccSubtitles ?? true,
-                    ConvertVttToAss = _config.Download?.ConvertVttToAss ?? false,
-                    CcSubsFont = _config.Download?.CcSubsFont ?? "",
-                    SubsAddScaledBorder = _config.Download?.SubsAddScaledBorder ?? "",
-                    SimultaneousDownloads = _config.Download?.SimultaneousDownloads ?? 2,
-                    SimultaneousProcessingJobs = _config.Download?.SimultaneousProcessingJobs ?? 1,
-                    DownloadMethodeNew = _config.Download?.DownloadMethodeNew ?? false,
-                    DownloadAllowEarlyStart = _config.Download?.DownloadAllowEarlyStart ?? false,
-                    DownloadOnlyWithAllSelectedDubSub = _config.Download?.DownloadOnlyWithAllSelectedDubSub ?? false,
-                    DownloadSpeedLimit = _config.Download?.DownloadSpeedLimit ?? 0,
-                    DownloadSpeedInBits = _config.Download?.DownloadSpeedInBits ?? false,
-                    Timeout = _config.Download?.Timeout ?? 15000,
-                    SkipSubs = _config.Download?.SkipSubs ?? false,
-                    CcTag = _config.Download?.CcTag ?? "CC",
-                    RetryAttempts = _config.Download?.RetryAttempts ?? 5,
-                    RetryDelay = _config.Download?.RetryDelay ?? 5,
-                    PlaybackRateLimitRetryDelaySeconds = _config.Download?.PlaybackRateLimitRetryDelaySeconds ?? 30,
-                    RetryMaxDelaySeconds = _config.Download?.RetryMaxDelaySeconds ?? 3600,
-                    PartSize = _config.Download?.PartSize ?? 0,
-                    NoVideo = _config.Download?.NoVideo ?? false,
-                    NoAudio = _config.Download?.NoAudio ?? false,
-                    IncludeChapters = _config.Download?.IncludeChapters ?? true,
-                    SkipMuxing = _config.Download?.SkipMuxing ?? false,
-                    MuxMp4 = _config.Download?.MuxMp4 ?? false,
-                    MuxAudioOnlyToMp3 = _config.Download?.MuxAudioOnlyToMp3 ?? false,
-                    SkipSubMux = _config.Download?.SkipSubMux ?? false,
-                    MuxFonts = _config.Download?.MuxFonts ?? false,
-                    MuxTypesettingFonts = _config.Download?.MuxTypesettingFonts ?? false,
-                    MuxCover = _config.Download?.MuxCover ?? false,
-                    MuxDefaultDub = _config.Download?.MuxDefaultDub ?? "",
-                    MuxDefaultSub = _config.Download?.MuxDefaultSub ?? "",
-                    MuxDefaultSubSigns = _config.Download?.MuxDefaultSubSigns ?? false,
-                    MuxDefaultSubForcedDisplay = _config.Download?.MuxDefaultSubForcedDisplay ?? false,
-                    DefaultVideo = _config.Download?.DefaultVideo ?? "",
-                    ReplaceExistingFiles = _config.Download?.ReplaceExistingFiles ?? false,
-                    SyncTiming = _config.Download?.SyncTiming ?? false,
-                    SyncTimingFullQualityFallback = _config.Download?.SyncTimingFullQualityFallback ?? false,
-                    SyncHwAccel = _config.Download?.SyncHwAccel ?? "",
-                    MkvmergeOptions = _config.Download?.MkvmergeOptions ?? new List<string>(),
-                    FfmpegOptions = _config.Download?.FfmpegOptions ?? new List<string>(),
-                    EncodeEnabled = _config.Download?.EncodeEnabled ?? false,
-                    EncodingPreset = _config.Download?.EncodingPreset ?? "",
-                    DownloadMultipleDubs = _config.Download?.DownloadMultipleDubs ?? false
-                },
-                Queue = new
-                {
-                    PersistQueue = _config.Queue?.PersistQueue ?? false,
-                    AutoDownload = _config.Queue?.AutoDownload ?? false,
-                    SimultaneousProcessingJobs = _config.Queue?.SimultaneousProcessingJobs ?? 1,
-                    MaxSimultaneousTranscodes = _config.Queue?.MaxSimultaneousTranscodes ?? 1,
-                    QueueFilePath = _config.Queue?.QueueFilePath ?? "/config/queue.json",
-                    ShutdownWhenQueueEmpty = _config.Queue?.ShutdownWhenQueueEmpty ?? false
-                },
-                History = new
-                {
-                    Enabled = _config.History?.Enabled ?? true,
-                    CountMissing = _config.History?.CountMissing ?? true,
-                    CheckPartialDownloads = _config.History?.CheckPartialDownloads ?? true,
-                    IncludeCrArtists = _config.History?.IncludeCrArtists ?? false,
-                    RemoveMissingEpisodes = _config.History?.RemoveMissingEpisodes ?? true,
-                    AddSpecials = _config.History?.AddSpecials ?? true,
-                    SkipUnmonitored = _config.History?.SkipUnmonitored ?? false,
-                    CountSonarr = _config.History?.CountSonarr ?? true,
-                    Lang = _config.History?.Lang ?? "en-US",
-                    AutoRefreshIntervalMinutes = _config.History?.AutoRefreshIntervalMinutes ?? 0,
-                    AutoRefreshMode = _config.History?.AutoRefreshMode ?? 0,
-                    AutoRefreshAddToQueue = _config.History?.AutoRefreshAddToQueue ?? false
-                },
-                HistoryPageProperties = _config.HistoryPageProperties,
-                SeasonsPageProperties = _config.SeasonsPageProperties,
-                TrackedSeriesReleaseLastCheckUtc = _config.TrackedSeriesReleaseLastCheckUtc,
-                Notifications = new
-                {
-                    WebhookUrl = _config.Notifications?.WebhookUrl ?? "",
-                    WebhookEnabled = _config.Notifications?.WebhookEnabled ?? false,
-                    WebhookMethod = _config.Notifications?.WebhookMethod ?? "POST",
-                    WebhookContentType = _config.Notifications?.WebhookContentType ?? "application/json",
-                    WebhookHeaders = SanitizeWebhookHeaders(_config.Notifications?.WebhookHeaders),
-                    WebhookBodyTemplate = _config.Notifications?.WebhookBodyTemplate ?? "",
-                    NotifyQueueFinished = _config.Notifications?.NotifyQueueFinished ?? false,
-                    NotifyDownloadFinished = _config.Notifications?.NotifyDownloadFinished ?? false,
-                    NotifyDownloadFailed = _config.Notifications?.NotifyDownloadFailed ?? false,
-                    NotifyTrackedSeriesReleased = _config.Notifications?.NotifyTrackedSeriesReleased ?? false,
-                    NotifyLoginExpired = _config.Notifications?.NotifyLoginExpired ?? false,
-                    NotifyUpdateAvailable = _config.Notifications?.NotifyUpdateAvailable ?? false,
-                    DownloadFinishedPlaySound = _config.Notifications?.DownloadFinishedPlaySound ?? false,
-                    DownloadFinishedSoundPath = _config.Notifications?.DownloadFinishedSoundPath ?? "",
-                    DownloadFinishedExecute = _config.Notifications?.DownloadFinishedExecute ?? false,
-                    DownloadFinishedExecutePath = _config.Notifications?.DownloadFinishedExecutePath ?? ""
-                },
-                Sonarr = new
-                {
-                    Enabled = _config.Sonarr?.Enabled ?? false,
-                    Host = _config.Sonarr?.Host ?? "localhost",
-                    // Upstream defaults Port to 0 (unset). Don't fabricate 8989 here: a non-zero
-                    // default pre-fills the settings field with a plausible-but-wrong port, so a
-                    // user whose Sonarr runs on a non-default port (e.g. 8991) sees "8989" already
-                    // filled, assumes it's correct, and every request 401s/misses against the wrong
-                    // instance. Show the real stored value (0 when unconfigured) so it's visibly unset.
-                    Port = _config.Sonarr?.Port ?? 0,
-                    ApiKey = !string.IsNullOrEmpty(_config.Sonarr?.ApiKey) ? "[configured]" : null,
-                    UseSsl = _config.Sonarr?.UseSsl ?? false,
-                    UrlBase = _config.Sonarr?.UrlBase ?? "",
-                    UseSonarrNumbering = _config.Sonarr?.UseSonarrNumbering ?? false
-                },
-                Proxy = new
-                {
-                    Enabled = _config.Proxy?.Enabled ?? false,
-                    AllTraffic = _config.Proxy?.AllTraffic ?? true,
-                    Socks = _config.Proxy?.Socks ?? false,
-                    Host = _config.Proxy?.Host ?? "",
-                    Port = _config.Proxy?.Port ?? 0,
-                    Username = _config.Proxy?.Username ?? "",
-                    Password = !string.IsNullOrEmpty(_config.Proxy?.Password) ? "[configured]" : null
-                },
-                FlareSolverr = new
-                {
-                    Enabled = _config.FlareSolverr?.Enabled ?? false,
-                    Host = _config.FlareSolverr?.Host ?? "localhost",
-                    Port = _config.FlareSolverr?.Port ?? 8191,
-                    UseSsl = _config.FlareSolverr?.UseSsl ?? false,
-                    MitmEnabled = _config.FlareSolverr?.MitmEnabled ?? false,
-                    MitmHost = _config.FlareSolverr?.MitmHost ?? "",
-                    MitmPort = _config.FlareSolverr?.MitmPort ?? 0,
-                    MitmUseSsl = _config.FlareSolverr?.MitmUseSsl ?? false
-                },
-                Calendar = new
-                {
-                    Language = _config.Calendar?.Language ?? "en-US",
-                    DubFilter = _config.Calendar?.DubFilter ?? "",
-                    Custom = _config.Calendar?.Custom ?? false,
-                    HideDubs = _config.Calendar?.HideDubs ?? false,
-                    ShowUpcomingEpisodes = _config.Calendar?.ShowUpcomingEpisodes ?? false,
-                    UpdateHistory = _config.Calendar?.UpdateHistory ?? false,
-                    ShowHistoryMark = _config.Calendar?.ShowHistoryMark ?? true
-                },
-                AddDownload = new
-                {
-                    SearchAddToHistory = _config.AddDownload?.SearchAddToHistory ?? true,
-                    SingleEpisodeInstantAdd = _config.AddDownload?.SingleEpisodeInstantAdd ?? true,
-                    DefaultSearchEnabled = _config.AddDownload?.DefaultSearchEnabled ?? false
-                },
-                Appearance = new
-                {
-                    Theme = _config.Appearance?.Theme ?? "Dark",
-                    AccentColor = _config.Appearance?.AccentColor ?? "",
-                    BackgroundImagePath = _config.Appearance?.BackgroundImagePath ?? "",
-                    BackgroundImageOpacity = _config.Appearance?.BackgroundImageOpacity ?? 1.0,
-                    BackgroundImageBlurRadius = _config.Appearance?.BackgroundImageBlurRadius ?? 0.0
-                },
-                General = new
-                {
-                    LogMode = _config.LogMode,
-                    RemoveFinishedDownload = _config.RemoveFinishedDownload,
-                    TokenFilePath = _config.TokenFilePath ?? ""
+                    Endpoint = "android/phone",
+                    Authorization = "", // Server-managed, not exposed to client
+                    UserAgent = "Crunchyroll/3.110.0 Android/16 okhttp/4.12.0",
+                    DeviceType = "OnePlus CPH2449",
+                    DeviceName = "CPH2449",
+                    Video = true,
+                    Audio = true
                 }
-            };
+            },
+            Download = new
+            {
+                OutputDirectory = _config.Download?.OutputDirectory ?? "/downloads",
+                OrganizeIntoFolders = _config.Download?.OrganizeIntoFolders ?? true,
+                TempDirectory = _config.Download?.TempDirectory ?? "/downloads/temp",
+                UseTempFolder = _config.Download?.UseTempFolder ?? false,
+                Filename = _config.Download?.Filename ?? "{seriesTitle} - S{season}E{episode} - {title} [{height}p]",
+                FilenameTemplate = _config.Download?.FilenameTemplate ?? "{seriesTitle} - S{season}E{episode} - {title} [{height}p]",
+                FilenameWhitespaceSubstitute = _config.Download?.FilenameWhitespaceSubstitute ?? "",
+                VideoTitle = _config.Download?.VideoTitle ?? "",
+                IncludeVideoDescription = _config.Download?.IncludeVideoDescription ?? false,
+                DescriptionLang = _config.Download?.DescriptionLang ?? "en-US",
+                LeadingNumbers = _config.Download?.LeadingNumbers ?? 0,
+                QualityVideo = _config.Download?.QualityVideo ?? "best",
+                QualityAudio = _config.Download?.QualityAudio ?? "best",
+                DubLanguages = _config.Download?.DubLanguages ?? new List<string> { "ja-JP" },
+                DefaultAudio = _config.Download?.DefaultAudio ?? "ja-JP",
+                SyncDefaultsFromProfile = _config.Download?.SyncDefaultsFromProfile ?? true,
+                DownloadDescriptionAudio = _config.Download?.DownloadDescriptionAudio ?? false,
+                DownloadFirstAvailableDub = _config.Download?.DownloadFirstAvailableDub ?? false,
+                DlVideoOnce = _config.Download?.DlVideoOnce ?? false,
+                KeepDubsSeparate = _config.Download?.KeepDubsSeparate ?? false,
+                DownloadDelaySeconds = _config.Download?.DownloadDelaySeconds ?? 0,
+                DownloadDelayUseDubBased = _config.Download?.DownloadDelayUseDubBased ?? false,
+                CooldownDelaySeconds = _config.Download?.CooldownDelaySeconds ?? 0,
+                HardSubLang = _config.Download?.HardSubLang ?? "",
+                HardSubRawFallback = _config.Download?.HardSubRawFallback ?? false,
+                Kstream = _config.Download?.Kstream ?? 0,
+                StreamServer = _config.Download?.StreamServer ?? 0,
+                SoftSubs = _config.Download?.SoftSubs ?? new List<string> { "en-US" },
+                DefaultSub = _config.Download?.DefaultSub ?? "en-US",
+                IncludeSignsSubs = _config.Download?.IncludeSignsSubs ?? false,
+                SignsSubsAsForced = _config.Download?.SignsSubsAsForced ?? false,
+                IncludeCcSubs = _config.Download?.IncludeCcSubs ?? false,
+                CcSubsMuxingFlag = _config.Download?.CcSubsMuxingFlag ?? false,
+                SubsDownloadDuplicate = _config.Download?.SubsDownloadDuplicate ?? false,
+                FixCccSubtitles = _config.Download?.FixCccSubtitles ?? true,
+                ConvertVttToAss = _config.Download?.ConvertVttToAss ?? false,
+                CcSubsFont = _config.Download?.CcSubsFont ?? "",
+                SubsAddScaledBorder = _config.Download?.SubsAddScaledBorder ?? "",
+                SimultaneousDownloads = _config.Download?.SimultaneousDownloads ?? 2,
+                SimultaneousProcessingJobs = _config.Download?.SimultaneousProcessingJobs ?? 1,
+                DownloadMethodeNew = _config.Download?.DownloadMethodeNew ?? false,
+                DownloadAllowEarlyStart = _config.Download?.DownloadAllowEarlyStart ?? false,
+                DownloadOnlyWithAllSelectedDubSub = _config.Download?.DownloadOnlyWithAllSelectedDubSub ?? false,
+                DownloadSpeedLimit = _config.Download?.DownloadSpeedLimit ?? 0,
+                DownloadSpeedInBits = _config.Download?.DownloadSpeedInBits ?? false,
+                Timeout = _config.Download?.Timeout ?? 15000,
+                SkipSubs = _config.Download?.SkipSubs ?? false,
+                CcTag = _config.Download?.CcTag ?? "CC",
+                RetryAttempts = _config.Download?.RetryAttempts ?? 5,
+                RetryDelay = _config.Download?.RetryDelay ?? 5,
+                PlaybackRateLimitRetryDelaySeconds = _config.Download?.PlaybackRateLimitRetryDelaySeconds ?? 30,
+                RetryMaxDelaySeconds = _config.Download?.RetryMaxDelaySeconds ?? 3600,
+                PartSize = _config.Download?.PartSize ?? 0,
+                NoVideo = _config.Download?.NoVideo ?? false,
+                NoAudio = _config.Download?.NoAudio ?? false,
+                IncludeChapters = _config.Download?.IncludeChapters ?? true,
+                SkipMuxing = _config.Download?.SkipMuxing ?? false,
+                MuxMp4 = _config.Download?.MuxMp4 ?? false,
+                MuxAudioOnlyToMp3 = _config.Download?.MuxAudioOnlyToMp3 ?? false,
+                SkipSubMux = _config.Download?.SkipSubMux ?? false,
+                MuxFonts = _config.Download?.MuxFonts ?? false,
+                MuxTypesettingFonts = _config.Download?.MuxTypesettingFonts ?? false,
+                MuxCover = _config.Download?.MuxCover ?? false,
+                MuxDefaultDub = _config.Download?.MuxDefaultDub ?? "",
+                MuxDefaultSub = _config.Download?.MuxDefaultSub ?? "",
+                MuxDefaultSubSigns = _config.Download?.MuxDefaultSubSigns ?? false,
+                MuxDefaultSubForcedDisplay = _config.Download?.MuxDefaultSubForcedDisplay ?? false,
+                DefaultVideo = _config.Download?.DefaultVideo ?? "",
+                ReplaceExistingFiles = _config.Download?.ReplaceExistingFiles ?? false,
+                SyncTiming = _config.Download?.SyncTiming ?? false,
+                SyncTimingFullQualityFallback = _config.Download?.SyncTimingFullQualityFallback ?? false,
+                SyncHwAccel = _config.Download?.SyncHwAccel ?? "",
+                MkvmergeOptions = _config.Download?.MkvmergeOptions ?? new List<string>(),
+                FfmpegOptions = _config.Download?.FfmpegOptions ?? new List<string>(),
+                EncodeEnabled = _config.Download?.EncodeEnabled ?? false,
+                EncodingPreset = _config.Download?.EncodingPreset ?? "",
+                DownloadMultipleDubs = _config.Download?.DownloadMultipleDubs ?? false
+            },
+            Queue = new
+            {
+                PersistQueue = _config.Queue?.PersistQueue ?? false,
+                AutoDownload = _config.Queue?.AutoDownload ?? false,
+                SimultaneousProcessingJobs = _config.Queue?.SimultaneousProcessingJobs ?? 1,
+                MaxSimultaneousTranscodes = _config.Queue?.MaxSimultaneousTranscodes ?? 1,
+                QueueFilePath = _config.Queue?.QueueFilePath ?? "/config/queue.json",
+                ShutdownWhenQueueEmpty = _config.Queue?.ShutdownWhenQueueEmpty ?? false
+            },
+            History = new
+            {
+                Enabled = _config.History?.Enabled ?? true,
+                CountMissing = _config.History?.CountMissing ?? true,
+                CheckPartialDownloads = _config.History?.CheckPartialDownloads ?? true,
+                IncludeCrArtists = _config.History?.IncludeCrArtists ?? false,
+                RemoveMissingEpisodes = _config.History?.RemoveMissingEpisodes ?? true,
+                AddSpecials = _config.History?.AddSpecials ?? true,
+                SkipUnmonitored = _config.History?.SkipUnmonitored ?? false,
+                CountSonarr = _config.History?.CountSonarr ?? true,
+                Lang = _config.History?.Lang ?? "en-US",
+                AutoRefreshIntervalMinutes = _config.History?.AutoRefreshIntervalMinutes ?? 0,
+                AutoRefreshMode = _config.History?.AutoRefreshMode ?? 0,
+                AutoRefreshAddToQueue = _config.History?.AutoRefreshAddToQueue ?? false
+            },
+            HistoryPageProperties = _config.HistoryPageProperties,
+            SeasonsPageProperties = _config.SeasonsPageProperties,
+            TrackedSeriesReleaseLastCheckUtc = _config.TrackedSeriesReleaseLastCheckUtc,
+            Notifications = new
+            {
+                WebhookUrl = _config.Notifications?.WebhookUrl ?? "",
+                WebhookEnabled = _config.Notifications?.WebhookEnabled ?? false,
+                WebhookMethod = _config.Notifications?.WebhookMethod ?? "POST",
+                WebhookContentType = _config.Notifications?.WebhookContentType ?? "application/json",
+                WebhookHeaders = SanitizeWebhookHeaders(_config.Notifications?.WebhookHeaders),
+                WebhookBodyTemplate = _config.Notifications?.WebhookBodyTemplate ?? "",
+                NotifyQueueFinished = _config.Notifications?.NotifyQueueFinished ?? false,
+                NotifyDownloadFinished = _config.Notifications?.NotifyDownloadFinished ?? false,
+                NotifyDownloadFailed = _config.Notifications?.NotifyDownloadFailed ?? false,
+                NotifyTrackedSeriesReleased = _config.Notifications?.NotifyTrackedSeriesReleased ?? false,
+                NotifyLoginExpired = _config.Notifications?.NotifyLoginExpired ?? false,
+                NotifyUpdateAvailable = _config.Notifications?.NotifyUpdateAvailable ?? false,
+                DownloadFinishedPlaySound = _config.Notifications?.DownloadFinishedPlaySound ?? false,
+                DownloadFinishedSoundPath = _config.Notifications?.DownloadFinishedSoundPath ?? "",
+                DownloadFinishedExecute = _config.Notifications?.DownloadFinishedExecute ?? false,
+                DownloadFinishedExecutePath = _config.Notifications?.DownloadFinishedExecutePath ?? ""
+            },
+            Sonarr = new
+            {
+                Enabled = _config.Sonarr?.Enabled ?? false,
+                Host = _config.Sonarr?.Host ?? "localhost",
+                // Upstream defaults Port to 0 (unset). Don't fabricate 8989 here: a non-zero
+                // default pre-fills the settings field with a plausible-but-wrong port, so a
+                // user whose Sonarr runs on a non-default port (e.g. 8991) sees "8989" already
+                // filled, assumes it's correct, and every request 401s/misses against the wrong
+                // instance. Show the real stored value (0 when unconfigured) so it's visibly unset.
+                Port = _config.Sonarr?.Port ?? 0,
+                ApiKey = !string.IsNullOrEmpty(_config.Sonarr?.ApiKey) ? "[configured]" : null,
+                UseSsl = _config.Sonarr?.UseSsl ?? false,
+                UrlBase = _config.Sonarr?.UrlBase ?? "",
+                UseSonarrNumbering = _config.Sonarr?.UseSonarrNumbering ?? false
+            },
+            Proxy = new
+            {
+                Enabled = _config.Proxy?.Enabled ?? false,
+                AllTraffic = _config.Proxy?.AllTraffic ?? true,
+                Socks = _config.Proxy?.Socks ?? false,
+                Host = _config.Proxy?.Host ?? "",
+                Port = _config.Proxy?.Port ?? 0,
+                Username = _config.Proxy?.Username ?? "",
+                Password = !string.IsNullOrEmpty(_config.Proxy?.Password) ? "[configured]" : null
+            },
+            FlareSolverr = new
+            {
+                Enabled = _config.FlareSolverr?.Enabled ?? false,
+                Host = _config.FlareSolverr?.Host ?? "localhost",
+                Port = _config.FlareSolverr?.Port ?? 8191,
+                UseSsl = _config.FlareSolverr?.UseSsl ?? false,
+                MitmEnabled = _config.FlareSolverr?.MitmEnabled ?? false,
+                MitmHost = _config.FlareSolverr?.MitmHost ?? "",
+                MitmPort = _config.FlareSolverr?.MitmPort ?? 0,
+                MitmUseSsl = _config.FlareSolverr?.MitmUseSsl ?? false
+            },
+            Calendar = new
+            {
+                Language = _config.Calendar?.Language ?? "en-US",
+                DubFilter = _config.Calendar?.DubFilter ?? "",
+                Custom = _config.Calendar?.Custom ?? false,
+                HideDubs = _config.Calendar?.HideDubs ?? false,
+                ShowUpcomingEpisodes = _config.Calendar?.ShowUpcomingEpisodes ?? false,
+                UpdateHistory = _config.Calendar?.UpdateHistory ?? false,
+                ShowHistoryMark = _config.Calendar?.ShowHistoryMark ?? true
+            },
+            AddDownload = new
+            {
+                SearchAddToHistory = _config.AddDownload?.SearchAddToHistory ?? true,
+                SingleEpisodeInstantAdd = _config.AddDownload?.SingleEpisodeInstantAdd ?? true,
+                DefaultSearchEnabled = _config.AddDownload?.DefaultSearchEnabled ?? false
+            },
+            Appearance = new
+            {
+                Theme = _config.Appearance?.Theme ?? "Dark",
+                AccentColor = _config.Appearance?.AccentColor ?? "",
+                BackgroundImagePath = _config.Appearance?.BackgroundImagePath ?? "",
+                BackgroundImageOpacity = _config.Appearance?.BackgroundImageOpacity ?? 1.0,
+                BackgroundImageBlurRadius = _config.Appearance?.BackgroundImageBlurRadius ?? 0.0
+            },
+            General = new
+            {
+                LogMode = _config.LogMode,
+                RemoveFinishedDownload = _config.RemoveFinishedDownload,
+                TokenFilePath = _config.TokenFilePath ?? ""
+            }
+        };
     }
 
     /// <summary>
@@ -412,7 +414,7 @@ public class ConfigController : ControllerBase
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            using var client = _httpClientFactory.CreateClient();
+            using var client = _httpClientFactory.CreateClient("CruncharrWebhooks");
             var payload = new
             {
                 event_type = "test",
@@ -516,9 +518,17 @@ public class ConfigController : ControllerBase
             if (request.Crunchyroll.SearchFetchFeaturedMusic.HasValue)
                 _config.Crunchyroll.SearchFetchFeaturedMusic = request.Crunchyroll.SearchFetchFeaturedMusic.Value;
             if (request.Crunchyroll.StreamEndpoint != null)
+            {
+                if (string.IsNullOrEmpty(request.Crunchyroll.StreamEndpoint.Authorization))
+                    request.Crunchyroll.StreamEndpoint.Authorization = _config.Crunchyroll.StreamEndpoint.Authorization;
                 _config.Crunchyroll.StreamEndpoint = request.Crunchyroll.StreamEndpoint;
+            }
             if (request.Crunchyroll.StreamEndpointSecondary != null)
+            {
+                if (string.IsNullOrEmpty(request.Crunchyroll.StreamEndpointSecondary.Authorization))
+                    request.Crunchyroll.StreamEndpointSecondary.Authorization = _config.Crunchyroll.StreamEndpointSecondary.Authorization;
                 _config.Crunchyroll.StreamEndpointSecondary = request.Crunchyroll.StreamEndpointSecondary;
+            }
         }
 
         if (request.Download != null)
@@ -529,8 +539,8 @@ public class ConfigController : ControllerBase
             if (!string.IsNullOrEmpty(dl.TempDirectory)) _config.Download.TempDirectory = ValidatePath(dl.TempDirectory, nameof(dl.TempDirectory));
             if (dl.UseTempFolder.HasValue) _config.Download.UseTempFolder = dl.UseTempFolder.Value;
             if (!string.IsNullOrEmpty(dl.Filename)) _config.Download.Filename = dl.Filename;
-            if (!string.IsNullOrEmpty(dl.FilenameTemplate)) _config.Download.FilenameTemplate = dl.FilenameTemplate;
-            if (!string.IsNullOrEmpty(dl.FilenameWhitespaceSubstitute)) _config.Download.FilenameWhitespaceSubstitute = dl.FilenameWhitespaceSubstitute;
+            if (dl.FilenameTemplate != null) _config.Download.FilenameTemplate = dl.FilenameTemplate;
+            if (dl.FilenameWhitespaceSubstitute != null) _config.Download.FilenameWhitespaceSubstitute = dl.FilenameWhitespaceSubstitute;
             if (dl.VideoTitle != null) _config.Download.VideoTitle = dl.VideoTitle;
             if (dl.IncludeVideoDescription.HasValue) _config.Download.IncludeVideoDescription = dl.IncludeVideoDescription.Value;
             if (!string.IsNullOrEmpty(dl.DescriptionLang)) _config.Download.DescriptionLang = dl.DescriptionLang;
@@ -691,7 +701,7 @@ public class ConfigController : ControllerBase
             if (s.Enabled.HasValue) _config.Sonarr.Enabled = s.Enabled.Value;
             if (s.Host != null) _config.Sonarr.Host = s.Host;
             if (s.Port.HasValue) _config.Sonarr.Port = s.Port.Value;
-            if (s.ApiKey != null) _config.Sonarr.ApiKey = s.ApiKey;
+            if (s.ApiKey != null && s.ApiKey != ConfiguredSecret) _config.Sonarr.ApiKey = s.ApiKey;
             if (s.UseSsl.HasValue) _config.Sonarr.UseSsl = s.UseSsl.Value;
             if (s.UrlBase != null) _config.Sonarr.UrlBase = s.UrlBase;
             if (s.UseSonarrNumbering.HasValue) _config.Sonarr.UseSonarrNumbering = s.UseSonarrNumbering.Value;
@@ -706,7 +716,7 @@ public class ConfigController : ControllerBase
             if (p.Host != null) _config.Proxy.Host = p.Host;
             if (p.Port.HasValue) _config.Proxy.Port = p.Port.Value;
             if (p.Username != null) _config.Proxy.Username = p.Username;
-            if (p.Password != null) _config.Proxy.Password = p.Password;
+            if (p.Password != null && p.Password != ConfiguredSecret) _config.Proxy.Password = p.Password;
         }
 
         if (request.FlareSolverr != null)

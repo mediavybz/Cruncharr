@@ -3,6 +3,7 @@ using Cruncharr.API.Services;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
+using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.Muxing.Syncing;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Serialization;
@@ -133,6 +134,11 @@ public class Program
         {
             AllowAutoRedirect = false
         });
+        builder.Services.AddHttpClient("CruncharrWebhooks", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .ConfigurePrimaryHttpMessageHandler(WebhookUrlValidator.CreateHttpMessageHandler);
         builder.Services.AddSingleton<AutoDownloadSchedulerService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<AutoDownloadSchedulerService>());
         builder.Services.AddSingleton<UpdateCheckerService>();

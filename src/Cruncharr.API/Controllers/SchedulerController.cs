@@ -42,7 +42,7 @@ public class SchedulerController : ControllerBase
             _logger.LogInformation("Manual scheduler trigger requested");
             using var scope = HttpContext.RequestServices.CreateScope();
             var config = scope.ServiceProvider.GetRequiredService<Cruncharr.Core.Configuration.CruncharrConfig>();
-            await _scheduler.RunCheckAsync(scope.ServiceProvider, config, CancellationToken.None);
+            await _scheduler.RunCheckAsync(scope.ServiceProvider, config, HttpContext.RequestAborted);
             return Ok(new { Message = "Scheduler check triggered successfully" });
         }
         catch (Exception ex)

@@ -12,8 +12,10 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
     private CancellationTokenSource? _cts;
     private Task? _executeTask;
     private DateTimeOffset? _lastRun;
-    private bool _isRunning;
+    private volatile bool _isRunning;
     private DateTimeOffset? _lastNotifyCheck;
+    private readonly SemaphoreSlim _runGate = new(1, 1);
+    private readonly object _stateLock = new();
 
     public AutoDownloadSchedulerService(IServiceProvider serviceProvider, ILogger<AutoDownloadSchedulerService> logger)
     {
@@ -22,7 +24,16 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
     }
 
     public bool IsRunning => _isRunning;
-    public DateTimeOffset? LastRun => _lastRun;
+    public DateTimeOffset? LastRun
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                return _lastRun;
+            }
+        }
+    }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -78,10 +89,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                 _logger.LogInformation("Auto-download check starting (mode: {Mode}, interval: {Interval}m)",
                     config.History?.AutoRefreshMode ?? 50, intervalMinutes);
 
-                _isRunning = true;
                 await RunCheckAsync(scope.ServiceProvider, config, cancellationToken);
-                _lastRun = DateTimeOffset.UtcNow;
-                _isRunning = false;
 
                 _logger.LogInformation("Auto-download check completed. Next check in {Interval} minutes", intervalMinutes);
                 await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), cancellationToken);
@@ -110,35 +118,49 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
     {
         if (config.History == null || !config.History.Enabled) return;
 
-        var historyService = serviceProvider.GetRequiredService<IHistoryService>();
-        var queueService = serviceProvider.GetRequiredService<IQueueService>();
-        var apiService = serviceProvider.GetRequiredService<ICrunchyrollApiService>();
-        var authService = serviceProvider.GetRequiredService<ICrunchyrollAuthService>();
-
-        var mode = config.History.AutoRefreshMode;
-
-        switch (mode)
+        await _runGate.WaitAsync(cancellationToken);
+        _isRunning = true;
+        try
         {
-            case 0: // DefaultAll
-                _logger.LogInformation("Refreshing all history series...");
-                await RefreshHistoryAsync(historyService, cancellationToken);
-                break;
-            case 1: // DefaultActive
-                _logger.LogInformation("Refreshing active history series...");
-                await RefreshHistoryAsync(historyService, cancellationToken);
-                break;
-            case 50: // FastNewReleases
-            default:
-                _logger.LogInformation("Checking for new releases...");
-                await RefreshHistoryWithNewReleasesAsync(historyService, apiService, authService,
-                    serviceProvider.GetService<INotificationService>(), config, cancellationToken);
-                break;
+            var historyService = serviceProvider.GetRequiredService<IHistoryService>();
+            var queueService = serviceProvider.GetRequiredService<IQueueService>();
+            var apiService = serviceProvider.GetRequiredService<ICrunchyrollApiService>();
+            var authService = serviceProvider.GetRequiredService<ICrunchyrollAuthService>();
+
+            var mode = config.History.AutoRefreshMode;
+
+            switch (mode)
+            {
+                case 0: // DefaultAll
+                    _logger.LogInformation("Refreshing all history series...");
+                    await RefreshHistoryAsync(historyService, cancellationToken);
+                    break;
+                case 1: // DefaultActive
+                    _logger.LogInformation("Refreshing active history series...");
+                    await RefreshHistoryAsync(historyService, cancellationToken);
+                    break;
+                case 50: // FastNewReleases
+                default:
+                    _logger.LogInformation("Checking for new releases...");
+                    await RefreshHistoryWithNewReleasesAsync(historyService, apiService, authService,
+                        serviceProvider.GetService<INotificationService>(), config, cancellationToken);
+                    break;
+            }
+
+            if (config.History.AutoRefreshAddToQueue)
+            {
+                _logger.LogInformation("Adding missing episodes to queue...");
+                await AddNewMissingToQueueAsync(historyService, queueService, config, cancellationToken);
+            }
         }
-
-        if (config.History.AutoRefreshAddToQueue)
+        finally
         {
-            _logger.LogInformation("Adding missing episodes to queue...");
-            await AddNewMissingToQueueAsync(historyService, queueService, config, cancellationToken);
+            lock (_stateLock)
+            {
+                _lastRun = DateTimeOffset.UtcNow;
+            }
+            _isRunning = false;
+            _runGate.Release();
         }
     }
 
@@ -460,5 +482,6 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
     public void Dispose()
     {
         _cts?.Dispose();
+        _runGate.Dispose();
     }
 }

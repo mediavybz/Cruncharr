@@ -3422,8 +3422,12 @@ public class DownloadService : IDownloadService
         {
             if (_queueService != null)
             {
-                progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 94,
-                    Doing = label == null ? "Waiting for transcode slot..." : $"Waiting for transcode slot ({label})..." });
+                progress?.Report(new DownloadProgress
+                {
+                    State = DownloadState.Processing,
+                    Percent = 94,
+                    Doing = label == null ? "Waiting for transcode slot..." : $"Waiting for transcode slot ({label})..."
+                });
                 await _queueService.WaitForTranscodeSlotAsync(cancellationToken);
                 held = true;
             }

@@ -791,19 +791,19 @@ public class CalendarService : ICalendarService
         await _anilistLoadLock.WaitAsync();
         try
         {
-        if (DateTime.UtcNow < _anilistNextFetchUtc)
-        {
-            return;
-        }
+            if (DateTime.UtcNow < _anilistNextFetchUtc)
+            {
+                return;
+            }
 
-        // Use UTC midnight: new DateTimeOffset(localDate, TimeSpan.Zero) throws on any
-        // non-UTC host because the local date's offset != zero. The value only feeds the
-        // AniList airingAt window (UTC unix seconds), so UTC is the correct basis anyway.
-        var todayMidnight = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
-        var todayMidnightUnix = todayMidnight.ToUnixTimeSeconds();
-        var sevenDaysLaterUnix = todayMidnight.AddDays(8).ToUnixTimeSeconds();
+            // Use UTC midnight: new DateTimeOffset(localDate, TimeSpan.Zero) throws on any
+            // non-UTC host because the local date's offset != zero. The value only feeds the
+            // AniList airingAt window (UTC unix seconds), so UTC is the correct basis anyway.
+            var todayMidnight = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
+            var todayMidnightUnix = todayMidnight.ToUnixTimeSeconds();
+            var sevenDaysLaterUnix = todayMidnight.AddDays(8).ToUnixTimeSeconds();
 
-        var query = @"query ($weekStart: Int, $weekEnd: Int, $page: Int) {
+            var query = @"query ($weekStart: Int, $weekEnd: Int, $page: Int) {
   Page(page: $page) {
     pageInfo {
       hasNextPage
@@ -836,115 +836,115 @@ public class CalendarService : ICalendarService
   }
 }";
 
-        var allSchedules = new List<AniListAiringSchedule>();
-        int currentPage = 1;
-        bool hasNextPage;
+            var allSchedules = new List<AniListAiringSchedule>();
+            int currentPage = 1;
+            bool hasNextPage;
 
-        do
-        {
-            var variables = new
+            do
             {
-                weekStart = todayMidnightUnix,
-                weekEnd = sevenDaysLaterUnix,
-                page = currentPage
-            };
-
-            var payload = new { query, variables };
-            var jsonPayload = JsonConvert.SerializeObject(payload, Formatting.Indented);
-
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://graphql.anilist.co")
-            {
-                Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
-            };
-
-            var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
-
-            if (!isOk)
-            {
-                _logger?.LogError("AniList request failed: {Error}", error);
-                _anilistNextFetchUtc = DateTime.UtcNow + AnilistFailureBackoff;
-                return;
-            }
-
-            var response = JsonConvert.DeserializeObject<AniListResponseCalendar>(content);
-
-            // [PT] Upstream: bail out if the response could not be parsed
-            if (response?.Data?.Page == null)
-            {
-                _logger?.LogError("Anilist response could not be parsed for upcoming calendar episodes");
-                _anilistNextFetchUtc = DateTime.UtcNow + AnilistFailureBackoff;
-                return;
-            }
-
-            var schedules = response.Data.Page.AiringSchedules ?? new List<AniListAiringSchedule>();
-
-            allSchedules.AddRange(schedules);
-            hasNextPage = response?.Data?.Page?.PageInfo?.HasNextPage ?? false;
-            currentPage++;
-        } while (hasNextPage && currentPage < 20);
-
-        // Filter for Crunchyroll content
-        var crunchyrollSchedules = allSchedules
-            .Where(s => s.Media?.ExternalLinks != null &&
-                       s.Media.ExternalLinks.Any(e => string.Equals(e.Site, "Crunchyroll", StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-
-        var calendarEpisodes = new List<CalendarEpisode>();
-
-        foreach (var schedule in crunchyrollSchedules)
-        {
-            var calEp = new CalendarEpisode
-            {
-                DateTime = DateTimeOffset.FromUnixTimeSeconds(schedule.AiringAt).UtcDateTime.ToLocalTime(),
-                HasPassed = false,
-                EpisodeName = schedule.Media?.Title?.English ?? schedule.Media?.Title?.Romaji,
-                SeriesUrl = $"https://www.crunchyroll.com/{language}/series/",
-                EpisodeUrl = $"https://www.crunchyroll.com/{language}/watch/",
-                ThumbnailUrl = schedule.Media?.CoverImage?.ExtraLarge ?? "",
-                IsPremiumOnly = true,
-                IsPremiere = schedule.Episode == 1,
-                SeasonName = schedule.Media?.Title?.English ?? schedule.Media?.Title?.Romaji,
-                EpisodeNumber = schedule.Episode.ToString(),
-                AnilistEpisode = true
-            };
-
-            // Extract Crunchyroll series ID from external links
-            if (schedule.Media?.ExternalLinks != null)
-            {
-                var crLink = schedule.Media.ExternalLinks.FirstOrDefault(e =>
-                    string.Equals(e.Site, "Crunchyroll", StringComparison.OrdinalIgnoreCase));
-
-                if (crLink?.Url != null)
+                var variables = new
                 {
-                    var match = Regex.Match(crLink.Url, @"series/([^/]+)");
-                    if (match.Success)
+                    weekStart = todayMidnightUnix,
+                    weekEnd = sevenDaysLaterUnix,
+                    page = currentPage
+                };
+
+                var payload = new { query, variables };
+                var jsonPayload = JsonConvert.SerializeObject(payload, Formatting.Indented);
+
+                var request = new HttpRequestMessage(HttpMethod.Post, "https://graphql.anilist.co")
+                {
+                    Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
+                };
+
+                var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+
+                if (!isOk)
+                {
+                    _logger?.LogError("AniList request failed: {Error}", error);
+                    _anilistNextFetchUtc = DateTime.UtcNow + AnilistFailureBackoff;
+                    return;
+                }
+
+                var response = JsonConvert.DeserializeObject<AniListResponseCalendar>(content);
+
+                // [PT] Upstream: bail out if the response could not be parsed
+                if (response?.Data?.Page == null)
+                {
+                    _logger?.LogError("Anilist response could not be parsed for upcoming calendar episodes");
+                    _anilistNextFetchUtc = DateTime.UtcNow + AnilistFailureBackoff;
+                    return;
+                }
+
+                var schedules = response.Data.Page.AiringSchedules ?? new List<AniListAiringSchedule>();
+
+                allSchedules.AddRange(schedules);
+                hasNextPage = response?.Data?.Page?.PageInfo?.HasNextPage ?? false;
+                currentPage++;
+            } while (hasNextPage && currentPage < 20);
+
+            // Filter for Crunchyroll content
+            var crunchyrollSchedules = allSchedules
+                .Where(s => s.Media?.ExternalLinks != null &&
+                           s.Media.ExternalLinks.Any(e => string.Equals(e.Site, "Crunchyroll", StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            var calendarEpisodes = new List<CalendarEpisode>();
+
+            foreach (var schedule in crunchyrollSchedules)
+            {
+                var calEp = new CalendarEpisode
+                {
+                    DateTime = DateTimeOffset.FromUnixTimeSeconds(schedule.AiringAt).UtcDateTime.ToLocalTime(),
+                    HasPassed = false,
+                    EpisodeName = schedule.Media?.Title?.English ?? schedule.Media?.Title?.Romaji,
+                    SeriesUrl = $"https://www.crunchyroll.com/{language}/series/",
+                    EpisodeUrl = $"https://www.crunchyroll.com/{language}/watch/",
+                    ThumbnailUrl = schedule.Media?.CoverImage?.ExtraLarge ?? "",
+                    IsPremiumOnly = true,
+                    IsPremiere = schedule.Episode == 1,
+                    SeasonName = schedule.Media?.Title?.English ?? schedule.Media?.Title?.Romaji,
+                    EpisodeNumber = schedule.Episode.ToString(),
+                    AnilistEpisode = true
+                };
+
+                // Extract Crunchyroll series ID from external links
+                if (schedule.Media?.ExternalLinks != null)
+                {
+                    var crLink = schedule.Media.ExternalLinks.FirstOrDefault(e =>
+                        string.Equals(e.Site, "Crunchyroll", StringComparison.OrdinalIgnoreCase));
+
+                    if (crLink?.Url != null)
                     {
-                        calEp.CrSeriesID = match.Groups[1].Value;
-                        calEp.SeriesUrl += calEp.CrSeriesID;
+                        var match = Regex.Match(crLink.Url, @"series/([^/]+)");
+                        if (match.Success)
+                        {
+                            calEp.CrSeriesID = match.Groups[1].Value;
+                            calEp.SeriesUrl += calEp.CrSeriesID;
+                        }
                     }
                 }
+
+                calendarEpisodes.Add(calEp);
             }
 
-            calendarEpisodes.Add(calEp);
-        }
-
-        // Fresh fetch succeeded: build a new window and swap it in wholesale so re-fetches never
-        // append duplicates into an existing date's list, old dates can't accumulate, and a
-        // concurrent reader never observes a partially-populated map.
-        var newCache = new Dictionary<string, List<CalendarEpisode>>();
-        foreach (var episode in calendarEpisodes)
-        {
-            var airDate = episode.DateTime.ToString("yyyy-MM-dd");
-            if (!newCache.TryGetValue(airDate, out var value))
+            // Fresh fetch succeeded: build a new window and swap it in wholesale so re-fetches never
+            // append duplicates into an existing date's list, old dates can't accumulate, and a
+            // concurrent reader never observes a partially-populated map.
+            var newCache = new Dictionary<string, List<CalendarEpisode>>();
+            foreach (var episode in calendarEpisodes)
             {
-                value = new List<CalendarEpisode>();
-                newCache[airDate] = value;
+                var airDate = episode.DateTime.ToString("yyyy-MM-dd");
+                if (!newCache.TryGetValue(airDate, out var value))
+                {
+                    value = new List<CalendarEpisode>();
+                    newCache[airDate] = value;
+                }
+                value.Add(episode);
             }
-            value.Add(episode);
-        }
-        _anilistCache = newCache;
+            _anilistCache = newCache;
 
-        _anilistNextFetchUtc = DateTime.UtcNow + AnilistUpcomingTtl;
+            _anilistNextFetchUtc = DateTime.UtcNow + AnilistUpcomingTtl;
         }
         finally
         {

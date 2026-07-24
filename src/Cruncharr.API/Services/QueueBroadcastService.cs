@@ -35,9 +35,9 @@ public class QueueBroadcastService : IDisposable
 
     public ChannelReader<string> Subscribe(Guid clientId)
     {
-        var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(100)
+        var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(1)
         {
-            FullMode = BoundedChannelFullMode.DropWrite
+            FullMode = BoundedChannelFullMode.DropOldest
         });
         _clients[clientId] = channel.Writer;
         return channel.Reader;

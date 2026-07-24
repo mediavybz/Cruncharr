@@ -58,6 +58,30 @@ public class HistoryDownloadRecordTests : IDisposable
         Assert.True(ep!.WasDownloaded);
     }
 
+    [Fact]
+    public async Task RichHistorySnapshot_IsDetachedFromServiceState()
+    {
+        var episode = new EpisodeInfo
+        {
+            Id = "EP_SNAPSHOT",
+            SeriesId = "SERIES_SNAPSHOT",
+            SeriesTitle = "Original",
+            SeasonId = "SEASON_SNAPSHOT",
+            SeasonNumber = 1,
+            EpisodeNumber = 1,
+            Title = "Episode"
+        };
+        await _history.UpdateWithSeasonDataAsync([episode]);
+        var snapshot = Assert.Single(await _history.GetHistorySeriesAsync());
+
+        snapshot.SeriesTitle = "Mutated";
+        snapshot.Seasons.Clear();
+
+        var fresh = Assert.Single(await _history.GetHistorySeriesAsync());
+        Assert.Equal("Original", fresh.SeriesTitle);
+        Assert.Single(fresh.Seasons);
+    }
+
     // Guard (upstream CRD v1.6.14): a manual "Mark as Downloaded" (no dubs/subs supplied) must reset
     // the downloaded dub/sub tracking to the full available set, so the episode is not re-flagged as
     // a partial download.
@@ -72,7 +96,8 @@ public class HistoryDownloadRecordTests : IDisposable
             Title = "Ep 1",
             SeasonNumber = 1,
             SeasonId = "S_MANUAL|S1",
-            EpisodeNumber = 1
+            EpisodeNumber = 1,
+            AudioLocale = "ja-JP"
         };
 
         await _history.UpdateWithSeasonDataAsync(new List<EpisodeInfo> { episode });
@@ -81,10 +106,12 @@ public class HistoryDownloadRecordTests : IDisposable
         await _history.SetAsDownloadedAsync(episode.SeriesId, episode.SeasonId, episode.Id,
             new List<string> { "ja-JP" }, new List<string>());
 
+        episode.AudioLocale = "en-US";
+        await _history.UpdateWithSeasonDataAsync([episode]);
+
         var hist = await _history.GetHistoryEpisodeAsync(episode.SeriesId, episode.SeasonId, episode.Id);
         Assert.NotNull(hist);
-        hist!.UpdateAvailableMedia(new List<string> { "ja-JP", "en-US" }, new List<string>());
-        Assert.True(hist.IsPartiallyDownloaded(new[] { "ja-JP", "en-US" }, Array.Empty<string>()));
+        Assert.True(hist!.IsPartiallyDownloaded(new[] { "ja-JP", "en-US" }, Array.Empty<string>()));
 
         // Manual mark (no dubs/subs) must reset tracking to everything available => no longer partial.
         await _history.SetAsDownloadedAsync(episode.SeriesId, episode.SeasonId, episode.Id);

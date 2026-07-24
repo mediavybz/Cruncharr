@@ -152,40 +152,48 @@ public class EncodingService : IEncodingService
             _logger?.LogWarning("Cannot overwrite built-in preset {Name}", preset.PresetName);
             return false;
         }
+        var presetPath = Path.Combine(_presetsDir, SanitizeFileName(preset.PresetName!) + ".json");
+        var tmp = presetPath + ".tmp";
         lock (_lock)
         {
-            _custom.RemoveAll(c => c.PresetName == preset.PresetName); // upsert
-            _custom.Add(preset);
-        }
-        try
-        {
-            Directory.CreateDirectory(_presetsDir);
-            // Atomic write (temp + rename) so a crash mid-save can't corrupt a custom preset.
-            var presetPath = Path.Combine(_presetsDir, SanitizeFileName(preset.PresetName!) + ".json");
-            var tmp = presetPath + ".tmp";
-            File.WriteAllText(tmp, JsonConvert.SerializeObject(preset, Formatting.Indented));
-            File.Move(tmp, presetPath, overwrite: true);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to persist preset {Name}", preset.PresetName);
-            return false;
+            try
+            {
+                Directory.CreateDirectory(_presetsDir);
+                // Atomic write (temp + rename) so a crash mid-save can't corrupt a custom preset.
+                File.WriteAllText(tmp, JsonConvert.SerializeObject(preset, Formatting.Indented));
+                File.Move(tmp, presetPath, overwrite: true);
+                _custom.RemoveAll(c => c.PresetName == preset.PresetName); // upsert
+                _custom.Add(preset);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* best-effort cleanup */ }
+                _logger?.LogError(ex, "Failed to persist preset {Name}", preset.PresetName);
+                return false;
+            }
         }
     }
 
     public bool RemovePreset(string presetName)
     {
         if (IsBuiltIn(presetName)) return false; // built-ins are not removable
-        bool removed;
-        lock (_lock) { removed = _custom.RemoveAll(c => c.PresetName == presetName) > 0; }
-        try
+        lock (_lock)
         {
-            var f = Path.Combine(_presetsDir, SanitizeFileName(presetName) + ".json");
-            if (File.Exists(f)) File.Delete(f);
+            if (!_custom.Any(c => c.PresetName == presetName)) return false;
+            try
+            {
+                var f = Path.Combine(_presetsDir, SanitizeFileName(presetName) + ".json");
+                if (File.Exists(f)) File.Delete(f);
+                _custom.RemoveAll(c => c.PresetName == presetName);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to delete preset file {Name}", presetName);
+                return false;
+            }
         }
-        catch (Exception ex) { _logger?.LogWarning(ex, "Failed to delete preset file {Name}", presetName); }
-        return removed;
     }
 
     private static string SanitizeFileName(string name)

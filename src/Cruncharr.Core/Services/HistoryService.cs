@@ -426,7 +426,12 @@ public class HistoryService : IHistoryService, IDisposable
         await _lock.WaitAsync();
         try
         {
-            return _historyList.ToList();
+            var json = JsonSerializer.Serialize(
+                _historyList,
+                HistoryJsonContext.Default.ListHistorySeries);
+            return JsonSerializer.Deserialize(
+                json,
+                HistoryJsonContext.Default.ListHistorySeries) ?? [];
         }
         finally
         {

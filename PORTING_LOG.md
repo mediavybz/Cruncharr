@@ -1,7 +1,45 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-23 (Round 45 complete: calendar series-title recovery)
+## Last Updated: 2026-07-23 (Round 46 in progress: calendar episode preselection)
+
+---
+
+## Round 46 — Calendar Episode-to-Add-Download Selection (2026-07-23)
+
+Released Calendar episode thumbnails will open the existing Add Download series workflow, select
+the matching season, and preselect only the clicked episode. Matching uses the concrete Calendar
+guid against freshly fetched series-list version metadata; no client version metadata is sent to
+the queue, and the existing one-click Calendar Download action remains unchanged.
+
+### API Contract
+- No route, request, response-shape, or status-code changes are planned.
+
+### Verification (pre-release)
+- Live matching mapped three released Calendar concrete dub guids to the correct logical episodes and seasons, including Season 2 episode 3 where Season 1 also has an episode 3.
+- Frontend JavaScript syntax, Git whitespace, and exact 1.0.62 release-reference checks passed.
+- The warning-as-error Release solution build completed with 0 warnings and 0 errors; the full Release suite passed 208/208 tests.
+- The loaded linux/amd64 production image became healthy at `1.0.62+local-calendar-selection`, served both 1.0.62 cache keys plus the Calendar matcher/action, and retained the CLI.
+- Browser verification against the live authenticated APIs opened Skeleton Knight episode 3 on Add Download Season 2 with exactly one checked row, English selected, and Add enabled; the unchanged Browse flow opened Season 1 with zero selected rows, upcoming thumbnails remained non-interactive, and the browser logged no warnings or errors.
+- Cache-only production builds completed for `linux/amd64` and `linux/arm64` using the repository publisher.
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Change | Date |
+|------|-------------------|-------------------|--------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | CalendarPage episode selection opening the existing Add Download episode picker | Existing GET `/api/v1/series/{seriesId}/list` | Locates the clicked concrete Calendar guid in freshly fetched series data, opens its season, selects exactly that logical episode, and pins the clicked available audio without posting version metadata; ordinary Browse and one-click Calendar Download behavior are unchanged | 2026-07-23 |
+| src/Cruncharr.API/wwwroot/css/app.css | CalendarPage released-episode thumbnail action | none | Resets the released thumbnail button to the existing image presentation and adds a visible keyboard-focus state | 2026-07-23 |
+| src/Cruncharr.API/wwwroot/index.html | Existing web release asset refresh | none | Bumped aligned CSS and JavaScript cache keys 1.0.61 → 1.0.62 so browsers cannot retain the old non-interactive Calendar thumbnails | 2026-07-23 |
+
+### Release Metadata
+| File | Change | Date |
+|------|--------|------|
+| src/Cruncharr.API/Cruncharr.API.csproj | [PT] Testing assembly/file/package version 1.0.61 → 1.0.62; framework and dependencies unchanged | 2026-07-23 |
+| src/Cruncharr.API/Controllers/HealthController.cs | [PT] Unreachable informational-version fallback 1.0.61 → 1.0.62; route, response shape, status codes, and health logic unchanged | 2026-07-23 |
+
+### In Progress
+| File | Mode | Blocker |
+|------|------|---------|
+| Testing release 1.0.62 | B/A metadata | Source commit and multi-architecture testing image pending |
 
 ---
 

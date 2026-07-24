@@ -725,7 +725,7 @@
                 }
                 
                 return `
-                    <div class="episode-multi-dub ${isSelected ? 'selected' : ''}" onclick="toggleEpisodeSelectionMultiDub('${escapeJsString(epKey)}')">
+                    <div class="episode-multi-dub ${isSelected ? 'selected' : ''}" data-episode-key="${escapeHtmlAttribute(epKey)}" onclick="toggleEpisodeSelectionMultiDub('${escapeJsString(epKey)}')">
                         <div class="episode-thumb">
                             ${ep.img && isSafeUrl(ep.img) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(ep.img)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                         </div>
@@ -1240,6 +1240,35 @@
             return order.map(k => groups.get(k));
         }
 
+        function findCalendarEpisodeTarget(episodeId, episodeList, seriesData) {
+            const requestedId = String(episodeId || '').toLowerCase();
+            if (!requestedId) return null;
+
+            for (const episode of episodeList || []) {
+                const episodeData = seriesData?.[episode.e];
+                const matches = (episodeData?.variants || []).some(variant => {
+                    const item = variant?.item || {};
+                    // Calendar carries a concrete dub guid. The series-list item keeps its
+                    // canonical guid at item.id and exposes concrete dub guids in the freshly
+                    // fetched versions array. This only locates the logical episode; versions
+                    // are never posted to the queue.
+                    const candidateIds = [item.id, item.guid];
+                    (item.versions || []).forEach(version => {
+                        candidateIds.push(version?.guid, version?.mediaGuid, version?.media_guid);
+                    });
+                    return candidateIds.some(id => String(id || '').toLowerCase() === requestedId);
+                });
+                if (matches) return { episodeKey: episode.e, seasonId: episode.id };
+            }
+
+            return null;
+        }
+
+        function openCalendarEpisode(seriesId, episodeId, audioLocale = '') {
+            if (!seriesId || !episodeId) return;
+            selectBrowseResult(seriesId, { episodeId, audioLocale });
+        }
+
         async function onCalendarDubFilterChange(dubFilter) {
             // Save to config
             try {
@@ -1334,14 +1363,25 @@
                                     const epLocales = (ep.audioLocales && ep.audioLocales.length) ? ep.audioLocales : (ep.audioLocale ? [ep.audioLocale] : []);
                                     const preferredAudio = config?.download?.defaultAudio || authStatus?.preferredAudioLanguage || '';
                                     const chosenDub = epLocales.includes(preferredAudio) ? preferredAudio : (epLocales[0] || '');
+                                    const canOpenEpisode = ep.hasAired && !ep.isUpcoming && ep.id && ep.seriesId;
+                                    const thumbContents = `
+                                        ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(ep.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                                        <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
+                                    `;
+                                    const episodeThumb = canOpenEpisode
+                                        ? `<button type="button"
+                                                class="calendar-episode-thumb calendar-episode-open"
+                                                onclick="openCalendarEpisode('${escapeJsString(ep.seriesId)}', '${escapeJsString(ep.id)}', '${escapeJsString(chosenDub)}')"
+                                                aria-label="Open ${escapeHtmlAttribute(ep.seriesTitle || ep.seasonName || 'series')} episode ${escapeHtmlAttribute(ep.episodeNumber || '')} in Add Download"
+                                                title="Open series and select this episode">
+                                                ${thumbContents}
+                                           </button>`
+                                        : `<div class="calendar-episode-thumb ${ep.isUpcoming ? 'poster' : ''}">${thumbContents}</div>`;
                                     return `
                                     <div class="calendar-episode ${ep.isPremiere ? 'premiere' : ''} ${ep.isUpcoming ? 'upcoming' : ''}">
                                         ${historyMark}
                                         <div class="calendar-episode-time">${timeDisplay}</div>
-                                        <div class="calendar-episode-thumb ${ep.isUpcoming ? 'poster' : ''}">
-                                            ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(ep.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
-                                            <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
-                                        </div>
+                                        ${episodeThumb}
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
                                         ${ep.seasonName && ep.seasonName !== ep.seriesTitle
                                             ? `<div class="calendar-episode-season">${escapeHtml(ep.seasonName)}</div>`
@@ -1610,7 +1650,7 @@
             `;
         }
 
-        async function selectBrowseResult(seriesId) {
+        async function selectBrowseResult(seriesId, episodeSelection = null) {
             navigateTo('add-download');
             selectBrowseResultTimeout = setTimeout(async () => {
                 const listContainer = document.getElementById('add-episodes-list');
@@ -1618,7 +1658,10 @@
                     listContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
                 }
                 try {
-                    const dubLangs = config?.download?.dubLanguages || ['ja-JP'];
+                    const dubLangs = [...(config?.download?.dubLanguages || ['ja-JP'])];
+                    if (episodeSelection?.audioLocale && !dubLangs.includes(episodeSelection.audioLocale)) {
+                        dubLangs.push(episodeSelection.audioLocale);
+                    }
                     const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
                     const res = await fetch(`/api/v1/series/${seriesId}/list?${dubLangParam}`);
                     if (res.status === 404) {
@@ -1663,6 +1706,9 @@
                         }
                     });
                     const seasons = Array.from(seasonMap.values());
+                    const calendarTarget = episodeSelection
+                        ? findCalendarEpisodeTarget(episodeSelection.episodeId, addDownloadEpisodeList, addDownloadSeriesData)
+                        : null;
                     
                     // Pre-select preferred audio only (see renderAddEpisodesMultiDub init above).
                     selectedEpisodeDubs.clear();
@@ -1687,8 +1733,32 @@
                     if (dropdown) {
                         dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
                         if (seasons.length > 0) {
-                            dropdown.value = seasons[0].id;
-                            onSeasonChange(seasons[0].id);
+                            const initialSeasonId = calendarTarget?.seasonId || seasons[0].id;
+                            dropdown.value = initialSeasonId;
+                            onSeasonChange(initialSeasonId);
+                            if (calendarTarget) {
+                                selectedEpisodes.add(calendarTarget.episodeKey);
+                                const targetData = addDownloadSeriesData[calendarTarget.episodeKey];
+                                const availableDubs = (targetData?.variants || [])
+                                    .map(v => v.lang?.crLocale || v.item?.audioLocale || v.item?.audio_locale)
+                                    .filter(Boolean);
+                                const requestedLocale = availableDubs.find(locale =>
+                                    locale.toLowerCase() === String(episodeSelection.audioLocale || '').toLowerCase()
+                                );
+                                if (requestedLocale) {
+                                    selectedEpisodeDubs.set(calendarTarget.episodeKey, new Set([requestedLocale]));
+                                }
+                                renderAddEpisodesMultiDub(
+                                    addDownloadEpisodeList.filter(ep => ep.id === initialSeasonId)
+                                );
+                                requestAnimationFrame(() => {
+                                    const selectedRow = Array.from(document.querySelectorAll('.episode-multi-dub'))
+                                        .find(row => row.dataset.episodeKey === calendarTarget.episodeKey);
+                                    selectedRow?.scrollIntoView({ block: 'center' });
+                                });
+                            } else if (episodeSelection) {
+                                showToast('Opened series, but could not preselect that calendar episode', 'info');
+                            }
                         } else {
                             selectedEpisodes.clear();
                             renderAddEpisodesMultiDub();

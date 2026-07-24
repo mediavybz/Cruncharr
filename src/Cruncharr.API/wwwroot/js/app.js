@@ -76,6 +76,7 @@
         let browseDubFilter = '';        // '' = all languages
         let browseRatingFilter = new Set(); // selected rating tier keys / raw codes; empty = all
         let historyFilterText = '';
+        const calendarSeriesTitleCache = new Map(); // seriesId -> canonical title from /series/{id}/list
 
         // Constants
         const AUTH_NOTIFICATION_THROTTLE_MS = 30000;
@@ -1159,6 +1160,56 @@
         // Collapse per-language duplicates of the same episode into one entry whose
         // audioLocales lists every dub it ships in (used for the "All Languages" view).
         const CAL_LOCALE_ORDER = ['ja-JP'];
+        const CAL_GENERIC_SERIES_LABEL = /^(?:specials?|season\s+\d+(?:\s*\([^)]*\))?)$/i;
+
+        function isGenericCalendarSeriesLabel(value) {
+            return CAL_GENERIC_SERIES_LABEL.test((value || '').trim());
+        }
+
+        async function resolveCalendarSeriesTitle(seriesId, audioLocale) {
+            if (!seriesId) return '';
+            if (calendarSeriesTitleCache.has(seriesId)) {
+                return calendarSeriesTitleCache.get(seriesId);
+            }
+
+            try {
+                const dubQuery = audioLocale ? `?dubLang=${encodeURIComponent(audioLocale)}` : '';
+                const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/list${dubQuery}`);
+                if (!res.ok) return '';
+                const data = await res.json();
+                const title = (data?.list || []).find(item => item?.seriesTitle)?.seriesTitle || '';
+                if (title) calendarSeriesTitleCache.set(seriesId, title);
+                return title;
+            } catch (e) {
+                return '';
+            }
+        }
+
+        async function enrichCalendarSeriesTitles(days) {
+            const episodes = (days || []).flatMap(day => day.episodes || []);
+            const candidates = new Map();
+
+            for (const ep of episodes) {
+                if (ep.seriesId && isGenericCalendarSeriesLabel(ep.seriesTitle) && !candidates.has(ep.seriesId)) {
+                    candidates.set(ep.seriesId, ep);
+                }
+            }
+
+            const resolvedTitles = new Map(await Promise.all(
+                Array.from(candidates, async ([seriesId, ep]) => [
+                    seriesId,
+                    await resolveCalendarSeriesTitle(seriesId, ep.audioLocale)
+                ])
+            ));
+
+            for (const ep of episodes) {
+                const resolvedTitle = resolvedTitles.get(ep.seriesId);
+                if (!resolvedTitle || !isGenericCalendarSeriesLabel(ep.seriesTitle)) continue;
+                ep.seasonName = ep.seriesTitle;
+                ep.seriesTitle = resolvedTitle;
+            }
+        }
+
         function consolidateCalendarEpisodes(episodes) {
             const groups = new Map();
             const order = [];
@@ -1236,6 +1287,7 @@
                 const res = await fetch(`/api/v1/calendar/custom?date=${sundayStr}&language=${encodeURIComponent(metaLang)}&dubFilter=${encodeURIComponent(dubFilter)}${forceUpdate ? '&forceUpdate=true' : ''}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                await enrichCalendarSeriesTitles(data.days);
                 const grid = document.getElementById('calendar-grid');
                 if (!grid) return;
                 if (!data.days || data.days.length === 0) {
@@ -1291,6 +1343,9 @@
                                             <div class="calendar-episode-number">${escapeHtml(ep.episodeNumber || '')}</div>
                                         </div>
                                         <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
+                                        ${ep.seasonName && ep.seasonName !== ep.seriesTitle
+                                            ? `<div class="calendar-episode-season">${escapeHtml(ep.seasonName)}</div>`
+                                            : ''}
                                         ${(ep.audioLocales && ep.audioLocales.length > 0)
                                             ? `<div class="calendar-episode-langs">${ep.audioLocales.map(l => `<span class="cal-lang">${escapeHtml(l)}</span>`).join('')}</div>`
                                             : (ep.audioLocale ? `<div class="calendar-episode-locale">${escapeHtml(ep.audioLocale)}</div>` : '')}

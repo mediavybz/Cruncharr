@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-23 (Round 45 in progress: calendar series-title recovery)
+## Last Updated: 2026-07-23 (Round 45 complete: calendar series-title recovery)
 
 ---
 
@@ -25,6 +25,8 @@ metadata, and keep the episode number and audio locales unchanged.
 - Cache-only production builds completed for `linux/amd64` and `linux/arm64` using the repository publisher.
 - Browser verification used the loaded 1.0.61 production assets with the live failing calendar/series responses: affected cards rendered `The Quintessential Quintuplets` above `Specials` and `Tomb Raider King` above `Season 1 (Korean)`, retained `en-US` and episode badges, and carried the canonical title in the existing Download action.
 - Loaded linux/amd64 production image became healthy at `1.0.61+local-calendar-titles`, served both 1.0.61 cache keys plus the title-recovery JavaScript and season styling, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
+- Multi-architecture publish completed for linux/amd64 (`sha256:ec51628df806d384912815e4b13be9e86ba6bb8bb358c8349695cbab3133c36d`) and linux/arm64 (`sha256:80b6a9ca6d7f71176b3c5c8103b60b0a751ddaca007d55d57b9a2adedee4b454`) under OCI index `sha256:7660d599098d6d04e736b0d6d139e278e014025f8a68e0ad066166a81c0b6bd6`.
+- Freshly pulled GHCR testing image became healthy at `1.0.61+58911447838489bf2f7c6e805a943213082fe6bd`, served both 1.0.61 browser cache keys plus the title-recovery JavaScript and season styling, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
 
 ### Frontend (Mode B)
 | File | Desktop Equivalent | API Endpoints Used | Date |
@@ -42,7 +44,17 @@ metadata, and keep the episode number and audio locales unchanged.
 ### In Progress
 | File | Mode | Blocker |
 |------|------|---------|
-| Testing release 1.0.61 | B/A metadata | Commit, testing push, image publish, registry inspection, and fresh-pull smoke pending |
+| Testing release 1.0.61 | B/A metadata | [completed] Source push, multi-architecture image publish, registry inspection, and fresh-pull smoke passed |
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Docker image | Multi-architecture 1.0.61 testing image for source commit `5891144`; `linux/amd64` + `linux/arm64`; OCI index `sha256:7660d599098d6d04e736b0d6d139e278e014025f8a68e0ad066166a81c0b6bd6` | 2026-07-23 |
+
+### Release Status
+- Fix commit `5891144` pushed to `origin/testing`.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, OCI index digest `sha256:7660d599098d6d04e736b0d6d139e278e014025f8a68e0ad066166a81c0b6bd6`.
+- Stable `master`, `:latest`, and numbered stable tags were not changed.
 
 ---
 

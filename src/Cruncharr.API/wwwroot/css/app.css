@@ -1079,6 +1079,16 @@
         }
 
         .calendar-episode-thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .calendar-episode-open {
+            border: 0;
+            padding: 0;
+            font: inherit;
+            cursor: pointer;
+        }
+        .calendar-episode-open:focus-visible {
+            outline: 2px solid var(--accent-orange);
+            outline-offset: 2px;
+        }
         /* AniList upcoming entries carry a PORTRAIT cover poster, not a 16:9 episode still.
            Letterbox it (contain) instead of center-cropping heads off, and dim the card
            slightly so scheduled-but-unreleased items read differently from released ones. */

@@ -1,7 +1,48 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-22 (Round 44 complete: zero-episode catalog filtering)
+## Last Updated: 2026-07-23 (Round 45 in progress: calendar series-title recovery)
+
+---
+
+## Round 45 — Calendar Series-Title Recovery (2026-07-23)
+
+Live testing `1.0.60+06f2c43` reproduced the screenshot: calendar records for
+`GY4PD7Z06` exposed `seriesTitle: "Specials"` even though the existing series-list response
+identified the series as `The Quintessential Quintuplets`; records for `GT00378123` exposed
+`seriesTitle: "Season 1 (Korean)"` while the existing series-list response identified
+`Tomb Raider King`. The frontend will recover the canonical series title only for these generic
+season-only labels through the existing series-list API, retain the original label as secondary
+metadata, and keep the episode number and audio locales unchanged.
+
+### API Contract
+- No route, request, response-shape, or status-code changes are planned.
+
+### Verification (pre-release)
+- Live 1.0.60 evidence reproduced both failures and confirmed the existing series-list endpoint returned `The Quintessential Quintuplets` for `GY4PD7Z06` and `Tomb Raider King` for `GT00378123`.
+- Frontend JavaScript syntax, generic-label classification, one-lookup-per-series behavior, successful-title caching, failure fallback, canonical-title replacement, retained season metadata, and Git whitespace checks passed.
+- Exact 1.0.61 release references and Docker Compose configuration passed; the warning-as-error Release solution build completed with 0 warnings and 0 errors, and the full Release suite passed 208/208 tests.
+- Cache-only production builds completed for `linux/amd64` and `linux/arm64` using the repository publisher.
+- Browser verification used the loaded 1.0.61 production assets with the live failing calendar/series responses: affected cards rendered `The Quintessential Quintuplets` above `Specials` and `Tomb Raider King` above `Season 1 (Korean)`, retained `en-US` and episode badges, and carried the canonical title in the existing Download action.
+- Loaded linux/amd64 production image became healthy at `1.0.61+local-calendar-titles`, served both 1.0.61 cache keys plus the title-recovery JavaScript and season styling, ran the retained CLI, and retained FFmpeg `N-125649-g8d394252d8-20260717`.
+
+### Frontend (Mode B)
+| File | Desktop Equivalent | API Endpoints Used | Date |
+|------|-------------------|-------------------|------|
+| src/Cruncharr.API/wwwroot/js/app.js | CalendarPage episode-card title and download identity | Existing GET `/api/v1/calendar/custom`; existing GET `/api/v1/series/{seriesId}/list` | Detects generic `Specials`/`Season N (...)` labels, resolves and caches one canonical title per affected series, retains the original label for secondary display, and passes the recovered title through the existing Download action | 2026-07-23 |
+| src/Cruncharr.API/wwwroot/css/app.css | CalendarPage secondary episode metadata | none | Styles the retained season/special label beneath the canonical series title without changing the episode badge or audio-locale presentation | 2026-07-23 |
+| src/Cruncharr.API/wwwroot/index.html | Existing web release asset refresh | none | Bumped aligned CSS and JavaScript cache keys 1.0.60 → 1.0.61 so browsers cannot retain the season-only card labels | 2026-07-23 |
+
+### Release Metadata
+| File | Change | Date |
+|------|--------|------|
+| src/Cruncharr.API/Cruncharr.API.csproj | [PT] Testing assembly/file/package version 1.0.60 → 1.0.61; framework and dependencies unchanged | 2026-07-23 |
+| src/Cruncharr.API/Controllers/HealthController.cs | [PT] Unreachable informational-version fallback 1.0.60 → 1.0.61; route, response shape, status codes, and health logic unchanged | 2026-07-23 |
+
+### In Progress
+| File | Mode | Blocker |
+|------|------|---------|
+| Testing release 1.0.61 | B/A metadata | Commit, testing push, image publish, registry inspection, and fresh-pull smoke pending |
 
 ---
 

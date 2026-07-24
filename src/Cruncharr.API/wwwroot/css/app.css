@@ -1110,6 +1110,12 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
+        .calendar-episode-season {
+            margin-top: 2px;
+            color: var(--text-secondary);
+            font-size: 0.7em;
+            line-height: 1.2;
+        }
 
         /* History */
         .history-toolbar {

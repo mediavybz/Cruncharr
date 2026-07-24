@@ -76,6 +76,38 @@ public class EncodingPresetAndTranscodeTests
         Assert.Equal(1, new QueueConfig().MaxSimultaneousTranscodes);
     }
 
+    [Fact]
+    public void FailedPresetPersistence_DoesNotActivatePresetInMemory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"cruncharr-preset-{Guid.NewGuid():N}");
+        var configPath = Path.Combine(root, "cruncharr.yaml");
+        var presetsPath = Path.Combine(root, "encoding-presets");
+        var previousConfigPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            Environment.SetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH", configPath);
+            var svc = new EncodingService();
+            File.WriteAllText(presetsPath, "blocks directory creation");
+            var preset = new VideoPreset
+            {
+                PresetName = "Must Not Activate",
+                Codec = "libx264",
+                Crf = 23
+            };
+
+            Assert.False(svc.AddPreset(preset));
+            Assert.Null(svc.GetPreset(preset.PresetName));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH", previousConfigPath);
+            if (File.Exists(presetsPath)) File.Delete(presetsPath);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(0, true, true)]
     [InlineData(0, false, false)]

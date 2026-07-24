@@ -44,15 +44,17 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
         lock (_syncLock)
         {
             _saveTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            PersistQueueCore(queue);
         }
-
-        PersistQueue(queue);
     }
 
     public void ScheduleSave(List<QueueItem> queue)
     {
         // Save immediately instead of using timer (timer may be trimmed in release builds)
-        PersistQueue(queue);
+        lock (_syncLock)
+        {
+            PersistQueueCore(queue);
+        }
     }
 
     public List<QueueItem>? LoadQueue()
@@ -90,13 +92,21 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
     public void DeleteQueue()
     {
+        lock (_syncLock)
+        {
+            DeleteQueueCore();
+        }
+    }
+
+    private void DeleteQueueCore()
+    {
         if (File.Exists(_queueFilePath))
         {
             File.Delete(_queueFilePath);
         }
     }
 
-    private void PersistQueue(List<QueueItem> queue)
+    private void PersistQueueCore(List<QueueItem> queue)
     {
         // PersistQueue disabled: do not write a snapshot to disk.
         if (!PersistEnabled)
@@ -104,7 +114,7 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
         if (queue.Count == 0)
         {
-            DeleteQueue();
+            DeleteQueueCore();
             return;
         }
 
@@ -116,7 +126,7 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
         if (snapshot.Count == 0)
         {
-            DeleteQueue();
+            DeleteQueueCore();
             return;
         }
 

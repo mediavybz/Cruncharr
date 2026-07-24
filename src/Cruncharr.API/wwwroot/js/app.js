@@ -22,7 +22,13 @@
             window.fetch = function (input, init) {
                 init = init || {};
                 const url = typeof input === 'string' ? input : (input && input.url) || '';
-                const isApi = url.indexOf('/api/') !== -1;
+                let isApi = false;
+                try {
+                    const parsedUrl = new URL(url, window.location.href);
+                    isApi = parsedUrl.origin === window.location.origin && parsedUrl.pathname.startsWith('/api/');
+                } catch (e) {
+                    isApi = false;
+                }
                 if (isApi) {
                     const k = readLocalStorage(KEY);
                     if (k) {
@@ -956,7 +962,7 @@
                             // Mark as watched if enabled
                             if (markAsWatched && item.data?.[0]?.mediaId) {
                                 try {
-                                    await fetch(`/api/v1/series/episodes/${item.data[0].mediaId}/mark-watched`, { method: 'POST' });
+                                    await fetch(`/api/v1/series/episodes/${encodeURIComponent(item.data[0].mediaId)}/mark-watched`, { method: 'POST' });
                                 } catch (e) {
                                     console.warn('Failed to mark as watched:', e);
                                 }
@@ -1065,7 +1071,7 @@
         async function showFeaturedMusic() {
             if (!addDownloadSelectedSeries) return;
             try {
-                const res = await fetch(`/api/v1/music/featured/${addDownloadSelectedSeries.id}`);
+                const res = await fetch(`/api/v1/music/featured/${encodeURIComponent(addDownloadSelectedSeries.id)}`);
                 if (!res.ok) throw new Error('Failed to fetch');
                 const videos = await res.json();
                 
@@ -1663,7 +1669,7 @@
                         dubLangs.push(episodeSelection.audioLocale);
                     }
                     const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
-                    const res = await fetch(`/api/v1/series/${seriesId}/list?${dubLangParam}`);
+                    const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/list?${dubLangParam}`);
                     if (res.status === 404) {
                         showToast('No episodes are available for this series', 'info');
                         if (listContainer) {
@@ -1866,8 +1872,8 @@
                         const na = fmtNextAir(s);
                         const metaMain = (s.episodeCount ? `${s.episodeCount} ep` : 'On Crunchyroll') + (sd ? ` · ${sd}` : '');
                         return `
-                        <div class="history-poster" ${clickable
-                            ? `onclick="selectBrowseResult('${escapeJsString(s.id)}')" class="clickable"`
+                        <div class="history-poster ${clickable ? 'clickable' : ''}" ${clickable
+                            ? `onclick="selectBrowseResult('${escapeJsString(s.id)}')"`
                             : `title="Not on Crunchyroll yet" style="opacity:.55;"`}>
                             <div class="history-poster-img"><span class="poster-type-badge">Series</span>${img}</div>
                             <div class="history-poster-info">
@@ -2048,7 +2054,7 @@
             // Fetch and show episodes
             (async () => {
                 try {
-                    const res = await fetch(`/api/v1/series/${seriesId}/episodes`);
+                    const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/episodes`);
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const episodes = await res.json();
                     const modalBody = document.getElementById('modal-body');
@@ -3108,7 +3114,7 @@
                                 <div class="setting-row mt-10"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
                                 ${renderListInput('setting-ffmpeg', dl.ffmpegOptions, '-option')}
                                 <div class="setting-row mt-10"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><div style="display:flex; gap:8px; align-items:center;"><select class="form-select mw-200" id="setting-encode-preset" onfocus="loadEncodingPresets()"><option value="">${dl.encodingPreset || 'None'}</option></select><button class="header-btn" type="button" onclick="openPresetEditor()">Manage Presets</button></div></div>
+                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><div style="display:flex; gap:8px; align-items:center;"><select class="form-select mw-200" id="setting-encode-preset" onfocus="loadEncodingPresets()"><option value="">${escapeHtml(dl.encodingPreset || 'None')}</option></select><button class="header-btn" type="button" onclick="openPresetEditor()">Manage Presets</button></div></div>
                             </div>
                         </div>
                     `;
@@ -3889,7 +3895,7 @@
                     return;
                 }
                 for (const item of activeItems) {
-                    await fetch(`/api/v1/queue/${item.id}/pause`, { method: 'POST' });
+                    await fetch(`/api/v1/queue/${encodeURIComponent(item.id)}/pause`, { method: 'POST' });
                 }
                 showToast(`Paused ${activeItems.length} download(s)`, 'success');
                 fetchDownloads();
@@ -3908,7 +3914,7 @@
 
         async function retryDownload(id) {
             try {
-                const res = await fetch(`/api/v1/queue/${id}/retry`, { method: 'POST' });
+                const res = await fetch(`/api/v1/queue/${encodeURIComponent(id)}/retry`, { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Retrying download', 'success');
                 fetchDownloads();
@@ -3917,7 +3923,7 @@
 
         async function startDownload(id) {
             try {
-                const res = await fetch(`/api/v1/queue/${id}/start`, { method: 'POST' });
+                const res = await fetch(`/api/v1/queue/${encodeURIComponent(id)}/start`, { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Starting download', 'success');
                 fetchDownloads();
@@ -3927,7 +3933,7 @@
         async function togglePauseResume(id, isDownloading) {
             try {
                 const endpoint = isDownloading ? 'pause' : 'resume';
-                const res = await fetch(`/api/v1/queue/${id}/${endpoint}`, { method: 'POST' });
+                const res = await fetch(`/api/v1/queue/${encodeURIComponent(id)}/${endpoint}`, { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 fetchDownloads();
             } catch (e) { showToast('Action failed', 'error'); }
@@ -3936,7 +3942,7 @@
         async function removeFromQueue(id) {
             if (!confirm('Remove this item from queue?')) return;
             try {
-                const res = await fetch(`/api/v1/queue/${id}`, { method: 'DELETE' });
+                const res = await fetch(`/api/v1/queue/${encodeURIComponent(id)}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Removed from queue', 'success');
                 if (currentPage === 'downloads') fetchDownloads();
@@ -3946,7 +3952,7 @@
         async function deleteDownloadedFile(id) {
             if (!confirm('Delete the downloaded file from the server?\n\nThis permanently deletes the file on the host running Cruncharr.')) return;
             try {
-                const res = await fetch(`/api/v1/queue/${id}/file`, { method: 'DELETE' });
+                const res = await fetch(`/api/v1/queue/${encodeURIComponent(id)}/file`, { method: 'DELETE' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 showToast('Downloaded file deleted', 'success');
                 if (currentPage === 'downloads') fetchDownloads();

@@ -98,4 +98,18 @@ public class LanguagePrefsServiceTests
         Assert.Equal("sub", sug!.Category);
         Assert.Equal("en-US", sug.Locale);
     }
+
+    [Fact]
+    public void State_ReturnsDeepSnapshot()
+    {
+        var service = Enabled();
+        service.RecordPick("audio", "en-US");
+        var snapshot = service.State;
+
+        snapshot.AudioCounts["en-US"] = 99;
+        snapshot.AudioDeclined.Add("fr-FR");
+
+        Assert.Equal(1, service.State.AudioCounts["en-US"]);
+        Assert.Empty(service.State.AudioDeclined);
+    }
 }

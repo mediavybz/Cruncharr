@@ -66,7 +66,25 @@ public class LanguagePrefsService : ILanguagePrefsService
         Load();
     }
 
-    public LanguagePrefsState State { get { lock (_lock) return _state; } }
+    public LanguagePrefsState State
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return new LanguagePrefsState
+                {
+                    Enabled = _state.Enabled,
+                    AudioCounts = new Dictionary<string, int>(_state.AudioCounts, StringComparer.OrdinalIgnoreCase),
+                    SubCounts = new Dictionary<string, int>(_state.SubCounts, StringComparer.OrdinalIgnoreCase),
+                    AudioDeclined = new List<string>(_state.AudioDeclined),
+                    SubDeclined = new List<string>(_state.SubDeclined),
+                    AudioSnooze = new Dictionary<string, int>(_state.AudioSnooze, StringComparer.OrdinalIgnoreCase),
+                    SubSnooze = new Dictionary<string, int>(_state.SubSnooze, StringComparer.OrdinalIgnoreCase)
+                };
+            }
+        }
+    }
     public bool Enabled { get { lock (_lock) return _state.Enabled; } }
 
     public void SetEnabled(bool enabled)

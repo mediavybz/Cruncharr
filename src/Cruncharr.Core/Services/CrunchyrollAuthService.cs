@@ -51,6 +51,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private readonly string _tokenFilePath;
     private readonly CruncharrConfig? _config;
     private readonly INotificationService? _notification;
+    private readonly SemaphoreSlim _refreshTokenGate = new(1, 1);
     private static readonly TimeSpan TokenRefreshBuffer = TimeSpan.FromSeconds(60);
 
     public CrToken? Token { get; private set; }
@@ -533,6 +534,19 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     }
 
     public async Task<bool> LoginAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default)
+    {
+        await _refreshTokenGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await LoginCoreAsync(email, password, useBetaApi, cancellationToken);
+        }
+        finally
+        {
+            _refreshTokenGate.Release();
+        }
+    }
+
+    private async Task<bool> LoginCoreAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken)
     {
         try
         {
@@ -1232,15 +1246,35 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         return false;
     }
 
-    public Task LogoutAsync()
+    public async Task LogoutAsync()
     {
-        Token = null;
-        Init();
-        DeleteToken();
-        return Task.CompletedTask;
+        await _refreshTokenGate.WaitAsync();
+        try
+        {
+            Token = null;
+            Init();
+            DeleteToken();
+        }
+        finally
+        {
+            _refreshTokenGate.Release();
+        }
     }
 
     public async Task<bool> RefreshTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default, bool force = false)
+    {
+        await _refreshTokenGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await RefreshTokenCoreAsync(useBetaApi, cancellationToken, force);
+        }
+        finally
+        {
+            _refreshTokenGate.Release();
+        }
+    }
+
+    private async Task<bool> RefreshTokenCoreAsync(bool useBetaApi, CancellationToken cancellationToken, bool force)
     {
         if (EndpointEnum == CrunchyrollEndpoints.Guest)
         {
@@ -1374,6 +1408,19 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     }
 
     public async Task<bool> ChangeProfileAsync(string profileId, bool useBetaApi, string? pin = null, CancellationToken cancellationToken = default)
+    {
+        await _refreshTokenGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await ChangeProfileCoreAsync(profileId, useBetaApi, pin, cancellationToken);
+        }
+        finally
+        {
+            _refreshTokenGate.Release();
+        }
+    }
+
+    private async Task<bool> ChangeProfileCoreAsync(string profileId, bool useBetaApi, string? pin, CancellationToken cancellationToken)
     {
         if (Token?.access_token == null && Token?.refresh_token == null ||
             Token?.access_token != null && Token?.refresh_token == null)

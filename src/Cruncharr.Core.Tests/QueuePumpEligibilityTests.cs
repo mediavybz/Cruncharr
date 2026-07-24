@@ -17,6 +17,28 @@ public class QueuePumpEligibilityTests
     private static DownloadProgress P(DownloadState state) => new() { State = state };
 
     [Fact]
+    public void QueueBroadcast_SlowClientReceivesLatestSnapshot()
+    {
+        var queue = new Mock<IQueueService>();
+        queue.Setup(service => service.GetQueue()).Returns([]);
+        queue.Setup(service => service.HasActiveDownloads).Returns(true);
+        queue.SetupSequence(service => service.ActiveDownloads)
+            .Returns(1)
+            .Returns(2);
+        using var broadcast = new QueueBroadcastService(
+            queue.Object,
+            NullLogger<QueueBroadcastService>.Instance);
+        var reader = broadcast.Subscribe(Guid.NewGuid());
+
+        queue.Raise(service => service.QueueStateChanged += null, EventArgs.Empty);
+        queue.Raise(service => service.QueueStateChanged += null, EventArgs.Empty);
+
+        Assert.True(reader.TryRead(out var latest));
+        Assert.Contains("\"activeDownloads\":2", latest);
+        Assert.False(reader.TryRead(out _));
+    }
+
+    [Fact]
     public void Paused_IsNotAutoStartEligible()
     {
         Assert.False(QueueService.IsAutoStartEligibleState(P(DownloadState.Paused)));
@@ -222,6 +244,77 @@ public class QueuePumpEligibilityTests
         await scheduler.RunCheckAsync(provider, config, CancellationToken.None);
 
         queue.Verify(service => service.AddToQueue(It.IsAny<EpisodeInfo>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Scheduler_SerializesOverlappingManualAndTimedChecks()
+    {
+        var firstEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        int active = 0;
+        int maxActive = 0;
+        var history = new Mock<IHistoryService>();
+        history.Setup(service => service.GetHistorySeriesAsync()).ReturnsAsync(
+        [
+            new HistorySeries { SeriesId = "SERIES1", SeriesTitle = "Example Show" }
+        ]);
+        history.Setup(service => service.CrUpdateSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>()))
+            .Returns(async () =>
+            {
+                var call = Interlocked.Increment(ref calls);
+                var nowActive = Interlocked.Increment(ref active);
+                int observedMax;
+                do
+                {
+                    observedMax = Volatile.Read(ref maxActive);
+                }
+                while (nowActive > observedMax &&
+                       Interlocked.CompareExchange(ref maxActive, nowActive, observedMax) != observedMax);
+
+                try
+                {
+                    if (call == 1)
+                    {
+                        firstEntered.TrySetResult(true);
+                        await releaseFirst.Task.WaitAsync(TestContext.Current.CancellationToken);
+                    }
+                    return true;
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref active);
+                }
+            });
+
+        using var provider = new ServiceCollection()
+            .AddSingleton(history.Object)
+            .AddSingleton(Mock.Of<IQueueService>())
+            .AddSingleton(Mock.Of<ICrunchyrollApiService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .BuildServiceProvider();
+        using var scheduler = new AutoDownloadSchedulerService(
+            provider,
+            NullLogger<AutoDownloadSchedulerService>.Instance);
+        var config = new CruncharrConfig();
+        config.History.Enabled = true;
+        config.History.AutoRefreshMode = 0;
+
+        var first = scheduler.RunCheckAsync(provider, config, TestContext.Current.CancellationToken);
+        await firstEntered.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var second = scheduler.RunCheckAsync(provider, config, TestContext.Current.CancellationToken);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+
+        Assert.True(scheduler.IsRunning);
+        Assert.Equal(1, Volatile.Read(ref calls));
+
+        releaseFirst.TrySetResult(true);
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(2, Volatile.Read(ref calls));
+        Assert.Equal(1, Volatile.Read(ref maxActive));
+        Assert.False(scheduler.IsRunning);
+        Assert.NotNull(scheduler.LastRun);
     }
 
     [Fact]

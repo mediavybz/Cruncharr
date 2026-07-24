@@ -2,6 +2,7 @@ using Cruncharr.API.Services;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
+using Cruncharr.Core.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
 
@@ -189,10 +190,30 @@ public class QueueController : ControllerBase
         var epId = item?.Episode?.Id;
         if (string.IsNullOrEmpty(epId)) return null;
         var history = await _historyService.GetAllAsync(0, 100000);
-        // Some flat-history ids append the audio locale (e.g. <id>JAJP), so match exact OR prefix.
+        // Some legacy flat-history ids append the audio locale (e.g. <id>JAJP).
         var match = history.LastOrDefault(h => h.EpisodeId == epId)
-                    ?? history.LastOrDefault(h => h.EpisodeId != null && h.EpisodeId.StartsWith(epId, StringComparison.Ordinal));
+                    ?? history.LastOrDefault(h =>
+                        h.EpisodeId != null &&
+                        IsLegacyAudioSuffixedEpisodeId(h.EpisodeId, epId));
         return GetSafeOutputPath(match?.OutputPath);
+    }
+
+    private static bool IsLegacyAudioSuffixedEpisodeId(
+        string historyEpisodeId,
+        string baseEpisodeId)
+    {
+        if (!historyEpisodeId.StartsWith(baseEpisodeId, StringComparison.Ordinal) ||
+            historyEpisodeId.Length == baseEpisodeId.Length)
+        {
+            return false;
+        }
+
+        var suffix = historyEpisodeId[baseEpisodeId.Length..];
+        return Languages.languages.Any(language =>
+            string.Equals(
+                string.Concat(language.CrLocale.Where(char.IsLetterOrDigit)),
+                suffix,
+                StringComparison.OrdinalIgnoreCase));
     }
 
     private string? GetSafeOutputPath(string? outputPath)

@@ -7,6 +7,8 @@ namespace Cruncharr.Core.Configuration;
 
 public class CruncharrConfig
 {
+    private static readonly object _saveLock = new();
+
     [JsonPropertyName("crunchyroll")]
     [YamlMember(Alias = "crunchyroll", ApplyNamingConventions = false)]
     public CrunchyrollConfig Crunchyroll { get; set; } = new();
@@ -105,30 +107,38 @@ public class CruncharrConfig
 
     public bool Save(string configPath)
     {
-        try
+        lock (_saveLock)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+            try
+            {
+                var directory = Path.GetDirectoryName(configPath);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
 
-            string content = (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml"))
-                ? new SerializerBuilder().Build().Serialize(this)
-                : Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
+                string content = (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml"))
+                    ? new SerializerBuilder().Build().Serialize(this)
+                    : Newtonsoft.Json.JsonConvert.SerializeObject(this, Newtonsoft.Json.Formatting.Indented);
 
-            // Atomic write: serialize to a temp file then rename, so a crash/kill/power-loss
-            // mid-write can't truncate or corrupt the config (which would lose ALL settings,
-            // including credentials, and fall back to defaults on next boot).
-            string tmp = configPath + ".tmp";
-            File.WriteAllText(tmp, content);
-            File.Move(tmp, configPath, overwrite: true);
+                // Atomic write: serialize to a temp file then rename, so a crash/kill/power-loss
+                // mid-write can't truncate or corrupt the config (which would lose ALL settings,
+                // including credentials, and fall back to defaults on next boot). Every in-process
+                // caller shares this lock because multiple API surfaces save to the same path.
+                string tmp = configPath + ".tmp";
+                File.WriteAllText(tmp, content);
+                File.Move(tmp, configPath, overwrite: true);
 
-            // Config holds credentials (CR password, proxy password, Sonarr API key) in
-            // plaintext; restrict to owner read/write so other users on a shared /config
-            // mount cannot read them.
-            Cruncharr.Core.Utils.SecureFile.Restrict(configPath);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Failed to save configuration to {configPath}: {ex.Message}", ex);
+                // Config holds credentials (CR password, proxy password, Sonarr API key) in
+                // plaintext; restrict to owner read/write so other users on a shared /config
+                // mount cannot read them.
+                Cruncharr.Core.Utils.SecureFile.Restrict(configPath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to save configuration to {configPath}: {ex.Message}", ex);
+            }
         }
     }
 

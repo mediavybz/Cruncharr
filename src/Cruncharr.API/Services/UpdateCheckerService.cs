@@ -25,24 +25,27 @@ public class UpdateCheckerService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (_config.Notifications?.NotifyUpdateAvailable != true)
-        {
-            _logger?.LogInformation("Update checker disabled (NotifyUpdateAvailable=false)");
-            return;
-        }
-
         while (!stoppingToken.IsCancellationRequested)
         {
-            try
+            var nextCheckDelay = TimeSpan.FromHours(6);
+            if (_config.Notifications?.NotifyUpdateAvailable == true)
             {
-                await CheckForUpdateAsync(stoppingToken);
+                try
+                {
+                    await CheckForUpdateAsync(stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Update check failed");
+                }
             }
-            catch (Exception ex)
+            else
             {
-                _logger?.LogError(ex, "Update check failed");
+                _logger?.LogDebug("Update checker disabled (NotifyUpdateAvailable=false)");
+                nextCheckDelay = TimeSpan.FromMinutes(1);
             }
 
-            await Task.Delay(TimeSpan.FromHours(6), stoppingToken);
+            await Task.Delay(nextCheckDelay, stoppingToken);
         }
     }
 

@@ -27,50 +27,75 @@ public class NotificationService : INotificationService
     // Dedup so these don't spam on every auth/update poll (ported from upstream's Reset* guards).
     private bool _loginExpiredNotified;
     private string _notifiedUpdateVersion = string.Empty;
+    private readonly SemaphoreSlim _loginExpiredGate = new(1, 1);
+    private readonly SemaphoreSlim _updateAvailableGate = new(1, 1);
+    private int _loginExpiredResetGeneration;
 
     public NotificationService(IHttpClientFactory httpClientFactory, ILogger<NotificationService>? logger = null)
     {
         _logger = logger;
-        _httpClient = httpClientFactory.CreateClient();
+        _httpClient = httpClientFactory.CreateClient("CruncharrWebhooks");
     }
 
     // Ported notification events whose config flags + UI toggles existed but never fired
     // (NotifyLoginExpired / NotifyUpdateAvailable / NotifyTrackedSeriesReleased were dead toggles).
     public async Task NotifyLoginExpiredAsync(string? username, CruncharrConfig config)
     {
-        if (_loginExpiredNotified) return;
-        if (!config.Notifications.WebhookEnabled || string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
-        if (!config.Notifications.NotifyLoginExpired) return;
-        _loginExpiredNotified = true;
-        _logger?.LogInformation("Sending login-expired notification");
-        await SendWebhookAsync(config, new
+        await _loginExpiredGate.WaitAsync();
+        try
         {
-            event_type = "login_expired",
-            title = "Crunchyroll login expired",
-            message = "The saved Crunchyroll session could not be refreshed. Please log in again.",
-            username = username ?? string.Empty,
-            timestamp = DateTime.UtcNow
-        });
+            if (Volatile.Read(ref _loginExpiredNotified)) return;
+            if (!config.Notifications.WebhookEnabled || string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
+            if (!config.Notifications.NotifyLoginExpired) return;
+            var resetGeneration = Volatile.Read(ref _loginExpiredResetGeneration);
+            _logger?.LogInformation("Sending login-expired notification");
+            var sent = await SendWebhookAsync(config, new
+            {
+                event_type = "login_expired",
+                title = "Crunchyroll login expired",
+                message = "The saved Crunchyroll session could not be refreshed. Please log in again.",
+                username = username ?? string.Empty,
+                timestamp = DateTime.UtcNow
+            });
+            if (sent && resetGeneration == Volatile.Read(ref _loginExpiredResetGeneration))
+                Volatile.Write(ref _loginExpiredNotified, true);
+        }
+        finally
+        {
+            _loginExpiredGate.Release();
+        }
     }
 
-    public void ResetLoginExpiredNotification() => _loginExpiredNotified = false;
+    public void ResetLoginExpiredNotification()
+    {
+        Interlocked.Increment(ref _loginExpiredResetGeneration);
+        Volatile.Write(ref _loginExpiredNotified, false);
+    }
 
     public async Task NotifyUpdateAvailableAsync(string currentVersion, string latestVersion, CruncharrConfig config)
     {
-        if (string.Equals(_notifiedUpdateVersion, latestVersion, StringComparison.OrdinalIgnoreCase)) return;
-        if (!config.Notifications.WebhookEnabled || string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
-        if (!config.Notifications.NotifyUpdateAvailable) return;
-        _notifiedUpdateVersion = latestVersion;
-        _logger?.LogInformation("Sending update-available notification ({Latest})", latestVersion);
-        await SendWebhookAsync(config, new
+        await _updateAvailableGate.WaitAsync();
+        try
         {
-            event_type = "update_available",
-            title = "Update available",
-            message = $"Version {latestVersion} is available. Current version: {currentVersion}.",
-            current_version = currentVersion,
-            latest_version = latestVersion,
-            timestamp = DateTime.UtcNow
-        });
+            if (string.Equals(_notifiedUpdateVersion, latestVersion, StringComparison.OrdinalIgnoreCase)) return;
+            if (!config.Notifications.WebhookEnabled || string.IsNullOrEmpty(config.Notifications.WebhookUrl)) return;
+            if (!config.Notifications.NotifyUpdateAvailable) return;
+            _logger?.LogInformation("Sending update-available notification ({Latest})", latestVersion);
+            var sent = await SendWebhookAsync(config, new
+            {
+                event_type = "update_available",
+                title = "Update available",
+                message = $"Version {latestVersion} is available. Current version: {currentVersion}.",
+                current_version = currentVersion,
+                latest_version = latestVersion,
+                timestamp = DateTime.UtcNow
+            });
+            if (sent) _notifiedUpdateVersion = latestVersion;
+        }
+        finally
+        {
+            _updateAvailableGate.Release();
+        }
     }
 
     public async Task NotifyTrackedSeriesReleasedAsync(string seriesTitle, string episodeTitle, string episodeId, CruncharrConfig config)
@@ -205,7 +230,7 @@ public class NotificationService : INotificationService
         }
     }
 
-    private async Task SendWebhookAsync(CruncharrConfig config, object payload)
+    private async Task<bool> SendWebhookAsync(CruncharrConfig config, object payload)
     {
         try
         {
@@ -214,12 +239,12 @@ public class NotificationService : INotificationService
             if (string.IsNullOrEmpty(webhookUrl))
             {
                 _logger?.LogWarning("Webhook URL is empty, skipping webhook");
-                return;
+                return false;
             }
             if (!WebhookUrlValidator.IsValidWebhookUrl(webhookUrl, out var validationError))
             {
                 _logger?.LogWarning("Webhook URL failed validation: {Error}", validationError);
-                return;
+                return false;
             }
 
             var method = new HttpMethod(config.Notifications.WebhookMethod);
@@ -261,10 +286,12 @@ public class NotificationService : INotificationService
 
             using var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
+            return true;
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to send webhook notification");
+            return false;
         }
     }
 }

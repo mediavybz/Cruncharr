@@ -305,6 +305,12 @@ public class HttpClientWrapper : IDisposable
         }
         foreach (var kvp in _cookieStore)
         {
+            if (request.RequestUri == null ||
+                !CookieDomainMatches(request.RequestUri.Host, kvp.Key))
+            {
+                continue;
+            }
+
             var domainLock = _cookieLocks.GetOrAdd(kvp.Key, _ => new object());
             lock (domainLock)
             {
@@ -325,6 +331,13 @@ public class HttpClientWrapper : IDisposable
             request.Headers.Remove("Cookie");
             request.Headers.Add("Cookie", cookieHeader.ToString());
         }
+    }
+
+    private static bool CookieDomainMatches(string requestHost, string cookieDomain)
+    {
+        var normalizedDomain = cookieDomain.TrimStart('.');
+        return requestHost.Equals(normalizedDomain, StringComparison.OrdinalIgnoreCase) ||
+               requestHost.EndsWith("." + normalizedDomain, StringComparison.OrdinalIgnoreCase);
     }
 
     private void CaptureResponseCookies(HttpResponseMessage response, Uri requestUri)

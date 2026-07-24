@@ -1,7 +1,7 @@
 # Porting Log
 ## Project: Crunchy-Downloader → Docker + Web UI
 ## Desktop Source Version: upstream/master 245cf78 (synced 2026-06-12)
-## Last Updated: 2026-07-23 (Round 46 in progress: calendar episode preselection)
+## Last Updated: 2026-07-23 (Round 46 complete: calendar episode preselection)
 
 ---
 
@@ -22,6 +22,7 @@ the queue, and the existing one-click Calendar Download action remains unchanged
 - The loaded linux/amd64 production image became healthy at `1.0.62+local-calendar-selection`, served both 1.0.62 cache keys plus the Calendar matcher/action, and retained the CLI.
 - Browser verification against the live authenticated APIs opened Skeleton Knight episode 3 on Add Download Season 2 with exactly one checked row, English selected, and Add enabled; the unchanged Browse flow opened Season 1 with zero selected rows, upcoming thumbnails remained non-interactive, and the browser logged no warnings or errors.
 - Cache-only production builds completed for `linux/amd64` and `linux/arm64` using the repository publisher.
+- Freshly pulled GHCR testing image became healthy at `1.0.62+5393a909a3ecab333487ec5d9ac38c2af219c559`, served both 1.0.62 cache keys plus the Calendar matcher/action/focus style, ran the retained CLI, retained FFmpeg `N-125649-g8d394252d8-20260717`, ran PID 1 as UID 1000, and stopped gracefully with exit code 0.
 
 ### Frontend (Mode B)
 | File | Desktop Equivalent | API Endpoints Used | Change | Date |
@@ -39,7 +40,18 @@ the queue, and the existing one-click Calendar Download action remains unchanged
 ### In Progress
 | File | Mode | Blocker |
 |------|------|---------|
-| Testing release 1.0.62 | B/A metadata | Source commit and multi-architecture testing image pending |
+| Testing release 1.0.62 | B/A metadata | [completed] Source push, multi-architecture image publish, registry inspection, and fresh-pull smoke passed |
+
+### Infrastructure
+| File | Purpose | Date |
+|------|---------|------|
+| Docker image | Multi-architecture 1.0.62 testing image for source commit `5393a90`; `linux/amd64` + `linux/arm64`; OCI index `sha256:fc2165d20639e23456d5a95c995b4f42c4055c5f8471d9fe7f75dac060b1e457` | 2026-07-23 |
+
+### Release Status
+- Feature commit `5393a90` pushed to `origin/testing`.
+- Multi-architecture image pushed to `ghcr.io/mediavybz/cruncharr:testing`, OCI index digest `sha256:fc2165d20639e23456d5a95c995b4f42c4055c5f8471d9fe7f75dac060b1e457`.
+- Platform manifests: linux/amd64 `sha256:e855026fbb007f73035a6719f7114dd2273b0a2c4ce2c8e9dfae49a8cbf228a9`; linux/arm64 `sha256:ec85fa0deb5ccc539d8e4b6002633c629757252f1a1da45db6642e1b26ad73c1`.
+- Stable `master`, `:latest`, and numbered stable tags were not changed.
 
 ---
 

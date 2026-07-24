@@ -12,6 +12,25 @@
             }
         }
 
+        function readSessionStorage(key) {
+            try { return sessionStorage.getItem(key); }
+            catch (e) { return null; }
+        }
+
+        function writeSessionStorage(key, value) {
+            try {
+                sessionStorage.setItem(key, value);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function removeSessionStorage(key) {
+            try { sessionStorage.removeItem(key); }
+            catch (e) { /* storage unavailable */ }
+        }
+
         // API-key support. If the server is started with CRUNCHARR_API_KEY set, every
         // /api/* call must carry the key. We attach it from localStorage and, on a 401,
         // prompt for it once and reload. When no key is configured server-side, nothing
@@ -79,6 +98,11 @@
         let globalSearchAbort = null;    // top-bar search in-flight request
         let globalSearchResults = [];    // last top-bar search results
         let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
+        let browseSeriesPromise = null;  // de-duplicates background/visible catalog requests
+        let browseCatalogLoaded = false;
+        let browseFilteredSeries = [];
+        let browseRenderedCount = 0;
+        let browseLoadMoreObserver = null;
         let browseDubFilter = '';        // '' = all languages
         let browseRatingFilter = new Set(); // selected rating tier keys / raw codes; empty = all
         let historyFilterText = '';
@@ -96,6 +120,9 @@
         const FETCH_CONFIG_RETRY_DELAY_MS = 3000;
         const HISTORY_SEARCH_DEBOUNCE_MS = 200;
         const TOAST_DISPLAY_DURATION_MS = 3000;
+        const BROWSE_RENDER_BATCH_SIZE = 96;
+        const BROWSE_CACHE_KEY = 'cruncharrBrowseCatalogV1';
+        const BROWSE_CACHE_TTL_MS = 15 * 60 * 1000;
         const ACTIVE_DROPDOWN_LISTENERS = new Map(); // id -> listener function
 
         document.addEventListener('DOMContentLoaded', async () => {
@@ -121,6 +148,7 @@
             setupTextSelectionGuard();
             setupMultiSelectDropdowns();
             updateTopbarProfile();
+            scheduleBrowsePrefetch();
             // Remove splash once app shell is rendered
             const splash = document.getElementById('loading-splash');
             if (splash) { splash.classList.add('hidden'); setTimeout(() => splash.remove(), 500); }
@@ -227,6 +255,9 @@
             if (currentPage === 'history' && page !== 'history' && historyIntervalId) {
                 clearInterval(historyIntervalId);
                 historyIntervalId = null;
+            }
+            if (currentPage === 'browse' && page !== 'browse') {
+                disconnectBrowseLoadMoreObserver();
             }
             // Clear any pending browse result timeout
             if (selectBrowseResultTimeout) {
@@ -1549,18 +1580,84 @@
                     <div class="loading"><div class="spinner"></div>Loading series...</div>
                 </div>
             `;
-            fetchAllSeries();
+            if (browseCatalogLoaded) renderBrowseFiltered();
+            else fetchAllSeries();
+        }
+
+        function scheduleBrowsePrefetch() {
+            const prefetch = () => { loadAllBrowseSeries().catch(() => {}); };
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(prefetch, { timeout: 2000 });
+            } else {
+                setTimeout(prefetch, 1000);
+            }
+        }
+
+        function compactBrowseSeries(data) {
+            return (data || [])
+                .filter(series => series.episodeCount == null || series.episodeCount > 0)
+                .map(series => ({
+                    id: series.id,
+                    title: series.title,
+                    coverArtUrl: series.coverArtUrl,
+                    thumbnailUrl: series.thumbnailUrl,
+                    episodeCount: series.episodeCount,
+                    audioLocales: Array.isArray(series.audioLocales) ? series.audioLocales : [],
+                    maturityRatings: Array.isArray(series.maturityRatings) ? series.maturityRatings : []
+                }));
+        }
+
+        function restoreBrowseCatalog() {
+            const cached = readSessionStorage(BROWSE_CACHE_KEY);
+            if (!cached) return false;
+            try {
+                const parsed = JSON.parse(cached);
+                const cachedAt = Number(parsed?.cachedAt);
+                if (!Number.isFinite(cachedAt) || Date.now() - cachedAt > BROWSE_CACHE_TTL_MS ||
+                    !Array.isArray(parsed?.series)) {
+                    removeSessionStorage(BROWSE_CACHE_KEY);
+                    return false;
+                }
+                allBrowseSeries = compactBrowseSeries(parsed.series);
+                browseCatalogLoaded = true;
+                return true;
+            } catch (e) {
+                removeSessionStorage(BROWSE_CACHE_KEY);
+                return false;
+            }
+        }
+
+        async function loadAllBrowseSeries() {
+            if (browseCatalogLoaded) return allBrowseSeries;
+            if (restoreBrowseCatalog()) return allBrowseSeries;
+            if (!browseSeriesPromise) {
+                browseSeriesPromise = (async () => {
+                    const res = await fetch('/api/v1/series/all');
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    allBrowseSeries = compactBrowseSeries(data);
+                    browseCatalogLoaded = true;
+                    writeSessionStorage(BROWSE_CACHE_KEY, JSON.stringify({
+                        cachedAt: Date.now(),
+                        series: allBrowseSeries
+                    }));
+                    return allBrowseSeries;
+                })();
+            }
+
+            try {
+                return await browseSeriesPromise;
+            } finally {
+                browseSeriesPromise = null;
+            }
         }
 
         async function fetchAllSeries() {
             try {
-                const res = await fetch('/api/v1/series/all');
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                allBrowseSeries = (data || []).filter(series =>
-                    series.episodeCount == null || series.episodeCount > 0);
-                renderBrowseFiltered();
+                await loadAllBrowseSeries();
+                if (currentPage === 'browse') renderBrowseFiltered();
             } catch (e) {
+                if (currentPage !== 'browse') return;
                 const content = document.getElementById('browse-content');
                 if (content) content.innerHTML = `
                     <div class="empty-state">
@@ -1623,10 +1720,79 @@
             }
             const count = document.getElementById('browse-count');
             if (count) count.textContent = `${list.length} series`;
+            const pageContent = document.getElementById('content');
+            if (pageContent) pageContent.scrollTop = 0;
+            browseFilteredSeries = list;
+            browseRenderedCount = 0;
             renderBrowseContent(list);
         }
 
+        function disconnectBrowseLoadMoreObserver() {
+            if (browseLoadMoreObserver) {
+                browseLoadMoreObserver.disconnect();
+                browseLoadMoreObserver = null;
+            }
+        }
+
+        function renderBrowseCards(series) {
+            return series.map(s => `
+                <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
+                    <div class="history-poster-img">
+                        <span class="poster-type-badge">Series</span>
+                        ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                    </div>
+                    <div class="history-poster-info">
+                        <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
+                        <div class="history-poster-meta">${s.episodeCount == null ? 'Episodes available' : `${s.episodeCount} episode(s)`}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderNextBrowseBatch() {
+            const grid = document.querySelector('#browse-content .history-poster-grid');
+            const sentinel = document.getElementById('browse-load-more');
+            if (!grid || !sentinel) {
+                disconnectBrowseLoadMoreObserver();
+                return;
+            }
+
+            const nextEnd = Math.min(browseRenderedCount + BROWSE_RENDER_BATCH_SIZE, browseFilteredSeries.length);
+            const nextSeries = browseFilteredSeries.slice(browseRenderedCount, nextEnd);
+            if (nextSeries.length > 0) {
+                grid.insertAdjacentHTML('beforeend', renderBrowseCards(nextSeries));
+                browseRenderedCount = nextEnd;
+            }
+
+            if (browseRenderedCount >= browseFilteredSeries.length) {
+                disconnectBrowseLoadMoreObserver();
+                sentinel.remove();
+                return;
+            }
+
+            const button = sentinel.querySelector('button');
+            if (button) {
+                button.textContent = `Load more (${browseFilteredSeries.length - browseRenderedCount} remaining)`;
+            }
+        }
+
+        function observeMoreBrowseSeries() {
+            disconnectBrowseLoadMoreObserver();
+            const sentinel = document.getElementById('browse-load-more');
+            if (!sentinel || browseRenderedCount >= browseFilteredSeries.length) return;
+            if (typeof window.IntersectionObserver !== 'function') return;
+
+            browseLoadMoreObserver = new IntersectionObserver(entries => {
+                if (entries.some(entry => entry.isIntersecting)) renderNextBrowseBatch();
+            }, {
+                root: document.getElementById('content'),
+                rootMargin: '600px 0px'
+            });
+            browseLoadMoreObserver.observe(sentinel);
+        }
+
         function renderBrowseContent(series) {
+            disconnectBrowseLoadMoreObserver();
             const content = document.getElementById('browse-content');
             if (!content) return;
             if (!series || series.length === 0) {
@@ -1638,22 +1804,21 @@
                 return;
             }
 
+            browseRenderedCount = Math.min(BROWSE_RENDER_BATCH_SIZE, series.length);
             content.innerHTML = `
                 <div class="history-poster-grid">
-                    ${series.map(s => `
-                        <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
-                            <div class="history-poster-img">
-                                <span class="poster-type-badge">Series</span>
-                                ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
-                            </div>
-                            <div class="history-poster-info">
-                                <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
-                                <div class="history-poster-meta">${s.seasons?.length || 0} season(s)</div>
-                            </div>
-                        </div>
-                    `).join('')}
+                    ${renderBrowseCards(series.slice(0, browseRenderedCount))}
                 </div>
+                ${browseRenderedCount < series.length ? `
+                    <div id="browse-load-more" style="display:flex; justify-content:center; padding:24px 0;">
+                        ${typeof window.IntersectionObserver === 'function'
+                            ? '<span class="hint">Loading more series...</span>'
+                            : `<button class="header-btn" onclick="renderNextBrowseBatch()">
+                                Load more (${series.length - browseRenderedCount} remaining)
+                            </button>`}
+                    </div>` : ''}
             `;
+            observeMoreBrowseSeries();
         }
 
         async function selectBrowseResult(seriesId, episodeSelection = null) {

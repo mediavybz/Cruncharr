@@ -9,12 +9,20 @@ src/publish/
 TestResults/
 coverage/
 coverage.*
+coverage-report/
+*.trx
+*.coverage
+*.coveragexml
 
 # IDE
 .vs/
 .vscode/
+.idea/
+_ReSharper*/
 *.user
 *.suo
+*.sln.iml
+*.DotSettings.user
 
 # Sensitive files - NEVER commit these
 widevine/*.pem
@@ -25,6 +33,14 @@ test-data/lib/device_private_key
 test-data/tools/device_private_key
 *.key
 *.pem
+*.pfx
+*.p12
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
 
 # Original reference code (separate repo) - NOT shipped in this public repo
 crunchy-downloader/
@@ -36,10 +52,16 @@ test-data/
 # Test credentials
 test-data/credentials*
 *.env
+.env.*
+!.env.example
+!.env.template
+appsettings.Local.json
+appsettings.*.Local.json
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
 # Logs
 *.log
@@ -70,15 +92,23 @@ status.md
 .claude/
 examples/
 
-# Local-only documentation (the public repository keeps README only)
-*.md
-!README.md
+# Local-only workflow documentation
+AGENTS.md
+CLAUDE.md
+SKILL.md
+PORTING_LOG.md
 
 # Upstream source reference (fetched on demand)
 upstream_src/
 
 # Binary image exports
 cruncharr-image.tar
+
+# Local Docker Compose overrides
+docker-compose.override.yml
+docker-compose.override.yaml
+compose.override.yml
+compose.override.yaml
 
 # Local UI screenshot/debug artifacts
 shots/

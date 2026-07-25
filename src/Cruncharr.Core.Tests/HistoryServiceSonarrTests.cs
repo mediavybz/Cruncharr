@@ -393,6 +393,156 @@ public class HistoryServiceSonarrTests : IDisposable
         Assert.Equal("1001", episode.SonarrEpisodeId);
     }
 
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_SpecialsAlignToOrderedTvdbSpecials()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons =
+        [
+            new HistorySeason
+            {
+                SeasonId = "cr-specials",
+                SeasonTitle = "Specials",
+                SeasonNum = "4",
+                EpisodesList =
+                [
+                    new HistoryEpisode
+                    {
+                        EpisodeId = "special-1",
+                        EpisodeTitle = "No Coincidences in This Summer Break (Part 1)",
+                        EpisodeDescription = "Futaro decides to take the summer off from tutoring. Nino acts extra cold to him for some reason.",
+                        Episode = "1",
+                        EpisodeSeasonNum = "4"
+                    },
+                    new HistoryEpisode
+                    {
+                        EpisodeId = "special-2",
+                        EpisodeTitle = "No Coincidences in This Summer Break (Part 2)",
+                        EpisodeDescription = "Futaro invites the sisters to the pool. Nino and Miku try to get closer to him.",
+                        Episode = "2",
+                        EpisodeSeasonNum = "4"
+                    },
+                    new HistoryEpisode
+                    {
+                        EpisodeId = "special-3",
+                        EpisodeTitle = "Operation Quintuplets (Part 1)",
+                        EpisodeDescription = "Futaro and the sisters head to Hawaii.",
+                        Episode = "3",
+                        EpisodeSeasonNum = "4"
+                    },
+                    new HistoryEpisode
+                    {
+                        EpisodeId = "special-4",
+                        EpisodeTitle = "Operation Quintuplets (Part 2)",
+                        EpisodeDescription = "The quintuplets help prepare for a date in Hawaii.",
+                        Episode = "4",
+                        EpisodeSeasonNum = "4"
+                    }
+                ]
+            }
+        ];
+        await SaveTestHistory(history);
+
+        var episodes = new List<SonarrEpisode>
+        {
+            new()
+            {
+                Id = 2001,
+                SeriesId = 100,
+                SeasonNumber = 0,
+                EpisodeNumber = 1,
+                AbsoluteEpisodeNumber = 25,
+                Title = "Movie",
+                Overview = "The feature film concludes the school festival story."
+            },
+            new()
+            {
+                Id = 2002,
+                SeriesId = 100,
+                SeasonNumber = 0,
+                EpisodeNumber = 2,
+                AbsoluteEpisodeNumber = 26,
+                Title = "五等分の花嫁∽ 偶然のない夏休み 前編",
+                Overview = "Fuutarou takes a break from tutoring during summer vacation to focus on entrance exams."
+            },
+            new()
+            {
+                Id = 2003,
+                SeriesId = 100,
+                SeasonNumber = 0,
+                EpisodeNumber = 3,
+                AbsoluteEpisodeNumber = 27,
+                Title = "五等分の花嫁∽ 偶然のない夏休み 後編",
+                Overview = "The quintuplets are invited to the swimming pool by Fuutarou. Nino and Miku try to get close to him."
+            },
+            new()
+            {
+                Id = 2004,
+                SeriesId = 100,
+                SeasonNumber = 0,
+                EpisodeNumber = 4,
+                AbsoluteEpisodeNumber = 29,
+                Title = "五等分の花嫁* Part 1",
+                Overview = "Futaro and the quintuplets plan a Hawaii trip."
+            },
+            new()
+            {
+                Id = 2005,
+                SeriesId = 100,
+                SeasonNumber = 0,
+                EpisodeNumber = 5,
+                AbsoluteEpisodeNumber = 30,
+                Title = "五等分の花嫁* Part 2",
+                Overview = "The quintuplets continue their Hawaii trip."
+            }
+        };
+
+        _sonarrServiceMock
+            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(episodes);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        var matched = result[0].Seasons[0].EpisodesList;
+
+        Assert.Equal(["2002", "2003", "2004", "2005"], matched.Select(episode => episode.SonarrEpisodeId));
+        Assert.All(matched, episode => Assert.Equal("0", episode.SonarrSeasonNumber));
+    }
+
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_SpecialNeverUsesUnrelatedAbsoluteNumber()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons[0].SeasonTitle = "Specials";
+        history[0].Seasons[0].SeasonNum = "4";
+        history[0].Seasons[0].EpisodesList[0].EpisodeTitle = "Brand New OVA";
+        history[0].Seasons[0].EpisodesList[0].EpisodeSeasonNum = "4";
+        await SaveTestHistory(history);
+
+        _sonarrServiceMock
+            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode
+                {
+                    Id = 1001,
+                    SeriesId = 100,
+                    SeasonNumber = 1,
+                    EpisodeNumber = 1,
+                    AbsoluteEpisodeNumber = 1,
+                    Title = "Unrelated Pilot"
+                }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        Assert.Null(result[0].Seasons[0].EpisodesList[0].SonarrEpisodeId);
+    }
+
     private List<HistorySeries> CreateTestHistory()
     {
         return new List<HistorySeries>{

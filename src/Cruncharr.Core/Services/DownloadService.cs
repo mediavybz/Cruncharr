@@ -253,6 +253,72 @@ public class DownloadService : IDownloadService
         savedSonarrEpisodeId.HasValue &&
         (sonarrEpisode == null || sonarrSeries == null);
 
+    internal static SonarrEpisode? ResolveSonarrEpisodeFallback(
+        EpisodeInfo episode,
+        IReadOnlyList<SonarrEpisode> sonarrEpisodes)
+    {
+        if (sonarrEpisodes.Count == 0) return null;
+
+        var isSpecial = episode.SeasonNumber == 0 ||
+                        episode.SeasonTitle?.Contains("special", StringComparison.OrdinalIgnoreCase) == true;
+
+        // Number equality is reliable for regular seasons, but not for provider-specific
+        // "Specials" groupings. Crunchyroll can expose a local Specials season as S4E1 while
+        // TVDB stores the same item as S00E02; treating E1 as an absolute number instead maps it
+        // to an unrelated S01E01.
+        if (!isSpecial)
+        {
+            var exactNumber = sonarrEpisodes.FirstOrDefault(candidate =>
+                candidate.SeasonNumber == episode.SeasonNumber &&
+                candidate.EpisodeNumber == episode.EpisodeNumber);
+            if (exactNumber != null) return exactNumber;
+        }
+
+        if (!string.IsNullOrWhiteSpace(episode.Title))
+        {
+            var titleMatch = sonarrEpisodes
+                .Select(candidate => new
+                {
+                    Episode = candidate,
+                    Score = string.IsNullOrWhiteSpace(candidate.Title)
+                        ? 0.0
+                        : StringSimilarity.CalculateSimilarity(candidate.Title, episode.Title)
+                })
+                .OrderByDescending(candidate => candidate.Score)
+                .FirstOrDefault();
+            if (titleMatch is { Score: >= 0.8 }) return titleMatch.Episode;
+        }
+
+        if (!string.IsNullOrWhiteSpace(episode.Description))
+        {
+            var descriptionMatch = sonarrEpisodes
+                .Select(candidate => new
+                {
+                    Episode = candidate,
+                    Score = string.IsNullOrWhiteSpace(candidate.Overview)
+                        ? 0.0
+                        : StringSimilarity.CalculateCosineSimilarity(candidate.Overview, episode.Description)
+                })
+                .OrderByDescending(candidate => candidate.Score)
+                .FirstOrDefault();
+            if (descriptionMatch is { Score: > 0.8 }) return descriptionMatch.Episode;
+        }
+
+        if (episode.ReleaseDate.HasValue)
+        {
+            var airDateMatch = sonarrEpisodes.FirstOrDefault(candidate =>
+                candidate.AirDateUtc != default &&
+                candidate.AirDateUtc.UtcDateTime.Date == episode.ReleaseDate.Value.Date);
+            if (airDateMatch != null) return airDateMatch;
+        }
+
+        return isSpecial
+            ? null
+            : sonarrEpisodes.FirstOrDefault(candidate =>
+                candidate.AbsoluteEpisodeNumber > 0 &&
+                candidate.AbsoluteEpisodeNumber == episode.EpisodeNumber);
+    }
+
     internal static bool ShouldReplaceEncodedOutput(int exitCode, bool tempOutputExists) =>
         exitCode == 0 && tempOutputExists;
 
@@ -563,6 +629,24 @@ public class DownloadService : IDownloadService
                 var historyEpisode = _history != null
                     ? await _history.GetHistoryEpisodeAsync(episode.SeriesId, episode.SeasonId, episode.Id)
                     : null;
+
+                // Browse/history can discover a newly added Crunchyroll special before Sonarr has
+                // stored its episode identity. Re-run the existing whole-series matcher before
+                // attempting a single-item fallback; ordered context is required when CR and TVDB
+                // use different special-season offsets or translated titles.
+                if (config.Sonarr.UseSonarrNumbering &&
+                    _history != null &&
+                    historyEpisode != null &&
+                    string.IsNullOrWhiteSpace(historyEpisode.SonarrEpisodeId) &&
+                    !string.IsNullOrWhiteSpace(episode.SeriesId))
+                {
+                    await _history.MatchHistoryEpisodesWithSonarrAsync(episode.SeriesId, false);
+                    historyEpisode = await _history.GetHistoryEpisodeAsync(
+                        episode.SeriesId,
+                        episode.SeasonId,
+                        episode.Id);
+                }
+
                 if (int.TryParse(historyEpisode?.SonarrEpisodeId, out var storedSonarrEpisodeId))
                 {
                     savedSonarrEpisodeId = storedSonarrEpisodeId;
@@ -579,25 +663,14 @@ public class DownloadService : IDownloadService
                 }
 
                 // Preserve the current fallback for queue items that have no saved History match.
-                if (sonarrEpisode == null)
+                // Never replace a saved identity when its exact Sonarr read is temporarily down.
+                if (sonarrEpisode == null && !savedSonarrEpisodeId.HasValue)
                 {
                     sonarrSeries = await _sonarrService.GetSeriesByTitleAsync(episode.SeriesTitle, config.Sonarr);
                     if (sonarrSeries != null)
                     {
                         var sonarrEpisodes = await _sonarrService.GetEpisodesAsync(sonarrSeries.Id, config.Sonarr);
-                        // CR and Sonarr/TVDB often number episodes differently: CR groups long-running
-                        // anime into a few "seasons" with CONTINUOUS episode numbers, while Sonarr/TVDB
-                        // splits them into many seasons. So (season, episode) equality usually misses and
-                        // UseSonarrNumbering silently fell back to CR numbers (e.g. CR Fairy Tail S3E278 ->
-                        // Sonarr has it as S8E1, absoluteEpisodeNumber 278). Try, in order: exact
-                        // season+episode, then absolute number (CR episode no. == Sonarr absolute), then
-                        // air date.
-                        sonarrEpisode =
-                            sonarrEpisodes.FirstOrDefault(ep => ep.SeasonNumber == episode.SeasonNumber && ep.EpisodeNumber == episode.EpisodeNumber)
-                            ?? sonarrEpisodes.FirstOrDefault(ep => ep.AbsoluteEpisodeNumber > 0 && ep.AbsoluteEpisodeNumber == episode.EpisodeNumber)
-                            ?? (episode.ReleaseDate.HasValue
-                                ? sonarrEpisodes.FirstOrDefault(ep => ep.AirDateUtc != default && ep.AirDateUtc.UtcDateTime.Date == episode.ReleaseDate.Value.Date)
-                                : null);
+                        sonarrEpisode = ResolveSonarrEpisodeFallback(episode, sonarrEpisodes);
                         _logger?.LogInformation("Sonarr match: {SeriesTitle} CR S{CrS}E{CrE} -> Sonarr S{SnS}E{SnE} (abs {Abs}) \"{EpTitle}\"",
                             sonarrSeries.Title, episode.SeasonNumber, episode.EpisodeNumber,
                             sonarrEpisode?.SeasonNumber, sonarrEpisode?.EpisodeNumber, sonarrEpisode?.AbsoluteEpisodeNumber, sonarrEpisode?.Title);

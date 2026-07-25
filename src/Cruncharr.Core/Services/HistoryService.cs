@@ -889,7 +889,12 @@ public class HistoryService : IHistoryService, IDisposable
             var titleCandidates = episodesToMatch
                 .Select(historyEpisode =>
                 {
-                    var match = FindClosestMatchEpisodeWithScore(titleAvailableEpisodes, historyEpisode.EpisodeTitle ?? string.Empty);
+                    var availableEpisodes = IsSpecialHistoryEpisode(historySeries, historyEpisode)
+                        ? titleAvailableEpisodes.Where(episode => episode.SeasonNumber == 0).ToList()
+                        : titleAvailableEpisodes;
+                    var match = FindClosestMatchEpisodeWithScore(
+                        availableEpisodes,
+                        historyEpisode.EpisodeTitle ?? string.Empty);
                     return new
                     {
                         HistoryEpisode = historyEpisode,
@@ -917,6 +922,11 @@ public class HistoryService : IHistoryService, IDisposable
             // Try matching by episode/season number
             foreach (var historyEpisode in failedEpisodes.ToList())
             {
+                if (IsSpecialHistoryEpisode(historySeries, historyEpisode))
+                {
+                    continue;
+                }
+
                 var episode = episodes.FirstOrDefault(ele =>
                 {
                     if (usedSonarrEpisodeIds.Contains(ele.Id))
@@ -941,6 +951,7 @@ public class HistoryService : IHistoryService, IDisposable
             {
                 var episode = episodes.FirstOrDefault(ele =>
                     !usedSonarrEpisodeIds.Contains(ele.Id) &&
+                    (!IsSpecialHistoryEpisode(historySeries, historyEpisode) || ele.SeasonNumber == 0) &&
                     !string.IsNullOrEmpty(historyEpisode.EpisodeDescription) &&
                     !string.IsNullOrEmpty(ele.Overview) &&
                     StringSimilarity.CalculateCosineSimilarity(ele.Overview, historyEpisode.EpisodeDescription) > 0.8);
@@ -951,11 +962,25 @@ public class HistoryService : IHistoryService, IDisposable
                 }
             }
 
+            // Crunchyroll commonly exposes OVAs in a provider-local season (for example "Specials"
+            // as S4E1-E4), while TVDB/Sonarr stores them in season 0 with other entries such as a
+            // movie before them. Titles can also be translated differently. Align the remaining
+            // special group to an ordered subset of Sonarr season 0 using title/overview evidence.
+            foreach (var matchedSpecial in MatchSpecialEpisodesByOrder(
+                         historySeries,
+                         failedEpisodes,
+                         episodes,
+                         usedSonarrEpisodeIds))
+            {
+                failedEpisodes.Remove(matchedSpecial);
+            }
+
             // Try matching by absolute episode number
             foreach (var historyEpisode in failedEpisodes.ToList())
             {
                 var episode = episodes.FirstOrDefault(ele =>
                     !usedSonarrEpisodeIds.Contains(ele.Id) &&
+                    !IsSpecialHistoryEpisode(historySeries, historyEpisode) &&
                     ele.AbsoluteEpisodeNumber.ToString() == historyEpisode.Episode);
 
                 if (TryAssignSonarrEpisode(historyEpisode, episode, usedSonarrEpisodeIds))
@@ -1048,6 +1073,212 @@ public class HistoryService : IHistoryService, IDisposable
 
         return highestSimilarity < 0.8 ? (null, highestSimilarity) : (closestMatch, highestSimilarity);
     }
+
+    private List<HistoryEpisode> MatchSpecialEpisodesByOrder(
+        HistorySeries historySeries,
+        List<HistoryEpisode> failedEpisodes,
+        List<SonarrEpisode> sonarrEpisodes,
+        HashSet<int> usedSonarrEpisodeIds)
+    {
+        var failed = failedEpisodes.ToHashSet();
+        var matched = new List<HistoryEpisode>();
+
+        foreach (var historySeason in historySeries.Seasons.Where(IsSpecialHistorySeason))
+        {
+            var sourceEpisodes = historySeason.EpisodesList
+                .Where(failed.Contains)
+                .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.Episode))
+                .ToList();
+            if (sourceEpisodes.Count == 0) continue;
+
+            var targetEpisodes = sonarrEpisodes
+                .Where(sonarrEpisode =>
+                    sonarrEpisode.SeasonNumber == 0 &&
+                    !usedSonarrEpisodeIds.Contains(sonarrEpisode.Id))
+                .OrderBy(sonarrEpisode => sonarrEpisode.EpisodeNumber)
+                .ToList();
+            if (targetEpisodes.Count < sourceEpisodes.Count) continue;
+
+            var alignment = FindBestOrderedSpecialAlignment(sourceEpisodes, targetEpisodes);
+            if (alignment.Count != sourceEpisodes.Count) continue;
+
+            var scores = alignment
+                .Select(pair => CalculateEpisodeEvidenceScore(pair.HistoryEpisode, pair.SonarrEpisode))
+                .ToList();
+            var hasEnoughEvidence = sourceEpisodes.Count == 1
+                ? scores[0] >= 0.8
+                : scores.Count(score => score >= 0.45) >= 2 &&
+                  scores.Average() >= 0.25;
+            if (!hasEnoughEvidence)
+            {
+                continue;
+            }
+
+            foreach (var pair in alignment)
+            {
+                if (!TryAssignSonarrEpisode(pair.HistoryEpisode, pair.SonarrEpisode, usedSonarrEpisodeIds))
+                {
+                    continue;
+                }
+
+                matched.Add(pair.HistoryEpisode);
+                _logger?.LogInformation(
+                    "Ordered special match: CR S{CrS}E{CrE} \"{CrTitle}\" -> Sonarr S00E{SnE} \"{SnTitle}\"",
+                    pair.HistoryEpisode.EpisodeSeasonNum,
+                    pair.HistoryEpisode.Episode,
+                    pair.HistoryEpisode.EpisodeTitle,
+                    pair.SonarrEpisode.EpisodeNumber,
+                    pair.SonarrEpisode.Title);
+            }
+        }
+
+        return matched;
+    }
+
+    private static List<(HistoryEpisode HistoryEpisode, SonarrEpisode SonarrEpisode)>
+        FindBestOrderedSpecialAlignment(
+            IReadOnlyList<HistoryEpisode> sourceEpisodes,
+            IReadOnlyList<SonarrEpisode> targetEpisodes)
+    {
+        var sourceCount = sourceEpisodes.Count;
+        var targetCount = targetEpisodes.Count;
+        if (sourceCount == 0 || targetCount < sourceCount) return [];
+
+        const double impossible = -1_000_000;
+        var scores = new double[sourceCount, targetCount];
+        for (var sourceIndex = 0; sourceIndex < sourceCount; sourceIndex++)
+        {
+            for (var targetIndex = 0; targetIndex < targetCount; targetIndex++)
+            {
+                scores[sourceIndex, targetIndex] = CalculateEpisodeEvidenceScore(
+                    sourceEpisodes[sourceIndex],
+                    targetEpisodes[targetIndex]);
+            }
+        }
+
+        var best = new double[sourceCount + 1, targetCount + 1];
+        var take = new bool[sourceCount + 1, targetCount + 1];
+        for (var sourceIndex = 1; sourceIndex <= sourceCount; sourceIndex++)
+        {
+            best[sourceIndex, 0] = impossible;
+        }
+
+        for (var sourceIndex = 1; sourceIndex <= sourceCount; sourceIndex++)
+        {
+            for (var targetIndex = 1; targetIndex <= targetCount; targetIndex++)
+            {
+                var skipTarget = best[sourceIndex, targetIndex - 1];
+                var match = best[sourceIndex - 1, targetIndex - 1] +
+                            scores[sourceIndex - 1, targetIndex - 1];
+                if (match > skipTarget)
+                {
+                    best[sourceIndex, targetIndex] = match;
+                    take[sourceIndex, targetIndex] = true;
+                }
+                else
+                {
+                    best[sourceIndex, targetIndex] = skipTarget;
+                }
+            }
+        }
+
+        var alignment = new List<(HistoryEpisode HistoryEpisode, SonarrEpisode SonarrEpisode)>();
+        var sourceCursor = sourceCount;
+        var targetCursor = targetCount;
+        while (sourceCursor > 0 && targetCursor > 0)
+        {
+            if (!take[sourceCursor, targetCursor])
+            {
+                targetCursor--;
+                continue;
+            }
+
+            alignment.Add((
+                sourceEpisodes[sourceCursor - 1],
+                targetEpisodes[targetCursor - 1]));
+            sourceCursor--;
+            targetCursor--;
+        }
+
+        alignment.Reverse();
+        return alignment;
+    }
+
+    private static double CalculateEpisodeEvidenceScore(
+        HistoryEpisode historyEpisode,
+        SonarrEpisode sonarrEpisode)
+    {
+        var titleSimilarity =
+            string.IsNullOrWhiteSpace(historyEpisode.EpisodeTitle) ||
+            string.IsNullOrWhiteSpace(sonarrEpisode.Title)
+                ? 0.0
+                : StringSimilarity.CalculateSimilarity(
+                    historyEpisode.EpisodeTitle.ToLowerInvariant(),
+                    sonarrEpisode.Title.ToLowerInvariant());
+        var titleTokenSimilarity = CalculateNormalizedTokenCosine(
+            historyEpisode.EpisodeTitle,
+            sonarrEpisode.Title);
+        var overviewSimilarity = CalculateNormalizedTokenCosine(
+            historyEpisode.EpisodeDescription,
+            sonarrEpisode.Overview);
+
+        return Math.Max(titleSimilarity, Math.Max(titleTokenSimilarity, overviewSimilarity));
+    }
+
+    private static double CalculateNormalizedTokenCosine(string? source, string? target)
+    {
+        static Dictionary<string, int> TokenCounts(string? value)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(value)) return counts;
+            var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "a", "an", "the", "and", "or", "to", "of", "in", "on", "for", "with",
+                "from", "is", "are", "was", "were", "be", "by", "as", "at", "it", "this",
+                "that", "they", "them", "his", "her", "he", "she", "him"
+            };
+
+            foreach (System.Text.RegularExpressions.Match match in
+                     System.Text.RegularExpressions.Regex.Matches(value, @"[\p{L}\p{N}]+"))
+            {
+                var token = match.Value.ToLowerInvariant();
+                if (stopWords.Contains(token)) continue;
+                counts[token] = counts.GetValueOrDefault(token) + 1;
+            }
+
+            return counts;
+        }
+
+        var sourceTokens = TokenCounts(source);
+        var targetTokens = TokenCounts(target);
+        if (sourceTokens.Count == 0 || targetTokens.Count == 0) return 0.0;
+
+        var dotProduct = sourceTokens.Sum(pair =>
+            pair.Value * targetTokens.GetValueOrDefault(pair.Key));
+        var sourceNorm = Math.Sqrt(sourceTokens.Values.Sum(value => value * value));
+        var targetNorm = Math.Sqrt(targetTokens.Values.Sum(value => value * value));
+        return sourceNorm == 0 || targetNorm == 0
+            ? 0.0
+            : dotProduct / (sourceNorm * targetNorm);
+    }
+
+    private static bool IsSpecialHistorySeason(HistorySeason historySeason) =>
+        historySeason.SpecialSeason ||
+        historySeason.SeasonTitle?.Contains("special", StringComparison.OrdinalIgnoreCase) == true ||
+        historySeason.SeasonNum == "0";
+
+    private static bool IsSpecialHistoryEpisode(
+        HistorySeries historySeries,
+        HistoryEpisode historyEpisode) =>
+        historyEpisode.SpecialEpisode ||
+        historySeries.Seasons.Any(historySeason =>
+            IsSpecialHistorySeason(historySeason) &&
+            historySeason.EpisodesList.Contains(historyEpisode));
+
+    private static double ParseEpisodeOrdinal(string? episode) =>
+        double.TryParse(episode, NumberStyles.Any, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : double.MaxValue;
 
     private static bool TryAssignSonarrEpisode(HistoryEpisode historyEpisode, SonarrEpisode? episode, HashSet<int> usedSonarrEpisodeIds)
     {

@@ -287,6 +287,59 @@ public class PortedGapTests
     }
 
     [Fact]
+    public void DownloadNaming_SpecialNeverUsesUnrelatedAbsoluteNumber()
+    {
+        var episode = new EpisodeInfo
+        {
+            Title = "Brand New OVA",
+            SeasonTitle = "Specials",
+            SeasonNumber = 4,
+            EpisodeNumber = 1,
+            Episode = "1"
+        };
+        var sonarrEpisodes = new List<SonarrEpisode>
+        {
+            new()
+            {
+                Id = 1001,
+                SeasonNumber = 1,
+                EpisodeNumber = 1,
+                AbsoluteEpisodeNumber = 1,
+                Title = "Unrelated Pilot"
+            }
+        };
+
+        var match = DownloadService.ResolveSonarrEpisodeFallback(episode, sonarrEpisodes);
+
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public void DownloadNaming_ContinuousRegularNumberStillUsesTvdbAbsoluteNumber()
+    {
+        var episode = new EpisodeInfo
+        {
+            Title = "The Purification Plan",
+            SeasonTitle = "Season 3",
+            SeasonNumber = 3,
+            EpisodeNumber = 278,
+            Episode = "278"
+        };
+        var expected = new SonarrEpisode
+        {
+            Id = 4278,
+            SeasonNumber = 8,
+            EpisodeNumber = 5,
+            AbsoluteEpisodeNumber = 278,
+            Title = "Purification Strategy"
+        };
+
+        var match = DownloadService.ResolveSonarrEpisodeFallback(episode, [expected]);
+
+        Assert.Same(expected, match);
+    }
+
+    [Fact]
     public void DownloadFilename_LongSonarrTitle_IsLimitedWithoutDroppingQualitySuffix()
     {
         const string template = "{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}";

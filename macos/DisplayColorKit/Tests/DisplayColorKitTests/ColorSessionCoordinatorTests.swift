@@ -235,6 +235,40 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         await XCTAssertEqualAsync(await fixture.journals.count(), 0)
     }
 
+    func testDisplayIDChangeWithStableUUIDReappliesOnlyIntendedTable() async throws {
+        let fixture = try makeCoordinatorFixture()
+        let request = CalibrationRequest(
+            display: fixture.identity,
+            profileURL: URL(fileURLWithPath: "/input/New.icc"),
+            transferTable: fixture.requestedTable
+        )
+        _ = try await fixture.coordinator.activate(request)
+        await fixture.display.setRecords([makeDisplay(identity: fixture.identity, id: 99)])
+
+        await fixture.coordinator.handleTopologyEvent(.willChange)
+        await fixture.coordinator.handleTopologyEvent(.didChange(displayID: 99, flags: 0))
+
+        await XCTAssertEqualAsync(await fixture.transfer.applied(), [fixture.requestedTable, fixture.requestedTable])
+        await XCTAssertEqualAsync(await fixture.journals.count(), 1)
+    }
+
+    func testRemovedDisplayPreservesRecoveryStateWithoutStaleIDMutation() async throws {
+        let fixture = try makeCoordinatorFixture()
+        let request = CalibrationRequest(
+            display: fixture.identity,
+            profileURL: URL(fileURLWithPath: "/input/New.icc"),
+            transferTable: fixture.requestedTable
+        )
+        _ = try await fixture.coordinator.activate(request)
+        await fixture.display.disconnect(fixture.identity)
+
+        await fixture.coordinator.handleTopologyEvent(.willChange)
+        await fixture.coordinator.handleTopologyEvent(.didChange(displayID: 42, flags: 0))
+
+        await XCTAssertEqualAsync(await fixture.transfer.applied(), [fixture.requestedTable])
+        await XCTAssertEqualAsync(await fixture.journals.count(), 1)
+    }
+
     func testCancellationDuringVerificationStillCompletesRollback() async throws {
         let identity = try XCTUnwrap(DisplayIdentity(rawValue: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
         let baseline = URL(fileURLWithPath: "/baseline.icc")

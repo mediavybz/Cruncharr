@@ -44,7 +44,7 @@ public actor ColorSessionCoordinator {
         try acquireMutation(for: request.display)
         defer { releaseMutation(for: request.display) }
 
-        try checkCancellation()
+        try checkForwardProgress()
         _ = try await displays.resolveDisplayID(for: request.display)
         let originalProfile = try await profiles.profileState(for: request.display)
         let originalTable = try await transferTables.capture(for: request.display)
@@ -61,12 +61,12 @@ public actor ColorSessionCoordinator {
         try await journals.save(journal)
 
         do {
-            try checkCancellation()
+            try checkForwardProgress()
             let staged = try await profileStore.stageProfile(from: request.profileURL)
             journal.stagedProfile = staged
             try await journals.save(journal)
 
-            try checkCancellation()
+            try checkForwardProgress()
             journal.stage = .assigningProfile
             try await journals.save(journal)
             _ = try await displays.resolveDisplayID(for: request.display)
@@ -83,7 +83,7 @@ public actor ColorSessionCoordinator {
 
             var transferVerification: TransferVerification?
             if let table = request.transferTable {
-                try checkCancellation()
+                try checkForwardProgress()
                 journal.stage = .applyingTransferTable
                 try await journals.save(journal)
                 _ = try await displays.resolveDisplayID(for: request.display)
@@ -92,7 +92,7 @@ public actor ColorSessionCoordinator {
 
             if let requestedBrightness = request.brightness {
                 do {
-                    try checkCancellation()
+                    try checkForwardProgress()
                     let display = try await exactDisplay(request.display)
                     guard let brightness else { throw DisplayColorError.brightnessUnsupported(request.display) }
                     try await brightness.setBrightness(requestedBrightness, for: display)
@@ -281,7 +281,7 @@ public actor ColorSessionCoordinator {
         let deadline = start.addingTimeInterval(verificationTimeout)
         var lastError: Error?
         while true {
-            if cancellationAllowed { try checkCancellation() }
+            if cancellationAllowed { try checkForwardProgress() }
             do {
                 _ = try await displays.resolveDisplayID(for: display)
                 let state = try await profiles.profileState(for: display)

@@ -136,6 +136,25 @@ func strictCurrentProfile(in records: [ProfileRecord], display: DisplayIdentity)
     return selected
 }
 
+func factoryProfileCandidate(in records: [ProfileRecord], display: DisplayIdentity) throws -> ProfileRecord {
+    if let explicit = records.first(where: { $0.isDeviceDefault && !$0.isCustomAssignment }) {
+        return explicit
+    }
+    if let fallback = records.first(where: { !$0.isCustomAssignment }) {
+        return ProfileRecord(
+            url: fallback.url,
+            profileIdentifier: fallback.profileIdentifier,
+            description: fallback.description,
+            isCurrent: fallback.isCurrent,
+            isDeviceDefault: fallback.isDeviceDefault,
+            isCustomAssignment: false,
+            isFactoryCandidateInferred: true,
+            digest: fallback.digest
+        )
+    }
+    throw DisplayColorError.factoryProfileUnavailable(display)
+}
+
 public final class SystemColorProfileAdapter: ColorProfileSystem, @unchecked Sendable {
     public init() {}
 
@@ -182,22 +201,7 @@ public final class SystemColorProfileAdapter: ColorProfileSystem, @unchecked Sen
 
     public func factoryProfile(for display: DisplayIdentity) async throws -> ProfileRecord {
         let state = try await profileState(for: display)
-        if let explicit = state.profiles.first(where: { $0.isDeviceDefault && !$0.isCustomAssignment }) {
-            return explicit
-        }
-        if let fallback = state.profiles.first(where: { !$0.isCustomAssignment }) {
-            return ProfileRecord(
-                url: fallback.url,
-                profileIdentifier: fallback.profileIdentifier,
-                description: fallback.description,
-                isCurrent: fallback.isCurrent,
-                isDeviceDefault: fallback.isDeviceDefault,
-                isCustomAssignment: false,
-                isFactoryCandidateInferred: true,
-                digest: fallback.digest
-            )
-        }
-        throw DisplayColorError.factoryProfileUnavailable(display)
+        return try factoryProfileCandidate(in: state.profiles, display: display)
     }
 
     public func setCustomDefaultProfile(_ url: URL?, for display: DisplayIdentity) async throws {

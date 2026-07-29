@@ -150,8 +150,18 @@ public final class SystemColorProfileAdapter: ColorProfileSystem, @unchecked Sen
             throw DisplayColorError.colorSyncDeviceInfoUnavailable(display)
         }
         let deviceInfo = unmanagedDeviceInfo.takeRetainedValue()
+        var deviceDiagnostics: [String] = []
         let customProfiles = CFDictionaryValue.dictionary(deviceInfo, key: customProfilesKey)
-        let customDefaultURL = customProfiles.flatMap { CFDictionaryValue.url($0, key: defaultProfileID) }.map { ($0 as URL).standardizedFileURL }
+        if CFDictionaryValue.object(deviceInfo, key: customProfilesKey) != nil, customProfiles == nil {
+            deviceDiagnostics.append("ColorSync custom-profile state is not a dictionary.")
+        }
+        let customDefaultValue = customProfiles.flatMap { CFDictionaryValue.object($0, key: defaultProfileID) }
+        let customDefaultURL = customProfiles
+            .flatMap { CFDictionaryValue.url($0, key: defaultProfileID) }
+            .map { ($0 as URL).standardizedFileURL }
+        if customDefaultValue != nil, customDefaultURL == nil {
+            deviceDiagnostics.append("ColorSync default custom-profile mapping is not a URL.")
+        }
 
         let context = ProfileIterationContext(requestedUUID: uuid)
         ColorSyncIterateDeviceProfiles(profileIterationCallback, Unmanaged.passUnretained(context).toOpaque())
@@ -167,7 +177,7 @@ public final class SystemColorProfileAdapter: ColorProfileSystem, @unchecked Sen
             )
         }
         let selected = try strictCurrentProfile(in: records, display: display)
-        return ProfileState(profiles: records, current: selected, customDefaultURL: customDefaultURL, diagnostics: context.diagnostics)
+        return ProfileState(profiles: records, current: selected, customDefaultURL: customDefaultURL, diagnostics: deviceDiagnostics + context.diagnostics)
     }
 
     public func factoryProfile(for display: DisplayIdentity) async throws -> ProfileRecord {

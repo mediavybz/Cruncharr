@@ -2,14 +2,14 @@
 
 `DisplayColorKit` is an independently implemented macOS 12+ Swift package for display discovery, ColorSync profile assignment, per-channel transfer-table management, and optional IOKit brightness control.
 
-The library identifies displays by Core Graphics UUID. Numeric display IDs are treated as session-scoped and are resolved again immediately before every hardware mutation. All system calls are behind protocols so deterministic unit tests never change a developer's displays.
+The library identifies displays by Core Graphics UUID. Numeric display IDs are treated as session-scoped and are resolved again immediately before every hardware mutation. System adapters are injected through protocols so deterministic unit tests never change a developer's displays.
 
 ## Products
 
 - `DisplayColorKit`: reusable library.
 - `display-colorctl`: minimal read-only inventory/profile harness.
 - `DisplayColorKitTests`: deterministic unit tests using in-memory adapters.
-- Hardware integration tests are opt-in with `DISPLAY_COLOR_HARDWARE_TESTS=1`; they always attempt restoration in teardown.
+- Hardware integration tests are opt-in with `DISPLAY_COLOR_HARDWARE_TESTS=1`; every mutation path attempts restoration before returning.
 
 ## Build
 
@@ -27,6 +27,6 @@ SwiftPM builds the native architecture. Universal distribution artifacts can be 
 - Brightness is reported as unsupported unless exactly one `IODisplayConnect` service matches the selected display's vendor, product, and serial identity.
 - Gamma-table writes can be accepted by Core Graphics without useful hardware readback in some HDR modes and on some hardware. The API reports this distinction.
 - `CGDisplayRestoreColorSyncSettings()` reloads ColorSync settings globally. It is used only as a last-resort rollback after exact table restoration fails and is reported to the caller.
-- A process crash cannot run cleanup. Active sessions remain in an atomic recovery journal and are restored on the next launch.
+- A process crash cannot run cleanup. Active sessions remain in an atomic recovery journal; the host calls `recoverUnfinishedSessions()` on the next launch to attempt restoration.
 
 See `ATTRIBUTION.md` for the clean-room boundary and `Tests/DisplayColorKitTests/HardwareIntegrationTests.swift` for hardware-test safeguards.

@@ -137,8 +137,12 @@ func strictCurrentProfile(in records: [ProfileRecord], display: DisplayIdentity)
 }
 
 func factoryProfileCandidate(in records: [ProfileRecord], display: DisplayIdentity) throws -> ProfileRecord {
-    if let explicit = records.first(where: { $0.isDeviceDefault && !$0.isCustomAssignment }) {
-        return explicit
+    let explicit = records.filter { $0.isDeviceDefault && !$0.isCustomAssignment }
+    if explicit.count == 1, let selected = explicit.first {
+        return selected
+    }
+    if explicit.count > 1 {
+        throw DisplayColorError.factoryProfileUnavailable(display)
     }
     if let fallback = records.first(where: { !$0.isCustomAssignment }) {
         return ProfileRecord(

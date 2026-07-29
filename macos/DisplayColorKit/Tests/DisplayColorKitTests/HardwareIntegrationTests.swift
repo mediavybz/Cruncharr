@@ -54,19 +54,19 @@ final class HardwareIntegrationTests: XCTestCase {
 
         do {
             try await profileSystem.setCustomDefaultProfile(staged.url, for: identity)
-            try await waitForProfile(staged.url, display: identity, profileSystem: profileSystem)
+            try await waitForProfile(staged.url, expectedCustom: staged.url, display: identity, profileSystem: profileSystem)
             for display in allDisplays where display.identity != identity {
                 let unchanged = try await profileSystem.profileState(for: display.identity)
                 XCTAssertEqual(unchanged.current.url.standardizedFileURL, before[display.identity]?.current.url.standardizedFileURL)
             }
             try await profileSystem.setCustomDefaultProfile(selectedBefore.customDefaultURL, for: identity)
-            try await waitForProfile(selectedBefore.current.url, display: identity, profileSystem: profileSystem)
+            try await waitForProfile(selectedBefore.current.url, expectedCustom: selectedBefore.customDefaultURL, display: identity, profileSystem: profileSystem)
             try await profileStore.removeIfOwned(staged)
         } catch {
             let primary = error
             do {
                 try await profileSystem.setCustomDefaultProfile(selectedBefore.customDefaultURL, for: identity)
-                try await waitForProfile(selectedBefore.current.url, display: identity, profileSystem: profileSystem)
+                try await waitForProfile(selectedBefore.current.url, expectedCustom: selectedBefore.customDefaultURL, display: identity, profileSystem: profileSystem)
                 try await profileStore.removeIfOwned(staged)
             } catch {
                 XCTFail("ICC integration-test rollback failed: \(error.localizedDescription)")
@@ -75,10 +75,12 @@ final class HardwareIntegrationTests: XCTestCase {
         }
     }
 
-    private func waitForProfile(_ expected: URL, display: DisplayIdentity, profileSystem: SystemColorProfileAdapter) async throws {
+    private func waitForProfile(_ expected: URL, expectedCustom: URL?, display: DisplayIdentity, profileSystem: SystemColorProfileAdapter) async throws {
         for _ in 0..<20 {
             let state = try await profileSystem.profileState(for: display)
-            if state.current.url.standardizedFileURL == expected.standardizedFileURL { return }
+            let currentMatches = state.current.url.standardizedFileURL == expected.standardizedFileURL
+            let customMatches = state.customDefaultURL?.standardizedFileURL == expectedCustom?.standardizedFileURL
+            if currentMatches && customMatches { return }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
         throw DisplayColorError.profileVerificationTimedOut(display)

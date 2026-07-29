@@ -214,6 +214,21 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         await XCTAssertEqualAsync(await fixture.profiles.assignments(), [])
     }
 
+    func testBeginReconfigurationSuspendsNewMutation() async throws {
+        let fixture = try makeCoordinatorFixture()
+        await fixture.coordinator.handleTopologyEvent(.willChange)
+        let request = CalibrationRequest(display: fixture.identity, profileURL: URL(fileURLWithPath: "/input/New.icc"))
+
+        do {
+            _ = try await fixture.coordinator.activate(request)
+            XCTFail("Expected topology-change rejection")
+        } catch let error as DisplayColorError {
+            XCTAssertEqual(error, .topologyChangeInProgress)
+        }
+        await XCTAssertEqualAsync(await fixture.journals.count(), 0)
+        await XCTAssertEqualAsync(await fixture.profiles.assignments(), [])
+    }
+
     func testUnfinishedJournalIsRestoredOnNextLaunch() async throws {
         let fixture = try makeCoordinatorFixture()
         try await fixture.profiles.setCustomDefaultProfile(fixture.stagedURL, for: fixture.identity)

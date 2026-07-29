@@ -44,7 +44,12 @@ final class ColorSyncAdapterTests: XCTestCase {
             let malformed = NSMutableDictionary(dictionary: valid as NSDictionary)
             malformed[key] = NSNumber(value: 42)
             guard case .malformed = parseColorSyncProfileEntry(malformed as CFDictionary, requestedUUID: uuid) else {
-                return XCTFail("Expected malformed result for key \(key)")
+                return XCTFail("Expected malformed result for wrong-type key \(key)")
+            }
+            let missing = NSMutableDictionary(dictionary: valid as NSDictionary)
+            missing.removeObject(forKey: key)
+            guard case .malformed = parseColorSyncProfileEntry(missing as CFDictionary, requestedUUID: uuid) else {
+                return XCTFail("Expected malformed result for missing key \(key)")
             }
         }
 

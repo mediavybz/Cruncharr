@@ -227,9 +227,7 @@ private final class InspectorViewController: NSViewController {
     private func show(error: Error, context: String) {
         records = []
         displayPicker.removeAllItems()
-        detailsView.string = "\(context)
-
-\(String(describing: error))"
+        detailsView.string = "\(context)\n\n\(String(describing: error))"
         setLoading(false, status: context)
     }
 
@@ -259,8 +257,7 @@ private final class InspectorViewController: NSViewController {
             lines.append(contentsOf: state.diagnostics.map { "  • \($0)" })
         }
 
-        return lines.joined(separator: "
-")
+        return lines.joined(separator: "\n")
     }
 
     private func render(record: DisplayRecord, profileError: Error) -> String {
@@ -268,8 +265,7 @@ private final class InspectorViewController: NSViewController {
         lines.append("")
         lines.append("COLORSYNC PROFILE QUERY FAILED")
         lines.append("  \(String(describing: profileError))")
-        return lines.joined(separator: "
-")
+        return lines.joined(separator: "\n")
     }
 
     private func displayLines(for record: DisplayRecord) -> [String] {

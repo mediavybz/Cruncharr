@@ -166,11 +166,7 @@ public final class SystemColorProfileAdapter: ColorProfileSystem, @unchecked Sen
                 isCustomAssignment: customDefaultURL.map { Self.sameFile($0, entry.url) } ?? false
             )
         }
-        let current = records.filter(\.isCurrent)
-        guard !current.isEmpty else { throw DisplayColorError.currentProfileMissing(display) }
-        guard current.count == 1, let selected = current.first else {
-            throw DisplayColorError.currentProfileAmbiguous(display, count: current.count)
-        }
+        let selected = try strictCurrentProfile(in: records, display: display)
         return ProfileState(profiles: records, current: selected, customDefaultURL: customDefaultURL, diagnostics: context.diagnostics)
     }
 

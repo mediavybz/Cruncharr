@@ -30,24 +30,30 @@ final class ColorSyncAdapterTests: XCTestCase {
         XCTAssertEqual(parseColorSyncProfileEntry(otherUUID, requestedUUID: requested), .ignored)
     }
 
-    func testWrongTypesForEveryExpectedKeyAreMalformed() throws {
+    func testWrongTypesForRequiredMatchingFieldsAreMalformedAndBadDeviceIDIsIgnored() throws {
         let uuid = try makeUUID("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")
         let valid = try makeEntry(uuid: uuid, url: URL(fileURLWithPath: "/valid.icc"))
-        let keys = try [
+        let malformedKeys = try [
             constant(kColorSyncDeviceClass),
-            constant(kColorSyncDeviceID),
             constant(kColorSyncDeviceProfileURL),
             constant(kColorSyncDeviceProfileIsCurrent),
             constant(kColorSyncDeviceProfileID)
         ].map { $0 as String }
 
-        for key in keys {
+        for key in malformedKeys {
             let malformed = NSMutableDictionary(dictionary: valid as NSDictionary)
             malformed[key] = NSNumber(value: 42)
             guard case .malformed = parseColorSyncProfileEntry(malformed as CFDictionary, requestedUUID: uuid) else {
                 return XCTFail("Expected malformed result for key \(key)")
             }
         }
+
+        let deviceIDKey = try constant(kColorSyncDeviceID) as String
+        let unrelated = NSMutableDictionary(dictionary: valid as NSDictionary)
+        unrelated[deviceIDKey] = NSNumber(value: 42)
+        XCTAssertEqual(parseColorSyncProfileEntry(unrelated as CFDictionary, requestedUUID: uuid), .ignored)
+        unrelated.removeObject(forKey: deviceIDKey)
+        XCTAssertEqual(parseColorSyncProfileEntry(unrelated as CFDictionary, requestedUUID: uuid), .ignored)
     }
 
     func testStrictCurrentProfileRejectsMissingAndAmbiguousState() throws {

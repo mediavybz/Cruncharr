@@ -8,6 +8,7 @@ final class RecoveryJournalStoreTests: XCTestCase {
         defer { XCTAssertNoThrow(try FileManager.default.removeItem(at: root)) }
         let identity = try XCTUnwrap(DisplayIdentity(rawValue: "AAAAAAAA-0000-0000-0000-000000000000"))
         let table = try TransferTable.linear(sampleCount: 4)
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_000.123456)
         let journal = RecoveryJournal(
             stage: .prepared,
             snapshot: SessionSnapshot(
@@ -15,7 +16,8 @@ final class RecoveryJournalStoreTests: XCTestCase {
                 originalProfileURL: URL(fileURLWithPath: "/profiles/original.icc"),
                 originalCustomDefaultURL: nil,
                 originalTransferTable: table
-            )
+            ),
+            createdAt: createdAt
         )
         let store = try FileRecoveryJournalStore(directory: root)
 

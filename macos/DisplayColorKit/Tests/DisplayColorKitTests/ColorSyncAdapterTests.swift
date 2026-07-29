@@ -56,6 +56,32 @@ final class ColorSyncAdapterTests: XCTestCase {
         XCTAssertEqual(parseColorSyncProfileEntry(unrelated as CFDictionary, requestedUUID: uuid), .ignored)
     }
 
+    func testCustomProfileStateUsesOnlyDefaultMappingAndDiagnosesWrongTypes() throws {
+        let customProfilesKey = try constant(kColorSyncCustomProfiles) as String
+        let defaultProfileKey = try constant(kColorSyncDeviceDefaultProfileID) as String
+        let expected = URL(fileURLWithPath: "/profiles/custom.icc")
+        let customProfiles = NSMutableDictionary()
+        customProfiles[defaultProfileKey] = expected as NSURL
+        customProfiles["unrelated-profile-id"] = URL(fileURLWithPath: "/profiles/other.icc") as NSURL
+        let deviceInfo = NSMutableDictionary()
+        deviceInfo[customProfilesKey] = customProfiles
+
+        let parsed = parseColorSyncCustomProfileState(deviceInfo as CFDictionary)
+        XCTAssertEqual(parsed.defaultURL, expected)
+        XCTAssertEqual(parsed.diagnostics, [])
+
+        deviceInfo[customProfilesKey] = NSNumber(value: 7)
+        let malformedContainer = parseColorSyncCustomProfileState(deviceInfo as CFDictionary)
+        XCTAssertNil(malformedContainer.defaultURL)
+        XCTAssertEqual(malformedContainer.diagnostics.count, 1)
+
+        customProfiles[defaultProfileKey] = NSNumber(value: 9)
+        deviceInfo[customProfilesKey] = customProfiles
+        let malformedMapping = parseColorSyncCustomProfileState(deviceInfo as CFDictionary)
+        XCTAssertNil(malformedMapping.defaultURL)
+        XCTAssertEqual(malformedMapping.diagnostics.count, 1)
+    }
+
     func testStrictCurrentProfileRejectsMissingAndAmbiguousState() throws {
         let display = try XCTUnwrap(DisplayIdentity(rawValue: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
         let first = ProfileRecord(

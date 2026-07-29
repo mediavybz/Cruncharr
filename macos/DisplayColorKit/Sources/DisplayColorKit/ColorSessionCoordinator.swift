@@ -329,8 +329,9 @@ public actor ColorSessionCoordinator {
         mutatingDisplays.remove(display)
     }
 
-    private func checkCancellation() throws {
+    private func checkForwardProgress() throws {
         if Task.isCancelled { throw DisplayColorError.cancelled }
+        if topologyChanging { throw DisplayColorError.topologyChangeInProgress }
     }
 
     private func normalized(_ error: Error) -> DisplayColorError {

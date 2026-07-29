@@ -196,7 +196,7 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         )
         await fixture.journals.insert(journal)
 
-        let outcomes = await fixture.coordinator.recoverUnfinishedSessions()
+        let outcomes = try await fixture.coordinator.recoverUnfinishedSessions()
         XCTAssertEqual(outcomes[journal.id], "restored")
         await XCTAssertEqualAsync(await fixture.journals.count(), 0)
         await XCTAssertEqualAsync(await fixture.transfer.applied(), [fixture.baselineTable])

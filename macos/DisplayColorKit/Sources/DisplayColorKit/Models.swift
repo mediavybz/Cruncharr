@@ -112,6 +112,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
     public let isCurrent: Bool
     public let isDeviceDefault: Bool
     public let isCustomAssignment: Bool
+    public let isFactoryCandidateInferred: Bool
     public let digest: String?
 
     public init(
@@ -121,6 +122,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         isCurrent: Bool,
         isDeviceDefault: Bool,
         isCustomAssignment: Bool,
+        isFactoryCandidateInferred: Bool = false,
         digest: String? = nil
     ) {
         self.url = url.standardizedFileURL
@@ -129,6 +131,7 @@ public struct ProfileRecord: Codable, Equatable, Sendable {
         self.isCurrent = isCurrent
         self.isDeviceDefault = isDeviceDefault
         self.isCustomAssignment = isCustomAssignment
+        self.isFactoryCandidateInferred = isFactoryCandidateInferred
         self.digest = digest
     }
 }

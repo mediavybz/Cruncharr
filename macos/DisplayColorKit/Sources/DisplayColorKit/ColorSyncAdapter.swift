@@ -93,7 +93,7 @@ private func profileIterationCallback(_ information: CFDictionary?, _ rawContext
     }
     context.entries.append((
         url: url.standardizedFileURL,
-        identifier: profileID as String?,
+        identifier: profileID.map { $0 as String },
         current: current,
         isDefault: isDefault,
         description: description
@@ -149,7 +149,7 @@ public final class SystemColorProfileAdapter: ColorProfileSystem, @unchecked Sen
         if let url {
             assignments[defaultProfileID as String] = url.standardizedFileURL as NSURL
         }
-        guard ColorSyncDeviceSetCustomProfiles(deviceClass, uuid, assignments) else {
+        guard ColorSyncDeviceSetCustomProfiles(deviceClass, uuid, assignments as CFDictionary) else {
             throw DisplayColorError.customProfileAssignmentRejected(display)
         }
     }

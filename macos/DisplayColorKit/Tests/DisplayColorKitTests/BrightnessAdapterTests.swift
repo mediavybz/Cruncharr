@@ -34,7 +34,8 @@ final class BrightnessAdapterTests: XCTestCase {
         access.supported = false
         let adapter = IOKitBrightnessAdapter(serviceAccess: access)
 
-        XCTAssertFalse(try await adapter.supportsBrightness(for: makeDisplay(identity: identity)))
+        let supported = try await adapter.supportsBrightness(for: makeDisplay(identity: identity))
+        XCTAssertFalse(supported)
     }
 
     func testAmbiguousServiceErrorIsNotHidden() async throws {

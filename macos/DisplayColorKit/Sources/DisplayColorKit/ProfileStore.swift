@@ -3,14 +3,70 @@ import CryptoKit
 import Foundation
 import OSLog
 
+public struct ICCValidationResult: Equatable, Sendable {
+    public let description: String?
+    public let warnings: [String]
+
+    public init(description: String?, warnings: [String] = []) {
+        self.description = description
+        self.warnings = warnings
+    }
+}
+
+public protocol ICCProfileValidating: Sendable {
+    func validateDisplayProfile(at url: URL) throws -> ICCValidationResult
+}
+
+public struct SystemICCProfileValidator: ICCProfileValidating {
+    public init() {}
+
+    public func validateDisplayProfile(at url: URL) throws -> ICCValidationResult {
+        var creationError: Unmanaged<CFError>?
+        guard let unmanagedProfile = ColorSyncProfileCreateWithURL(url as CFURL, &creationError) else {
+            let detail = creationError?.takeRetainedValue().localizedDescription ?? "ColorSync could not construct a profile"
+            throw DisplayColorError.invalidProfile(url, detail)
+        }
+        let profile = unmanagedProfile.takeRetainedValue()
+
+        var verificationError: Unmanaged<CFError>?
+        var verificationWarning: Unmanaged<CFError>?
+        let isValid = ColorSyncProfileVerify(profile, &verificationError, &verificationWarning)
+        let validationDetail = verificationError?.takeRetainedValue().localizedDescription
+        let warningDetail = verificationWarning?.takeRetainedValue().localizedDescription
+        guard isValid else {
+            throw DisplayColorError.profileValidation(url, validationDetail ?? "ColorSyncProfileVerify returned false")
+        }
+
+        guard let unmanagedHeader = ColorSyncProfileCopyHeader(profile) else {
+            throw DisplayColorError.invalidProfile(url, "profile header is unavailable")
+        }
+        let header = unmanagedHeader.takeRetainedValue() as Data
+        guard header.count >= 16 else {
+            throw DisplayColorError.invalidProfile(url, "ICC header is shorter than 16 bytes")
+        }
+        let profileClass = String(bytes: header[12..<16], encoding: .ascii)
+        guard profileClass == "mntr" else {
+            throw DisplayColorError.invalidProfile(url, "ICC profile class is \(profileClass ?? "unreadable"), not display/monitor (mntr)")
+        }
+        let description = ColorSyncProfileCopyDescriptionString(profile)?.takeRetainedValue() as String?
+        return ICCValidationResult(description: description, warnings: warningDetail.map { [$0] } ?? [])
+    }
+}
+
 public actor UserColorSyncProfileStore: ProfileFileStoring {
     private let fileManager: FileManager
     private let destinationOverride: URL?
+    private let validator: any ICCProfileValidating
     private let logger = Logger(subsystem: "DisplayColorKit", category: "ProfileStore")
 
-    public init(fileManager: FileManager = .default, destinationOverride: URL? = nil) {
+    public init(
+        fileManager: FileManager = .default,
+        destinationOverride: URL? = nil,
+        validator: any ICCProfileValidating = SystemICCProfileValidator()
+    ) {
         self.fileManager = fileManager
         self.destinationOverride = destinationOverride
+        self.validator = validator
     }
 
     public func stageProfile(from sourceURL: URL) async throws -> StagedProfile {
@@ -31,35 +87,9 @@ public actor UserColorSyncProfileStore: ProfileFileStoring {
             throw DisplayColorError.invalidProfile(source, "expected an .icc or .icm file")
         }
 
-        var creationError: Unmanaged<CFError>?
-        guard let unmanagedProfile = ColorSyncProfileCreateWithURL(source as CFURL, &creationError) else {
-            let detail = creationError?.takeRetainedValue().localizedDescription ?? "ColorSync could not construct a profile"
-            throw DisplayColorError.invalidProfile(source, detail)
-        }
-        let profile = unmanagedProfile.takeRetainedValue()
-
-        var verificationError: Unmanaged<CFError>?
-        var verificationWarning: Unmanaged<CFError>?
-        let isValid = ColorSyncProfileVerify(profile, &verificationError, &verificationWarning)
-        let validationDetail = verificationError?.takeRetainedValue().localizedDescription
-        let warningDetail = verificationWarning?.takeRetainedValue().localizedDescription
-        guard isValid else {
-            throw DisplayColorError.profileValidation(source, validationDetail ?? "ColorSyncProfileVerify returned false")
-        }
-        if let warningDetail {
-            logger.warning("ColorSync profile validation warning for \(source.lastPathComponent, privacy: .public): \(warningDetail, privacy: .public)")
-        }
-
-        guard let unmanagedHeader = ColorSyncProfileCopyHeader(profile) else {
-            throw DisplayColorError.invalidProfile(source, "profile header is unavailable")
-        }
-        let header = unmanagedHeader.takeRetainedValue() as Data
-        guard header.count >= 16 else {
-            throw DisplayColorError.invalidProfile(source, "ICC header is shorter than 16 bytes")
-        }
-        let profileClass = String(bytes: header[12..<16], encoding: .ascii)
-        guard profileClass == "mntr" else {
-            throw DisplayColorError.invalidProfile(source, "ICC profile class is \(profileClass ?? "unreadable"), not display/monitor (mntr)")
+        let validation = try validator.validateDisplayProfile(at: source)
+        for warning in validation.warnings {
+            logger.warning("ColorSync profile validation warning for \(source.lastPathComponent, privacy: .public): \(warning, privacy: .public)")
         }
 
         let sourceData: Data
@@ -69,7 +99,6 @@ public actor UserColorSyncProfileStore: ProfileFileStoring {
             throw DisplayColorError.profileStaging("could not read source bytes: \(error.localizedDescription)")
         }
         let digest = Self.sha256(sourceData)
-        let profileDescription = ColorSyncProfileCopyDescriptionString(profile)?.takeRetainedValue() as String?
         let directory = try profileDirectory()
         try createDirectoryIfNeeded(directory)
 
@@ -79,11 +108,16 @@ public actor UserColorSyncProfileStore: ProfileFileStoring {
             guard existingDigest == digest else {
                 throw DisplayColorError.profileStaging("collision-safe destination unexpectedly contains unrelated bytes")
             }
-            return StagedProfile(url: destination, digest: digest, description: profileDescription, createdByComponent: false)
+            return StagedProfile(url: destination, digest: digest, description: validation.description, createdByComponent: false)
         }
 
         let temporary = directory.appendingPathComponent(".displaycolorkit-\(UUID().uuidString)-\(destination.lastPathComponent)")
-        defer { try? fileManager.removeItem(at: temporary) }
+        defer {
+            if fileManager.fileExists(atPath: temporary.path) {
+                do { try fileManager.removeItem(at: temporary) }
+                catch { logger.error("Temporary profile cleanup failed: \(error.localizedDescription, privacy: .public)") }
+            }
+        }
         do {
             try fileManager.copyItem(at: source, to: temporary)
             guard try digestOfFile(temporary) == digest else {
@@ -93,7 +127,7 @@ public actor UserColorSyncProfileStore: ProfileFileStoring {
                 try fileManager.moveItem(at: temporary, to: destination)
             } catch {
                 if fileManager.fileExists(atPath: destination.path), try digestOfFile(destination) == digest {
-                    return StagedProfile(url: destination, digest: digest, description: profileDescription, createdByComponent: false)
+                    return StagedProfile(url: destination, digest: digest, description: validation.description, createdByComponent: false)
                 }
                 throw error
             }
@@ -101,12 +135,12 @@ public actor UserColorSyncProfileStore: ProfileFileStoring {
             throw error
         } catch {
             if (error as NSError).domain == NSCocoaErrorDomain,
-               [(NSFileWriteNoPermissionError), (NSFileReadNoPermissionError)].contains((error as NSError).code) {
+               [NSFileWriteNoPermissionError, NSFileReadNoPermissionError].contains((error as NSError).code) {
                 throw DisplayColorError.sandboxConfiguration(error.localizedDescription)
             }
             throw DisplayColorError.profileStaging(error.localizedDescription)
         }
-        return StagedProfile(url: destination, digest: digest, description: profileDescription, createdByComponent: true)
+        return StagedProfile(url: destination, digest: digest, description: validation.description, createdByComponent: true)
     }
 
     public func removeIfOwned(_ profile: StagedProfile) async throws {

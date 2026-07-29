@@ -127,6 +127,15 @@ private func profileIterationCallback(_ information: CFDictionary?, _ rawContext
     return true
 }
 
+func strictCurrentProfile(in records: [ProfileRecord], display: DisplayIdentity) throws -> ProfileRecord {
+    let current = records.filter(\.isCurrent)
+    guard !current.isEmpty else { throw DisplayColorError.currentProfileMissing(display) }
+    guard current.count == 1, let selected = current.first else {
+        throw DisplayColorError.currentProfileAmbiguous(display, count: current.count)
+    }
+    return selected
+}
+
 public final class SystemColorProfileAdapter: ColorProfileSystem, @unchecked Sendable {
     public init() {}
 
@@ -163,6 +172,26 @@ public final class SystemColorProfileAdapter: ColorProfileSystem, @unchecked Sen
             throw DisplayColorError.currentProfileAmbiguous(display, count: current.count)
         }
         return ProfileState(profiles: records, current: selected, customDefaultURL: customDefaultURL, diagnostics: context.diagnostics)
+    }
+
+    public func factoryProfile(for display: DisplayIdentity) async throws -> ProfileRecord {
+        let state = try await profileState(for: display)
+        if let explicit = state.profiles.first(where: { $0.isDeviceDefault && !$0.isCustomAssignment }) {
+            return explicit
+        }
+        if let fallback = state.profiles.first(where: { !$0.isCustomAssignment }) {
+            return ProfileRecord(
+                url: fallback.url,
+                profileIdentifier: fallback.profileIdentifier,
+                description: fallback.description,
+                isCurrent: fallback.isCurrent,
+                isDeviceDefault: fallback.isDeviceDefault,
+                isCustomAssignment: false,
+                isFactoryCandidateInferred: true,
+                digest: fallback.digest
+            )
+        }
+        throw DisplayColorError.factoryProfileUnavailable(display)
     }
 
     public func setCustomDefaultProfile(_ url: URL?, for display: DisplayIdentity) async throws {

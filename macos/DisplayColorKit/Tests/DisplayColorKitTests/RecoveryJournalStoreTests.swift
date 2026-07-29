@@ -20,9 +20,11 @@ final class RecoveryJournalStoreTests: XCTestCase {
         let store = try FileRecoveryJournalStore(directory: root)
 
         try await store.save(journal)
-        XCTAssertEqual(try await store.loadAll(), [journal])
+        let saved = try await store.loadAll()
+        XCTAssertEqual(saved, [journal])
         try await store.remove(id: journal.id)
-        XCTAssertEqual(try await store.loadAll(), [])
+        let removed = try await store.loadAll()
+        XCTAssertEqual(removed, [])
     }
 
     func testCorruptJournalReturnsTypedError() async throws {

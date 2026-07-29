@@ -2,9 +2,11 @@ import AppKit
 import ColorSync
 import CoreGraphics
 import Foundation
+import OSLog
 
 public final class CoreGraphicsDisplaySystem: DisplayHardwareSystem, @unchecked Sendable {
     private let brightness: (any BrightnessControlling)?
+    private let logger = Logger(subsystem: "DisplayColorKit", category: "Inventory")
 
     public init(brightness: (any BrightnessControlling)? = nil) {
         self.brightness = brightness
@@ -21,7 +23,13 @@ public final class CoreGraphicsDisplaySystem: DisplayHardwareSystem, @unchecked 
             }
             return result
         }
-        let ioDescriptors = (try? IOKitDisplayCatalog.descriptors()) ?? []
+        let ioDescriptors: [IOKitDisplayDescriptor]
+        do {
+            ioDescriptors = try IOKitDisplayCatalog.descriptors()
+        } catch {
+            logger.warning("IOKit display metadata is unavailable: (error.displayColorDescription, privacy: .public)")
+            ioDescriptors = []
+        }
 
         var records: [DisplayRecord] = []
         for displayID in displayIDs {
@@ -67,8 +75,14 @@ public final class CoreGraphicsDisplaySystem: DisplayHardwareSystem, @unchecked 
                 physicalSizeMillimeters: DisplaySize(width: physical.width, height: physical.height),
                 capabilities: capabilities
             )
-            if let brightness, (try? await brightness.supportsBrightness(for: record)) == true {
-                record.capabilities.insert(.brightness)
+            if let brightness {
+                do {
+                    if try await brightness.supportsBrightness(for: record) {
+                        record.capabilities.insert(.brightness)
+                    }
+                } catch {
+                    logger.warning("Brightness probing failed for display=(identity.rawValue, privacy: .public): (error.displayColorDescription, privacy: .public)")
+                }
             }
             records.append(record)
         }

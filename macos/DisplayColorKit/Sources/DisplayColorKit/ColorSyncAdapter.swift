@@ -46,10 +46,20 @@ private enum CFDictionaryValue {
     }
 }
 
-private func profileIterationCallback(_ information: CFDictionary?, _ rawContext: UnsafeMutableRawPointer?) -> Bool {
-    guard let information, let rawContext else { return true }
-    let context = Unmanaged<ProfileIterationContext>.fromOpaque(rawContext).takeUnretainedValue()
+struct ParsedColorSyncProfileEntry: Equatable {
+    let url: URL
+    let identifier: String
+    let isCurrent: Bool
+    let isDeviceDefault: Bool
+}
 
+enum ColorSyncProfileEntryParseResult: Equatable {
+    case ignored
+    case malformed(String)
+    case matching(ParsedColorSyncProfileEntry)
+}
+
+func parseColorSyncProfileEntry(_ information: CFDictionary, requestedUUID: CFUUID) -> ColorSyncProfileEntryParseResult {
     guard let classKey = kColorSyncDeviceClass?.takeUnretainedValue(),
           let displayClass = kColorSyncDisplayDeviceClass?.takeUnretainedValue(),
           let idKey = kColorSyncDeviceID?.takeUnretainedValue(),
@@ -57,45 +67,61 @@ private func profileIterationCallback(_ information: CFDictionary?, _ rawContext
           let currentKey = kColorSyncDeviceProfileIsCurrent?.takeUnretainedValue(),
           let profileIDKey = kColorSyncDeviceProfileID?.takeUnretainedValue(),
           let defaultProfileID = kColorSyncDeviceDefaultProfileID?.takeUnretainedValue() else {
-        context.diagnostics.append("Required ColorSync constants were unavailable.")
-        return false
+        return .malformed("Required ColorSync constants were unavailable.")
     }
     guard let entryClass = CFDictionaryValue.string(information, key: classKey) else {
-        context.diagnostics.append("Profile entry has a missing or non-string device class.")
-        return true
+        return .malformed("Profile entry has a missing or non-string device class.")
     }
-    guard CFEqual(entryClass, displayClass) else { return true }
+    guard CFEqual(entryClass, displayClass) else { return .ignored }
     guard let entryUUID = CFDictionaryValue.uuid(information, key: idKey) else {
-        context.diagnostics.append("Display profile entry has a missing or non-UUID device ID.")
-        return true
+        return .malformed("Display profile entry has a missing or non-UUID device ID.")
     }
-    guard CFEqual(entryUUID, context.requestedUUID) else { return true }
+    guard CFEqual(entryUUID, requestedUUID) else { return .ignored }
     guard let cfURL = CFDictionaryValue.url(information, key: profileURLKey) else {
-        context.diagnostics.append("Matching profile entry has a missing or non-URL profile URL.")
-        return true
+        return .malformed("Matching profile entry has a missing or non-URL profile URL.")
     }
     guard let current = CFDictionaryValue.boolean(information, key: currentKey) else {
-        context.diagnostics.append("Matching profile entry has a missing or non-Boolean current flag.")
+        return .malformed("Matching profile entry has a missing or non-Boolean current flag.")
+    }
+    guard let profileID = CFDictionaryValue.string(information, key: profileIDKey) else {
+        return .malformed("Matching profile entry has a missing or non-string profile identifier.")
+    }
+    return .matching(ParsedColorSyncProfileEntry(
+        url: (cfURL as URL).standardizedFileURL,
+        identifier: profileID as String,
+        isCurrent: current,
+        isDeviceDefault: CFEqual(profileID, defaultProfileID)
+    ))
+}
+
+private func profileIterationCallback(_ information: CFDictionary?, _ rawContext: UnsafeMutableRawPointer?) -> Bool {
+    guard let information, let rawContext else { return true }
+    let context = Unmanaged<ProfileIterationContext>.fromOpaque(rawContext).takeUnretainedValue()
+    let parsed: ParsedColorSyncProfileEntry
+    switch parseColorSyncProfileEntry(information, requestedUUID: context.requestedUUID) {
+    case .ignored:
         return true
+    case .malformed(let diagnostic):
+        context.diagnostics.append(diagnostic)
+        return true
+    case .matching(let entry):
+        parsed = entry
     }
 
-    let profileID = CFDictionaryValue.string(information, key: profileIDKey)
-    let isDefault = profileID.map { CFEqual($0, defaultProfileID) } ?? false
-    let url = cfURL as URL
     var creationError: Unmanaged<CFError>?
     var description: String?
-    if let unmanagedProfile = ColorSyncProfileCreateWithURL(cfURL, &creationError) {
+    if let unmanagedProfile = ColorSyncProfileCreateWithURL(parsed.url as CFURL, &creationError) {
         let profile = unmanagedProfile.takeRetainedValue()
         description = ColorSyncProfileCopyDescriptionString(profile)?.takeRetainedValue() as String?
     } else {
         let detail = creationError?.takeRetainedValue().localizedDescription ?? "unknown profile creation error"
-        context.diagnostics.append("Could not open \(url.lastPathComponent): \(detail)")
+        context.diagnostics.append("Could not open \(parsed.url.lastPathComponent): \(detail)")
     }
     context.entries.append((
-        url: url.standardizedFileURL,
-        identifier: profileID.map { $0 as String },
-        current: current,
-        isDefault: isDefault,
+        url: parsed.url,
+        identifier: parsed.identifier,
+        current: parsed.isCurrent,
+        isDefault: parsed.isDeviceDefault,
         description: description
     ))
     return true

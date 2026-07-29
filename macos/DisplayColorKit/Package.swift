@@ -6,7 +6,8 @@ let package = Package(
     platforms: [.macOS(.v12)],
     products: [
         .library(name: "DisplayColorKit", targets: ["DisplayColorKit"]),
-        .executable(name: "display-colorctl", targets: ["DisplayColorCLI"])
+        .executable(name: "display-colorctl", targets: ["DisplayColorCLI"]),
+        .executable(name: "DisplayColorSample", targets: ["DisplayColorSampleApp"])
     ],
     targets: [
         .target(
@@ -22,6 +23,11 @@ let package = Package(
         .executableTarget(
             name: "DisplayColorCLI",
             dependencies: ["DisplayColorKit"]
+        ),
+        .executableTarget(
+            name: "DisplayColorSampleApp",
+            dependencies: ["DisplayColorKit"],
+            linkerSettings: [.linkedFramework("AppKit")]
         ),
         .testTarget(
             name: "DisplayColorKitTests",

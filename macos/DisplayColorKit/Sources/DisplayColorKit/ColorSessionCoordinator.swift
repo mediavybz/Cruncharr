@@ -97,8 +97,11 @@ public actor ColorSessionCoordinator {
                     guard let brightness else { throw DisplayColorError.brightnessUnsupported(request.display) }
                     try await brightness.setBrightness(requestedBrightness, for: display)
                 } catch {
-                    if request.brightnessIsRequired { throw error }
-                    logger.warning("Optional brightness failed for display=\(request.display.rawValue, privacy: .public): \(error.displayColorDescription, privacy: .public)")
+                    let brightnessError = normalized(error)
+                    if request.brightnessIsRequired || brightnessError == .cancelled || brightnessError == .topologyChangeInProgress {
+                        throw brightnessError
+                    }
+                    logger.warning("Optional brightness failed for display=\(request.display.rawValue, privacy: .public): \(brightnessError.displayColorDescription, privacy: .public)")
                 }
             }
 

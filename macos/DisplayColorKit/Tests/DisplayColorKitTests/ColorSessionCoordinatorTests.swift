@@ -68,9 +68,9 @@ final class ColorSessionCoordinatorTests: XCTestCase {
 
         let session = try await fixture.coordinator.activate(request)
         XCTAssertEqual(session.display, fixture.identity)
-        XCTAssertEqual(await fixture.journals.count(), 1)
-        XCTAssertEqual(await fixture.transfer.applied(), [fixture.requestedTable])
-        XCTAssertEqual(await fixture.profiles.assignments(), [fixture.stagedURL])
+        await XCTAssertEqualAsync(await fixture.journals.count(), 1)
+        await XCTAssertEqualAsync(await fixture.transfer.applied(), [fixture.requestedTable])
+        await XCTAssertEqualAsync(await fixture.profiles.assignments(), [fixture.stagedURL])
         let stages = await fixture.journals.stages()
         XCTAssertTrue(stages.contains(.prepared))
         XCTAssertTrue(stages.contains(.assigningProfile))
@@ -79,10 +79,10 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(stages.last, .active)
 
         try await fixture.coordinator.deactivate(sessionID: session.id)
-        XCTAssertEqual(await fixture.journals.count(), 0)
-        XCTAssertEqual(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
-        XCTAssertEqual(await fixture.transfer.applied(), [fixture.requestedTable, fixture.baselineTable])
-        XCTAssertEqual(await fixture.store.removalCount(), 1)
+        await XCTAssertEqualAsync(await fixture.journals.count(), 0)
+        await XCTAssertEqualAsync(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
+        await XCTAssertEqualAsync(await fixture.transfer.applied(), [fixture.requestedTable, fixture.baselineTable])
+        await XCTAssertEqualAsync(await fixture.store.removalCount(), 1)
     }
 
     func testSetterFailureRollsBackSnapshotAndClearsJournal() async throws {
@@ -96,10 +96,10 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         } catch let error as DisplayColorError {
             XCTAssertEqual(error, .customProfileAssignmentRejected(fixture.identity))
         }
-        XCTAssertEqual(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
-        XCTAssertEqual(await fixture.transfer.applied(), [fixture.baselineTable])
-        XCTAssertEqual(await fixture.journals.count(), 0)
-        XCTAssertEqual(await fixture.store.removalCount(), 1)
+        await XCTAssertEqualAsync(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
+        await XCTAssertEqualAsync(await fixture.transfer.applied(), [fixture.baselineTable])
+        await XCTAssertEqualAsync(await fixture.journals.count(), 0)
+        await XCTAssertEqualAsync(await fixture.store.removalCount(), 1)
     }
 
     func testSetterSuccessWithoutReadbackTimesOutAndRollsBack() async throws {
@@ -113,9 +113,9 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         } catch let error as DisplayColorError {
             XCTAssertEqual(error, .profileVerificationTimedOut(fixture.identity))
         }
-        XCTAssertGreaterThan(await fixture.clock.sleeps(), 0)
-        XCTAssertEqual(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
-        XCTAssertEqual(await fixture.journals.count(), 0)
+        await XCTAssertGreaterThanAsync(await fixture.clock.sleeps(), 0)
+        await XCTAssertEqualAsync(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
+        await XCTAssertEqualAsync(await fixture.journals.count(), 0)
     }
 
     func testDelayedReadbackSucceedsUsingInjectedClock() async throws {
@@ -125,7 +125,7 @@ final class ColorSessionCoordinatorTests: XCTestCase {
 
         let session = try await fixture.coordinator.activate(request)
         XCTAssertEqual(session.display, fixture.identity)
-        XCTAssertEqual(await fixture.clock.sleeps(), 2)
+        await XCTAssertEqualAsync(await fixture.clock.sleeps(), 2)
     }
 
     func testLUTFailureRestoresBothProfileAndExactTable() async throws {
@@ -143,9 +143,9 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         } catch let error as DisplayColorError {
             XCTAssertEqual(error, .transferTableWrite(fixture.identity, code: -1))
         }
-        XCTAssertEqual(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
-        XCTAssertEqual(await fixture.transfer.applied(), [fixture.requestedTable, fixture.baselineTable])
-        XCTAssertEqual(await fixture.journals.count(), 0)
+        await XCTAssertEqualAsync(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
+        await XCTAssertEqualAsync(await fixture.transfer.applied(), [fixture.requestedTable, fixture.baselineTable])
+        await XCTAssertEqualAsync(await fixture.journals.count(), 0)
     }
 
     func testPrimaryAndRollbackFailureKeepsRecoveryJournal() async throws {
@@ -164,9 +164,9 @@ final class ColorSessionCoordinatorTests: XCTestCase {
             guard case .rollbackFailed(_, let failures) = error else { return XCTFail("Unexpected error: \(error)") }
             XCTAssertTrue(failures.contains { $0.contains("exact transfer-table restore failed") })
         }
-        XCTAssertEqual(await fixture.transfer.fallbacks(), 1)
-        XCTAssertEqual(await fixture.journals.count(), 1)
-        XCTAssertEqual(await fixture.store.removalCount(), 0)
+        await XCTAssertEqualAsync(await fixture.transfer.fallbacks(), 1)
+        await XCTAssertEqualAsync(await fixture.journals.count(), 1)
+        await XCTAssertEqualAsync(await fixture.store.removalCount(), 0)
     }
 
     func testDisconnectedDisplayFailsBeforeJournalOrMutation() async throws {
@@ -175,8 +175,8 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         let request = CalibrationRequest(display: fixture.identity, profileURL: URL(fileURLWithPath: "/input/New.icc"))
 
         await XCTAssertThrowsErrorAsync(try await fixture.coordinator.activate(request))
-        XCTAssertEqual(await fixture.journals.count(), 0)
-        XCTAssertEqual(await fixture.profiles.assignments(), [])
+        await XCTAssertEqualAsync(await fixture.journals.count(), 0)
+        await XCTAssertEqualAsync(await fixture.profiles.assignments(), [])
     }
 
     func testUnfinishedJournalIsRestoredOnNextLaunch() async throws {
@@ -198,9 +198,9 @@ final class ColorSessionCoordinatorTests: XCTestCase {
 
         let outcomes = await fixture.coordinator.recoverUnfinishedSessions()
         XCTAssertEqual(outcomes[journal.id], "restored")
-        XCTAssertEqual(await fixture.journals.count(), 0)
-        XCTAssertEqual(await fixture.transfer.applied(), [fixture.baselineTable])
-        XCTAssertEqual(await fixture.store.removalCount(), 1)
+        await XCTAssertEqualAsync(await fixture.journals.count(), 0)
+        await XCTAssertEqualAsync(await fixture.transfer.applied(), [fixture.baselineTable])
+        await XCTAssertEqualAsync(await fixture.store.removalCount(), 1)
     }
 
     func testOptionalBrightnessFailureDoesNotInvalidateColorSession() async throws {
@@ -216,7 +216,7 @@ final class ColorSessionCoordinatorTests: XCTestCase {
 
         let session = try await fixture.coordinator.activate(request)
         XCTAssertEqual(session.display, fixture.identity)
-        XCTAssertEqual(await fixture.journals.count(), 1)
+        await XCTAssertEqualAsync(await fixture.journals.count(), 1)
     }
 
     func testRequiredBrightnessFailureRollsBackColorSession() async throws {
@@ -231,8 +231,8 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         )
 
         await XCTAssertThrowsErrorAsync(try await fixture.coordinator.activate(request))
-        XCTAssertEqual(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
-        XCTAssertEqual(await fixture.journals.count(), 0)
+        await XCTAssertEqualAsync(await fixture.profiles.assignments(), [fixture.stagedURL, nil])
+        await XCTAssertEqualAsync(await fixture.journals.count(), 0)
     }
 
     func testCancellationDuringVerificationStillCompletesRollback() async throws {
@@ -269,9 +269,9 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         } catch let error as DisplayColorError {
             XCTAssertEqual(error, .cancelled)
         }
-        XCTAssertEqual(await profiles.assignments(), [stagedURL, nil])
-        XCTAssertEqual(await transfer.applied(), [table])
-        XCTAssertEqual(await journals.count(), 0)
+        await XCTAssertEqualAsync(await profiles.assignments(), [stagedURL, nil])
+        await XCTAssertEqualAsync(await transfer.applied(), [table])
+        await XCTAssertEqualAsync(await journals.count(), 0)
     }
 }
 

@@ -41,5 +41,5 @@ if [ "$MISSING" -ne 0 ]; then
     exit 1
 fi
 
-swift build --build-tests
-swift test --skip HardwareIntegrationTests
+swift build --build-tests -Xswiftc -warnings-as-errors
+swift test -Xswiftc -warnings-as-errors

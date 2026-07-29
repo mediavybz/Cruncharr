@@ -27,7 +27,7 @@ public final class CoreGraphicsDisplaySystem: DisplayHardwareSystem, @unchecked 
         do {
             ioDescriptors = try IOKitDisplayCatalog.descriptors()
         } catch {
-            logger.warning("IOKit display metadata is unavailable: (error.displayColorDescription, privacy: .public)")
+            logger.warning("IOKit display metadata is unavailable: \(error.displayColorDescription, privacy: .public)")
             ioDescriptors = []
         }
 
@@ -81,7 +81,7 @@ public final class CoreGraphicsDisplaySystem: DisplayHardwareSystem, @unchecked 
                         record.capabilities.insert(.brightness)
                     }
                 } catch {
-                    logger.warning("Brightness probing failed for display=(identity.rawValue, privacy: .public): (error.displayColorDescription, privacy: .public)")
+                    logger.warning("Brightness probing failed for display=\(identity.rawValue, privacy: .public): \(error.displayColorDescription, privacy: .public)")
                 }
             }
             records.append(record)

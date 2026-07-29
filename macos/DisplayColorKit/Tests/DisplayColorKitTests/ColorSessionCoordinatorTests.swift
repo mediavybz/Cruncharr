@@ -169,6 +169,41 @@ final class ColorSessionCoordinatorTests: XCTestCase {
         await XCTAssertEqualAsync(await fixture.store.removalCount(), 0)
     }
 
+    func testUnverifiedRollbackInvokesFallbackAndRetainsJournal() async throws {
+        let fixture = try makeCoordinatorFixture()
+        let request = CalibrationRequest(display: fixture.identity, profileURL: URL(fileURLWithPath: "/input/New.icc"))
+        let session = try await fixture.coordinator.activate(request)
+        await fixture.transfer.configure(verification: .acceptedReadbackUnavailable(reason: "injected HDR limitation"))
+
+        do {
+            try await fixture.coordinator.deactivate(sessionID: session.id)
+            XCTFail("Expected rollback verification failure")
+        } catch let error as DisplayColorError {
+            guard case .rollbackFailed(_, let failures) = error else { return XCTFail("Unexpected error: \(error)") }
+            XCTAssertTrue(failures.contains { $0.contains("could not be verified") })
+        }
+        await XCTAssertEqualAsync(await fixture.transfer.fallbacks(), 1)
+        await XCTAssertEqualAsync(await fixture.journals.count(), 1)
+        await XCTAssertEqualAsync(await fixture.store.removalCount(), 0)
+    }
+
+    func testStagedProfileCleanupFailureRetainsFailedJournal() async throws {
+        let fixture = try makeCoordinatorFixture()
+        let request = CalibrationRequest(display: fixture.identity, profileURL: URL(fileURLWithPath: "/input/New.icc"))
+        let session = try await fixture.coordinator.activate(request)
+        await fixture.store.configureRemoveError(.profileStaging("injected cleanup failure"))
+
+        do {
+            try await fixture.coordinator.deactivate(sessionID: session.id)
+            XCTFail("Expected cleanup failure")
+        } catch let error as DisplayColorError {
+            guard case .rollbackFailed(_, let failures) = error else { return XCTFail("Unexpected error: \(error)") }
+            XCTAssertTrue(failures.contains { $0.contains("staged profile cleanup failed") })
+        }
+        await XCTAssertEqualAsync(await fixture.journals.count(), 1)
+        await XCTAssertEqualAsync(await fixture.store.removalCount(), 0)
+    }
+
     func testDisconnectedDisplayFailsBeforeJournalOrMutation() async throws {
         let fixture = try makeCoordinatorFixture()
         await fixture.display.disconnect(fixture.identity)

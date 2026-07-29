@@ -111,6 +111,7 @@ actor FakeProfileSystem: ColorProfileSystem {
 actor FakeProfileStore: ProfileFileStoring {
     let staged: StagedProfile
     var stageError: DisplayColorError?
+    var removeError: DisplayColorError?
     var removed: [StagedProfile] = []
 
     init(staged: StagedProfile) { self.staged = staged }
@@ -120,7 +121,11 @@ actor FakeProfileStore: ProfileFileStoring {
         return staged
     }
 
-    func removeIfOwned(_ profile: StagedProfile) async throws { removed.append(profile) }
+    func removeIfOwned(_ profile: StagedProfile) async throws {
+        if let removeError { throw removeError }
+        removed.append(profile)
+    }
+    func configureRemoveError(_ error: DisplayColorError?) { removeError = error }
     func removalCount() -> Int { removed.count }
 }
 
@@ -145,6 +150,7 @@ actor FakeTransferSystem: TransferTableSystem {
 
     func restoreColorSyncSettingsFallback() async { fallbackCount += 1 }
     func configure(failureCalls: Set<Int>) { self.failureCalls = failureCalls }
+    func configure(verification: TransferVerification) { self.verification = verification }
     func applied() -> [TransferTable] { applyCalls }
     func fallbacks() -> Int { fallbackCount }
 }

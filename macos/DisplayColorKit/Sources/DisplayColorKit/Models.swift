@@ -215,7 +215,7 @@ public struct TransferTable: Codable, Equatable, Sendable {
     public static func generated(red: [Float], green: [Float], blue: [Float]) throws -> TransferTable {
         let table = try TransferTable(red: red, green: green, blue: blue)
         for (name, channel) in [("red", red), ("green", green), ("blue", blue)] {
-            guard zip(channel, channel.dropFirst()).allSatisfy({ $0 <= $1 }) else {
+            guard zip(channel, channel.dropFirst()).allSatisfy({ pair in pair.0 <= pair.1 }) else {
                 throw DisplayColorError.transferTableValidation("generated \(name) channel is not monotonically nondecreasing")
             }
         }
@@ -224,9 +224,9 @@ public struct TransferTable: Codable, Equatable, Sendable {
 
     public func approximatelyEquals(_ other: TransferTable, tolerance: Float) -> Bool {
         guard tolerance.isFinite, tolerance >= 0, count == other.count else { return false }
-        return zip(red, other.red).allSatisfy { abs($0 - $1) <= tolerance }
-            && zip(green, other.green).allSatisfy { abs($0 - $1) <= tolerance }
-            && zip(blue, other.blue).allSatisfy { abs($0 - $1) <= tolerance }
+        return zip(red, other.red).allSatisfy { pair in abs(pair.0 - pair.1) <= tolerance }
+            && zip(green, other.green).allSatisfy { pair in abs(pair.0 - pair.1) <= tolerance }
+            && zip(blue, other.blue).allSatisfy { pair in abs(pair.0 - pair.1) <= tolerance }
     }
 
     private static func validateChannels(red: [Float], green: [Float], blue: [Float]) throws {

@@ -37,8 +37,8 @@ public final class CoreGraphicsDisplaySystem: DisplayHardwareSystem, @unchecked 
                 continue
             }
             let cfUUID = unmanagedUUID.takeRetainedValue()
-            guard let string = CFUUIDCreateString(kCFAllocatorDefault, cfUUID) as String?,
-                  let identity = DisplayIdentity(rawValue: string) else {
+            guard let cfString = CFUUIDCreateString(kCFAllocatorDefault, cfUUID),
+                  let identity = DisplayIdentity(rawValue: cfString as String) else {
                 continue
             }
 
@@ -69,10 +69,10 @@ public final class CoreGraphicsDisplaySystem: DisplayHardwareSystem, @unchecked 
                 isMirrored: CGDisplayMirrorsDisplay(displayID) != kCGNullDirectDisplay,
                 pixelSize: DisplaySize(width: Double(CGDisplayPixelsWide(displayID)), height: Double(CGDisplayPixelsHigh(displayID))),
                 bounds: DisplayRectangle(
-                    origin: DisplayPoint(x: bounds.origin.x, y: bounds.origin.y),
-                    size: DisplaySize(width: bounds.size.width, height: bounds.size.height)
+                    origin: DisplayPoint(x: Double(bounds.origin.x), y: Double(bounds.origin.y)),
+                    size: DisplaySize(width: Double(bounds.size.width), height: Double(bounds.size.height))
                 ),
-                physicalSizeMillimeters: DisplaySize(width: physical.width, height: physical.height),
+                physicalSizeMillimeters: DisplaySize(width: Double(physical.width), height: Double(physical.height)),
                 capabilities: capabilities
             )
             if let brightness {

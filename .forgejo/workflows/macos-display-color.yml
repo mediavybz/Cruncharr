@@ -1,0 +1,19 @@
+name: macOS DisplayColorKit
+
+on:
+  push:
+    paths:
+      - "macos/DisplayColorKit/**"
+      - ".forgejo/workflows/macos-display-color.yml"
+  pull_request:
+    paths:
+      - "macos/DisplayColorKit/**"
+
+jobs:
+  build-and-test:
+    runs-on: [self-hosted, macOS]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit SDK, build, and test
+        working-directory: macos/DisplayColorKit
+        run: sh Scripts/audit-sdk.sh

@@ -147,11 +147,8 @@ public actor ColorSessionCoordinator {
         return outcomes
     }
 
-    public func recoverUnfinishedSessions() async -> [UUID: String] {
-        let pending: [RecoveryJournal]
-        do { pending = try await journals.loadAll() }
-        catch { return [UUID(): error.displayColorDescription] }
-
+    public func recoverUnfinishedSessions() async throws -> [UUID: String] {
+        let pending = try await journals.loadAll()
         var outcomes: [UUID: String] = [:]
         for journal in pending {
             let display = journal.snapshot.display

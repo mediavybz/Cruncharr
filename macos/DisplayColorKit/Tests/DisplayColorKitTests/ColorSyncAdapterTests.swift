@@ -121,6 +121,15 @@ final class ColorSyncAdapterTests: XCTestCase {
         }
     }
 
+    func testAmbiguousExplicitFactoryProfilesAreRejected() throws {
+        let display = try XCTUnwrap(DisplayIdentity(rawValue: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
+        let first = ProfileRecord(url: URL(fileURLWithPath: "/one.icc"), profileIdentifier: "one", description: nil, isCurrent: false, isDeviceDefault: true, isCustomAssignment: false)
+        let second = ProfileRecord(url: URL(fileURLWithPath: "/two.icc"), profileIdentifier: "two", description: nil, isCurrent: false, isDeviceDefault: true, isCustomAssignment: false)
+        XCTAssertThrowsError(try factoryProfileCandidate(in: [first, second], display: display)) { error in
+            XCTAssertEqual(error as? DisplayColorError, .factoryProfileUnavailable(display))
+        }
+    }
+
     private func makeEntry(uuid: CFUUID, url: URL, current: Bool = true) throws -> CFDictionary {
         let dictionary = NSMutableDictionary()
         dictionary[try constant(kColorSyncDeviceClass) as String] = try constant(kColorSyncDisplayDeviceClass) as String

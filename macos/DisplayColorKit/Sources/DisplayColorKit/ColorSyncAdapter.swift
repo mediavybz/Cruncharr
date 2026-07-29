@@ -6,6 +6,7 @@ private final class ProfileIterationContext {
     let requestedUUID: CFUUID
     var entries: [(url: URL, identifier: String?, current: Bool, isDefault: Bool, description: String?)] = []
     var diagnostics: [String] = []
+    var stopRequested = false
 
     init(requestedUUID: CFUUID) {
         self.requestedUUID = requestedUUID
@@ -74,7 +75,7 @@ func parseColorSyncProfileEntry(_ information: CFDictionary, requestedUUID: CFUU
     }
     guard CFEqual(entryClass, displayClass) else { return .ignored }
     guard let entryUUID = CFDictionaryValue.uuid(information, key: idKey) else {
-        return .malformed("Display profile entry has a missing or non-UUID device ID.")
+        return .ignored
     }
     guard CFEqual(entryUUID, requestedUUID) else { return .ignored }
     guard let cfURL = CFDictionaryValue.url(information, key: profileURLKey) else {
@@ -97,6 +98,7 @@ func parseColorSyncProfileEntry(_ information: CFDictionary, requestedUUID: CFUU
 private func profileIterationCallback(_ information: CFDictionary?, _ rawContext: UnsafeMutableRawPointer?) -> Bool {
     guard let information, let rawContext else { return true }
     let context = Unmanaged<ProfileIterationContext>.fromOpaque(rawContext).takeUnretainedValue()
+    guard !context.stopRequested else { return false }
     let parsed: ParsedColorSyncProfileEntry
     switch parseColorSyncProfileEntry(information, requestedUUID: context.requestedUUID) {
     case .ignored:

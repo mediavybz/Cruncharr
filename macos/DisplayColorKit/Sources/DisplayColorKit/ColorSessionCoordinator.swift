@@ -183,9 +183,18 @@ public actor ColorSessionCoordinator {
                     do {
                         _ = try await displays.resolveDisplayID(for: journal.snapshot.display)
                         let state = try await profiles.profileState(for: journal.snapshot.display)
-                        guard Self.sameFile(state.current.url, staged.url) else { continue }
+                        guard Self.sameFile(state.current.url, staged.url),
+                              let customURL = state.customDefaultURL,
+                              Self.sameFile(customURL, staged.url) else { continue }
                         if let intended = journal.intendedTransferTable {
-                            _ = try await transferTables.apply(intended, to: journal.snapshot.display)
+                            do {
+                                let currentTable = try await transferTables.capture(for: journal.snapshot.display)
+                                if !currentTable.approximatelyEquals(intended, tolerance: 1.0 / 65_535.0) {
+                                    _ = try await transferTables.apply(intended, to: journal.snapshot.display)
+                                }
+                            } catch {
+                                _ = try await transferTables.apply(intended, to: journal.snapshot.display)
+                            }
                         }
                     } catch {
                         logger.error("Reconfiguration recovery deferred for display=\(journal.snapshot.display.rawValue, privacy: .public): \(error.displayColorDescription, privacy: .public)")

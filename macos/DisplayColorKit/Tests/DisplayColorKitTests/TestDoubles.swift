@@ -1,4 +1,5 @@
 import Foundation
+import XCTest
 @testable import DisplayColorKit
 
 actor FakeDisplaySystem: DisplayHardwareSystem {
@@ -219,4 +220,38 @@ func makeDisplay(identity: DisplayIdentity, id: UInt32 = 42) -> DisplayRecord {
         bounds: DisplayRectangle(origin: DisplayPoint(x: 0, y: 0), size: DisplaySize(width: 1920, height: 1080)),
         physicalSizeMillimeters: DisplaySize(width: 500, height: 300)
     )
+}
+
+
+func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected expression to throw", file: file, line: line)
+    } catch {
+        // Expected.
+    }
+}
+
+func XCTAssertEqualAsync<T: Equatable>(
+    _ expression: @autoclosure () async -> T,
+    _ expected: T,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    let actual = await expression()
+    XCTAssertEqual(actual, expected, file: file, line: line)
+}
+
+func XCTAssertGreaterThanAsync<T: Comparable>(
+    _ expression: @autoclosure () async -> T,
+    _ expected: T,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    let actual = await expression()
+    XCTAssertGreaterThan(actual, expected, file: file, line: line)
 }

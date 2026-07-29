@@ -238,10 +238,19 @@ public actor ColorSessionCoordinator {
 
         do {
             _ = try await displays.resolveDisplayID(for: journal.snapshot.display)
-            _ = try await transferTables.apply(journal.snapshot.originalTransferTable, to: journal.snapshot.display)
+            let verification = try await transferTables.apply(journal.snapshot.originalTransferTable, to: journal.snapshot.display)
+            if case .acceptedReadbackUnavailable(let reason) = verification {
+                await transferTables.restoreColorSyncSettingsFallback()
+                failures.append("exact transfer-table restore could not be verified; global ColorSync fallback invoked: \(reason)")
+            }
         } catch {
             await transferTables.restoreColorSyncSettingsFallback()
             failures.append("exact transfer-table restore failed; global ColorSync fallback invoked: \(error.displayColorDescription)")
+        }
+
+        if failures.isEmpty, removeStagedProfile, let staged = journal.stagedProfile {
+            do { try await profileStore.removeIfOwned(staged) }
+            catch { failures.append("staged profile cleanup failed: \(error.displayColorDescription)") }
         }
 
         if failures.isEmpty {
@@ -252,11 +261,9 @@ public actor ColorSessionCoordinator {
             } catch {
                 failures.append("recovery journal cleanup failed: \(error.displayColorDescription)")
             }
-            if failures.isEmpty, removeStagedProfile, let staged = journal.stagedProfile {
-                do { try await profileStore.removeIfOwned(staged) }
-                catch { failures.append("staged profile cleanup failed: \(error.displayColorDescription)") }
-            }
-        } else {
+        }
+
+        if !failures.isEmpty {
             journal.stage = .failed
             do { try await journals.save(journal) }
             catch { failures.append("failed-state journal write failed: \(error.displayColorDescription)") }

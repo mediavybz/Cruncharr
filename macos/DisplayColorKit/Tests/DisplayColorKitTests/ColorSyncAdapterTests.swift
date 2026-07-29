@@ -85,6 +85,42 @@ final class ColorSyncAdapterTests: XCTestCase {
         XCTAssertEqual(try strictCurrentProfile(in: [first, currentTwo], display: display), currentTwo)
     }
 
+    func testFactorySelectionPrefersExplicitDefaultAndAnnotatesFallback() throws {
+        let display = try XCTUnwrap(DisplayIdentity(rawValue: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
+        let explicit = ProfileRecord(
+            url: URL(fileURLWithPath: "/factory.icc"),
+            profileIdentifier: "default",
+            description: nil,
+            isCurrent: false,
+            isDeviceDefault: true,
+            isCustomAssignment: false
+        )
+        let fallback = ProfileRecord(
+            url: URL(fileURLWithPath: "/associated.icc"),
+            profileIdentifier: "associated",
+            description: nil,
+            isCurrent: true,
+            isDeviceDefault: false,
+            isCustomAssignment: false
+        )
+        XCTAssertEqual(try factoryProfileCandidate(in: [fallback, explicit], display: display), explicit)
+        let inferred = try factoryProfileCandidate(in: [fallback], display: display)
+        XCTAssertTrue(inferred.isFactoryCandidateInferred)
+        XCTAssertEqual(inferred.url, fallback.url)
+
+        let customOnly = ProfileRecord(
+            url: URL(fileURLWithPath: "/custom.icc"),
+            profileIdentifier: "custom",
+            description: nil,
+            isCurrent: true,
+            isDeviceDefault: false,
+            isCustomAssignment: true
+        )
+        XCTAssertThrowsError(try factoryProfileCandidate(in: [customOnly], display: display)) { error in
+            XCTAssertEqual(error as? DisplayColorError, .factoryProfileUnavailable(display))
+        }
+    }
+
     private func makeEntry(uuid: CFUUID, url: URL, current: Bool = true) throws -> CFDictionary {
         let dictionary = NSMutableDictionary()
         dictionary[try constant(kColorSyncDeviceClass) as String] = try constant(kColorSyncDisplayDeviceClass) as String

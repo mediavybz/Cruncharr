@@ -233,6 +233,11 @@ proxy). Before exposing it more widely:
   private/loopback/link-local addresses (SSRF protection); catalog images are proxied
   and cached server-side only from the source's own image host over HTTPS.
 
+
+## macOS display color management
+
+The independent Swift package in [macos/DisplayColorKit](macos/DisplayColorKit) provides UUID-addressed display discovery, ColorSync profile transactions, transfer-table management, optional brightness control, recovery journaling, a read-only CLI, and deterministic tests. It targets macOS 12+ and is intentionally separate from the .NET service. See its [independent implementation notice](macos/DisplayColorKit/ATTRIBUTION.md).
+
 ## Credits
 
 This project is based on the original **Crunchy-Downloader** desktop application by [Crunchy-DL](https://github.com/Crunchy-DL/Crunchy-Downloader). All core logic and media processing is ported from the upstream source, as required by its license.

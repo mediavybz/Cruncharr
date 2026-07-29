@@ -187,12 +187,14 @@ public actor ColorSessionCoordinator {
                               let customURL = state.customDefaultURL,
                               Self.sameFile(customURL, staged.url) else { continue }
                         if let intended = journal.intendedTransferTable {
+                            let needsReapply: Bool
                             do {
                                 let currentTable = try await transferTables.capture(for: journal.snapshot.display)
-                                if !currentTable.approximatelyEquals(intended, tolerance: 1.0 / 65_535.0) {
-                                    _ = try await transferTables.apply(intended, to: journal.snapshot.display)
-                                }
+                                needsReapply = !currentTable.approximatelyEquals(intended, tolerance: 1.0 / 65_535.0)
                             } catch {
+                                needsReapply = true
+                            }
+                            if needsReapply {
                                 _ = try await transferTables.apply(intended, to: journal.snapshot.display)
                             }
                         }

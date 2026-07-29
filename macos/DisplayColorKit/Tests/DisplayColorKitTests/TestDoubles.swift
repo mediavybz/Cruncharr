@@ -153,6 +153,11 @@ actor FakeBrightness: BrightnessControlling {
     var error: DisplayColorError?
     var values: [Float] = []
 
+    func configure(supported: Bool = true, error: DisplayColorError? = nil) {
+        self.supported = supported
+        self.error = error
+    }
+
     func supportsBrightness(for display: DisplayRecord) async throws -> Bool { supported }
 
     func setBrightness(_ value: Float, for display: DisplayRecord) async throws {
@@ -180,6 +185,7 @@ actor MemoryJournalStore: RecoveryJournalStoring {
     func count() -> Int { storage.count }
     func stages() -> [SessionStage] { savedStages }
     func insert(_ journal: RecoveryJournal) { storage[journal.id] = journal }
+    func configureFailRemove(_ value: Bool) { failRemove = value }
 }
 
 actor TestClock: VerificationClock {

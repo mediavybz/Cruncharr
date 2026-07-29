@@ -25,6 +25,35 @@ final class DisplayInventoryTests: XCTestCase {
         XCTAssertEqual(result, [])
     }
 
+    func testSingleMirroredDisplayPreservesPresentationMetadata() async throws {
+        let identity = try XCTUnwrap(DisplayIdentity(rawValue: "55555555-5555-5555-5555-555555555555"))
+        let profileURL = URL(fileURLWithPath: "/profiles/mirrored.icc")
+        let profile = ProfileRecord(
+            url: profileURL,
+            profileIdentifier: "mirrored",
+            description: nil,
+            isCurrent: true,
+            isDeviceDefault: true,
+            isCustomAssignment: false
+        )
+        var display = makeDisplay(identity: identity, id: 55)
+        display.localizedName = "Mirrored Presentation Display"
+        display.isMirrored = true
+        let inventory = DisplayInventory(
+            displays: FakeDisplaySystem(records: [display]),
+            profiles: InventoryProfileAdapter(states: [
+                identity: ProfileState(profiles: [profile], current: profile, customDefaultURL: nil)
+            ])
+        )
+
+        let records = try await inventory.snapshot()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].identity, identity)
+        XCTAssertEqual(records[0].localizedName, "Mirrored Presentation Display")
+        XCTAssertTrue(records[0].isMirrored)
+        XCTAssertEqual(records[0].currentProfileURL, profileURL)
+    }
+
     func testMultipleDisplaysKeepUUIDIdentityAndReceiveOwnProfiles() async throws {
         let first = try XCTUnwrap(DisplayIdentity(rawValue: "11111111-1111-1111-1111-111111111111"))
         let second = try XCTUnwrap(DisplayIdentity(rawValue: "22222222-2222-2222-2222-222222222222"))

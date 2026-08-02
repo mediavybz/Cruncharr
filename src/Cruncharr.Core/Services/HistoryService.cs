@@ -124,16 +124,100 @@ public class HistoryService : IHistoryService, IDisposable
 
     public async Task<bool> IsDownloadedAsync(string episodeId, string audioLanguage)
     {
-        await _lock.WaitAsync();
-        try
+        var history = await GetAllAsync(0, int.MaxValue);
+        bool localArtifactExists = history.Any(h =>
+            string.Equals(h.EpisodeId, episodeId, StringComparison.Ordinal) &&
+            string.Equals(h.AudioLanguage, audioLanguage, StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(h.OutputPath) &&
+            File.Exists(h.OutputPath));
+        if (localArtifactExists) return true;
+
+        if (_config.Sonarr?.Enabled != true ||
+            _sonarrService == null)
         {
-            var history = await LoadHistoryAsync();
-            return history.Any(h => h.EpisodeId == episodeId && h.AudioLanguage == audioLanguage);
+            return false;
         }
-        finally
+
+        var richHistory = await GetHistorySeriesAsync();
+        var matchingSeries = richHistory
+            .Where(series => series.Seasons.Any(season =>
+                season.EpisodesList.Any(episode =>
+                    string.Equals(episode.EpisodeId, episodeId, StringComparison.Ordinal))))
+            .ToList();
+        var sonarrArtifacts = await GetCurrentSonarrArtifactEpisodeIdsAsync(
+            matchingSeries,
+            _sonarrService,
+            _config.Sonarr);
+        return sonarrArtifacts.Contains(episodeId);
+    }
+
+    public static HashSet<string> GetEpisodeIdsWithExistingArtifacts(
+        IEnumerable<DownloadHistory> history,
+        Func<string, bool>? pathExists = null)
+    {
+        pathExists ??= File.Exists;
+        return history
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.EpisodeId))
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.OutputPath) && pathExists(entry.OutputPath))
+            .Select(entry => entry.EpisodeId)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    public static bool HasCompletedArtifact(
+        HistoryEpisode episode,
+        IReadOnlySet<string>? localArtifactEpisodeIds,
+        IReadOnlySet<string>? currentSonarrArtifactEpisodeIds = null)
+    {
+        if (string.IsNullOrWhiteSpace(episode.EpisodeId)) return false;
+        return localArtifactEpisodeIds?.Contains(episode.EpisodeId) == true ||
+               currentSonarrArtifactEpisodeIds?.Contains(episode.EpisodeId) == true;
+    }
+
+    public static async Task<HashSet<string>> GetCurrentSonarrArtifactEpisodeIdsAsync(
+        IEnumerable<HistorySeries> history,
+        ISonarrService? sonarrService,
+        SonarrConfig sonarrConfig,
+        CancellationToken cancellationToken = default,
+        Action<string, Exception>? onError = null)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        if (sonarrService == null || !sonarrConfig.Enabled) return result;
+
+        foreach (var series in history)
         {
-            _lock.Release();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!int.TryParse(series.SonarrSeriesId, out var sonarrSeriesId)) continue;
+
+            try
+            {
+                // One bulk Sonarr request per matched series. Persisted SonarrHasFile is only a
+                // cache and may be stale after a user deletes a file directly in Sonarr.
+                var currentEpisodes = await sonarrService.GetEpisodesAsync(
+                    sonarrSeriesId,
+                    sonarrConfig,
+                    forceRefresh: true);
+                var currentFileEpisodeIds = currentEpisodes
+                    .Where(episode => episode.HasFile)
+                    .Select(episode => episode.Id)
+                    .ToHashSet();
+
+                foreach (var historyEpisode in series.Seasons.SelectMany(season => season.EpisodesList))
+                {
+                    if (!string.IsNullOrWhiteSpace(historyEpisode.EpisodeId) &&
+                        int.TryParse(historyEpisode.SonarrEpisodeId, out var sonarrEpisodeId) &&
+                        currentFileEpisodeIds.Contains(sonarrEpisodeId))
+                    {
+                        result.Add(historyEpisode.EpisodeId);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                onError?.Invoke(series.SonarrSeriesId!, ex);
+            }
         }
+
+        return result;
     }
 
     public async Task RemoveAsync(string episodeId)

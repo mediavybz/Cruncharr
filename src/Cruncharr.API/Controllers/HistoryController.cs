@@ -1,3 +1,4 @@
+using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -10,11 +11,19 @@ public class HistoryController : ControllerBase
 {
     private readonly IHistoryService _historyService;
     private readonly ILogger<HistoryController> _logger;
+    private readonly ISonarrService? _sonarrService;
+    private readonly CruncharrConfig _config;
 
-    public HistoryController(IHistoryService historyService, ILogger<HistoryController> logger)
+    public HistoryController(
+        IHistoryService historyService,
+        ILogger<HistoryController> logger,
+        ISonarrService? sonarrService = null,
+        CruncharrConfig? config = null)
     {
         _historyService = historyService;
         _logger = logger;
+        _sonarrService = sonarrService;
+        _config = config ?? new CruncharrConfig();
     }
 
     private static bool IsValidId(string id) => !string.IsNullOrWhiteSpace(id) && !id.Contains("..") && !id.Contains("/") && !id.Contains("\\");
@@ -48,7 +57,13 @@ public class HistoryController : ControllerBase
         try
         {
             var history = await _historyService.GetHistorySeriesAsync();
-            var response = history.Select(MapToResponse).ToList();
+            var flatHistory = await _historyService.GetAllAsync(0, int.MaxValue);
+            var localArtifacts = HistoryService.GetEpisodeIdsWithExistingArtifacts(flatHistory ?? []);
+            var sonarrArtifacts = await GetCurrentSonarrArtifactEpisodeIdsAsync(history);
+            var response = history.Select(series => MapToResponse(
+                series,
+                localArtifacts,
+                sonarrArtifacts)).ToList();
             return Ok(response);
         }
         catch (Exception ex)
@@ -115,7 +130,13 @@ public class HistoryController : ControllerBase
             var history = await _historyService.GetHistorySeriesAsync();
             var series = history?.FirstOrDefault(s => s.SeriesId == seriesId);
             if (series == null) return NotFound();
-            return Ok(MapToResponse(series));
+            var flatHistory = await _historyService.GetAllAsync(0, int.MaxValue);
+            var localArtifacts = HistoryService.GetEpisodeIdsWithExistingArtifacts(flatHistory ?? []);
+            var sonarrArtifacts = await GetCurrentSonarrArtifactEpisodeIdsAsync(history ?? []);
+            return Ok(MapToResponse(
+                series,
+                localArtifacts,
+                sonarrArtifacts));
         }
         catch (Exception ex)
         {
@@ -392,7 +413,22 @@ public class HistoryController : ControllerBase
         }
     }
 
-    private static HistorySeriesResponse MapToResponse(HistorySeries series)
+    private async Task<HashSet<string>> GetCurrentSonarrArtifactEpisodeIdsAsync(
+        IEnumerable<HistorySeries> history)
+    {
+        if (_config.Sonarr?.Enabled != true) return [];
+        return await HistoryService.GetCurrentSonarrArtifactEpisodeIdsAsync(
+            history,
+            _sonarrService,
+            _config.Sonarr,
+            HttpContext?.RequestAborted ?? CancellationToken.None,
+            (seriesId, ex) => _logger.LogWarning(ex, "Could not refresh Sonarr file state for history series {SeriesId}", seriesId));
+    }
+
+    private static HistorySeriesResponse MapToResponse(
+        HistorySeries series,
+        IReadOnlySet<string> localArtifactEpisodeIds,
+        IReadOnlySet<string> currentSonarrArtifactEpisodeIds)
     {
         return new HistorySeriesResponse
         {
@@ -423,12 +459,19 @@ public class HistoryController : ControllerBase
                     EpisodeSeasonNum = e.EpisodeSeasonNum,
                     SpecialEpisode = e.SpecialEpisode,
                     WasDownloaded = e.WasDownloaded,
+                    HasLocalArtifact = !string.IsNullOrWhiteSpace(e.EpisodeId) &&
+                                       localArtifactEpisodeIds.Contains(e.EpisodeId),
+                    HasCompletedArtifact = HistoryService.HasCompletedArtifact(
+                        e,
+                        localArtifactEpisodeIds,
+                        currentSonarrArtifactEpisodeIds),
                     IsEpisodeAvailableOnStreamingService = e.IsEpisodeAvailableOnStreamingService,
                     ThumbnailImageUrl = e.ThumbnailImageUrl,
                     EpisodeCrPremiumAirDate = e.EpisodeCrPremiumAirDate,
                     SonarrEpisodeId = e.SonarrEpisodeId,
                     SonarrEpisodeNumber = e.SonarrEpisodeNumber,
-                    SonarrHasFile = e.SonarrHasFile,
+                    SonarrHasFile = !string.IsNullOrWhiteSpace(e.EpisodeId) &&
+                                    currentSonarrArtifactEpisodeIds.Contains(e.EpisodeId),
                     SonarrIsMonitored = e.SonarrIsMonitored,
                     SonarrAbsolutNumber = e.SonarrAbsolutNumber,
                     SonarrSeasonNumber = e.SonarrSeasonNumber,
@@ -486,6 +529,8 @@ public class HistoryEpisodeResponse
     public string? EpisodeSeasonNum { get; set; }
     public bool SpecialEpisode { get; set; }
     public bool WasDownloaded { get; set; }
+    public bool HasLocalArtifact { get; set; }
+    public bool HasCompletedArtifact { get; set; }
     public bool IsEpisodeAvailableOnStreamingService { get; set; }
     public string? ThumbnailImageUrl { get; set; }
     public DateTime? EpisodeCrPremiumAirDate { get; set; }

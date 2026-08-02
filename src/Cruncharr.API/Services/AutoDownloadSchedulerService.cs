@@ -150,7 +150,12 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
             if (config.History.AutoRefreshAddToQueue)
             {
                 _logger.LogInformation("Adding missing episodes to queue...");
-                await AddNewMissingToQueueAsync(historyService, queueService, config, cancellationToken);
+                await AddNewMissingToQueueAsync(
+                    historyService,
+                    queueService,
+                    serviceProvider.GetService<ISonarrService>(),
+                    config,
+                    cancellationToken);
             }
         }
         finally
@@ -254,6 +259,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
     private async Task AddNewMissingToQueueAsync(
         IHistoryService historyService,
         IQueueService queueService,
+        ISonarrService? sonarrService,
         CruncharrConfig config,
         CancellationToken cancellationToken)
     {
@@ -261,6 +267,21 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
         {
             var seriesList = await historyService.GetHistorySeriesAsync();
             if (seriesList == null || seriesList.Count == 0) return;
+
+            // Rich history's WasDownloaded flag records that a download completed at some point;
+            // it is not proof that the artifact still exists. Build the live local-artifact set
+            // from flat history so deleted/moved-away files become eligible again. Sonarr-managed
+            // files are handled separately through HistoryEpisode.SonarrHasFile below.
+            var flatHistory = await historyService.GetAllAsync(0, int.MaxValue) ?? [];
+            var localArtifactEpisodeIds = HistoryService.GetEpisodeIdsWithExistingArtifacts(flatHistory);
+            var currentSonarrArtifactEpisodeIds = config.Sonarr?.Enabled == true
+                ? await HistoryService.GetCurrentSonarrArtifactEpisodeIdsAsync(
+                    seriesList,
+                    sonarrService,
+                    config.Sonarr,
+                    cancellationToken,
+                    (seriesId, ex) => _logger.LogWarning(ex, "Could not refresh Sonarr file state for series {SeriesId}", seriesId))
+                : [];
 
             int addedCount = 0;
             var queueItems = queueService.GetQueue();
@@ -273,7 +294,11 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
 
                     if (series.Seasons == null || series.Seasons.Count == 0) continue;
 
-                    foreach (var (season, episode) in EnumerateMissingEpisodes(series, config))
+                    foreach (var (season, episode) in EnumerateMissingEpisodes(
+                                 series,
+                                 config,
+                                 localArtifactEpisodeIds,
+                                 currentSonarrArtifactEpisodeIds))
                     {
                         // Skip episodes already in queue
                         bool inQueue = queueItems.Any(q =>
@@ -351,7 +376,9 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
 
     private static IEnumerable<(HistorySeason Season, HistoryEpisode Episode)> EnumerateMissingEpisodes(
         HistorySeries series,
-        CruncharrConfig config)
+        CruncharrConfig config,
+        IReadOnlySet<string>? localArtifactEpisodeIds = null,
+        IReadOnlySet<string>? currentSonarrArtifactEpisodeIds = null)
     {
         bool foundWatched = false;
         bool historyAddSpecials = config.History?.AddSpecials ?? false;
@@ -376,7 +403,11 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                     {
                         var episode = episodes[j];
                         if (skipUnmonitored && sonarrEnabled && !episode.SonarrIsMonitored) continue;
-                        if (ShouldCountEpisode(series, season, episode, useSonarr, countMissing, false, config))
+                        var hasCompletedArtifact = HistoryService.HasCompletedArtifact(
+                            episode,
+                            localArtifactEpisodeIds,
+                            currentSonarrArtifactEpisodeIds);
+                        if (ShouldCountEpisode(series, season, episode, useSonarr, countMissing, false, config, hasCompletedArtifact))
                             candidates.Add((season, episode));
                     }
                 }
@@ -387,22 +418,26 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
             {
                 var episode = episodes[j];
                 if (skipUnmonitored && sonarrEnabled && !episode.SonarrIsMonitored) continue;
+                var hasCompletedArtifact = HistoryService.HasCompletedArtifact(
+                    episode,
+                    localArtifactEpisodeIds,
+                    currentSonarrArtifactEpisodeIds);
 
                 if (episode.SpecialEpisode)
                 {
                     if (historyAddSpecials &&
-                        ShouldCountEpisode(series, season, episode, useSonarr, countMissing, false, config))
+                        ShouldCountEpisode(series, season, episode, useSonarr, countMissing, false, config, hasCompletedArtifact))
                     {
                         candidates.Add((season, episode));
                     }
                     continue;
                 }
 
-                if (ShouldCountEpisode(series, season, episode, useSonarr, countMissing, foundWatched, config))
+                if (ShouldCountEpisode(series, season, episode, useSonarr, countMissing, foundWatched, config, hasCompletedArtifact))
                 {
                     candidates.Add((season, episode));
                 }
-                else if (episode.WasDownloaded && !IsPartialDownloadActionable(series, season, episode, config))
+                else if (hasCompletedArtifact && !IsPartialDownloadActionable(series, season, episode, config))
                 {
                     foundWatched = true;
                 }
@@ -420,13 +455,14 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
         bool useSonarr,
         bool countMissing,
         bool foundWatched,
-        CruncharrConfig config)
+        CruncharrConfig config,
+        bool hasCompletedArtifact)
     {
         if (useSonarr)
-            return !string.IsNullOrEmpty(episode.SonarrEpisodeId) && !episode.SonarrHasFile;
+            return !string.IsNullOrEmpty(episode.SonarrEpisodeId) && !hasCompletedArtifact;
 
         return IsPartialDownloadActionable(series, season, episode, config) ||
-               !episode.WasDownloaded && (!foundWatched || countMissing);
+               !hasCompletedArtifact && (!foundWatched || countMissing);
     }
 
     private static bool IsPartialDownloadActionable(

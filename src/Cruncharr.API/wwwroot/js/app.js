@@ -4237,7 +4237,7 @@
                 for (const series of (data || [])) {
                     for (const season of (series.seasons || [])) {
                         for (const episode of (season.episodes || [])) {
-                            if (episode.wasDownloaded === false && episode.episodeId) {
+                            if (!episodeHasCompletedArtifact(episode) && episode.episodeId) {
                                 if (episode.isEpisodeAvailableOnStreamingService === false) continue;
                                 const queueRes = await fetch('/api/v1/queue', {
                                     method: 'POST',
@@ -4465,13 +4465,20 @@
             return missingDubs.length > 0 || missingSubs.length > 0;
         }
         
-        // An episode counts as "have" if Cruncharr downloaded it OR (when Sonarr counting is on and
-        // the series is matched) Sonarr already has the file. Mirrors upstream HistoryCountSonarr.
+        // Historical WasDownloaded means a download completed once; the artifact can later be
+        // deleted or moved. The API verifies Cruncharr's recorded path and Sonarr's live HasFile.
+        function episodeHasCompletedArtifact(episode) {
+            if (typeof episode?.hasCompletedArtifact === 'boolean') return episode.hasCompletedArtifact;
+            return !!(episode?.wasDownloaded || episode?.sonarrHasFile);
+        }
+
+        // An episode counts as "have" only while a verified Cruncharr/Sonarr artifact exists.
         function episodeIsHave(episode, series) {
-            if (episode.wasDownloaded) return true;
+            const hasLocal = typeof episode?.hasLocalArtifact === 'boolean'
+                ? episode.hasLocalArtifact
+                : !!episode?.wasDownloaded;
             const countSonarr = config?.history?.countSonarr !== false;
-            if (countSonarr && series && series.sonarrSeriesId && episode.sonarrHasFile) return true;
-            return false;
+            return hasLocal || !!(countSonarr && episode?.sonarrHasFile);
         }
 
         // "Have" / total counts for a series, factoring Sonarr-owned files (see episodeIsHave).
@@ -4483,21 +4490,22 @@
         }
 
         function getEpisodeDownloadStatus(episode, series) {
-            if (episode.wasDownloaded && isEpisodePartiallyDownloaded(episode)) {
+            const countsAsHave = episodeIsHave(episode, series);
+            if (countsAsHave && episode.wasDownloaded && isEpisodePartiallyDownloaded(episode)) {
                 return { class: 'status-partial', icon: '&#10004;' };
             }
-            if (episode.wasDownloaded) {
-                return { class: 'status-full', icon: '&#10004;' };
-            }
-            // Sonarr already has the file -> show as "have" (check), distinct tooltip handled elsewhere.
-            const countSonarr = config?.history?.countSonarr !== false;
-            if (countSonarr && series && series.sonarrSeriesId && episode.sonarrHasFile) {
+            if (countsAsHave) {
                 return { class: 'status-full', icon: '&#10004;' };
             }
             return { class: 'status-none', icon: '' };
         }
         
         function getEpisodeStatusTooltip(episode, series) {
+            if (!episodeHasCompletedArtifact(episode)) {
+                return episode.wasDownloaded
+                    ? 'Previously downloaded, but the completed file is missing — available to re-download'
+                    : 'Not downloaded';
+            }
             const downloadedDubs = episode.downloadedDubLang || [];
             const downloadedSubs = episode.downloadedSoftSubs || [];
             const availableDubs = episode.availableDubLang || [];
@@ -4527,10 +4535,8 @@
 
             const tip = tooltip.trim();
             if (tip) return tip;
-            // Not downloaded by Cruncharr, but Sonarr may already own it.
-            const countSonarr = config?.history?.countSonarr !== false;
-            if (countSonarr && series && series.sonarrSeriesId && episode.sonarrHasFile) {
-                return 'Already in Sonarr (file present)';
+            if (episode.sonarrHasFile) {
+                return 'File present in Sonarr (re-download suppressed)';
             }
             return 'Not downloaded';
         }
@@ -4669,7 +4675,7 @@
                                     <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
                                 </div>
                             </div>
-                            ${!ep.wasDownloaded ? `<button class="btn-icon" onclick="event.stopPropagation(); toggleEpisodeOptions(event, '${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}', '${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Pick dubs/subs">&#9881;</button><button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Add to queue (default dubs/subs)">&#128229;</button>` : ''}
+                            ${!episodeHasCompletedArtifact(ep) ? `<button class="btn-icon" onclick="event.stopPropagation(); toggleEpisodeOptions(event, '${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}', '${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Pick dubs/subs">&#9881;</button><button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Add to queue (default dubs/subs)">&#128229;</button>` : ''}
                         </div>
                     `;
                 }).join('');

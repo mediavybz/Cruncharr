@@ -507,6 +507,30 @@ public class SonarrServiceTests
     }
 
     [Fact]
+    public async Task GetEpisodesAsync_ForceRefreshBypassesEpisodeListCache()
+    {
+        var handler = new StubHttpMessageHandler((request, call, _) =>
+        {
+            Assert.Contains("/episode?seriesId=801", request.RequestUri!.ToString());
+            return Task.FromResult(JsonResponse(
+                $"[{{\"id\":26363,\"seriesId\":801,\"hasFile\":{(call == 1 ? "true" : "false")}}}]"));
+        });
+        var service = new SonarrService(
+            new TestHttpClientFactory(new HttpClient(handler)),
+            _loggerMock.Object);
+        var config = CreateTestConfig();
+
+        var initial = await service.GetEpisodesAsync(801, config);
+        var cached = await service.GetEpisodesAsync(801, config);
+        var refreshed = await service.GetEpisodesAsync(801, config, forceRefresh: true);
+
+        Assert.True(Assert.Single(initial).HasFile);
+        Assert.True(Assert.Single(cached).HasFile);
+        Assert.False(Assert.Single(refreshed).HasFile);
+        Assert.Equal(2, handler.CallCount);
+    }
+
+    [Fact]
     public async Task GetNamingConfigAsync_MapsExistingSonarrContract()
     {
         var handler = new StubHttpMessageHandler((request, _, _) =>

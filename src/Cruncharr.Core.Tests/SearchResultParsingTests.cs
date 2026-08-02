@@ -64,4 +64,123 @@ public class SearchResultParsingTests
 
         Assert.Equal("MOVIE1", results[0].Id);
     }
+
+    [Fact]
+    public void SearchHasNextPage_UsesPerGroupCountAndIgnoresEpisodes()
+    {
+        var firstPage = new CrSearchResult
+        {
+            Data =
+            [
+                new CrSearchGroup
+                {
+                    Type = "series",
+                    Count = 143,
+                    Items = Enumerable.Range(0, 100)
+                        .Select(index => new CrSearchItem { Id = $"SERIES{index}" })
+                        .ToList()
+                },
+                new CrSearchGroup
+                {
+                    Type = "movie_listing",
+                    Count = 6,
+                    Items = Enumerable.Range(0, 6)
+                        .Select(index => new CrSearchItem { Id = $"MOVIE{index}" })
+                        .ToList()
+                },
+                new CrSearchGroup { Type = "episode", Count = 5_000, Items = [] }
+            ]
+        };
+
+        Assert.True(CrunchyrollApiService.SearchHasNextPage(firstPage, start: 0));
+
+        var lastPage = new CrSearchResult
+        {
+            Data =
+            [
+                new CrSearchGroup
+                {
+                    Type = "series",
+                    Count = 143,
+                    Items = Enumerable.Range(100, 43)
+                        .Select(index => new CrSearchItem { Id = $"SERIES{index}" })
+                        .ToList()
+                }
+            ]
+        };
+
+        Assert.False(CrunchyrollApiService.SearchHasNextPage(lastPage, start: 100));
+    }
+
+    [Fact]
+    public void ParseSearchResults_MergesPagesAndRanksLaterExactHit()
+    {
+        var groups = new[]
+        {
+            new CrSearchGroup
+            {
+                Type = "series",
+                Items =
+                [
+                    new CrSearchItem { Id = "FUZZY", Title = "A Fuzzy Family Show" },
+                    new CrSearchItem { Id = "DUPLICATE", Title = "Duplicate" }
+                ]
+            },
+            new CrSearchGroup
+            {
+                Type = "movie_listing",
+                Items =
+                [
+                    new CrSearchItem { Id = "EXACT", Title = "SPY x FAMILY CODE: White" },
+                    new CrSearchItem { Id = "DUPLICATE", Title = "Duplicate" }
+                ]
+            }
+        };
+
+        var results = CrunchyrollApiService.ParseSearchResults(groups, "SPY x FAMILY CODE: White");
+
+        Assert.Equal("EXACT", results[0].Id);
+        Assert.Single(results, result => result.Id == "DUPLICATE");
+    }
+
+    [Fact]
+    public void SearchContainsExactTitle_IgnoresNonDownloadableGroupsAndCase()
+    {
+        var groups = new[]
+        {
+            new CrSearchGroup
+            {
+                Type = "episode",
+                Items = [new CrSearchItem { Id = "EP", Title = "Missing Show" }]
+            },
+            new CrSearchGroup
+            {
+                Type = "series",
+                Items = [new CrSearchItem { Id = "SERIES", Title = "MISSING SHOW" }]
+            }
+        };
+
+        Assert.True(CrunchyrollApiService.SearchContainsExactTitle(groups, "Missing Show"));
+        Assert.False(CrunchyrollApiService.SearchContainsExactTitle(groups[..1], "Missing Show"));
+    }
+
+    [Theory]
+    [InlineData("https://www.crunchyroll.com/series/GYZJ43JMR/that-time-i-got-reincarnated-as-a-slime", "GYZJ43JMR")]
+    [InlineData("https://www.crunchyroll.com/watch/G14U411V1/demons-and-strategies", "G14U411V1")]
+    [InlineData("GYZJ43JMR", "GYZJ43JMR")]
+    public void ExtractIdFromUrl_UsesOpaqueIdInsteadOfTrailingSlug(string input, string expected)
+    {
+        Assert.Equal(expected, CrunchyrollApiService.ExtractIdFromUrl(input));
+    }
+
+    [Fact]
+    public void ExtractDirectSeriesId_AcceptsSeriesUrlButNotEpisodeUrl()
+    {
+        Assert.Equal(
+            "GYZJ43JMR",
+            CrunchyrollApiService.ExtractDirectSeriesId(
+                "https://www.crunchyroll.com/series/GYZJ43JMR/that-time-i-got-reincarnated-as-a-slime"));
+        Assert.Null(CrunchyrollApiService.ExtractDirectSeriesId(
+            "https://www.crunchyroll.com/watch/G14U411V1/demons-and-strategies"));
+    }
 }

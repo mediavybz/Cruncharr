@@ -71,18 +71,59 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             return new List<SeriesInfo>();
         }
 
-        var request = HttpClientWrapper.CreateRequest(BuildSearchUri(query).ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
-
-        if (!isOk)
+        var directSeriesId = ExtractDirectSeriesId(query);
+        if (directSeriesId != null)
         {
-            _logger?.LogError("Search failed: {Error}", error);
-            return new List<SeriesInfo>();
+            var directSeries = await GetSeriesAsync(
+                directSeriesId,
+                useBetaApi: true,
+                cancellationToken: cancellationToken);
+            return directSeries == null ? [] : [directSeries];
         }
 
         try
         {
-            return ParseSearchResults(content, query);
+            const int pageSize = 100;
+            const int minimumPages = 3;
+            const int maxPages = 10;
+            var groups = new List<CrSearchGroup>();
+
+            // Crunchyroll caps a search group at 100 items even when its `count` is larger.
+            // Fetch a small, bounded number of pages so broad-but-valid queries do not silently
+            // lose catalog entries, while still keeping type-ahead search latency and API load
+            // predictable. Exact-title results normally land on page one.
+            for (var page = 0; page < maxPages; page++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var start = page * pageSize;
+                var request = HttpClientWrapper.CreateRequest(BuildSearchUri(query, pageSize, start).ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+                var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+
+                if (!isOk)
+                {
+                    _logger?.LogError("Search page {Page} failed: {Error}", page + 1, error);
+                    if (page == 0) return [];
+                    break;
+                }
+
+                var result = JsonConvert.DeserializeObject<CrSearchResult>(content);
+                if (result?.Data == null) break;
+                groups.AddRange(result.Data);
+
+                if (!SearchHasNextPage(result, start)) break;
+
+                // Broad words can span thousands of matches, while Crunchyroll occasionally
+                // ranks an exact title after the first few pages. Always provide the previous
+                // three-page breadth, then stop as soon as the exact requested title is found.
+                // If it is still absent, continue to a bounded 1,000 catalog candidates.
+                if (page + 1 >= minimumPages && SearchContainsExactTitle(groups, query)) break;
+            }
+
+            return ParseSearchResults(groups, query);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -111,10 +152,37 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         var result = JsonConvert.DeserializeObject<CrSearchResult>(content);
         if (result?.Data == null) return [];
 
+        return ParseSearchResults(result.Data, query);
+    }
+
+    internal static bool SearchHasNextPage(CrSearchResult result, int start)
+    {
+        return (result.Data ?? [])
+            .Where(IsDownloadableSearchGroup)
+            .Any(group => group.Count > start + (group.Items?.Count ?? 0));
+    }
+
+    internal static bool SearchContainsExactTitle(IEnumerable<CrSearchGroup> groups, string query)
+    {
+        var title = query.Trim();
+        return title.Length > 0 && groups
+            .Where(IsDownloadableSearchGroup)
+            .SelectMany(group => group.Items ?? [])
+            .Any(item => string.Equals(item.Title, title, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsDownloadableSearchGroup(CrSearchGroup group)
+    {
+        return string.Equals(group.Type, "series", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(group.Type, "movie_listing", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static List<SeriesInfo> ParseSearchResults(IEnumerable<CrSearchGroup> groups, string query)
+    {
+
         var normalizedQuery = query.Trim();
-        var ordered = result.Data
-            .Where(group => string.Equals(group.Type, "series", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(group.Type, "movie_listing", StringComparison.OrdinalIgnoreCase))
+        var ordered = groups
+            .Where(IsDownloadableSearchGroup)
             .SelectMany(group => (group.Items ?? []).Select(item => new { Group = group.Type!, Item = item }))
             .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Item.Id))
             .Select((candidate, index) => new { Candidate = candidate, Index = index })
@@ -1258,16 +1326,49 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         return _authService.Token?.access_token != null;
     }
 
-    private static string ExtractIdFromUrl(string input)
+    internal static string ExtractIdFromUrl(string input)
     {
-        if (input.StartsWith("http"))
+        if (Uri.TryCreate(input.Trim(), UriKind.Absolute, out var uri))
         {
-            var parts = input.Split('/');
-            if (parts.Length == 0) return input;
-            return parts.Last().Split('?')[0];
+            var parts = uri.AbsolutePath
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (var index = 0; index + 1 < parts.Length; index++)
+            {
+                if (parts[index].Equals("series", StringComparison.OrdinalIgnoreCase) ||
+                    parts[index].Equals("watch", StringComparison.OrdinalIgnoreCase))
+                {
+                    return parts[index + 1];
+                }
+            }
+
+            return parts.FirstOrDefault(IsOpaqueContentId) ?? parts.LastOrDefault() ?? input;
         }
-        return input;
+
+        return input.Trim();
     }
+
+    internal static string? ExtractDirectSeriesId(string query)
+    {
+        var trimmed = query.Trim();
+        if (IsOpaqueContentId(trimmed)) return trimmed;
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)) return null;
+
+        var parts = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var index = 0; index + 1 < parts.Length; index++)
+        {
+            if (parts[index].Equals("series", StringComparison.OrdinalIgnoreCase) &&
+                IsOpaqueContentId(parts[index + 1]))
+            {
+                return parts[index + 1];
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsOpaqueContentId(string value) =>
+        Regex.IsMatch(value, "^(?=.*[0-9])[A-Z0-9]{8,16}$", RegexOptions.CultureInvariant);
 
     private static List<string> ExtractImageUrls(Dictionary<string, List<List<object>>>? images)
     {

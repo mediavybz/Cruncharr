@@ -97,15 +97,27 @@ public class QueueController : ControllerBase
                 Versions = request.Versions
             };
 
-            _queueService.AddToQueue(episode);
-            _logger.LogInformation("Added episode {EpisodeId} to queue", request.EpisodeId);
+            var result = _queueService.AddToQueue(episode);
+            _logger.LogInformation(result.Added
+                ? "Added episode {EpisodeId} to queue"
+                : "Episode {EpisodeId} was already present in the queue", request.EpisodeId);
 
             // Adaptive defaults: learn from the PRIMARY (first) language the user picked for this
             // download. No-op unless the feature is enabled; bare adds (no explicit pick) don't count.
-            _languagePrefs.RecordPick("audio", request.SelectedDubs?.FirstOrDefault());
-            _languagePrefs.RecordPick("sub", request.SelectedSubs?.FirstOrDefault());
+            if (result.Added)
+            {
+                _languagePrefs.RecordPick("audio", request.SelectedDubs?.FirstOrDefault());
+                _languagePrefs.RecordPick("sub", request.SelectedSubs?.FirstOrDefault());
+            }
 
-            return Ok(new { Message = "Added to queue", EpisodeId = request.EpisodeId });
+            return Ok(new
+            {
+                result.Added,
+                Message = result.Added ? "Added to queue" : "Episode is already in the queue",
+                EpisodeId = request.EpisodeId,
+                QueueItemId = result.Item.Id,
+                State = result.Item.DownloadProgress.State.ToString()
+            });
         }
         catch (Exception ex)
         {

@@ -155,7 +155,8 @@ public class QueuePumpEligibilityTests
         var queue = new Mock<IQueueService>();
         queue.Setup(service => service.GetQueue()).Returns([]);
         queue.Setup(service => service.AddToQueue(It.IsAny<EpisodeInfo>()))
-            .Callback<EpisodeInfo>(item => queuedEpisode = item);
+            .Callback<EpisodeInfo>(item => queuedEpisode = item)
+            .Returns<EpisodeInfo>(item => new QueueAddResult(true, new QueueItem { Episode = item }));
 
         using var provider = new ServiceCollection()
             .AddSingleton(history.Object)

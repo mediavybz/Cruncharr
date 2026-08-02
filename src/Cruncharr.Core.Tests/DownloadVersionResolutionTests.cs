@@ -15,6 +15,49 @@ namespace Cruncharr.Core.Tests;
 /// </summary>
 public class DownloadVersionResolutionTests
 {
+    [Fact]
+    public void FindExistingDownload_RequiresExactEpisodeAndAudioAndAnExistingFile()
+    {
+        var oldMatch = new DownloadHistory
+        {
+            EpisodeId = "GEXIST001",
+            AudioLanguage = "en-US",
+            OutputPath = "/media/old.mkv",
+            DownloadedAt = new DateTime(2026, 8, 1, 1, 0, 0, DateTimeKind.Utc)
+        };
+        var latestMatch = new DownloadHistory
+        {
+            EpisodeId = "GEXIST001",
+            AudioLanguage = "EN-us",
+            OutputPath = "/media/latest.mkv",
+            DownloadedAt = new DateTime(2026, 8, 1, 2, 0, 0, DateTimeKind.Utc)
+        };
+        var wrongEpisode = new DownloadHistory
+        {
+            EpisodeId = "GEXIST002",
+            AudioLanguage = "en-US",
+            OutputPath = "/media/wrong.mkv",
+            DownloadedAt = new DateTime(2026, 8, 1, 3, 0, 0, DateTimeKind.Utc)
+        };
+
+        var result = DownloadService.FindExistingDownload(
+            [oldMatch, latestMatch, wrongEpisode],
+            "GEXIST001",
+            ["en-US"],
+            [],
+            path => path is "/media/old.mkv" or "/media/latest.mkv");
+
+        Assert.Same(latestMatch, result);
+        Assert.Null(DownloadService.FindExistingDownload([latestMatch], "GEXIST001", ["ja-JP"], [], _ => true));
+        Assert.Null(DownloadService.FindExistingDownload([latestMatch], "GEXIST001", ["en-US"], [], _ => false));
+
+        latestMatch.AudioLanguages = ["en-US", "ja-JP"];
+        latestMatch.SubtitleLanguages = ["en-US"];
+        Assert.Same(latestMatch, DownloadService.FindExistingDownload([latestMatch], "GEXIST001", ["ja-JP", "en-US"], ["en-US"], _ => true));
+        Assert.Null(DownloadService.FindExistingDownload([latestMatch], "GEXIST001", ["ja-JP", "fr-FR"], ["en-US"], _ => true));
+        Assert.Null(DownloadService.FindExistingDownload([latestMatch], "GEXIST001", ["en-US"], ["es-419"], _ => true));
+    }
+
     private static EpisodeVersion V(string locale, string guid, bool original = false) =>
         new EpisodeVersion { AudioLocale = locale, Guid = guid, Original = original };
 

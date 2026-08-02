@@ -72,6 +72,17 @@
             };
         })();
 
+        async function readQueueAdmission(response) {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            try {
+                const data = await response.json();
+                return { added: data.added !== false, data };
+            } catch (e) {
+                // Compatibility with an older backend that returned no admission flag.
+                return { added: true, data: null };
+            }
+        }
+
         let currentPage = 'downloads';
         let queueData = [];
         let historyData = [];
@@ -988,7 +999,8 @@
                                 // the correct dub stream.
                             })
                         });
-                        if (queueRes.ok) {
+                        const admission = await readQueueAdmission(queueRes);
+                        if (admission.added) {
                             added++;
                             // Mark as watched if enabled
                             if (markAsWatched && item.data?.[0]?.mediaId) {
@@ -1157,8 +1169,8 @@
                         locale: 'ja-JP'
                     })
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                showToast('Added music video to queue', 'success');
+                const admission = await readQueueAdmission(res);
+                showToast(admission.added ? 'Added music video to queue' : 'Music video is already in the queue', admission.added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to add to queue', 'error');
             }
@@ -1473,8 +1485,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                showToast('Added to queue', 'success');
+                const admission = await readQueueAdmission(res);
+                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to add', 'error');
             }
@@ -2265,8 +2277,8 @@
                         seriesTitle: seriesTitle || 'Unknown'
                     })
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                showToast('Added to queue', 'success');
+                const admission = await readQueueAdmission(res);
+                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to add to queue', 'error');
             }
@@ -4186,7 +4198,7 @@
                                         thumbnailUrl: episode.thumbnailImageUrl || ''
                                     })
                                 });
-                                if (queueRes.ok) added++;
+                                if ((await readQueueAdmission(queueRes)).added) added++;
                             }
                         }
                     }
@@ -4655,8 +4667,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                showToast('Added to queue', 'success');
+                const admission = await readQueueAdmission(res);
+                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to add to queue', 'error');
             }
@@ -4717,8 +4729,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                showToast('Added to queue with selected dubs/subs', 'success');
+                const admission = await readQueueAdmission(res);
+                showToast(admission.added ? 'Added to queue with selected dubs/subs' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
                 panel.remove();
                 checkLanguageSuggestion();
             } catch (e) {
@@ -4751,7 +4763,7 @@
                                 description: ep.description || null
                             })
                         });
-                        if (queueRes.ok) added++;
+                        if ((await readQueueAdmission(queueRes)).added) added++;
                     }
                 }
                 
@@ -5177,7 +5189,7 @@
                                 description: ep.description || null
                             })
                         });
-                        if (queueRes.ok) added++;
+                        if ((await readQueueAdmission(queueRes)).added) added++;
                     }
                 }
                 

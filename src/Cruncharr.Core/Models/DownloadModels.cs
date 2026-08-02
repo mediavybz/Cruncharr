@@ -114,6 +114,7 @@ public class EpisodeInfo
 public class SeriesInfo
 {
     public string Id { get; set; } = "";
+    public string ContentType { get; set; } = "series";
     public string Title { get; set; } = "";
     public string? Description { get; set; }
     public string? CoverArtUrl { get; set; }

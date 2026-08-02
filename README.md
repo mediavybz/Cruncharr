@@ -162,6 +162,28 @@ Publish the testing image:
 bash scripts/publish-docker.sh --tag ghcr.io/mediavybz/cruncharr:testing --push
 ```
 
+### Reclaim local Docker build storage
+
+After verifying a published image, remove the disposable cache from the builder used for the publish:
+
+```bash
+docker buildx prune --all --force
+docker image prune --force
+docker system df
+```
+
+If a dedicated temporary builder was created, remove it with `docker buildx rm <builder-name>`. To remove **all** unused local images, stopped containers, networks, build cache, and volumes, use `docker system prune --all --volumes --force`; this is machine-wide and must not be run when unused volumes contain data that should be kept.
+
+On Windows, Docker may free space internally without shrinking its physical VHD. With Docker data already pruned, run the following from an elevated PowerShell window:
+
+```powershell
+$dockerVhd = "$env:LOCALAPPDATA\Docker\wsl\disk\docker_data.vhdx"
+docker desktop stop
+wsl --shutdown
+Optimize-VHD -Path $dockerVhd -Mode Full
+docker desktop start
+```
+
 ## API Endpoints
 
 The backend exposes a REST API at `http://localhost:8585/api/v1/`:

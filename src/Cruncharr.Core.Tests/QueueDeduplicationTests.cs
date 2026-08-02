@@ -71,6 +71,47 @@ public class QueueDeduplicationTests
         Assert.Equal(2, queue.GetQueue().Count);
     }
 
+    [Theory]
+    [InlineData(DownloadState.Queued)]
+    [InlineData(DownloadState.Downloading)]
+    [InlineData(DownloadState.Processing)]
+    [InlineData(DownloadState.Paused)]
+    public void AddToQueue_SuppressesDuplicateWhileExistingAttemptIsNonTerminal(DownloadState state)
+    {
+        using var queue = CreateQueue();
+        var existing = Item("blocking-row", "GTEST-BLOCK", DateTimeOffset.UtcNow);
+        existing.DownloadProgress.State = state;
+        queue.ReplaceQueue([existing]);
+
+        var result = queue.AddToQueue(Episode("GTEST-BLOCK", "New request"));
+
+        Assert.False(result.Added);
+        Assert.Same(existing, result.Item);
+        Assert.Equal(state, existing.DownloadProgress.State);
+        Assert.Single(queue.GetQueue());
+    }
+
+    [Theory]
+    [InlineData(DownloadState.Done)]
+    [InlineData(DownloadState.Error)]
+    [InlineData(DownloadState.Cancelled)]
+    public void AddToQueue_ReadmitsEpisodeByResettingTerminalRow(DownloadState state)
+    {
+        using var queue = CreateQueue();
+        var existing = Item("terminal-row", "GTEST-READMIT", DateTimeOffset.UtcNow.AddHours(-1));
+        existing.DownloadProgress.State = state;
+        queue.ReplaceQueue([existing]);
+
+        var result = queue.AddToQueue(Episode("GTEST-READMIT", "Re-download"));
+
+        Assert.True(result.Added);
+        Assert.Same(existing, result.Item);
+        Assert.Equal("terminal-row", result.Item.Id);
+        Assert.Equal(DownloadState.Queued, result.Item.DownloadProgress.State);
+        Assert.Equal("Re-download", result.Item.Episode.Title);
+        Assert.Single(queue.GetQueue());
+    }
+
     [Fact]
     public void Restore_KeepsEarliestEntryForEachEpisodeIdAndPersistsSanitizedQueue()
     {

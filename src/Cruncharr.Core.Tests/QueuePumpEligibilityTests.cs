@@ -189,6 +189,70 @@ public class QueuePumpEligibilityTests
     }
 
     [Fact]
+    public async Task Scheduler_QueuesDownloadedHistoryEpisodeWhenRecordedArtifactWasDeleted()
+    {
+        var missingPath = Path.Combine(Path.GetTempPath(), $"cruncharr-deleted-{Guid.NewGuid():N}.mkv");
+
+        var added = await RunSchedulerArtifactCaseAsync(
+            missingPath,
+            persistedSonarrHasFile: false,
+            currentSonarrHasFile: false,
+            sonarrEnabled: true);
+
+        Assert.Equal(1, added);
+    }
+
+    [Fact]
+    public async Task Scheduler_SuppressesDownloadedHistoryEpisodeWhileRecordedArtifactExists()
+    {
+        var existingPath = Path.Combine(Path.GetTempPath(), $"cruncharr-existing-{Guid.NewGuid():N}.mkv");
+        try
+        {
+            await File.WriteAllTextAsync(existingPath, "artifact", TestContext.Current.CancellationToken);
+
+            var added = await RunSchedulerArtifactCaseAsync(
+                existingPath,
+                persistedSonarrHasFile: false,
+                currentSonarrHasFile: false,
+                sonarrEnabled: false);
+
+            Assert.Equal(0, added);
+        }
+        finally
+        {
+            File.Delete(existingPath);
+        }
+    }
+
+    [Fact]
+    public async Task Scheduler_SuppressesSonarrManagedArtifactAfterImportMovesOriginalOutput()
+    {
+        var movedOriginalPath = Path.Combine(Path.GetTempPath(), $"cruncharr-imported-{Guid.NewGuid():N}.mkv");
+
+        var added = await RunSchedulerArtifactCaseAsync(
+            movedOriginalPath,
+            persistedSonarrHasFile: false,
+            currentSonarrHasFile: true,
+            sonarrEnabled: true);
+
+        Assert.Equal(0, added);
+    }
+
+    [Fact]
+    public async Task Scheduler_QueuesWhenPersistedSonarrFlagIsStaleAndDirectSonarrHasNoFile()
+    {
+        var missingPath = Path.Combine(Path.GetTempPath(), $"cruncharr-stale-sonarr-{Guid.NewGuid():N}.mkv");
+
+        var added = await RunSchedulerArtifactCaseAsync(
+            missingPath,
+            persistedSonarrHasFile: true,
+            currentSonarrHasFile: false,
+            sonarrEnabled: true);
+
+        Assert.Equal(1, added);
+    }
+
+    [Fact]
     public async Task Scheduler_SkipsUnmonitoredSonarrEpisodeWhenConfigured()
     {
         var series = new HistorySeries
@@ -466,6 +530,99 @@ public class QueuePumpEligibilityTests
         Episode = new EpisodeInfo { Id = id, Title = id },
         DownloadProgress = new DownloadProgress { State = state }
     };
+
+    private static async Task<int> RunSchedulerArtifactCaseAsync(
+        string recordedOutputPath,
+        bool persistedSonarrHasFile,
+        bool currentSonarrHasFile,
+        bool sonarrEnabled)
+    {
+        var episode = new HistoryEpisode
+        {
+            EpisodeId = "ARTIFACT-EP1",
+            Episode = "1",
+            EpisodeTitle = "Artifact Episode",
+            IsEpisodeAvailableOnStreamingService = true,
+            WasDownloaded = true,
+            SonarrEpisodeId = "100",
+            SonarrHasFile = persistedSonarrHasFile,
+            HistoryEpisodeAvailableDubLang = ["en-US"]
+        };
+        var series = new HistorySeries
+        {
+            SeriesId = "ARTIFACT-SERIES",
+            SeriesTitle = "Artifact Series",
+            SonarrSeriesId = "10",
+            Seasons =
+            [
+                new HistorySeason
+                {
+                    SeasonId = "ARTIFACT-SEASON",
+                    SeasonNum = "1",
+                    HistorySeasonDubLangOverride = ["en-US"],
+                    EpisodesList = [episode]
+                }
+            ]
+        };
+        var history = new Mock<IHistoryService>();
+        history.Setup(service => service.GetHistorySeriesAsync()).ReturnsAsync([series]);
+        history.Setup(service => service.GetAllAsync(0, int.MaxValue)).ReturnsAsync(
+        [
+            new DownloadHistory
+            {
+                EpisodeId = episode.EpisodeId!,
+                AudioLanguage = "en-US",
+                AudioLanguages = ["en-US"],
+                OutputPath = recordedOutputPath
+            }
+        ]);
+        history.Setup(service => service.CrUpdateSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>())).ReturnsAsync(true);
+
+        var sonarr = new Mock<ISonarrService>();
+        sonarr.Setup(service => service.GetEpisodesAsync(10, It.IsAny<SonarrConfig>(), true))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode
+                {
+                    Id = 100,
+                    SeriesId = 10,
+                    HasFile = currentSonarrHasFile
+                }
+            ]);
+
+        var added = 0;
+        var queue = new Mock<IQueueService>();
+        queue.Setup(service => service.GetQueue()).Returns([]);
+        queue.Setup(service => service.AddToQueue(It.IsAny<EpisodeInfo>()))
+            .Returns<EpisodeInfo>(item =>
+            {
+                Interlocked.Increment(ref added);
+                return new QueueAddResult(true, new QueueItem { Episode = item });
+            });
+
+        using var provider = new ServiceCollection()
+            .AddSingleton(history.Object)
+            .AddSingleton(queue.Object)
+            .AddSingleton(Mock.Of<ICrunchyrollApiService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(sonarr.Object)
+            .BuildServiceProvider();
+        using var scheduler = new AutoDownloadSchedulerService(
+            provider,
+            NullLogger<AutoDownloadSchedulerService>.Instance);
+        var config = new CruncharrConfig();
+        config.History.Enabled = true;
+        config.History.AutoRefreshMode = 0;
+        config.History.AutoRefreshAddToQueue = true;
+        config.History.CountMissing = true;
+        config.History.CountSonarr = false;
+        config.History.CheckPartialDownloads = false;
+        config.Sonarr.Enabled = sonarrEnabled;
+
+        await scheduler.RunCheckAsync(provider, config, TestContext.Current.CancellationToken);
+
+        return Volatile.Read(ref added);
+    }
 
     private static async Task WaitForAsync(Func<bool> predicate)
     {

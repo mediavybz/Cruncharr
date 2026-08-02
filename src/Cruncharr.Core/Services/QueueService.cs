@@ -193,19 +193,29 @@ public class QueueService : IQueueService, IDisposable
         QueueItem item;
         lock (_queueMutationLock)
         {
-            var existing = _queue.Values.FirstOrDefault(candidate =>
-                candidate.Episode != null && string.Equals(candidate.Episode.Id, episode.Id, StringComparison.Ordinal));
-            if (existing != null)
+            var matchingItems = _queue.Values
+                .Where(candidate => candidate.Episode != null &&
+                                    string.Equals(candidate.Episode.Id, episode.Id, StringComparison.Ordinal))
+                .ToList();
+            var blockingItem = matchingItems.FirstOrDefault(candidate =>
+                BlocksDuplicateAdmission(candidate.DownloadProgress));
+            if (blockingItem != null)
             {
-                _logger?.LogInformation("Episode {EpisodeId} is already queued as {QueueItemId}; duplicate admission suppressed", episode.Id, existing.Id);
-                return new QueueAddResult(false, existing);
+                _logger?.LogInformation("Episode {EpisodeId} is already queued as {QueueItemId}; duplicate admission suppressed", episode.Id, blockingItem.Id);
+                return new QueueAddResult(false, blockingItem);
             }
 
-            item = new QueueItem
+            // Done/Error/Cancelled rows describe terminal attempts, not live work. Reuse the
+            // oldest terminal row so a missing/deleted artifact can be admitted without creating
+            // another visually duplicated queue row.
+            item = matchingItems.OrderBy(candidate => candidate.AddedAt).FirstOrDefault() ?? new QueueItem();
+            foreach (var staleTerminal in matchingItems.Where(candidate => !ReferenceEquals(candidate, item)))
             {
-                Episode = episode,
-                DownloadProgress = new DownloadProgress { State = DownloadState.Queued }
-            };
+                _queue.TryRemove(staleTerminal.Id, out _);
+            }
+            item.Episode = episode;
+            item.DownloadProgress = new DownloadProgress { State = DownloadState.Queued };
+            item.AddedAt = DateTimeOffset.UtcNow;
             _queue[item.Id] = item;
         }
 
@@ -214,6 +224,14 @@ public class QueueService : IQueueService, IDisposable
         ScheduleSave();
         RequestPump();
         return new QueueAddResult(true, item);
+    }
+
+    internal static bool BlocksDuplicateAdmission(DownloadProgress? progress)
+    {
+        return progress?.State is not (
+            DownloadState.Done or
+            DownloadState.Error or
+            DownloadState.Cancelled);
     }
 
     public bool RemoveFromQueue(string queueItemId)
@@ -793,11 +811,22 @@ public class QueueService : IQueueService, IDisposable
 
             if (_config?.RemoveFinishedDownload == true)
             {
+                bool removedFinishedItem = false;
                 lock (_queueMutationLock)
                 {
-                    _queue.TryRemove(item.Id, out _);
+                    // AddToQueue may have re-admitted this terminal row between completion and
+                    // cleanup. Do not remove the newly queued attempt in that race.
+                    if (item.DownloadProgress.State == DownloadState.Done &&
+                        _queue.TryGetValue(item.Id, out var current) &&
+                        ReferenceEquals(current, item))
+                    {
+                        removedFinishedItem = _queue.TryRemove(item.Id, out _);
+                    }
                 }
-                _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
+                if (removedFinishedItem)
+                {
+                    _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
+                }
             }
         }
         catch (DownloadException dex)

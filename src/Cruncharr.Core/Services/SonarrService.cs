@@ -15,6 +15,7 @@ public interface ISonarrService
     Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config);
     Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config);
+    Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh);
     Task<SonarrEpisode?> GetEpisodeAsync(int episodeId, SonarrConfig config);
     Task<SonarrNamingConfig?> GetNamingConfigAsync(SonarrConfig config);
 }
@@ -294,13 +295,16 @@ public class SonarrService : ISonarrService
             ? string.Empty
             : new string(title.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
-    public virtual async Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config)
+    public virtual Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config) =>
+        GetEpisodesAsync(seriesId, config, forceRefresh: false);
+
+    public virtual async Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh)
     {
         var configKey = BuildCacheKey(config);
         var listKey = $"{configKey}|series:{seriesId}";
         lock (_metadataCacheLock)
         {
-            if (_episodeListCache.TryGetValue(listKey, out var cached) && IsFresh(cached.FetchedUtc))
+            if (!forceRefresh && _episodeListCache.TryGetValue(listKey, out var cached) && IsFresh(cached.FetchedUtc))
             {
                 return cached.Data;
             }
@@ -311,7 +315,7 @@ public class SonarrService : ISonarrService
         {
             lock (_metadataCacheLock)
             {
-                if (_episodeListCache.TryGetValue(listKey, out var cached) && IsFresh(cached.FetchedUtc))
+                if (!forceRefresh && _episodeListCache.TryGetValue(listKey, out var cached) && IsFresh(cached.FetchedUtc))
                 {
                     return cached.Data;
                 }

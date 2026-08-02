@@ -97,6 +97,8 @@
         let addDownloadSeriesData = null; // Stores EpisodeAndLanguage data from ListSeriesId
         let addDownloadEpisodeList = []; // Stores EpisodeDisplay list from ListSeriesId
         let selectedEpisodeDubs = new Map(); // episodeKey -> Set of selected dub locales
+        let addDownloadPreferredAudio = '';
+        let addDownloadPreferredAudioSource = '';
         let languagePrefsEnabled = false; // adaptive default language feature (loaded from /language-prefs)
         let _langSuggestShownFor = ''; // de-dupe the suggestion prompt within a session
         let historyRichData = []; // Cache for rich history data with episodes
@@ -105,6 +107,7 @@
         let isQueueGloballyPaused = false;
         let authIntervalId, historyIntervalId;
         let selectBrowseResultTimeout = null;
+        let selectBrowseGeneration = 0;
         let globalSearchDebounce = null; // top-bar search debounce timer
         let globalSearchAbort = null;    // top-bar search in-flight request
         let globalSearchResults = [];    // last top-bar search results
@@ -275,6 +278,7 @@
                 clearTimeout(selectBrowseResultTimeout);
                 selectBrowseResultTimeout = null;
             }
+            selectBrowseGeneration++;
             // Close history search popup if open
             if (historySearchPopupOpen) closeHistorySearchPopup();
             currentPage = page;
@@ -655,6 +659,7 @@
                         </div>
                         <div class="search-result-info">
                             <div class="search-result-title">${escapeHtml(s.title)}</div>
+                            <div class="search-result-type">${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
                             <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
                         </div>
                     </div>
@@ -806,13 +811,20 @@
                     const epData = addDownloadSeriesData[epKey];
                     if (epData && epData.variants) {
                         const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
-                        const preferredAudio = authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
+                        const preferredAudio = addDownloadPreferredAudio || authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
                         const selected = new Set();
-                        if (availableDubs.includes(preferredAudio)) selected.add(preferredAudio);
-                        else if (availableDubs.length > 0) selected.add(availableDubs[0]);
+                        const availablePreferred = findMatchingLocale(availableDubs, preferredAudio);
+                        if (availablePreferred) selected.add(availablePreferred);
+                        else if (availableDubs.length > 0 && addDownloadPreferredAudioSource !== 'Calendar filter') selected.add(availableDubs[0]);
                         if (selected.size > 0) {
                             selectedEpisodeDubs.set(epKey, selected);
+                        } else if (addDownloadPreferredAudioSource === 'Calendar filter') {
+                            selectedEpisodes.delete(epKey);
+                            showToast(`Audio ${preferredAudio} is not available for this episode`, 'info');
                         }
+                    } else if (addDownloadPreferredAudioSource === 'Calendar filter') {
+                        selectedEpisodes.delete(epKey);
+                        showToast(`Audio ${preferredAudio} is not available for this episode`, 'info');
                     }
                 }
             }
@@ -821,20 +833,24 @@
 
         // Pull the CURRENT Crunchyroll account language (preferred audio/sub) so a change made on
         // crunchyroll.com is reflected in Add Download without a re-login. Lightweight account GET.
-        async function refreshAuthStatus() {
+        async function refreshAuthStatus(isCurrent = () => true) {
             try {
                 const r = await fetch('/api/v1/auth/status?refresh=true');
-                if (r.ok) authStatus = await r.json();
+                if (r.ok) {
+                    const refreshedStatus = await r.json();
+                    if (isCurrent()) authStatus = refreshedStatus;
+                }
             } catch (e) { /* non-fatal: fall back to cached authStatus */ }
         }
 
         // Show WHY a language is pre-selected in Add Download, so the default isn't a mystery.
         // Source priority matches the seed: CR account preferred audio > Settings Default Audio.
-        function updateAddDefaultHint(preferredAudio) {
+        function updateAddDefaultHint(preferredAudio, sourceOverride = '') {
             const el = document.getElementById('add-default-hint');
             if (!el) return;
             let src;
-            if (authStatus?.preferredAudioLanguage) src = "your Crunchyroll account's preferred audio";
+            if (sourceOverride) src = sourceOverride;
+            else if (authStatus?.preferredAudioLanguage) src = "your Crunchyroll account's preferred audio";
             else if (config?.download?.defaultAudio) src = 'Settings → Default Audio';
             else src = 'the app default';
             el.innerHTML = `&#9432; Audio pre-selected: <strong>${escapeHtml(preferredAudio)}</strong> (from ${src}). Toggle per episode to change just this download — it won't alter your saved defaults.`;
@@ -897,7 +913,8 @@
                 ? addDownloadEpisodeList.filter(ep => ep.id === currentSeasonId)
                 : addDownloadEpisodeList;
             if (checked) {
-                const preferredAudio = authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
+                const preferredAudio = addDownloadPreferredAudio || authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
+                let unavailableCount = 0;
                 visibleEpisodes.forEach(ep => {
                     const epKey = ep.e;
                     selectedEpisodes.add(epKey);
@@ -907,13 +924,23 @@
                     if (epData && epData.variants && !selectedEpisodeDubs.has(epKey)) {
                         const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
                         const selected = new Set();
-                        if (availableDubs.includes(preferredAudio)) selected.add(preferredAudio);
-                        else if (availableDubs.length > 0) selected.add(availableDubs[0]);
+                        const availablePreferred = findMatchingLocale(availableDubs, preferredAudio);
+                        if (availablePreferred) selected.add(availablePreferred);
+                        else if (availableDubs.length > 0 && addDownloadPreferredAudioSource !== 'Calendar filter') selected.add(availableDubs[0]);
                         if (selected.size > 0) {
                             selectedEpisodeDubs.set(epKey, selected);
+                        } else if (addDownloadPreferredAudioSource === 'Calendar filter') {
+                            selectedEpisodes.delete(epKey);
+                            unavailableCount++;
                         }
+                    } else if ((!epData || !epData.variants) && addDownloadPreferredAudioSource === 'Calendar filter') {
+                        selectedEpisodes.delete(epKey);
+                        unavailableCount++;
                     }
                 });
+                if (unavailableCount > 0) {
+                    showToast(`${unavailableCount} episode(s) do not offer calendar-selected audio ${preferredAudio}`, 'info');
+                }
             } else {
                 selectedEpisodes.clear();
                 selectedEpisodeDubs.clear();
@@ -1215,6 +1242,18 @@
             return CAL_GENERIC_SERIES_LABEL.test((value || '').trim());
         }
 
+        function findMatchingLocale(locales, requested) {
+            const normalized = String(requested || '').toLowerCase();
+            return (locales || []).find(locale => String(locale || '').toLowerCase() === normalized) || '';
+        }
+
+        function chooseCalendarDub(isAllLanguages, dubFilter, episodeLocales, preferredAudio) {
+            if (!isAllLanguages && dubFilter && dubFilter !== 'none') {
+                return findMatchingLocale(episodeLocales, dubFilter) || dubFilter;
+            }
+            return findMatchingLocale(episodeLocales, preferredAudio) || episodeLocales[0] || '';
+        }
+
         async function resolveCalendarSeriesTitle(seriesId, audioLocale) {
             if (!seriesId) return '';
             if (calendarSeriesTitleCache.has(seriesId)) {
@@ -1411,7 +1450,7 @@
                                     // episode so the backend can resolve it (no mux/transcode failure).
                                     const epLocales = (ep.audioLocales && ep.audioLocales.length) ? ep.audioLocales : (ep.audioLocale ? [ep.audioLocale] : []);
                                     const preferredAudio = config?.download?.defaultAudio || authStatus?.preferredAudioLanguage || '';
-                                    const chosenDub = epLocales.includes(preferredAudio) ? preferredAudio : (epLocales[0] || '');
+                                    const chosenDub = chooseCalendarDub(isAllLangs, dubFilter, epLocales, preferredAudio);
                                     const canOpenEpisode = ep.hasAired && !ep.isUpcoming && ep.id && ep.seriesId;
                                     const thumbContents = `
                                         ${ep.thumbnailUrl && isSafeUrl(ep.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(ep.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
@@ -1835,18 +1874,25 @@
 
         async function selectBrowseResult(seriesId, episodeSelection = null) {
             navigateTo('add-download');
+            const loadGeneration = ++selectBrowseGeneration;
+            selectedEpisodes.clear();
+            selectedEpisodeDubs.clear();
+            addDownloadPreferredAudio = '';
+            addDownloadPreferredAudioSource = '';
             selectBrowseResultTimeout = setTimeout(async () => {
                 const listContainer = document.getElementById('add-episodes-list');
                 if (listContainer) {
                     listContainer.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
                 }
                 try {
+                    if (loadGeneration !== selectBrowseGeneration) return;
                     const dubLangs = [...(config?.download?.dubLanguages || ['ja-JP'])];
-                    if (episodeSelection?.audioLocale && !dubLangs.includes(episodeSelection.audioLocale)) {
+                    if (episodeSelection?.audioLocale && !findMatchingLocale(dubLangs, episodeSelection.audioLocale)) {
                         dubLangs.push(episodeSelection.audioLocale);
                     }
                     const dubLangParam = dubLangs.map(l => `dubLang=${encodeURIComponent(l)}`).join('&');
                     const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/list?${dubLangParam}`);
+                    if (loadGeneration !== selectBrowseGeneration) return;
                     if (res.status === 404) {
                         showToast('No episodes are available for this series', 'info');
                         if (listContainer) {
@@ -1862,6 +1908,7 @@
                     }
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const result = await res.json();
+                    if (loadGeneration !== selectBrowseGeneration) return;
                     
                     if (!result || !result.list) {
                         showToast('No episodes found for this series', 'error');
@@ -1894,23 +1941,26 @@
                         : null;
                     
                     // Pre-select preferred audio only (see renderAddEpisodesMultiDub init above).
-                    selectedEpisodeDubs.clear();
-                    await refreshAuthStatus(); // reflect website-side language change without re-login
-                    const preferredAudio = authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
+                    await refreshAuthStatus(() => loadGeneration === selectBrowseGeneration); // reflect website-side language change without re-login
+                    if (loadGeneration !== selectBrowseGeneration) return;
+                    const preferredAudio = episodeSelection?.audioLocale || authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
+                    addDownloadPreferredAudio = preferredAudio;
+                    addDownloadPreferredAudioSource = episodeSelection?.audioLocale ? 'Calendar filter' : '';
                     addDownloadEpisodeList.forEach(ep => {
                         const epKey = ep.e;
                         const epData = addDownloadSeriesData[epKey];
                         if (epData && epData.variants) {
                             const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
                             const selected = new Set();
-                            if (availableDubs.includes(preferredAudio)) selected.add(preferredAudio);
-                            else if (availableDubs.length > 0) selected.add(availableDubs[0]);
+                            const availablePreferred = findMatchingLocale(availableDubs, preferredAudio);
+                            if (availablePreferred) selected.add(availablePreferred);
+                            else if (!episodeSelection && availableDubs.length > 0) selected.add(availableDubs[0]);
                             if (selected.size > 0) {
                                 selectedEpisodeDubs.set(epKey, selected);
                             }
                         }
                     });
-                    updateAddDefaultHint(preferredAudio);
+                    updateAddDefaultHint(preferredAudio, addDownloadPreferredAudioSource);
 
                     const dropdown = document.getElementById('season-dropdown');
                     if (dropdown) {
@@ -1925,11 +1975,13 @@
                                 const availableDubs = (targetData?.variants || [])
                                     .map(v => v.lang?.crLocale || v.item?.audioLocale || v.item?.audio_locale)
                                     .filter(Boolean);
-                                const requestedLocale = availableDubs.find(locale =>
-                                    locale.toLowerCase() === String(episodeSelection.audioLocale || '').toLowerCase()
-                                );
+                                const requestedLocale = findMatchingLocale(availableDubs, episodeSelection.audioLocale);
                                 if (requestedLocale) {
                                     selectedEpisodeDubs.set(calendarTarget.episodeKey, new Set([requestedLocale]));
+                                } else if (episodeSelection.audioLocale) {
+                                    selectedEpisodeDubs.delete(calendarTarget.episodeKey);
+                                    selectedEpisodes.delete(calendarTarget.episodeKey);
+                                    showToast(`The calendar-selected audio ${episodeSelection.audioLocale} is not available for this episode`, 'info');
                                 }
                                 renderAddEpisodesMultiDub(
                                     addDownloadEpisodeList.filter(ep => ep.id === initialSeasonId)
@@ -1948,6 +2000,7 @@
                         }
                     }
                 } catch (e) {
+                    if (loadGeneration !== selectBrowseGeneration) return;
                     console.error('Failed to load series:', e);
                     showToast('Failed to load series episodes', 'error');
                     const listContainer = document.getElementById('add-episodes-list');

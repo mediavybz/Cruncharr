@@ -71,18 +71,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             return new List<SeriesInfo>();
         }
 
-        var queryParams = new NameValueCollection{
-            { "q", query },
-            { "n", "20" },
-            { "type", "series" }
-        };
-
-        var uriBuilder = new UriBuilder(ApiUrls.Search(true))
-        {
-            Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
-        };
-
-        var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
+        var request = HttpClientWrapper.CreateRequest(BuildSearchUri(query).ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
         var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
 
         if (!isOk)
@@ -93,33 +82,71 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         try
         {
-            var result = JsonConvert.DeserializeObject<CrSearchResult>(content);
-            if (result?.Data == null) return new List<SeriesInfo>();
-
-            var seriesList = new List<SeriesInfo>();
-            foreach (var group in result.Data)
-            {
-                if (group.Items == null) continue;
-                foreach (var item in group.Items)
-                {
-                    seriesList.Add(new SeriesInfo
-                    {
-                        Id = item.Id,
-                        Title = item.Title,
-                        Description = item.Description,
-                        Images = ExtractImageUrls(item.Images),
-                        CoverArtUrl = ExtractBestImage(item.Images, "poster_tall"),
-                        ThumbnailUrl = ExtractBestImage(item.Images, "poster_wide")
-                    });
-                }
-            }
-            return seriesList;
+            return ParseSearchResults(content, query);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to parse search results");
             return new List<SeriesInfo>();
         }
+    }
+
+    internal static Uri BuildSearchUri(string query, int limit = 100, int start = 0)
+    {
+        var queryParams = new NameValueCollection
+        {
+            { "q", query },
+            { "n", Math.Clamp(limit, 1, 100).ToString() },
+            { "start", Math.Max(0, start).ToString() },
+            { "type", "series,movie_listing" }
+        };
+        return new UriBuilder(ApiUrls.Search(true))
+        {
+            Query = string.Join("&", queryParams.AllKeys.Select(key => $"{key}={HttpUtility.UrlEncode(queryParams[key])}"))
+        }.Uri;
+    }
+
+    internal static List<SeriesInfo> ParseSearchResults(string content, string query)
+    {
+        var result = JsonConvert.DeserializeObject<CrSearchResult>(content);
+        if (result?.Data == null) return [];
+
+        var normalizedQuery = query.Trim();
+        var ordered = result.Data
+            .Where(group => string.Equals(group.Type, "series", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(group.Type, "movie_listing", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(group => (group.Items ?? []).Select(item => new { Group = group.Type!, Item = item }))
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Item.Id))
+            .Select((candidate, index) => new { Candidate = candidate, Index = index })
+            .GroupBy(value => value.Candidate.Item.Id, StringComparer.Ordinal)
+            .Select(group => group
+                .OrderBy(value => SearchRelevance(value.Candidate.Item.Title, normalizedQuery))
+                .ThenBy(value => value.Index)
+                .First())
+            .OrderBy(value => SearchRelevance(value.Candidate.Item.Title, normalizedQuery))
+            .ThenBy(value => value.Index)
+            .Take(200);
+
+        return ordered.Select(value => new SeriesInfo
+        {
+            Id = value.Candidate.Item.Id,
+            ContentType = value.Candidate.Group,
+            Title = value.Candidate.Item.Title,
+            Description = value.Candidate.Item.Description,
+            Images = ExtractImageUrls(value.Candidate.Item.Images),
+            CoverArtUrl = ExtractBestImage(value.Candidate.Item.Images, "poster_tall"),
+            ThumbnailUrl = ExtractBestImage(value.Candidate.Item.Images, "poster_wide")
+        }).ToList();
+    }
+
+    private static int SearchRelevance(string? title, string query)
+    {
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(query)) return 4;
+        if (string.Equals(title, query, StringComparison.OrdinalIgnoreCase)) return 0;
+        if (title.StartsWith(query, StringComparison.OrdinalIgnoreCase)) return 1;
+        if (title.Contains(query, StringComparison.OrdinalIgnoreCase)) return 2;
+        var terms = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return terms.Length > 0 && terms.All(term => title.Contains(term, StringComparison.OrdinalIgnoreCase)) ? 3 : 4;
     }
 
     public async Task<SeriesInfo?> GetSeriesAsync(string seriesId, bool useBetaApi, string? crLocale = null, bool forced = false, CancellationToken cancellationToken = default)

@@ -21,7 +21,7 @@ public class SeriesController : ControllerBase
     /// Search for series on Crunchyroll
     /// </summary>
     [HttpGet("search")]
-    public async Task<ActionResult> Search([FromQuery] string query, [FromQuery] bool premium = false)
+    public async Task<ActionResult> Search([FromQuery] string query, [FromQuery] bool premium = false, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -30,8 +30,12 @@ public class SeriesController : ControllerBase
 
         try
         {
-            var results = await _api.SearchAsync(query, premium);
+            var results = await _api.SearchAsync(query, premium, cancellationToken);
             return Ok(results);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

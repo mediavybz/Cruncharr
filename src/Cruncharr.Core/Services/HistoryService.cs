@@ -94,7 +94,8 @@ public class HistoryService : IHistoryService, IDisposable
         try
         {
             var history = await LoadHistoryAsync();
-            history.RemoveAll(h => h.EpisodeId == entry.EpisodeId && h.AudioLanguage == entry.AudioLanguage);
+            history.RemoveAll(h => string.Equals(h.EpisodeId, entry.EpisodeId, StringComparison.Ordinal) &&
+                                   string.Equals(h.AudioLanguage, entry.AudioLanguage, StringComparison.OrdinalIgnoreCase));
             history.Add(entry);
             await SaveHistoryAsync(history);
         }

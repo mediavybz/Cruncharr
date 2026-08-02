@@ -326,8 +326,10 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                             SelectedSubs = selectedSubs
                         };
 
-                        queueService.AddToQueue(episodeInfo);
-                        addedCount++;
+                        if (queueService.AddToQueue(episodeInfo).Added)
+                        {
+                            addedCount++;
+                        }
                     }
                 }
                 catch (Exception ex)

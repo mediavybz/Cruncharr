@@ -166,6 +166,126 @@ public class DownloadService : IDownloadService
         episode.SelectedDubs?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim()
         ?? config.Download.DefaultAudio;
 
+    internal static List<string> ResolveRequestedAudioLanguages(EpisodeInfo episode, CruncharrConfig config)
+    {
+        var explicitDubs = episode.SelectedDubs?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+        if (explicitDubs.Count > 0) return explicitDubs;
+
+        if (config.Download.DownloadMultipleDubs)
+        {
+            var configuredDubs = config.Download.DubLanguages
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (configuredDubs.Count > 0) return configuredDubs;
+        }
+        return [ResolveRequestedAudioLanguage(episode, config)];
+    }
+
+    internal static List<string> ResolveRequestedSubtitleLanguages(EpisodeInfo episode, CruncharrConfig config)
+    {
+        if (config.Download.SkipSubs) return [];
+        var requested = episode.SelectedSubs?.Any(value => !string.IsNullOrWhiteSpace(value)) == true
+            ? episode.SelectedSubs
+            : config.Download.SoftSubs;
+        return requested?
+            .Where(value => !string.IsNullOrWhiteSpace(value) && !string.Equals(value, "none", StringComparison.OrdinalIgnoreCase))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+    }
+
+    internal static DownloadHistory? FindExistingDownload(
+        IEnumerable<DownloadHistory> history,
+        string episodeId,
+        IReadOnlyCollection<string> audioLanguages,
+        IReadOnlyCollection<string> subtitleLanguages,
+        Func<string, bool>? fileExists = null)
+    {
+        fileExists ??= File.Exists;
+        return history
+            .Where(entry => string.Equals(entry.EpisodeId, episodeId, StringComparison.Ordinal))
+            .Where(entry =>
+            {
+                var recordedAudio = entry.AudioLanguages?.Count > 0 ? entry.AudioLanguages : [entry.AudioLanguage];
+                return audioLanguages.All(requested => recordedAudio.Contains(requested, StringComparer.OrdinalIgnoreCase));
+            })
+            .Where(entry => subtitleLanguages.All(requested =>
+                entry.SubtitleLanguages.Contains(requested, StringComparer.OrdinalIgnoreCase)))
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.OutputPath) && fileExists(entry.OutputPath))
+            .OrderByDescending(entry => entry.DownloadedAt)
+            .FirstOrDefault();
+    }
+
+    private async Task AdoptExistingArtifactAsync(
+        EpisodeInfo episode,
+        CruncharrConfig config,
+        string outputPath,
+        IReadOnlyCollection<string> audioLanguages,
+        IReadOnlyCollection<string> subtitleLanguages,
+        DownloadHistory? existing = null)
+    {
+        if (_history == null || !config.Download.HistoryEnabled) return;
+        try
+        {
+            var richSeriesId = !string.IsNullOrWhiteSpace(episode.SeriesId)
+                ? episode.SeriesId
+                : !string.IsNullOrWhiteSpace(existing?.SeriesId)
+                    ? existing.SeriesId
+                    : existing == null
+                        ? ResolveRichSeriesId(episode)
+                        : null;
+            if (string.IsNullOrWhiteSpace(episode.SeriesId)) episode.SeriesId = richSeriesId;
+            if (string.IsNullOrWhiteSpace(episode.SeriesTitle)) episode.SeriesTitle = existing?.SeriesTitle ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(episode.Title)) episode.Title = existing?.EpisodeTitle ?? string.Empty;
+            if (episode.SeasonNumber <= 0 && existing != null) episode.SeasonNumber = existing.SeasonNumber;
+            if (episode.EpisodeNumber <= 0 && existing != null) episode.EpisodeNumber = existing.EpisodeNumber;
+            if (string.IsNullOrWhiteSpace(episode.SeasonId) && !string.IsNullOrWhiteSpace(richSeriesId))
+                episode.SeasonId = $"{richSeriesId}|S{episode.SeasonNumber}";
+
+            var dubs = (existing?.AudioLanguages?.Count > 0 ? existing.AudioLanguages : audioLanguages)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var subs = (existing?.SubtitleLanguages?.Count > 0 ? existing.SubtitleLanguages : subtitleLanguages)
+                .Where(value => !string.IsNullOrWhiteSpace(value) && !string.Equals(value, "all", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var primaryAudio = dubs.FirstOrDefault() ?? ResolveRequestedAudioLanguage(episode, config);
+            var fileInfo = new FileInfo(outputPath);
+            await _history.AddAsync(new DownloadHistory
+            {
+                EpisodeId = episode.Id,
+                SeriesId = richSeriesId ?? string.Empty,
+                SeriesTitle = episode.SeriesTitle,
+                EpisodeTitle = episode.Title,
+                SeasonNumber = episode.SeasonNumber,
+                EpisodeNumber = episode.EpisodeNumber,
+                AudioLanguage = primaryAudio,
+                AudioLanguages = dubs,
+                SubtitleLanguages = subs,
+                DownloadedAt = existing?.DownloadedAt ?? DateTime.UtcNow,
+                OutputPath = outputPath,
+                FileSizeBytes = fileInfo.Exists ? fileInfo.Length : 0
+            });
+
+            if (!string.IsNullOrWhiteSpace(richSeriesId))
+            {
+                await _history.UpdateWithSeasonDataAsync([episode]);
+                await _history.SetAsDownloadedAsync(richSeriesId, episode.SeasonId, episode.Id, dubs, subs);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to adopt existing output into history for {EpisodeId}", episode.Id);
+        }
+    }
+
     internal static bool ShouldDownloadMultipleDubs(EpisodeInfo episode, CruncharrConfig config)
     {
         var explicitDubCount = episode.SelectedDubs?
@@ -379,6 +499,39 @@ public class DownloadService : IDownloadService
     public async Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default, Action? onDownloadComplete = null)
     {
         _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", episode.Id, episode.Title);
+
+        // A persisted queue may outlive the completed queue row that originally admitted the
+        // episode. Treat a matching, still-present history artifact as an idempotent success so a
+        // retry/restart cannot redownload it under a numeric suffix.
+        if (_history != null && config.Download.HistoryEnabled && !config.Download.ReplaceExistingFiles)
+        {
+            try
+            {
+                var requestedAudio = ResolveRequestedAudioLanguages(episode, config);
+                var requestedSubs = ResolveRequestedSubtitleLanguages(episode, config);
+                var history = await _history.GetAllAsync(0, int.MaxValue);
+                var existing = FindExistingDownload(history, episode.Id, requestedAudio, requestedSubs);
+                if (existing != null)
+                {
+                    _logger?.LogInformation("Skipping already-downloaded episode {EpisodeId}; existing output is {OutputPath}", episode.Id, existing.OutputPath);
+                    await AdoptExistingArtifactAsync(episode, config, existing.OutputPath, requestedAudio, requestedSubs, existing);
+                    progress?.Report(new DownloadProgress { State = DownloadState.Done, Percent = 100, Doing = "Already downloaded" });
+                    onDownloadComplete?.Invoke();
+                    return new DownloadResult
+                    {
+                        Success = true,
+                        SkippedExisting = true,
+                        OutputPath = existing.OutputPath,
+                        Episode = episode
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Could not check download history before downloading {EpisodeId}; continuing", episode.Id);
+            }
+        }
+
         progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 0, Doing = "Authenticating..." });
 
         // Authenticate (use beta API)
@@ -782,7 +935,20 @@ public class DownloadService : IDownloadService
         var outputParentDir = Path.GetDirectoryName(outputPath);
         if (!string.IsNullOrEmpty(outputParentDir)) Directory.CreateDirectory(outputParentDir);
 
-        // Replace existing file if configured
+        if (File.Exists(outputPath) && !config.Download.ReplaceExistingFiles)
+        {
+            var message = $"Output already exists at '{outputPath}', but history does not prove it contains every requested audio/subtitle track.";
+            _logger?.LogWarning("Refusing ambiguous output collision for episode {EpisodeId}: {OutputPath}", episode.Id, outputPath);
+            return new DownloadResult
+            {
+                Success = false,
+                ErrorMessage = message,
+                ErrorType = DownloadErrorType.OutputConflict,
+                Episode = episode
+            };
+        }
+
+        // Replace existing file if configured.
         if (config.Download.ReplaceExistingFiles && File.Exists(outputPath))
         {
             _logger?.LogInformation("Replacing existing file: {OutputPath}", outputPath);
@@ -1619,14 +1785,15 @@ public class DownloadService : IDownloadService
                             }
                             else
                             {
-                                int counter = 1;
-                                var baseNewPath = newOutputPath;
-                                while (File.Exists(newOutputPath))
+                                var message = $"Quality-resolved output already exists at '{newOutputPath}', but history does not prove it contains every requested audio/subtitle track.";
+                                _logger?.LogWarning("Refusing ambiguous quality-resolved collision for episode {EpisodeId}: {OutputPath}", episode.Id, newOutputPath);
+                                return new DownloadResult
                                 {
-                                    newOutputPath = Path.Combine(outputDir, $"{newFileName}({counter}){outputExtension}");
-                                    counter++;
-                                }
-                                _logger?.LogWarning("Collision detected, using {Path}", newOutputPath);
+                                    Success = false,
+                                    ErrorMessage = message,
+                                    ErrorType = DownloadErrorType.OutputConflict,
+                                    Episode = episode
+                                };
                             }
                         }
 
@@ -1689,7 +1856,7 @@ public class DownloadService : IDownloadService
                             if (!string.Equals(groupWorkPath, groupOutputPath, StringComparison.Ordinal))
                             {
                                 progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 97, Doing = $"Moving {locale}..." });
-                                MoveToFinalPath(groupWorkPath, groupOutputPath);
+                                MoveToFinalPath(groupWorkPath, groupOutputPath, config.Download.ReplaceExistingFiles);
                             }
                         }
                     }
@@ -1720,7 +1887,7 @@ public class DownloadService : IDownloadService
                         if (!string.Equals(workPath, outputPath, StringComparison.Ordinal))
                         {
                             progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 97, Doing = "Moving to output..." });
-                            MoveToFinalPath(workPath, outputPath);
+                            MoveToFinalPath(workPath, outputPath, config.Download.ReplaceExistingFiles);
                         }
                     }
                 }
@@ -1738,7 +1905,7 @@ public class DownloadService : IDownloadService
                         try
                         {
                             var dest = Path.Combine(outDir, baseName + "." + Path.GetFileName(rawFile));
-                            MoveToFinalPath(rawFile, dest);
+                            MoveToFinalPath(rawFile, dest, config.Download.ReplaceExistingFiles);
                         }
                         catch (Exception ex)
                         {
@@ -1792,7 +1959,8 @@ public class DownloadService : IDownloadService
                         EpisodeTitle = episode.Title,
                         SeasonNumber = episode.SeasonNumber,
                         EpisodeNumber = episode.EpisodeNumber,
-                        AudioLanguage = episode.Locale,
+                        AudioLanguage = downloadedDubs.FirstOrDefault() ?? ResolveRequestedAudioLanguage(episode, config),
+                        AudioLanguages = downloadedDubs.Count > 0 ? downloadedDubs : ResolveRequestedAudioLanguages(episode, config),
                         SubtitleLanguages = downloadedSubs,
                         DownloadedAt = DateTime.UtcNow,
                         OutputPath = outputPath,
@@ -3460,7 +3628,7 @@ public class DownloadService : IDownloadService
     // Move a finished file from the temp working dir to its final location. tempDir may live on
     // a different filesystem than the output dir (e.g. tmpfs vs the SSD mount), where File.Move's
     // rename() fails with a cross-device error; fall back to copy+delete in that case.
-    private void MoveToFinalPath(string sourcePath, string destPath)
+    private void MoveToFinalPath(string sourcePath, string destPath, bool replaceExisting)
     {
         if (!File.Exists(sourcePath))
         {
@@ -3470,7 +3638,14 @@ public class DownloadService : IDownloadService
 
         var destDir = Path.GetDirectoryName(destPath);
         if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
-        if (File.Exists(destPath)) File.Delete(destPath);
+        if (File.Exists(destPath))
+        {
+            if (!replaceExisting)
+            {
+                throw new DownloadException($"Output already exists at '{destPath}'.", DownloadErrorType.OutputConflict);
+            }
+            File.Delete(destPath);
+        }
 
         try
         {
@@ -3479,7 +3654,7 @@ public class DownloadService : IDownloadService
         catch (IOException)
         {
             // Cross-device (EXDEV) or similar: copy then remove the source.
-            File.Copy(sourcePath, destPath, overwrite: true);
+            File.Copy(sourcePath, destPath, overwrite: replaceExisting);
             File.Delete(sourcePath);
         }
         _logger?.LogInformation("Moved output to {Dest}", destPath);

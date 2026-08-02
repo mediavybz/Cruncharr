@@ -10,7 +10,7 @@ namespace Cruncharr.Core.Services;
 
 public interface IQueueService
 {
-    void AddToQueue(EpisodeInfo episode);
+    QueueAddResult AddToQueue(EpisodeInfo episode);
     bool RemoveFromQueue(string queueItemId);
     List<QueueItem> GetQueue();
     Task ProcessQueueAsync(CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default);
@@ -50,6 +50,7 @@ public interface IQueueService
 public class QueueService : IQueueService, IDisposable
 {
     private readonly ConcurrentDictionary<string, QueueItem> _queue = new();
+    private readonly object _queueMutationLock = new();
     private readonly IServiceProvider _serviceProvider;
     private readonly IQueuePersistenceService? _persistenceService;
     private readonly ILogger<QueueService>? _logger;
@@ -128,7 +129,15 @@ public class QueueService : IQueueService, IDisposable
             var savedQueue = _persistenceService.LoadQueue();
             if (savedQueue != null)
             {
-                foreach (var item in savedQueue)
+                var restoredItems = savedQueue
+                    .Where(item => item?.Episode != null && !string.IsNullOrWhiteSpace(item.Episode.Id))
+                    .OrderBy(item => item.AddedAt)
+                    .ThenBy(item => item.Id, StringComparer.Ordinal)
+                    .GroupBy(item => item.Episode?.Id ?? string.Empty, StringComparer.Ordinal)
+                    .SelectMany(group => string.IsNullOrWhiteSpace(group.Key) ? group : group.Take(1))
+                    .ToList();
+
+                foreach (var item in restoredItems)
                 {
                     // An item saved mid-flight has no running task after a restart. Left as
                     // Downloading/Processing the pump would skip it forever (stuck). Requeue it
@@ -141,7 +150,13 @@ public class QueueService : IQueueService, IDisposable
                     }
                     _queue[item.Id] = item;
                 }
-                _logger?.LogInformation("Restored {Count} items from persisted queue", savedQueue.Count);
+                var suppressedCount = savedQueue.Count - restoredItems.Count;
+                if (suppressedCount > 0)
+                {
+                    _logger?.LogWarning("Suppressed {Count} duplicate episode entries while restoring the persisted queue", suppressedCount);
+                    _persistenceService.SaveQueue(_queue.Values.ToList());
+                }
+                _logger?.LogInformation("Restored {Count} items from persisted queue", restoredItems.Count);
                 RestoreRetryStateFromQueue();
             }
         }
@@ -167,27 +182,48 @@ public class QueueService : IQueueService, IDisposable
         }
     }
 
-    public void AddToQueue(EpisodeInfo episode)
+    public QueueAddResult AddToQueue(EpisodeInfo episode)
     {
         ArgumentNullException.ThrowIfNull(episode);
-        var item = new QueueItem
+        if (string.IsNullOrWhiteSpace(episode.Id))
         {
-            Episode = episode,
-            DownloadProgress = new DownloadProgress { State = DownloadState.Queued }
-        };
-
-        if (_queue.TryAdd(item.Id, item))
-        {
-            _logger?.LogInformation("Added to queue: {EpisodeId} - {Title}", episode.Id, episode.Title);
-            OnQueueStateChanged();
-            ScheduleSave();
-            RequestPump();
+            throw new ArgumentException("Episode ID is required", nameof(episode));
         }
+
+        QueueItem item;
+        lock (_queueMutationLock)
+        {
+            var existing = _queue.Values.FirstOrDefault(candidate =>
+                candidate.Episode != null && string.Equals(candidate.Episode.Id, episode.Id, StringComparison.Ordinal));
+            if (existing != null)
+            {
+                _logger?.LogInformation("Episode {EpisodeId} is already queued as {QueueItemId}; duplicate admission suppressed", episode.Id, existing.Id);
+                return new QueueAddResult(false, existing);
+            }
+
+            item = new QueueItem
+            {
+                Episode = episode,
+                DownloadProgress = new DownloadProgress { State = DownloadState.Queued }
+            };
+            _queue[item.Id] = item;
+        }
+
+        _logger?.LogInformation("Added to queue: {EpisodeId} - {Title}", episode.Id, episode.Title);
+        OnQueueStateChanged();
+        ScheduleSave();
+        RequestPump();
+        return new QueueAddResult(true, item);
     }
 
     public bool RemoveFromQueue(string queueItemId)
     {
-        if (_queue.TryRemove(queueItemId, out _))
+        bool removed;
+        lock (_queueMutationLock)
+        {
+            removed = _queue.TryRemove(queueItemId, out _);
+        }
+        if (removed)
         {
             // Cancel any in-flight download/mux/encode for this item.
             CancelActiveItem(queueItemId);
@@ -201,7 +237,10 @@ public class QueueService : IQueueService, IDisposable
 
     public List<QueueItem> GetQueue()
     {
-        return _queue.Values.ToList();
+        lock (_queueMutationLock)
+        {
+            return _queue.Values.ToList();
+        }
     }
 
     public void RetryAllFailed()
@@ -221,9 +260,14 @@ public class QueueService : IQueueService, IDisposable
 
     public void ClearQueue()
     {
-        _queue.Clear();
+        List<string> removedIds;
+        lock (_queueMutationLock)
+        {
+            removedIds = _queue.Keys.ToList();
+            _queue.Clear();
+        }
         // Clearing the queue also cancels every in-flight download/mux/encode.
-        foreach (var id in _itemCts.Keys.ToList())
+        foreach (var id in removedIds)
         {
             CancelActiveItem(id);
         }
@@ -236,28 +280,45 @@ public class QueueService : IQueueService, IDisposable
     {
         // Replacing the queue also replaces its active work. This is the REST equivalent of
         // removing the old desktop queue items, which cancels each item's token.
-        foreach (var id in _itemCts.Keys.ToList())
-        {
-            CancelActiveItem(id);
-        }
-
         if (newQueue == null)
         {
             _logger?.LogWarning("ReplaceQueue called with null list, clearing queue");
-            _queue.Clear();
+            List<string> removedIds;
+            lock (_queueMutationLock)
+            {
+                removedIds = _queue.Keys.ToList();
+                _queue.Clear();
+            }
+            foreach (var id in removedIds)
+            {
+                CancelActiveItem(id);
+            }
             OnQueueStateChanged();
             ScheduleSave();
             return;
         }
-        _queue.Clear();
-        foreach (var item in newQueue)
+        var replacement = newQueue
+            .Where(item => item?.Episode != null && !string.IsNullOrWhiteSpace(item.Episode.Id))
+            .OrderBy(item => item.AddedAt)
+            .ThenBy(item => item.Id, StringComparer.Ordinal)
+            .GroupBy(item => item.Episode?.Id ?? string.Empty, StringComparer.Ordinal)
+            .SelectMany(group => string.IsNullOrWhiteSpace(group.Key) ? group : group.Take(1))
+            .ToList();
+        List<string> replacedIds;
+        lock (_queueMutationLock)
         {
-            if (item != null)
+            replacedIds = _queue.Keys.ToList();
+            _queue.Clear();
+            foreach (var item in replacement)
             {
                 _queue[item.Id] = item;
             }
         }
-        _logger?.LogInformation("Queue replaced with {Count} items", newQueue.Count);
+        foreach (var id in replacedIds)
+        {
+            CancelActiveItem(id);
+        }
+        _logger?.LogInformation("Queue replaced with {Count} items ({Suppressed} duplicate episodes suppressed)", replacement.Count, newQueue.Count - replacement.Count);
         OnQueueStateChanged();
         ScheduleSave();
         RequestPump();
@@ -721,8 +782,8 @@ public class QueueService : IQueueService, IDisposable
 
             item.DownloadProgress.State = DownloadState.Done;
             item.DownloadProgress.Percent = 100;
-            item.DownloadProgress.Doing = "Complete";
-            _logger?.LogInformation("Download complete: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
+            item.DownloadProgress.Doing = result.SkippedExisting ? "Already downloaded" : "Complete";
+            _logger?.LogInformation(result.SkippedExisting ? "Download skipped because output already exists: {EpisodeId} - {Title}" : "Download complete: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
 
             // Send webhook notification
             if (_notificationService != null && _config != null)
@@ -732,7 +793,10 @@ public class QueueService : IQueueService, IDisposable
 
             if (_config?.RemoveFinishedDownload == true)
             {
-                _queue.TryRemove(item.Id, out _);
+                lock (_queueMutationLock)
+                {
+                    _queue.TryRemove(item.Id, out _);
+                }
                 _logger?.LogInformation("Removed finished download from queue: {EpisodeId}", item.Episode.Id);
             }
         }
@@ -813,7 +877,8 @@ public class QueueService : IQueueService, IDisposable
         DownloadErrorType.SubscriptionExpired or
         DownloadErrorType.PremiumContent or
         DownloadErrorType.MaturityRating or
-        DownloadErrorType.MissingLanguage);
+        DownloadErrorType.MissingLanguage or
+        DownloadErrorType.OutputConflict);
 
     private bool IsCurrentQueueItem(QueueItem item)
     {
@@ -939,8 +1004,10 @@ public class QueueService : IQueueService, IDisposable
     {
         if (_persistenceService != null)
         {
-            var queue = GetQueue();
-            _persistenceService.ScheduleSave(queue);
+            lock (_queueMutationLock)
+            {
+                _persistenceService.ScheduleSave(_queue.Values.ToList());
+            }
         }
     }
 

@@ -73,6 +73,8 @@ public class QueueItem
     public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed record QueueAddResult(bool Added, QueueItem Item);
+
 public class EpisodeInfo
 {
     public string Id { get; set; } = "";
@@ -149,6 +151,7 @@ public class DownloadHistory
     public int SeasonNumber { get; set; }
     public int EpisodeNumber { get; set; }
     public string AudioLanguage { get; set; } = "";
+    public List<string> AudioLanguages { get; set; } = new();
     public List<string> SubtitleLanguages { get; set; } = new();
     public DateTime DownloadedAt { get; set; }
     public string OutputPath { get; set; } = "";
@@ -318,6 +321,7 @@ public class Thumbnail
 public class DownloadResult
 {
     public bool Success { get; set; }
+    public bool SkippedExisting { get; set; }
     public string? ErrorMessage { get; set; }
     public string? OutputPath { get; set; }
     public EpisodeInfo? Episode { get; set; }
@@ -335,7 +339,8 @@ public enum DownloadErrorType
     RateLimited,
     NetworkError,
     ParseError,
-    MissingLanguage
+    MissingLanguage,
+    OutputConflict
 }
 
 public class DownloadException : Exception

@@ -1,10 +1,43 @@
 using System.Web;
 using Cruncharr.Core.Services;
+using Moq;
 
 namespace Cruncharr.Core.Tests;
 
 public class SearchResultParsingTests
 {
+    [Fact]
+    public async Task EnsureAuthenticatedAsync_RefreshesAnExistingSessionBeforeCatalogRequests()
+    {
+        var auth = new Mock<ICrunchyrollAuthService>();
+        auth.SetupGet(service => service.IsAuthenticated).Returns(true);
+        auth.Setup(service => service.RefreshTokenAsync(true, It.IsAny<CancellationToken>(), false))
+            .ReturnsAsync(true);
+        var api = new CrunchyrollApiService(auth.Object);
+
+        var authenticated = await api.EnsureAuthenticatedAsync(true, CancellationToken.None);
+
+        Assert.True(authenticated);
+        auth.Verify(service => service.RefreshTokenAsync(true, It.IsAny<CancellationToken>(), false), Times.Once);
+        auth.Verify(service => service.AuthenticateAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EnsureAuthenticatedAsync_AuthenticatesWhenNoSessionExists()
+    {
+        var auth = new Mock<ICrunchyrollAuthService>();
+        auth.SetupGet(service => service.IsAuthenticated).Returns(false);
+        auth.Setup(service => service.AuthenticateAsync(true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var api = new CrunchyrollApiService(auth.Object);
+
+        var authenticated = await api.EnsureAuthenticatedAsync(true, CancellationToken.None);
+
+        Assert.True(authenticated);
+        auth.Verify(service => service.AuthenticateAsync(true, It.IsAny<CancellationToken>()), Times.Once);
+        auth.Verify(service => service.RefreshTokenAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
+    }
+
     [Fact]
     public void BuildSearchUri_RequestsSeriesAndMoviesWithExpandedLimit()
     {

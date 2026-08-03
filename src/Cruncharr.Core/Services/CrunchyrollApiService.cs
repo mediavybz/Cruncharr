@@ -1327,13 +1327,19 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         }
     }
 
-    private async Task<bool> EnsureAuthenticatedAsync(bool useBetaApi, CancellationToken cancellationToken)
+    internal async Task<bool> EnsureAuthenticatedAsync(bool useBetaApi, CancellationToken cancellationToken)
     {
-        if (!_authService.IsAuthenticated)
+        if (_authService.IsAuthenticated)
         {
-            return await _authService.AuthenticateAsync(useBetaApi, cancellationToken);
+            // Crunchyroll access tokens currently expire after only a few minutes. Merely
+            // checking that an access-token string and profile exist leaves long-running
+            // containers sending an expired bearer token until the Auth screen happens to be
+            // opened. RefreshTokenAsync is synchronized and is a no-op until the token enters
+            // its refresh window, so it is safe to use as the request preflight.
+            return await _authService.RefreshTokenAsync(useBetaApi, cancellationToken);
         }
-        return true;
+
+        return await _authService.AuthenticateAsync(useBetaApi, cancellationToken);
     }
 
     // Anonymous-capable endpoints (browse/new episodes) only need an access token,

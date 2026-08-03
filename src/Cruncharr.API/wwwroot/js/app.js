@@ -4669,6 +4669,10 @@
                     const tooltip = getEpisodeStatusTooltip(ep, series);
                     const airDate = ep.episodeCrPremiumAirDate ? new Date(ep.episodeCrPremiumAirDate) : null;
                     const airStr = airDate && !isNaN(airDate.getTime()) ? airDate.toLocaleDateString() : '';
+                    const providerEpisodeLabel = ep.episode || '?';
+                    const episodeIdentityLabel = ep.specialEpisode && ep.sonarrSeasonEpisodeText
+                        ? `${ep.sonarrSeasonEpisodeText} · CR ${providerEpisodeLabel}`
+                        : providerEpisodeLabel;
                     // Sonarr per-episode indicator (mirrors the desktop app): green check when Sonarr
                     // already has the file, otherwise a neutral Sonarr mark when it's tracked there.
                     const sonarrTip = ep.sonarrEpisodeId
@@ -4681,7 +4685,7 @@
 
                     return `
                         <div class="history-episode">
-                            <div class="history-episode-number">${escapeHtml(ep.episode || '?')}</div>
+                            <div class="history-episode-number">${escapeHtml(episodeIdentityLabel)}</div>
                             <div class="history-episode-title">${escapeHtml(ep.episodeTitle || 'Unknown Episode')}${airStr ? `<span class="history-episode-airdate"> · ${escapeHtml(airStr)}</span>` : ''}</div>
                             <div class="history-episode-langs">
                                 ${sonarrBadge}

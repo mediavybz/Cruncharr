@@ -145,6 +145,10 @@ public class HistoryEpisode
         SonarrIsMonitored = episode.Monitored;
         SonarrAbsolutNumber = episode.AbsoluteEpisodeNumber.ToString();
         SonarrSeasonNumber = episode.SeasonNumber.ToString();
+        // Sonarr/TVDB is authoritative after an identity match. Crunchyroll's CMS sometimes
+        // collapses an SP label to a positive integer, so provider-only classification cannot
+        // recognize the item even though the content evidence correctly maps it to S00.
+        if (episode.SeasonNumber == 0) SpecialEpisode = true;
     }
 
     public void ClearSonarrEpisodeData()

@@ -727,6 +727,52 @@ public class HistoryServiceSonarrTests : IDisposable
         Assert.All(matched, episode => Assert.Equal("0", episode.SonarrSeasonNumber));
     }
 
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_SonarrS00CorrectsCollapsedProviderSpecial()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        var providerEpisode = history[0].Seasons[0].EpisodesList[0];
+        providerEpisode.Episode = "1";
+        providerEpisode.EpisodeSeasonNum = "2";
+        providerEpisode.EpisodeTitle = "Wistoria: Wand and Sword Special Episode";
+        providerEpisode.EpisodeDescription = "A look back at Season 1 and a short preview of what's to come!";
+        providerEpisode.SpecialEpisode = false;
+        await SaveTestHistory(history);
+
+        _sonarrServiceMock
+            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode
+                {
+                    Id = 2101,
+                    SeriesId = 100,
+                    SeasonNumber = 2,
+                    EpisodeNumber = 1,
+                    Title = "The Boy with No Talent",
+                    Overview = "Will begins his second season at the academy."
+                },
+                new SonarrEpisode
+                {
+                    Id = 2002,
+                    SeriesId = 100,
+                    SeasonNumber = 0,
+                    EpisodeNumber = 2,
+                    Title = "Season 2 Broadcast Commemorative Special Compilation Episode",
+                    Overview = providerEpisode.EpisodeDescription
+                }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!, rematchAll: true);
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        var matched = result[0].Seasons[0].EpisodesList[0];
+        Assert.Equal("2002", matched.SonarrEpisodeId);
+        Assert.Equal("S00E02", matched.SonarrSeasonEpisodeText);
+        Assert.True(matched.SpecialEpisode);
+    }
+
     private List<HistorySeries> CreateTestHistory()
     {
         return new List<HistorySeries>{

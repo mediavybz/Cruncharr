@@ -93,7 +93,6 @@ status.md
 examples/
 
 # Local-only workflow documentation
-AGENTS.md
 CLAUDE.md
 SKILL.md
 PORTING_LOG.md

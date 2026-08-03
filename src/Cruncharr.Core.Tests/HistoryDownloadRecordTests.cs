@@ -82,6 +82,93 @@ public class HistoryDownloadRecordTests : IDisposable
         Assert.Single(fresh.Seasons);
     }
 
+    [Theory]
+    [InlineData("5.5", 5, "5.5", true)]
+    [InlineData("13.5", 13, "13.5", true)]
+    [InlineData("24.5", 24, "24.5", true)]
+    [InlineData("24.9", 24, "24.9", true)]
+    [InlineData("48.5", 48, "48.5", true)]
+    [InlineData("65.5", 65, "65.5", true)]
+    [InlineData("11-12", 11, "11-12", false)]
+    [InlineData("OVA", 0, "OVA", true)]
+    [InlineData("FMI1", 1, "1", false)]
+    public async Task RichHistory_PreservesMeaningfulProviderEpisodeLabels(
+        string providerLabel,
+        int providerNumber,
+        string expectedHistoryLabel,
+        bool expectedSpecial)
+    {
+        var episode = new EpisodeInfo
+        {
+            Id = $"EP_{providerLabel}",
+            SeriesId = "SERIES_LABELS",
+            SeriesTitle = "Episode Labels",
+            SeasonId = "SEASON_LABELS",
+            SeasonTitle = "Season 1",
+            SeasonNumber = 1,
+            Episode = providerLabel,
+            EpisodeNumber = providerNumber,
+            Title = providerLabel
+        };
+
+        await _history.UpdateWithSeasonDataAsync([episode]);
+
+        var stored = await _history.GetHistoryEpisodeAsync(episode.SeriesId, episode.SeasonId, episode.Id);
+        Assert.NotNull(stored);
+        Assert.Equal(expectedHistoryLabel, stored.Episode);
+        Assert.Equal(expectedSpecial, stored.SpecialEpisode);
+    }
+
+    [Fact]
+    public async Task BrowseRefresh_DoesNotCollapseDecimalEpisodeLabelToInteger()
+    {
+        var episode = new EpisodeInfo
+        {
+            Id = "EP_DECIMAL_BROWSE",
+            SeriesId = "SERIES_DECIMAL_BROWSE",
+            SeriesTitle = "Decimal Show",
+            SeasonId = "SEASON_DECIMAL_BROWSE",
+            SeasonTitle = "Season 1",
+            SeasonNumber = 1,
+            Episode = "5",
+            EpisodeNumber = 5,
+            Title = "Bonus Episode"
+        };
+        await _history.UpdateWithSeasonDataAsync([episode]);
+
+        await _history.UpdateWithEpisodeAsync(
+        [
+            new Cruncharr.Core.Services.CrBrowseEpisode
+            {
+                Id = episode.Id,
+                Title = episode.Title,
+                EpisodeMetadata = new Cruncharr.Core.Services.CrBrowseEpisodeMetaData
+                {
+                    SeriesId = episode.SeriesId,
+                    SeriesTitle = episode.SeriesTitle,
+                    SeasonTitle = episode.SeasonTitle,
+                    SeasonNumber = episode.SeasonNumber,
+                    Episode = "5.5",
+                    EpisodeCount = 5,
+                    Versions =
+                    [
+                        new Cruncharr.Core.Services.CrBrowseEpisodeVersion
+                        {
+                            Original = true,
+                            Guid = episode.Id,
+                            SeasonGuid = episode.SeasonId
+                        }
+                    ]
+                }
+            }
+        ]);
+
+        var stored = await _history.GetHistoryEpisodeAsync(episode.SeriesId, episode.SeasonId, episode.Id);
+        Assert.NotNull(stored);
+        Assert.Equal("5.5", stored.Episode);
+        Assert.True(stored.SpecialEpisode);
+    }
+
     // Guard (upstream CRD v1.6.14): a manual "Mark as Downloaded" (no dubs/subs supplied) must reset
     // the downloaded dub/sub tracking to the full available set, so the episode is not re-flagged as
     // a partial download.

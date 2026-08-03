@@ -245,6 +245,7 @@ public class DownloadService : IDownloadService
             if (string.IsNullOrWhiteSpace(episode.Title)) episode.Title = existing?.EpisodeTitle ?? string.Empty;
             if (episode.SeasonNumber <= 0 && existing != null) episode.SeasonNumber = existing.SeasonNumber;
             if (episode.EpisodeNumber <= 0 && existing != null) episode.EpisodeNumber = existing.EpisodeNumber;
+            RestoreProviderEpisodeLabel(episode, existing);
             if (string.IsNullOrWhiteSpace(episode.SeasonId) && !string.IsNullOrWhiteSpace(richSeriesId))
                 episode.SeasonId = $"{richSeriesId}|S{episode.SeasonNumber}";
 
@@ -266,6 +267,7 @@ public class DownloadService : IDownloadService
                 EpisodeTitle = episode.Title,
                 SeasonNumber = episode.SeasonNumber,
                 EpisodeNumber = episode.EpisodeNumber,
+                Episode = episode.Episode,
                 AudioLanguage = primaryAudio,
                 AudioLanguages = dubs,
                 SubtitleLanguages = subs,
@@ -380,38 +382,53 @@ public class DownloadService : IDownloadService
         if (sonarrEpisodes.Count == 0) return null;
 
         var isSpecial = episode.SeasonNumber == 0 ||
-                        episode.SeasonTitle?.Contains("special", StringComparison.OrdinalIgnoreCase) == true;
+                        episode.SeasonTitle?.Contains("special", StringComparison.OrdinalIgnoreCase) == true ||
+                        CrunchyrollApiService.IsSpecialEpisode(
+                            episode.Episode,
+                            episode.EpisodeNumber > 0 ? episode.EpisodeNumber : null);
+        var identityCandidates = isSpecial
+            ? sonarrEpisodes.Where(candidate => candidate.SeasonNumber == 0).ToList()
+            : sonarrEpisodes.ToList();
+        if (identityCandidates.Count == 0) return null;
 
-        // Number equality is reliable for regular seasons, but not for provider-specific
-        // "Specials" groupings. Crunchyroll can expose a local Specials season as S4E1 while
-        // TVDB stores the same item as S00E02; treating E1 as an absolute number instead maps it
-        // to an unrelated S01E01.
-        if (!isSpecial)
-        {
-            var exactNumber = sonarrEpisodes.FirstOrDefault(candidate =>
+        var exactNumber = !isSpecial
+            ? sonarrEpisodes.FirstOrDefault(candidate =>
                 candidate.SeasonNumber == episode.SeasonNumber &&
-                candidate.EpisodeNumber == episode.EpisodeNumber);
-            if (exactNumber != null) return exactNumber;
-        }
+                candidate.EpisodeNumber == episode.EpisodeNumber)
+            : null;
 
+        // Provider numbering is not an identity. Crunchyroll can insert an item (24.9/SP/etc.)
+        // into a regular season while TVDB/Sonarr stores it in S00, shifting every list position.
+        // Resolve the logical episode by content first and let the matched Sonarr record supply the
+        // authoritative season, episode, title, and folder. Numbering is only a guarded fallback.
         if (!string.IsNullOrWhiteSpace(episode.Title))
         {
-            var titleMatch = sonarrEpisodes
+            var titleMatches = identityCandidates
                 .Select(candidate => new
                 {
                     Episode = candidate,
-                    Score = string.IsNullOrWhiteSpace(candidate.Title)
-                        ? 0.0
-                        : StringSimilarity.CalculateSimilarity(candidate.Title, episode.Title)
+                    Score = CalculateEpisodeTitleIdentityScore(episode.Title, candidate.Title)
                 })
                 .OrderByDescending(candidate => candidate.Score)
-                .FirstOrDefault();
-            if (titleMatch is { Score: >= 0.8 }) return titleMatch.Episode;
+                .Take(2)
+                .ToList();
+            if (titleMatches.Count > 0 &&
+                titleMatches[0].Score >= 0.82 &&
+                (titleMatches.Count == 1 || titleMatches[0].Score - titleMatches[1].Score >= 0.05) &&
+                (exactNumber == null ||
+                 titleMatches[0].Episode.Id == exactNumber.Id ||
+                 (CalculateEpisodeTitleIdentityScore(episode.Title, exactNumber.Title) < 0.45 &&
+                  titleMatches[0].Score - CalculateEpisodeTitleIdentityScore(
+                      episode.Title,
+                      exactNumber.Title) >= 0.15)))
+            {
+                return titleMatches[0].Episode;
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(episode.Description))
         {
-            var descriptionMatch = sonarrEpisodes
+            var descriptionMatches = identityCandidates
                 .Select(candidate => new
                 {
                     Episode = candidate,
@@ -420,16 +437,46 @@ public class DownloadService : IDownloadService
                         : StringSimilarity.CalculateCosineSimilarity(candidate.Overview, episode.Description)
                 })
                 .OrderByDescending(candidate => candidate.Score)
-                .FirstOrDefault();
-            if (descriptionMatch is { Score: > 0.8 }) return descriptionMatch.Episode;
+                .Take(2)
+                .ToList();
+            if (descriptionMatches.Count > 0 &&
+                descriptionMatches[0].Score > 0.8 &&
+                (descriptionMatches.Count == 1 ||
+                 descriptionMatches[0].Score - descriptionMatches[1].Score >= 0.05) &&
+                (exactNumber == null ||
+                 descriptionMatches[0].Episode.Id == exactNumber.Id ||
+                 (CalculateEpisodeOverviewIdentityScore(episode.Description, exactNumber.Overview) < 0.45 &&
+                  descriptionMatches[0].Score - CalculateEpisodeOverviewIdentityScore(
+                      episode.Description,
+                      exactNumber.Overview) >= 0.15)))
+            {
+                return descriptionMatches[0].Episode;
+            }
         }
 
         if (episode.ReleaseDate.HasValue)
         {
-            var airDateMatch = sonarrEpisodes.FirstOrDefault(candidate =>
-                candidate.AirDateUtc != default &&
-                candidate.AirDateUtc.UtcDateTime.Date == episode.ReleaseDate.Value.Date);
-            if (airDateMatch != null) return airDateMatch;
+            var airDateMatches = identityCandidates
+                .Where(candidate =>
+                    candidate.AirDateUtc != default &&
+                    candidate.AirDateUtc.UtcDateTime.Date == episode.ReleaseDate.Value.Date)
+                .ToList();
+            if (airDateMatches.Count == 1 &&
+                (exactNumber == null ||
+                 airDateMatches[0].Id == exactNumber.Id ||
+                 exactNumber.AirDateUtc == default ||
+                 exactNumber.AirDateUtc.UtcDateTime.Date != episode.ReleaseDate.Value.Date))
+            {
+                return airDateMatches[0];
+            }
+        }
+
+        // Number equality remains useful when titles are translated or generic, but never for a
+        // special-like provider item: its integer episode_number is commonly the preceding regular
+        // episode and would silently select the wrong Sonarr file identity.
+        if (!isSpecial)
+        {
+            if (exactNumber != null) return exactNumber;
         }
 
         return isSpecial
@@ -438,6 +485,44 @@ public class DownloadService : IDownloadService
                 candidate.AbsoluteEpisodeNumber > 0 &&
                 candidate.AbsoluteEpisodeNumber == episode.EpisodeNumber);
     }
+
+    internal static double CalculateEpisodeTitleIdentityScore(string? source, string? target)
+    {
+        var normalizedSource = NormalizeEpisodeIdentityText(source);
+        var normalizedTarget = NormalizeEpisodeIdentityText(target);
+        if (normalizedSource.Length == 0 || normalizedTarget.Length == 0) return 0.0;
+        if (IsGenericEpisodeIdentityTitle(normalizedSource) ||
+            IsGenericEpisodeIdentityTitle(normalizedTarget)) return 0.0;
+        if (string.Equals(normalizedSource, normalizedTarget, StringComparison.Ordinal)) return 1.0;
+
+        return Math.Max(
+            StringSimilarity.CalculateSimilarity(normalizedSource, normalizedTarget),
+            StringSimilarity.CalculateCosineSimilarity(normalizedSource, normalizedTarget));
+    }
+
+    private static double CalculateEpisodeOverviewIdentityScore(string? source, string? target) =>
+        string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(target)
+            ? 0.0
+            : StringSimilarity.CalculateCosineSimilarity(target, source);
+
+    internal static void RestoreProviderEpisodeLabel(EpisodeInfo episode, DownloadHistory? existing)
+    {
+        if (string.IsNullOrWhiteSpace(episode.Episode) &&
+            !string.IsNullOrWhiteSpace(existing?.Episode))
+        {
+            episode.Episode = existing.Episode;
+        }
+    }
+
+    private static string NormalizeEpisodeIdentityText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var decomposed = value.Normalize(NormalizationForm.FormD).ToLowerInvariant();
+        return Regex.Replace(decomposed, @"[^\p{L}\p{N}]+", " ").Trim();
+    }
+
+    private static bool IsGenericEpisodeIdentityTitle(string normalizedTitle) =>
+        Regex.IsMatch(normalizedTitle, @"^episode\s+\d+(?:\s+\d+)?$", RegexOptions.CultureInvariant);
 
     internal static bool ShouldReplaceEncodedOutput(int exitCode, bool tempOutputExists) =>
         exitCode == 0 && tempOutputExists;
@@ -1959,6 +2044,7 @@ public class DownloadService : IDownloadService
                         EpisodeTitle = episode.Title,
                         SeasonNumber = episode.SeasonNumber,
                         EpisodeNumber = episode.EpisodeNumber,
+                        Episode = episode.Episode,
                         AudioLanguage = downloadedDubs.FirstOrDefault() ?? ResolveRequestedAudioLanguage(episode, config),
                         AudioLanguages = downloadedDubs.Count > 0 ? downloadedDubs : ResolveRequestedAudioLanguages(episode, config),
                         SubtitleLanguages = downloadedSubs,

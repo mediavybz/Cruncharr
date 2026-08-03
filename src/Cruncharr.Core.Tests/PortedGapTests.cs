@@ -315,6 +315,76 @@ public class PortedGapTests
     }
 
     [Fact]
+    public void DownloadNaming_MetadataIdentityBeatsSameNumberRegularDecoy()
+    {
+        var episode = new EpisodeInfo
+        {
+            Title = "Digression: Hinata Sakaguchi",
+            Description = "Hinata considers the events that brought her face to face with Rimuru.",
+            SeasonTitle = "Season 2",
+            SeasonNumber = 2,
+            EpisodeNumber = 24,
+            Episode = "24.9"
+        };
+        var regularDecoy = new SonarrEpisode
+        {
+            Id = 2024,
+            SeasonNumber = 2,
+            EpisodeNumber = 24,
+            Title = "Octagram"
+        };
+        var expectedSpecial = new SonarrEpisode
+        {
+            Id = 2007,
+            SeasonNumber = 0,
+            EpisodeNumber = 7,
+            Title = "Digression - Hinata Sakaguchi"
+        };
+
+        var match = DownloadService.ResolveSonarrEpisodeFallback(
+            episode,
+            [regularDecoy, expectedSpecial]);
+
+        Assert.Same(expectedSpecial, match);
+    }
+
+    [Fact]
+    public void DownloadNaming_OverviewIdentityMapsSpecialWhenTitlesDiffer()
+    {
+        const string overview = "A look back at Season 1 and a short preview of what's to come!";
+        var episode = new EpisodeInfo
+        {
+            Title = "Wistoria: Wand and Sword Special Episode",
+            Description = overview,
+            SeasonTitle = "Season 2",
+            SeasonNumber = 2,
+            EpisodeNumber = 1,
+            Episode = "SP"
+        };
+        var regularDecoy = new SonarrEpisode
+        {
+            Id = 2101,
+            SeasonNumber = 2,
+            EpisodeNumber = 1,
+            Title = "The Boy with No Talent"
+        };
+        var expectedSpecial = new SonarrEpisode
+        {
+            Id = 2002,
+            SeasonNumber = 0,
+            EpisodeNumber = 2,
+            Title = "Season 2 Broadcast Commemorative Special Compilation Episode",
+            Overview = overview
+        };
+
+        var match = DownloadService.ResolveSonarrEpisodeFallback(
+            episode,
+            [regularDecoy, expectedSpecial]);
+
+        Assert.Same(expectedSpecial, match);
+    }
+
+    [Fact]
     public void DownloadNaming_ContinuousRegularNumberStillUsesTvdbAbsoluteNumber()
     {
         var episode = new EpisodeInfo
@@ -337,6 +407,49 @@ public class PortedGapTests
         var match = DownloadService.ResolveSonarrEpisodeFallback(episode, [expected]);
 
         Assert.Same(expected, match);
+    }
+
+    [Fact]
+    public void DownloadNaming_OrdinaryEpisodeKeepsExactSeasonNumberAgainstWeakCrossSeasonTitle()
+    {
+        var episode = new EpisodeInfo
+        {
+            Title = "The Promise",
+            SeasonNumber = 2,
+            EpisodeNumber = 3,
+            Episode = "3"
+        };
+        var expected = new SonarrEpisode
+        {
+            Id = 2203,
+            SeasonNumber = 2,
+            EpisodeNumber = 3,
+            Title = "A Promise"
+        };
+        var crossSeasonDecoy = new SonarrEpisode
+        {
+            Id = 1108,
+            SeasonNumber = 1,
+            EpisodeNumber = 8,
+            Title = "The Promise"
+        };
+
+        var match = DownloadService.ResolveSonarrEpisodeFallback(
+            episode,
+            [expected, crossSeasonDecoy]);
+
+        Assert.Same(expected, match);
+    }
+
+    [Fact]
+    public void DownloadHistory_RestoresRawProviderEpisodeLabel()
+    {
+        var episode = new EpisodeInfo { EpisodeNumber = 24 };
+        var history = new DownloadHistory { EpisodeNumber = 24, Episode = "24.9" };
+
+        DownloadService.RestoreProviderEpisodeLabel(episode, history);
+
+        Assert.Equal("24.9", episode.Episode);
     }
 
     [Fact]

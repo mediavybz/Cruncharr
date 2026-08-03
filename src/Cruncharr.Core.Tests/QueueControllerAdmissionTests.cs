@@ -12,6 +12,39 @@ namespace Cruncharr.Core.Tests;
 public class QueueControllerAdmissionTests
 {
     [Fact]
+    public void AddToQueue_PreservesRawEpisodeIdentitySeparatelyFromIntegerNumber()
+    {
+        EpisodeInfo? captured = null;
+        var queue = new Mock<IQueueService>();
+        queue.Setup(service => service.AddToQueue(It.IsAny<EpisodeInfo>()))
+            .Callback<EpisodeInfo>(episode => captured = episode)
+            .Returns((EpisodeInfo episode) => new QueueAddResult(
+                true,
+                new QueueItem { Id = "decimal-queue-id", Episode = episode }));
+        var controller = new QueueController(
+            queue.Object,
+            Mock.Of<IHistoryService>(),
+            Mock.Of<ILanguagePrefsService>(),
+            new CruncharrConfig(),
+            NullLogger<QueueController>.Instance);
+
+        var response = Assert.IsType<OkObjectResult>(controller.AddToQueue(new QueueRequest
+        {
+            EpisodeId = "GDECIMAL01",
+            Episode = "24.9",
+            EpisodeNumber = 0,
+            SeasonNumber = 2,
+            Title = "Digression: Hinata Sakaguchi"
+        }));
+
+        Assert.NotNull(response.Value);
+        Assert.NotNull(captured);
+        Assert.Equal("24.9", captured.Episode);
+        Assert.Equal(0, captured.EpisodeNumber);
+        Assert.Equal(2, captured.SeasonNumber);
+    }
+
+    [Fact]
     public void AddToQueue_ReturnsExistingAdmissionWithoutLearningDuplicatePreferences()
     {
         var existing = new QueueItem

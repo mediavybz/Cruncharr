@@ -151,6 +151,7 @@ public class DownloadHistory
     public string EpisodeTitle { get; set; } = "";
     public int SeasonNumber { get; set; }
     public int EpisodeNumber { get; set; }
+    public string? Episode { get; set; }
     public string AudioLanguage { get; set; } = "";
     public List<string> AudioLanguages { get; set; } = new();
     public List<string> SubtitleLanguages { get; set; } = new();

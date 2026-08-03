@@ -394,6 +394,88 @@ public class HistoryServiceSonarrTests : IDisposable
     }
 
     [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_DecimalEpisodeUsesSonarrSpecialIdentity()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons[0].EpisodesList[0].Episode = "5.5";
+        history[0].Seasons[0].EpisodesList[0].EpisodeTitle = "The Bonus Adventure";
+        history[0].Seasons[0].EpisodesList[0].SpecialEpisode = true;
+        await SaveTestHistory(history);
+
+        _sonarrServiceMock
+            .Setup(service => service.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode
+                {
+                    Id = 1005,
+                    SeriesId = 100,
+                    SeasonNumber = 1,
+                    EpisodeNumber = 5,
+                    Title = "The Bonus Adventure"
+                },
+                new SonarrEpisode
+                {
+                    Id = 2007,
+                    SeriesId = 100,
+                    SeasonNumber = 0,
+                    EpisodeNumber = 7,
+                    Title = "The Bonus Adventure"
+                }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        var episode = result[0].Seasons[0].EpisodesList[0];
+        Assert.Equal("5.5", episode.Episode);
+        Assert.Equal("2007", episode.SonarrEpisodeId);
+        Assert.Equal("S00E07", episode.SonarrSeasonEpisodeText);
+    }
+
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_RevalidatesStaleNumberBasedIdentity()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        var historyEpisode = history[0].Seasons[0].EpisodesList[0];
+        historyEpisode.Episode = "25";
+        historyEpisode.EpisodeTitle = "The Inserted Chronicle";
+        historyEpisode.SonarrEpisodeId = "1025";
+        await SaveTestHistory(history);
+
+        _sonarrServiceMock
+            .Setup(service => service.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode
+                {
+                    Id = 1025,
+                    SeriesId = 100,
+                    SeasonNumber = 1,
+                    EpisodeNumber = 25,
+                    Title = "The Next Regular Chapter"
+                },
+                new SonarrEpisode
+                {
+                    Id = 2008,
+                    SeriesId = 100,
+                    SeasonNumber = 0,
+                    EpisodeNumber = 8,
+                    Title = "The Inserted Chronicle"
+                }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        var rematched = result[0].Seasons[0].EpisodesList[0];
+        Assert.Equal("2008", rematched.SonarrEpisodeId);
+        Assert.Equal("S00E08", rematched.SonarrSeasonEpisodeText);
+    }
+
+    [Fact]
     public async Task MatchHistoryEpisodesWithSonarrAsync_SpecialsAlignToOrderedTvdbSpecials()
     {
         var history = CreateTestHistory();
@@ -541,6 +623,108 @@ public class HistoryServiceSonarrTests : IDisposable
 
         var result = await _historyService.GetHistorySeriesAsync();
         Assert.Null(result[0].Seasons[0].EpisodesList[0].SonarrEpisodeId);
+    }
+
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_StaleSpecialRegularIdentityIsCleared()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        var special = history[0].Seasons[0].EpisodesList[0];
+        special.Episode = "13.5";
+        special.SpecialEpisode = true;
+        special.SonarrEpisodeId = "1013";
+        special.EpisodeTitle = "Since That Day";
+        await SaveTestHistory(history);
+
+        _sonarrServiceMock
+            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode
+                {
+                    Id = 1013,
+                    SeriesId = 100,
+                    SeasonNumber = 1,
+                    EpisodeNumber = 13,
+                    Title = "Primal Desire"
+                }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        Assert.Null(result[0].Seasons[0].EpisodesList[0].SonarrEpisodeId);
+    }
+
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_InsertedRegularSeasonSpecialsAlignToSonarrS00()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons[0].SeasonTitle = "Season 1";
+        history[0].Seasons[0].EpisodesList =
+        [
+            new HistoryEpisode
+            {
+                EpisodeId = "inserted-24-5",
+                Episode = "24.5",
+                EpisodeSeasonNum = "1",
+                EpisodeTitle = "Episode 24.5",
+                EpisodeDescription = "alpha beta gamma delta",
+                SpecialEpisode = true
+            },
+            new HistoryEpisode
+            {
+                EpisodeId = "inserted-48-5",
+                Episode = "48.5",
+                EpisodeSeasonNum = "1",
+                EpisodeTitle = "Episode 48.5",
+                EpisodeDescription = "red blue green yellow",
+                SpecialEpisode = true
+            }
+        ];
+        await SaveTestHistory(history);
+
+        _sonarrServiceMock
+            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode
+                {
+                    Id = 2001,
+                    SeriesId = 100,
+                    SeasonNumber = 0,
+                    EpisodeNumber = 1,
+                    Title = "Movie",
+                    Overview = "unrelated feature film"
+                },
+                new SonarrEpisode
+                {
+                    Id = 2002,
+                    SeriesId = 100,
+                    SeasonNumber = 0,
+                    EpisodeNumber = 2,
+                    Title = "Episode 7",
+                    Overview = "alpha beta epsilon zeta"
+                },
+                new SonarrEpisode
+                {
+                    Id = 2003,
+                    SeriesId = 100,
+                    SeasonNumber = 0,
+                    EpisodeNumber = 3,
+                    Title = "Episode 13",
+                    Overview = "red blue orange purple"
+                }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var result = await _historyService.GetHistorySeriesAsync();
+        var matched = result[0].Seasons[0].EpisodesList;
+        Assert.Equal(["2002", "2003"], matched.Select(episode => episode.SonarrEpisodeId));
+        Assert.All(matched, episode => Assert.Equal("0", episode.SonarrSeasonNumber));
     }
 
     private List<HistorySeries> CreateTestHistory()

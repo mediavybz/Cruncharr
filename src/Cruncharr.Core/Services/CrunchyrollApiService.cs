@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Globalization;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -878,10 +879,27 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     }
 
     // [PT] Ported from upstream CrunchyEpisode.IsRegularEpisodeNumber
-    private static bool IsRegularEpisodeNumber(string? episode)
+    internal static bool IsRegularEpisodeNumber(string? episode)
     {
         return !string.IsNullOrWhiteSpace(episode) &&
                Regex.IsMatch(episode, @"^\d+(\.\d+)?(\s*-\s*\d+(\.\d+)?)?$");
+    }
+
+    internal static bool IsFractionalEpisodeNumber(string? episode)
+    {
+        if (string.IsNullOrWhiteSpace(episode)) return false;
+
+        var parts = Regex.Split(episode.Trim(), @"\s*-\s*");
+        if (parts.Length is < 1 or > 2) return false;
+
+        return parts.Any(part =>
+            Regex.IsMatch(part, @"^\d+\.\d+$") &&
+            decimal.TryParse(
+                part,
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var value) &&
+            value != decimal.Truncate(value));
     }
 
     // [PT] Upstream v1.6.14 fix ("special season detection incorrectly identifying some regular
@@ -891,6 +909,10 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     internal static bool IsSpecialEpisode(string? episodeLabel, int? episodeNumber)
     {
         if (string.IsNullOrEmpty(episodeLabel)) return false;
+        // Crunchyroll's integer episode_number is not an identity: inserted recaps/digressions
+        // commonly reuse the preceding regular number (13.5 -> 13, 24.9 -> 24), while Sonarr/TVDB
+        // correctly stores those entries in season 0. The raw fractional label is authoritative.
+        if (IsFractionalEpisodeNumber(episodeLabel)) return true;
         if (IsRegularEpisodeNumber(episodeLabel)) return false;
         if (episodeNumber.HasValue && episodeNumber.Value > 0) return false;
         return true;

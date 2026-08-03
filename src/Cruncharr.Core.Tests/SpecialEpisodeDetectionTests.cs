@@ -13,6 +13,16 @@ public class SpecialEpisodeDetectionTests
     // Real regular episodes (plain numeric label) — never special.
     [InlineData("1", 1, false)]
     [InlineData("517", 517, false)]
+    // Fractional labels are inserted bonus/special entries even when episode_number is the
+    // preceding positive integer (live CR examples that Sonarr stores in S00).
+    [InlineData("13.5", 13, true)]
+    [InlineData("24.5", 24, true)]
+    [InlineData("24.9", 24, true)]
+    [InlineData("48.5", 48, true)]
+    [InlineData("65.5", 65, true)]
+    [InlineData(" 24.5 ", 24, true)]
+    [InlineData("11.5-12", 11, true)]
+    [InlineData("11 - 12.5", 11, true)]
     // Multi-episode ranges are regular.
     [InlineData("11-12", 11, false)]
     // The regression case: non-numeric saga-code label but a valid positive episode_number.

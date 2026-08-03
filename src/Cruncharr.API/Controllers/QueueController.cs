@@ -87,6 +87,10 @@ public class QueueController : ControllerBase
                 // CR season_number (e.g. a Season 5 episode saved under Season 1).
                 SeasonNumber = request.SeasonNumber ?? 0,
                 EpisodeNumber = request.EpisodeNumber ?? 0,
+                // Keep the provider's display/identity label separately from its nullable integer
+                // episode_number. Fractional/SP labels cannot bind to an int and Sonarr needs the
+                // raw value to avoid treating an inserted special as a regular list position.
+                Episode = request.Episode,
                 Locale = request.Locale ?? "ja-JP",
                 AudioLocale = request.AudioLocale ?? request.Locale ?? "ja-JP",
                 ThumbnailUrl = request.ThumbnailUrl,
@@ -538,6 +542,7 @@ public class QueueRequest
     public string? SeriesTitle { get; set; }
     public int? SeasonNumber { get; set; }
     public int? EpisodeNumber { get; set; }
+    public string? Episode { get; set; }
     public string? Locale { get; set; }
     public string? AudioLocale { get; set; }
     public string? ThumbnailUrl { get; set; }

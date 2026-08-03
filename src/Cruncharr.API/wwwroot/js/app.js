@@ -83,6 +83,17 @@
             }
         }
 
+        function queueEpisodeIdentity(value) {
+            const raw = value == null ? '' : String(value).trim();
+            const numeric = Number(raw);
+            return {
+                episode: raw || null,
+                // ASP.NET's QueueRequest keeps this field integer-only. A fractional/SP label is
+                // sent through `episode` and the backend refetches its authoritative CR metadata.
+                episodeNumber: Number.isInteger(numeric) && numeric > 0 ? numeric : 0
+            };
+        }
+
         let currentPage = 'downloads';
         let queueData = [];
         let historyData = [];
@@ -1009,7 +1020,7 @@
                                 title: item.episodeTitle || item.title || '',
                                 seriesTitle: item.seriesTitle || addDownloadSelectedSeries?.title || '',
                                 seasonNumber: item.season || 1,
-                                episodeNumber: item.episodeNumber || 1,
+                                ...queueEpisodeIdentity(item.episodeNumber),
                                 thumbnailUrl: item.image || '',
                                 coverArtUrl: addDownloadSelectedSeries?.coverArtUrl || '',
                                 selectedDubs: item.selectedDubs || [],
@@ -1510,8 +1521,7 @@
                     payload.seriesTitle = seriesTitle;
                     payload.title = episodeNumber ? `${seriesTitle} — E${episodeNumber}` : seriesTitle;
                 }
-                const epNum = parseInt(episodeNumber, 10);
-                if (Number.isFinite(epNum)) payload.episodeNumber = epNum;
+                Object.assign(payload, queueEpisodeIdentity(episodeNumber));
                 if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
                 // Send the chosen language as selectedDubs (NOT locale/audioLocale). Passing
                 // locale pinned the version to the client-provided guid+locale, so if it didn't
@@ -4247,7 +4257,7 @@
                                         title: episode.episodeTitle || 'Unknown',
                                         seriesTitle: series.seriesTitle || 'Unknown',
                                         seasonNumber: season.seasonNum || 1,
-                                        episodeNumber: episode.episode || 1,
+                                        ...queueEpisodeIdentity(episode.episode),
                                         thumbnailUrl: episode.thumbnailImageUrl || ''
                                     })
                                 });
@@ -4646,7 +4656,15 @@
             }
             
             html += seasons.map(season => {
-                const episodesHtml = (season.episodes || []).map(ep => {
+                const seasonEpisodes = season.episodes || [];
+                const regularEpisodes = seasonEpisodes.filter(ep => !ep.specialEpisode);
+                const specialEpisodes = seasonEpisodes.filter(ep => ep.specialEpisode);
+                const regularHave = regularEpisodes.filter(ep => episodeIsHave(ep, series)).length;
+                const specialHave = specialEpisodes.filter(ep => episodeIsHave(ep, series)).length;
+                const seasonAvailability = specialEpisodes.length > 0
+                    ? `${regularHave}/${regularEpisodes.length} regular · ${specialHave}/${specialEpisodes.length} special`
+                    : `${regularHave}/${regularEpisodes.length} available`;
+                const episodesHtml = seasonEpisodes.map(ep => {
                     const status = getEpisodeDownloadStatus(ep, series);
                     const tooltip = getEpisodeStatusTooltip(ep, series);
                     const airDate = ep.episodeCrPremiumAirDate ? new Date(ep.episodeCrPremiumAirDate) : null;
@@ -4686,7 +4704,7 @@
                             <div style="display:flex; align-items:center; gap:8px;">
                                 <span class="season-collapse-chevron" title="Collapse / expand episodes">&#9656;</span>
                                 <span class="history-season-title">${escapeHtml(season.seasonTitle || `Season ${season.seasonNum || 1}`)}</span>
-                                <span style="font-size:0.8em; color:var(--text-muted);">${(season.episodes || []).filter(e => episodeIsHave(e, series)).length}/${season.episodes?.length || 0} available</span>
+                                <span style="font-size:0.8em; color:var(--text-muted);">${seasonAvailability}</span>
                             </div>
                             <div class="history-season-actions">
                                 <button class="btn-icon" onclick="event.stopPropagation(); showSeasonSettingsOverride('${escapeJsString(season.seasonId)}')" title="Season settings">&#9881;</button>
@@ -4816,7 +4834,7 @@
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
-                                episodeNumber: ep.episodeNumber || 1,
+                                ...queueEpisodeIdentity(ep.episode ?? ep.episodeNumber),
                                 thumbnailUrl: ep.thumbnailUrl || null,
                                 coverArtUrl: ep.coverArtUrl || null,
                                 description: ep.description || null
@@ -5242,7 +5260,7 @@
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
-                                episodeNumber: ep.episodeNumber || 1,
+                                ...queueEpisodeIdentity(ep.episode ?? ep.episodeNumber),
                                 thumbnailUrl: ep.thumbnailUrl || null,
                                 coverArtUrl: ep.coverArtUrl || null,
                                 description: ep.description || null

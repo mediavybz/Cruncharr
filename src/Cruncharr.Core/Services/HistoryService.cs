@@ -531,9 +531,9 @@ public class HistoryService : IHistoryService, IDisposable
             EpisodeTitle = episode.Title,
             EpisodeDescription = episode.Description,
             EpisodeId = episode.Id,
-            Episode = episode.EpisodeNumber.ToString(),
+            Episode = GetHistoryEpisodeLabel(episode),
             EpisodeSeasonNum = episode.SeasonNumber.ToString(),
-            SpecialEpisode = false,
+            SpecialEpisode = IsSpecialEpisode(episode),
             IsEpisodeAvailableOnStreamingService = true,
             ThumbnailImageUrl = episode.ThumbnailUrl,
             EpisodeType = EpisodeType.Episode,
@@ -548,8 +548,9 @@ public class HistoryService : IHistoryService, IDisposable
         historyEpisode.EpisodeTitle = episode.Title;
         historyEpisode.EpisodeDescription = episode.Description;
         historyEpisode.EpisodeId = episode.Id;
-        historyEpisode.Episode = episode.EpisodeNumber.ToString();
+        historyEpisode.Episode = GetHistoryEpisodeLabel(episode);
         historyEpisode.EpisodeSeasonNum = episode.SeasonNumber.ToString();
+        historyEpisode.SpecialEpisode = IsSpecialEpisode(episode);
         historyEpisode.IsEpisodeAvailableOnStreamingService = true;
         historyEpisode.ThumbnailImageUrl = episode.ThumbnailUrl;
         historyEpisode.EpisodeSeriesType = SeriesType.Series;
@@ -576,7 +577,8 @@ public class HistoryService : IHistoryService, IDisposable
             SeasonId = firstEpisode.SeasonId,
             SeasonNum = firstEpisode.SeasonNumber.ToString(),
             EpisodesList = [],
-            SpecialSeason = false
+            SpecialSeason = firstEpisode.SeasonNumber == 0 ||
+                            firstEpisode.SeasonTitle?.Contains("special", StringComparison.OrdinalIgnoreCase) == true
         };
 
         foreach (var episode in episodes)
@@ -587,6 +589,33 @@ public class HistoryService : IHistoryService, IDisposable
 
         return season;
     }
+
+    private static string GetHistoryEpisodeLabel(EpisodeInfo episode)
+    {
+        var label = episode.Episode?.Trim();
+        var apiEpisodeNumber = episode.EpisodeNumber > 0
+            ? episode.EpisodeNumber
+            : (int?)null;
+
+        // Keep provider labels that carry numbering information an integer cannot represent
+        // (for example 5.5 and 11-12), plus true OVA/special labels. A non-numeric saga code with
+        // a valid positive episode_number (for example FMI1) remains a regular numbered episode.
+        if (!string.IsNullOrWhiteSpace(label) &&
+            (CrunchyrollApiService.IsRegularEpisodeNumber(label) ||
+             CrunchyrollApiService.IsSpecialEpisode(label, apiEpisodeNumber)))
+        {
+            return label;
+        }
+
+        return episode.EpisodeNumber > 0
+            ? episode.EpisodeNumber.ToString(CultureInfo.InvariantCulture)
+            : label ?? "0";
+    }
+
+    private static bool IsSpecialEpisode(EpisodeInfo episode) =>
+        CrunchyrollApiService.IsSpecialEpisode(
+            episode.Episode,
+            episode.EpisodeNumber > 0 ? episode.EpisodeNumber : null);
 
     // Persistence
     private async Task LoadRichHistoryAsync()
@@ -944,6 +973,11 @@ public class HistoryService : IHistoryService, IDisposable
                 {
                     if (int.TryParse(historyEpisode.SonarrEpisodeId, out var sonarrEpisodeId) &&
                         episodesById.TryGetValue(sonarrEpisodeId, out var sonarrEpisode) &&
+                        ShouldKeepStoredSonarrMatch(
+                            historyEpisode,
+                            sonarrEpisode,
+                            episodes,
+                            IsSpecialHistoryEpisode(historySeries, historyEpisode)) &&
                         usedSonarrEpisodeIds.Add(sonarrEpisode.Id))
                     {
                         historyEpisode.AssignSonarrEpisodeData(sonarrEpisode);
@@ -971,31 +1005,34 @@ public class HistoryService : IHistoryService, IDisposable
                 .Where(episode => !usedSonarrEpisodeIds.Contains(episode.Id))
                 .ToList();
 
-            var titleCandidates = episodesToMatch
-                .Select(historyEpisode =>
-                {
-                    var availableEpisodes = IsSpecialHistoryEpisode(historySeries, historyEpisode)
-                        ? titleAvailableEpisodes.Where(episode => episode.SeasonNumber == 0).ToList()
-                        : titleAvailableEpisodes;
-                    var match = FindClosestMatchEpisodeWithScore(
-                        availableEpisodes,
-                        historyEpisode.EpisodeTitle ?? string.Empty);
-                    return new
-                    {
-                        HistoryEpisode = historyEpisode,
-                        match.Episode,
-                        match.Score
-                    };
-                })
-                .Where(candidate => candidate.Episode != null)
+            // Build every strong source/target identity pair, then consume the best one-to-one
+            // assignments. Selecting only each source's first choice caused a second valid episode
+            // to remain unmatched whenever two candidates initially preferred the same target.
+            // Title and overview are authoritative here; provider numbers are handled only later.
+            var identityCandidates = episodesToMatch
+                .SelectMany(historyEpisode =>
+                    titleAvailableEpisodes
+                        .Where(episode =>
+                            !IsSpecialHistoryEpisode(historySeries, historyEpisode) ||
+                            episode.SeasonNumber == 0)
+                        .Select(episode => new
+                        {
+                            HistoryEpisode = historyEpisode,
+                            Episode = episode,
+                            Score = CalculateEpisodeEvidenceScore(historyEpisode, episode)
+                        }))
+                .Where(candidate => candidate.Score >= 0.8)
                 .OrderByDescending(candidate => candidate.Score)
+                .ThenBy(candidate => candidate.HistoryEpisode.EpisodeId, StringComparer.Ordinal)
+                .ThenBy(candidate => candidate.Episode.Id)
                 .ToList();
 
             var failedEpisodes = new List<HistoryEpisode>();
             var matchedHistoryEpisodes = new HashSet<HistoryEpisode>();
 
-            foreach (var candidate in titleCandidates)
+            foreach (var candidate in identityCandidates)
             {
+                if (matchedHistoryEpisodes.Contains(candidate.HistoryEpisode)) continue;
                 if (TryAssignSonarrEpisode(candidate.HistoryEpisode, candidate.Episode, usedSonarrEpisodeIds))
                 {
                     matchedHistoryEpisodes.Add(candidate.HistoryEpisode);
@@ -1024,22 +1061,6 @@ public class HistoryService : IHistoryService, IDisposable
 
                     return episodeNumberStr == historyEpisode.Episode && seasonNumberStr == historyEpisode.EpisodeSeasonNum;
                 });
-
-                if (TryAssignSonarrEpisode(historyEpisode, episode, usedSonarrEpisodeIds))
-                {
-                    failedEpisodes.Remove(historyEpisode);
-                }
-            }
-
-            // Try matching by description similarity
-            foreach (var historyEpisode in failedEpisodes.ToList())
-            {
-                var episode = episodes.FirstOrDefault(ele =>
-                    !usedSonarrEpisodeIds.Contains(ele.Id) &&
-                    (!IsSpecialHistoryEpisode(historySeries, historyEpisode) || ele.SeasonNumber == 0) &&
-                    !string.IsNullOrEmpty(historyEpisode.EpisodeDescription) &&
-                    !string.IsNullOrEmpty(ele.Overview) &&
-                    StringSimilarity.CalculateCosineSimilarity(ele.Overview, historyEpisode.EpisodeDescription) > 0.8);
 
                 if (TryAssignSonarrEpisode(historyEpisode, episode, usedSonarrEpisodeIds))
                 {
@@ -1168,10 +1189,15 @@ public class HistoryService : IHistoryService, IDisposable
         var failed = failedEpisodes.ToHashSet();
         var matched = new List<HistoryEpisode>();
 
-        foreach (var historySeason in historySeries.Seasons.Where(IsSpecialHistorySeason))
+        foreach (var historySeason in historySeries.Seasons.Where(historySeason =>
+                     historySeason.EpisodesList.Any(historyEpisode =>
+                         failed.Contains(historyEpisode) &&
+                         IsSpecialHistoryEpisode(historySeries, historyEpisode))))
         {
             var sourceEpisodes = historySeason.EpisodesList
-                .Where(failed.Contains)
+                .Where(historyEpisode =>
+                    failed.Contains(historyEpisode) &&
+                    IsSpecialHistoryEpisode(historySeries, historyEpisode))
                 .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.Episode))
                 .ToList();
             if (sourceEpisodes.Count == 0) continue;
@@ -1295,19 +1321,75 @@ public class HistoryService : IHistoryService, IDisposable
     {
         var titleSimilarity =
             string.IsNullOrWhiteSpace(historyEpisode.EpisodeTitle) ||
-            string.IsNullOrWhiteSpace(sonarrEpisode.Title)
+            string.IsNullOrWhiteSpace(sonarrEpisode.Title) ||
+            IsGenericEpisodeTitle(historyEpisode.EpisodeTitle) ||
+            IsGenericEpisodeTitle(sonarrEpisode.Title)
                 ? 0.0
                 : StringSimilarity.CalculateSimilarity(
                     historyEpisode.EpisodeTitle.ToLowerInvariant(),
                     sonarrEpisode.Title.ToLowerInvariant());
-        var titleTokenSimilarity = CalculateNormalizedTokenCosine(
-            historyEpisode.EpisodeTitle,
-            sonarrEpisode.Title);
+        var titleTokenSimilarity = titleSimilarity == 0.0
+            ? 0.0
+            : CalculateNormalizedTokenCosine(
+                historyEpisode.EpisodeTitle,
+                sonarrEpisode.Title);
         var overviewSimilarity = CalculateNormalizedTokenCosine(
             historyEpisode.EpisodeDescription,
             sonarrEpisode.Overview);
 
-        return Math.Max(titleSimilarity, Math.Max(titleTokenSimilarity, overviewSimilarity));
+        var titleEvidence = Math.Max(titleSimilarity, titleTokenSimilarity);
+        if (titleEvidence > 0.0 && overviewSimilarity > 0.0)
+        {
+            // Keep a strong title sufficient on its own while using the overview to break ties
+            // between repeated titles such as "Part 1" across seasons.
+            return Math.Max(overviewSimilarity, titleEvidence * 0.85 + overviewSimilarity * 0.15);
+        }
+
+        return Math.Max(titleEvidence, overviewSimilarity);
+    }
+
+    private static bool IsGenericEpisodeTitle(string? title) =>
+        !string.IsNullOrWhiteSpace(title) &&
+        System.Text.RegularExpressions.Regex.IsMatch(
+            title.Trim(),
+            @"^episode\s+\d+(?:\.\d+)?$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static bool ShouldKeepStoredSonarrMatch(
+        HistoryEpisode historyEpisode,
+        SonarrEpisode storedEpisode,
+        IReadOnlyList<SonarrEpisode> allEpisodes,
+        bool isSpecial)
+    {
+        // A provider special must never retain an old number-based mapping to a regular Sonarr
+        // season. If no credible S00 identity exists, leaving it unmatched is safer than naming or
+        // deduplicating it as an unrelated regular episode.
+        if (isSpecial && storedEpisode.SeasonNumber != 0) return false;
+
+        if (string.IsNullOrWhiteSpace(historyEpisode.EpisodeTitle) &&
+            string.IsNullOrWhiteSpace(historyEpisode.EpisodeDescription))
+        {
+            return true;
+        }
+
+        var candidates = isSpecial
+            ? allEpisodes.Where(episode => episode.SeasonNumber == 0)
+            : allEpisodes;
+        var best = candidates
+            .Select(episode => new
+            {
+                Episode = episode,
+                Score = CalculateEpisodeEvidenceScore(historyEpisode, episode)
+            })
+            .OrderByDescending(candidate => candidate.Score)
+            .FirstOrDefault();
+        if (best == null || best.Episode.Id == storedEpisode.Id) return true;
+
+        var storedScore = CalculateEpisodeEvidenceScore(historyEpisode, storedEpisode);
+        // Only replace a persisted identity when metadata provides a decisive better answer. This
+        // heals older number-based mappings without churning generic/translated episode titles.
+        return best.Score < 0.8 || storedScore + 0.15 >= best.Score;
     }
 
     private static double CalculateNormalizedTokenCosine(string? source, string? target)
@@ -1707,9 +1789,10 @@ public class HistoryService : IHistoryService, IDisposable
             Id = browseEpisode.Id ?? originalVersion?.Guid ?? "",
             Guid = originalVersion?.Guid ?? browseEpisode.Id ?? "",
             Title = browseEpisode.Title ?? "",
-            SeriesTitle = "", // Not available in browse data
-            SeasonTitle = "",
+            SeriesTitle = metadata?.SeriesTitle ?? "",
+            SeasonTitle = metadata?.SeasonTitle ?? "",
             Description = browseEpisode.Description ?? "",
+            Episode = metadata?.Episode,
             EpisodeNumber = metadata?.EpisodeCount ?? 0,
             SeasonNumber = (int)(metadata?.SeasonNumber ?? 0),
             SeasonId = originalVersion?.SeasonGuid ?? "",

@@ -100,7 +100,8 @@ jobs:
 
           if [ "$PUBLISH_IMAGE" = "true" ]; then
             test -n "$GHCR_TOKEN"
-            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username mediavybz --password-stdin
+            test -n "$GHCR_USERNAME"
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
             bash scripts/publish-docker.sh \
               --tag ghcr.io/mediavybz/cruncharr:testing \
               --push
@@ -110,3 +111,4 @@ jobs:
           fi
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}

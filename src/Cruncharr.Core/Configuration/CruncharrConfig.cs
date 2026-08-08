@@ -353,6 +353,9 @@ public class DownloadConfig
     [YamlMember(Alias = "keep_dubs_separate", ApplyNamingConventions = false)]
     public bool KeepDubsSeparate { get; set; } = false;
 
+    [YamlMember(Alias = "keep_audio_descriptions_separate", ApplyNamingConventions = false)]
+    public bool KeepAudioDescriptionsSeparate { get; set; } = false;
+
     [YamlMember(Alias = "download_delay_seconds", ApplyNamingConventions = false)]
     public int DownloadDelaySeconds { get; set; } = 0;
 

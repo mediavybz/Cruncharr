@@ -538,7 +538,7 @@ public class HistoryService : IHistoryService, IDisposable
             ThumbnailImageUrl = episode.ThumbnailUrl,
             EpisodeType = EpisodeType.Episode,
             EpisodeSeriesType = SeriesType.Series,
-            HistoryEpisodeAvailableDubLang = new List<string> { episode.AudioLocale },
+            HistoryEpisodeAvailableDubLang = GetAvailableDubLocales(episode),
             HistoryEpisodeAvailableSoftSubs = episode.SubtitleLocales ?? new List<string>()
         };
     }
@@ -555,9 +555,10 @@ public class HistoryService : IHistoryService, IDisposable
         historyEpisode.ThumbnailImageUrl = episode.ThumbnailUrl;
         historyEpisode.EpisodeSeriesType = SeriesType.Series;
         // Update available dub/sub metadata for existing episodes
-        if (!historyEpisode.HistoryEpisodeAvailableDubLang.Contains(episode.AudioLocale, StringComparer.OrdinalIgnoreCase))
+        foreach (var locale in GetAvailableDubLocales(episode).Where(locale =>
+                     !historyEpisode.HistoryEpisodeAvailableDubLang.Contains(locale, StringComparer.OrdinalIgnoreCase)))
         {
-            historyEpisode.HistoryEpisodeAvailableDubLang.Add(episode.AudioLocale);
+            historyEpisode.HistoryEpisodeAvailableDubLang.Add(locale);
         }
         if (episode.SubtitleLocales != null)
         {
@@ -588,6 +589,23 @@ public class HistoryService : IHistoryService, IDisposable
         }
 
         return season;
+    }
+
+    private static List<string> GetAvailableDubLocales(EpisodeInfo episode)
+    {
+        if (episode.Versions is { Count: > 0 })
+        {
+            return episode.Versions
+                .Where(version => !string.IsNullOrWhiteSpace(version.AudioLocale))
+                .Select(version => version.Roles?.Any(role =>
+                    string.Equals(role, "description", StringComparison.OrdinalIgnoreCase)) == true
+                    ? version.AudioLocale + "*"
+                    : version.AudioLocale)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return string.IsNullOrWhiteSpace(episode.AudioLocale) ? [] : [episode.AudioLocale];
     }
 
     private static string GetHistoryEpisodeLabel(EpisodeInfo episode)
@@ -1794,7 +1812,11 @@ public class HistoryService : IHistoryService, IDisposable
             Description = browseEpisode.Description ?? "",
             Episode = metadata?.Episode,
             EpisodeNumber = metadata?.EpisodeCount ?? 0,
-            SeasonNumber = (int)(metadata?.SeasonNumber ?? 0),
+            SeasonNumber = CrunchyrollApiService.ResolveSeasonNumber(
+                (int)(metadata?.SeasonNumber ?? 0),
+                metadata?.SeasonTitle,
+                metadata?.SeriesTitle,
+                metadata?.Identifier),
             SeasonId = originalVersion?.SeasonGuid ?? "",
             SeriesId = metadata?.SeriesId ?? "", // Use SeriesId from metadata if available
             AudioLocale = metadata?.AudioLocale ?? "ja-JP",

@@ -14,12 +14,15 @@ public class SegmentTemplate
         templateValues.RepresentationID = ObjectUtilities.GetMemberValue(attributes, "id");
         templateValues.Bandwidth = ObjectUtilities.GetMemberValue(attributes, "bandwidth") ?? 0;
 
-        dynamic initialization = attributes.initialization ?? new { sourceURL = string.Empty, range = string.Empty };
+        dynamic initialization = ObjectUtilities.GetMemberValue(attributes, "initialization") ??
+                                 new { sourceURL = string.Empty, range = string.Empty };
 
         dynamic mapSegment = UrlType.UrlTypeToSegment(new
         {
             baseUrl = ObjectUtilities.GetMemberValue(attributes, "baseUrl"),
-            source = ConstructTemplateUrl(initialization.sourceURL, templateValues),
+            source = ConstructTemplateUrl(
+                ObjectUtilities.GetMemberValue(initialization, "sourceURL")?.ToString() ?? string.Empty,
+                templateValues),
             range = ObjectUtilities.GetMemberValue(initialization, "range")
         });
 

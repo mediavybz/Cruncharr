@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Dynamic;
 using System.Linq;
+using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser.Segments;
 
@@ -8,39 +10,40 @@ public class SegmentList
 {
     public static List<dynamic> SegmentsFromList(dynamic attributes, List<dynamic> segmentTimeline)
     {
-        if ((!attributes.duration && segmentTimeline == null) ||
-            (attributes.duration && segmentTimeline != null))
+        var duration = ObjectUtilities.GetMemberValue(attributes, "duration");
+        if ((duration == null && segmentTimeline == null) ||
+            (duration != null && segmentTimeline != null))
         {
             throw new Exception("Segment time unspecified");
         }
 
-        List<dynamic> segmentUrls = ((List<dynamic>)attributes.segmentUrls)?.ToList() ?? new List<dynamic>();
+        var segmentUrls = (ObjectUtilities.GetMemberValue(attributes, "segmentUrls") as IEnumerable<object>)?
+            .Cast<dynamic>()
+            .ToList() ?? [];
         var segmentUrlMap = segmentUrls.Select(segmentUrlObject => SegmentURLToSegmentObject(attributes, segmentUrlObject)).ToList();
 
-        List<dynamic> segmentTimeInfo = new List<dynamic>();
-        if (attributes.duration != null)
-        {
-            segmentTimeInfo = DurationTimeParser.ParseByDuration(attributes);
-        }
-        else if (segmentTimeline != null)
-        {
-            segmentTimeInfo = TimelineTimeParser.ParseByTimeline(attributes, segmentTimeline);
-        }
+        List<dynamic> segmentTimeInfo = duration != null
+            ? DurationTimeParser.ParseByDuration(attributes)
+            : TimelineTimeParser.ParseByTimeline(attributes, segmentTimeline);
 
         var segments = segmentTimeInfo.Select((segmentTime, index) =>
         {
-            if (index < segmentUrlMap.Count)
-            {
-                var segment = segmentUrlMap[index];
-                segment.Timeline = segmentTime.Timeline;
-                segment.Duration = segmentTime.Duration;
-                segment.Number = segmentTime.Number;
-                segment.PresentationTime = attributes.periodStart + ((segmentTime.Time - (attributes.presentationTimeOffset ?? 0)) / (attributes.timescale ?? 1));
+            if (index >= segmentUrlMap.Count) return null;
 
-                return segment;
-            }
+            var segment = segmentUrlMap[index];
+            var timescale = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributes, "timescale") ?? 1);
+            var presentationTimeOffset = Convert.ToDouble(
+                ObjectUtilities.GetMemberValue(attributes, "presentationTimeOffset") ?? 0);
+            var periodStart = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributes, "periodStart") ?? 0);
 
-            return null;
+            segment.timeline = ObjectUtilities.GetMemberValue(segmentTime, "timeline");
+            segment.duration = ObjectUtilities.GetMemberValue(segmentTime, "duration");
+            segment.number = ObjectUtilities.GetMemberValue(segmentTime, "number");
+            segment.presentationTime = periodStart +
+                (Convert.ToDouble(ObjectUtilities.GetMemberValue(segmentTime, "time")) - presentationTimeOffset) /
+                timescale;
+
+            return segment;
         }).Where(segment => segment != null).Cast<dynamic>().ToList();
 
         return segments;
@@ -48,21 +51,22 @@ public class SegmentList
 
     public static dynamic SegmentURLToSegmentObject(dynamic attributes, dynamic segmentUrl)
     {
+        dynamic initialization = ObjectUtilities.GetMemberValue(attributes, "initialization") ?? new ExpandoObject();
         var initSegment = UrlType.UrlTypeToSegment(new
         {
-            baseUrl = attributes.baseUrl,
-            source = attributes.initialization?.sourceURL,
-            range = attributes.initialization?.range
+            baseUrl = ObjectUtilities.GetMemberValue(attributes, "baseUrl"),
+            source = ObjectUtilities.GetMemberValue(initialization, "sourceURL"),
+            range = ObjectUtilities.GetMemberValue(initialization, "range")
         });
 
         var segment = UrlType.UrlTypeToSegment(new
         {
-            baseUrl = attributes.baseUrl,
-            source = segmentUrl.media,
-            range = segmentUrl.mediaRange
+            baseUrl = ObjectUtilities.GetMemberValue(attributes, "baseUrl"),
+            source = ObjectUtilities.GetMemberValue(segmentUrl, "media"),
+            range = ObjectUtilities.GetMemberValue(segmentUrl, "mediaRange")
         });
 
-        segment.Map = initSegment;
+        segment.map = initSegment;
         return segment;
     }
 }

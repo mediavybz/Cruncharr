@@ -486,6 +486,21 @@ public class DownloadService : IDownloadService
                 candidate.AbsoluteEpisodeNumber == episode.EpisodeNumber);
     }
 
+    internal static string GetSeparateAudioGroupKey(
+        string path,
+        string language,
+        bool keepAudioDescriptionsSeparate)
+    {
+        return keepAudioDescriptionsSeparate && IsAudioDescriptionFile(path)
+            ? language + ".AD"
+            : language;
+    }
+
+    internal static string RemoveAudioDescriptionGroupMarker(string groupKey) =>
+        groupKey.EndsWith(".AD", StringComparison.OrdinalIgnoreCase)
+            ? groupKey[..^3]
+            : groupKey;
+
     internal static double CalculateEpisodeTitleIdentityScore(string? source, string? target)
     {
         var normalizedSource = NormalizeEpisodeIdentityText(source);
@@ -1908,14 +1923,29 @@ public class DownloadService : IDownloadService
                     if (config.Download.KeepDubsSeparate && !config.Download.DlVideoOnce && audioTrackLanguages.Count > 0)
                     {
                         // Group by dub language and create separate output files
-                        var groups = audioTrackLanguages.GroupBy(a => a.Lang).ToList();
+                        var groups = audioTrackLanguages.GroupBy(a =>
+                            GetSeparateAudioGroupKey(
+                                a.Path,
+                                a.Lang,
+                                config.Download.KeepAudioDescriptionsSeparate)).ToList();
+                        var allAudioPaths = audioTrackLanguages
+                            .Select(track => track.Path)
+                            .ToHashSet(StringComparer.Ordinal);
+                        var sharedMediaFiles = downloadedFiles
+                            .Where(path => !allAudioPaths.Contains(path))
+                            .ToList();
                         foreach (var group in groups)
                         {
-                            var locale = group.Key;
+                            var outputSuffix = group.Key;
+                            var locale = RemoveAudioDescriptionGroupMarker(outputSuffix);
                             var groupAudioTracks = group.Select(a => (a.Path, a.Lang)).ToList();
+                            var groupMediaFiles = sharedMediaFiles
+                                .Concat(group.Select(track => track.Path))
+                                .Distinct(StringComparer.Ordinal)
+                                .ToList();
                             var groupOutputPath = Path.Combine(
                                 Path.GetDirectoryName(outputPath) ?? "/downloads",
-                                Path.GetFileNameWithoutExtension(outputPath) + $".{locale}" + Path.GetExtension(outputPath)
+                                Path.GetFileNameWithoutExtension(outputPath) + $".{outputSuffix}" + Path.GetExtension(outputPath)
                             );
                             // Mux/encode in tempDir when enabled, then move the finished file out.
                             var groupWorkPath = transcodeInTemp
@@ -1923,7 +1953,7 @@ public class DownloadService : IDownloadService
                                 : groupOutputPath;
 
                             progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 90, Doing = $"Muxing {locale}..." });
-                            var muxed = await MuxFilesAsync(downloadedFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupWorkPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: locale);
+                            var muxed = await MuxFilesAsync(groupMediaFiles, groupAudioTracks, subtitleFiles, chapterFile, fontAttachments, coverPath, groupWorkPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: locale);
                             if (!muxed)
                             {
                                 throw new DownloadException(
@@ -3226,6 +3256,7 @@ public class DownloadService : IDownloadService
 
     private async Task DecryptWithMp4Decrypt(string inputPath, string outputPath, List<ContentKey> keys)
     {
+        keys = GetContentKeys(keys);
         if (keys.Count == 0) return;
 
         // Find decryptor tool (prefer shaka-packager, fallback to mp4decrypt)
@@ -3297,6 +3328,7 @@ public class DownloadService : IDownloadService
 
     private async Task<List<string>> DecryptFilesAsync(List<string> encryptedFiles, List<ContentKey> keys, CancellationToken cancellationToken)
     {
+        keys = GetContentKeys(keys);
         var decryptedFiles = new List<string>();
 
         // Find decryptor tool
@@ -3388,9 +3420,17 @@ public class DownloadService : IDownloadService
         return decryptedFiles;
     }
 
+    internal static List<ContentKey> GetContentKeys(List<ContentKey> keys)
+    {
+        var contentKeys = keys
+            .Where(key => string.Equals(key.Type, "Content", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return contentKeys.Count > 0 ? contentKeys : keys;
+    }
+
     private static string BuildShakaKeysParam(List<ContentKey> keys) =>
         "--enable_raw_key_decryption " + string.Join(" ",
-            keys.Select(k => $"--keys key_id={FormatKey(k.KeyID)}:key={FormatKey(k.Bytes)}"));
+            GetContentKeys(keys).Select(k => $"--keys key_id={FormatKey(k.KeyID)}:key={FormatKey(k.Bytes)}"));
 
     private static string FormatKey(byte[] keyBytes) =>
         BitConverter.ToString(keyBytes).Replace("-", "").ToLower();

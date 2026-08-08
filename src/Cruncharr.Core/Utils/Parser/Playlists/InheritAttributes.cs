@@ -63,9 +63,16 @@ public class InheritAttributes
         return keySystemInfo;
     }
 
-    private static byte[] DecodeB64ToUint8Array(string base64String)
+    private static ExpandoObject DecodeB64ToUint8Array(string base64String)
     {
-        return Convert.FromBase64String(base64String);
+        var bytes = Convert.FromBase64String(base64String);
+        var result = new ExpandoObject();
+        var dictionary = (IDictionary<string, object>)result;
+        for (var index = 0; index < bytes.Length; index++)
+        {
+            dictionary[index.ToString()] = bytes[index];
+        }
+        return result;
     }
 
     public static string GetContent(XmlElement element) => element.InnerText.Trim();
@@ -86,14 +93,18 @@ public class InheritAttributes
                 dynamic finalBaseUrl = new ExpandoObject();
                 finalBaseUrl.baseUrl = resolvedBaseUrl;
 
-                ObjectUtilities.MergeExpandoObjects(finalBaseUrl, ParseAttribute.ParseAttributes(baseUrlElement));
+                dynamic mergedBaseUrl = ObjectUtilities.MergeExpandoObjects(
+                    finalBaseUrl,
+                    ParseAttribute.ParseAttributes(baseUrlElement));
 
-                if (resolvedBaseUrl != initialBaseUrl && finalBaseUrl.serviceLocation == null && reference.serviceLocation != null)
+                var serviceLocation = ObjectUtilities.GetMemberValue(mergedBaseUrl, "serviceLocation");
+                var referenceServiceLocation = ObjectUtilities.GetMemberValue(reference, "serviceLocation");
+                if (resolvedBaseUrl != initialBaseUrl && serviceLocation == null && referenceServiceLocation != null)
                 {
-                    finalBaseUrl.ServiceLocation = reference.ServiceLocation;
+                    mergedBaseUrl.serviceLocation = referenceServiceLocation;
                 }
 
-                return finalBaseUrl;
+                return mergedBaseUrl;
             })
         ).ToList();
     }
@@ -257,7 +268,7 @@ public class InheritAttributes
                 metadata.language = default(string);
                 metadata.aspectRatio = 1;
                 metadata.easyReader = 0;
-                metadata._3D = 0;
+                ((IDictionary<string, object>)metadata)["3D"] = 0;
 
                 if (value.Contains("="))
                 {
@@ -287,7 +298,7 @@ public class InheritAttributes
                                 metadata.aspectRatio = Convert.ToInt32(val);
                                 break;
                             case "3D":
-                                metadata._3D = Convert.ToInt32(val);
+                            ((IDictionary<string, object>)metadata)["3D"] = Convert.ToInt32(val);
                                 break;
                         }
                     }
@@ -318,7 +329,7 @@ public class InheritAttributes
         var accessibility = XMLUtils.FindChildren(adaptationSet, "Accessibility").FirstOrDefault();
         var captionServices = ParseCaptionServiceMetadata(accessibility != null ? ParseAttribute.ParseAttributes(accessibility) : null);
 
-        if (captionServices != null)
+        if (captionServices.Count > 0)
         {
             attrs = ObjectUtilities.MergeExpandoObjects(attrs, new { captionServices });
         }
@@ -436,7 +447,7 @@ public class InheritAttributes
         dynamic mpdAttributes = ParseAttribute.ParseAttributes(mpd);
         dynamic baseUrl = new ExpandoObject();
         baseUrl.baseUrl = manifestUri;
-        dynamic mpdBaseUrls = BuildBaseUrls(new List<dynamic> { baseUrl }, XMLUtils.FindChildren(mpd, "BaseUrl"));
+        dynamic mpdBaseUrls = BuildBaseUrls(new List<dynamic> { baseUrl }, XMLUtils.FindChildren(mpd, "BaseURL"));
         List<XmlElement> contentSteeringNodes = XMLUtils.FindChildren(mpd, "ContentSteering");
 
         ObjectUtilities.SetAttributeWithDefault(mpdAttributes, "type", "static");
@@ -461,7 +472,7 @@ public class InheritAttributes
             dynamic? priorPeriod = null;
             if (getIndex >= 0 && getIndex < periods.Count)
             {
-                priorPeriod = periods[getIndex];
+                priorPeriod = ((dynamic)periods[getIndex]).attributes;
             }
 
             attributes.start = GetPeriodStart(attributes, priorPeriod, mpdAttributes.type);

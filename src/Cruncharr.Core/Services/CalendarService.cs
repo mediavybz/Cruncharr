@@ -486,9 +486,9 @@ public class CalendarService : ICalendarService
                     EpisodeUrl = $"https://www.crunchyroll.com/{language}/watch/{crBrowseEpisode.Id}/",
                     ThumbnailUrl = crBrowseEpisode.Images?.Thumbnail?.FirstOrDefault()?.FirstOrDefault()?.Source ?? "",
                     IsPremiumOnly = metadata.IsPremiumOnly,
-                    IsPremiere = metadata.Episode == "1",
+                    IsPremiere = GetCalendarEpisodeNumber(metadata) == "1",
                     SeasonName = seasonTitle,
-                    EpisodeNumber = metadata.Episode ?? "?",
+                    EpisodeNumber = GetCalendarEpisodeNumber(metadata),
                     CrSeriesID = metadata.SeriesId,
                     CrSeasonID = metadata.SeasonId,
                     CrEpisodeID = crBrowseEpisode.Id,
@@ -507,6 +507,16 @@ public class CalendarService : ICalendarService
             _logger?.LogError(ex, "Failed to fetch new episodes for calendar");
             return null;
         }
+    }
+
+    internal static string GetCalendarEpisodeNumber(CrBrowseEpisodeMetaData metadata)
+    {
+        if (!string.IsNullOrWhiteSpace(metadata.Episode)) return metadata.Episode;
+        if (metadata.SequenceNumber > 0)
+        {
+            return metadata.SequenceNumber.ToString("0.##", CultureInfo.InvariantCulture);
+        }
+        return metadata.EpisodeCount == 1 ? "1" : string.Empty;
     }
 
     // [PT] Upstream: only treat "Season N" style labels as generic

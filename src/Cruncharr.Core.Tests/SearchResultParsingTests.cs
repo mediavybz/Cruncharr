@@ -39,7 +39,7 @@ public class SearchResultParsingTests
     }
 
     [Fact]
-    public void BuildSearchUri_RequestsSeriesAndMoviesWithExpandedLimit()
+    public void BuildSearchUri_RequestsEveryUpstreamSearchCategoryWithExpandedLimit()
     {
         var uri = CrunchyrollApiService.BuildSearchUri("SPY x FAMILY CODE: White", 100, 100);
         var query = HttpUtility.ParseQueryString(uri.Query);
@@ -47,7 +47,7 @@ public class SearchResultParsingTests
         Assert.Equal("SPY x FAMILY CODE: White", query["q"]);
         Assert.Equal("100", query["n"]);
         Assert.Equal("100", query["start"]);
-        Assert.Equal("series,movie_listing", query["type"]);
+        Assert.Equal("top_results,series,movie_listing,episode,music", query["type"]);
     }
 
     [Fact]

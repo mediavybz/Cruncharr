@@ -140,7 +140,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             { "q", query },
             { "n", Math.Clamp(limit, 1, 100).ToString() },
             { "start", Math.Max(0, start).ToString() },
-            { "type", "series,movie_listing" }
+            { "type", "top_results,series,movie_listing,episode,music" }
         };
         return new UriBuilder(ApiUrls.Search(true))
         {
@@ -351,7 +351,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Title = ep.Title,
                 Episode = ep.Episode,
                 EpisodeNumber = ep.EpisodeNumber ?? 0,
-                SeasonNumber = ep.SeasonNumber,
+                SeasonNumber = ResolveSeasonNumber(ep.SeasonNumber, ep.SeasonTitle, ep.SeriesTitle, ep.Identifier),
                 Description = ep.Description,
                 SeriesTitle = ep.SeriesTitle,
                 SeriesId = ep.SeriesId,
@@ -632,7 +632,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Title = episode.Title,
                 Episode = episode.Episode,
                 EpisodeNumber = episode.EpisodeNumber ?? 0,
-                SeasonNumber = episode.SeasonNumber,
+                SeasonNumber = ResolveSeasonNumber(episode.SeasonNumber, episode.SeasonTitle, episode.SeriesTitle, episode.Identifier),
                 Description = episode.Description,
                 SeriesTitle = episode.SeriesTitle,
                 // [FIX] Carry the series/season identity through. Without these the download flow
@@ -723,7 +723,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             {
                 Id = s.Id,
                 Title = s.Title,
-                SeasonNumber = s.SeasonNumber
+                SeasonNumber = ResolveSeasonNumber(s.SeasonNumber, s.Title, null, s.Identifier),
+                Identifier = s.Identifier
             }).ToList();
         }
         catch
@@ -777,7 +778,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     Title = e.Title,
                     Episode = e.Episode,
                     EpisodeNumber = e.EpisodeNumber ?? 0,
-                    SeasonNumber = e.SeasonNumber,
+                    SeasonNumber = ResolveSeasonNumber(e.SeasonNumber, e.SeasonTitle, e.SeriesTitle, e.Identifier),
                     SeasonTitle = e.SeasonTitle,
                     SeasonId = e.SeasonId,
                     Description = e.Description,
@@ -900,6 +901,55 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 CultureInfo.InvariantCulture,
                 out var value) &&
             value != decimal.Truncate(value));
+    }
+
+    // Upstream v1.6.16: special seasons are season 0 and explicit "Season N" titles take
+    // precedence over Crunchyroll's occasionally inconsistent numeric/identifier fields.
+    internal static int ResolveSeasonNumber(
+        int apiSeasonNumber,
+        string? seasonTitle,
+        string? seriesTitle,
+        string? identifier)
+    {
+        if (IsSpecialSeason(seasonTitle, seriesTitle, identifier)) return 0;
+
+        if (!string.IsNullOrWhiteSpace(seasonTitle))
+        {
+            var match = Regex.Match(
+                seasonTitle,
+                @"\bSeason\s+(\d+)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var titleSeason))
+            {
+                return titleSeason;
+            }
+        }
+
+        var identifierSeason = Helpers.ExtractNumberAfterS(identifier);
+        return int.TryParse(identifierSeason, out var parsedIdentifierSeason)
+            ? parsedIdentifierSeason
+            : apiSeasonNumber;
+    }
+
+    internal static bool IsSpecialSeason(string? seasonTitle, string? seriesTitle, string? identifier)
+    {
+        var remainingTitle = seasonTitle ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(seriesTitle) &&
+            remainingTitle.StartsWith(seriesTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            remainingTitle = remainingTitle[seriesTitle.Length..];
+        }
+
+        if (Regex.IsMatch(
+                remainingTitle,
+                @"\b(OVAs?|Specials?|Extras?)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrEmpty(identifier) &&
+               !Regex.IsMatch(identifier, @"\|S\d+", RegexOptions.CultureInvariant);
     }
 
     // [PT] Upstream v1.6.14 fix ("special season detection incorrectly identifying some regular

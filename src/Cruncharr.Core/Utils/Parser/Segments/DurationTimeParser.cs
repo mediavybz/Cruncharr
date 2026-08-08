@@ -1,100 +1,120 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
+using System.Dynamic;
 using System.Linq;
+using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser.Segments;
 
 public class DurationTimeParser
 {
-    public static int? ParseEndNumber(string endNumber)
+    public static int? ParseEndNumber(object endNumber)
     {
-        if (!int.TryParse(endNumber, out var parsedEndNumber))
-        {
-            return null;
-        }
-
-        return parsedEndNumber;
+        return endNumber != null && int.TryParse(endNumber.ToString(), out var parsed)
+            ? parsed
+            : null;
     }
 
     public static dynamic GetSegmentRangeStatic(dynamic attributes)
     {
-        int timescale = attributes.timescale ?? 1;
-        double segmentDuration = (double)attributes.duration / timescale;
-        int? endNumber = ParseEndNumber(attributes.endNumber as string);
+        object attributeObject = attributes;
+        var timescale = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "timescale") ?? 1);
+        var duration = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "duration"));
+        var segmentDuration = duration / timescale;
+        int? endNumber = ParseEndNumber(
+            (object)ObjectUtilities.GetMemberValue(attributeObject, "endNumber"));
 
         if (endNumber.HasValue)
         {
-            return new { start = 0, end = endNumber.Value };
+            return new { start = 0, end = (double)endNumber.Value };
         }
 
-        if (attributes.periodDuration is double periodDuration)
+        var periodDuration = ObjectUtilities.GetMemberValue(attributeObject, "periodDuration");
+        if (periodDuration != null)
         {
-            return new { start = 0, end = (int)(periodDuration / segmentDuration) };
+            return new { start = 0, end = Convert.ToDouble(periodDuration) / segmentDuration };
         }
 
-        return new { start = 0, end = (int)(attributes.sourceDuration / segmentDuration) };
+        var sourceDuration = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "sourceDuration") ?? 0);
+        return new { start = 0, end = sourceDuration / segmentDuration };
     }
 
     public static dynamic GetSegmentRangeDynamic(dynamic attributes)
     {
-        long now = (attributes.NOW + attributes.clientOffset) / 1000;
-        long periodStartWC = attributes.availabilityStartTime + attributes.periodStart;
-        long periodEndWC = now + attributes.minimumUpdatePeriod;
-        long periodDuration = periodEndWC - periodStartWC;
-        int timescale = attributes.timescale ?? 1;
-        int segmentCount = (int)Math.Ceiling(periodDuration * timescale / (double)attributes.duration);
-        int availableStart = (int)Math.Floor((now - periodStartWC - attributes.timeShiftBufferDepth) * timescale / (double)attributes.duration);
-        int availableEnd = (int)Math.Floor((now - periodStartWC) * timescale / (double)attributes.duration);
+        object attributeObject = attributes;
+        var now = (Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "NOW") ?? 0) +
+                   Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "clientOffset") ?? 0)) / 1000.0;
+        var availabilityStart = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "availabilityStartTime") ?? 0);
+        var periodStart = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "periodStart") ?? 0);
+        var minimumUpdatePeriod = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "minimumUpdatePeriod") ?? 0);
+        var timeShiftBufferDepth = Convert.ToDouble(
+            ObjectUtilities.GetMemberValue(attributeObject, "timeShiftBufferDepth") ?? double.PositiveInfinity);
+        var timescale = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "timescale") ?? 1);
+        var duration = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "duration"));
+        var periodStartWallClock = availabilityStart + periodStart;
 
-        int? endNumber = ParseEndNumber(attributes.endNumber as string);
-        int end = endNumber.HasValue ? endNumber.Value : Math.Min(segmentCount, availableEnd);
+        var segmentCount = (int)Math.Ceiling((now + minimumUpdatePeriod - periodStartWallClock) * timescale / duration);
+        var availableStart = (int)Math.Floor((now - periodStartWallClock - timeShiftBufferDepth) * timescale / duration);
+        var availableEnd = (int)Math.Floor((now - periodStartWallClock) * timescale / duration);
+        int? endNumber = ParseEndNumber(
+            (object)ObjectUtilities.GetMemberValue(attributeObject, "endNumber"));
 
-        return new { start = Math.Max(0, availableStart), end = end };
-    }
-
-    public static List<dynamic> ToSegments(dynamic attributes, int number)
-    {
-        int timescale = attributes.timescale ?? 1;
-        long periodStart = attributes.periodStart;
-        int startNumber = attributes.startNumber ?? 1;
-
-        return new List<dynamic>{
-            new{
-                number = startNumber + number,
-                duration = (double)attributes.duration / timescale,
-                timeline = periodStart,
-                time = number * attributes.duration
-            }
+        return new
+        {
+            start = Math.Max(0, availableStart),
+            end = endNumber ?? Math.Min(segmentCount, availableEnd)
         };
     }
 
-    public static IEnumerable<dynamic> ParseByDuration(dynamic attributes)
+    public static dynamic ToSegment(dynamic attributes, int number)
     {
-        var type = (string)attributes.type;
-        var rangeFunction = type == "static" ? (Func<dynamic, dynamic>)GetSegmentRangeStatic : GetSegmentRangeDynamic;
-        dynamic times = rangeFunction(attributes);
-        List<int> d = Range(times.start, times.end - times.start);
-        List<dynamic> segments = d.Select(number => ToSegments(attributes, number)).ToList();
+        object attributeObject = attributes;
+        var timescale = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "timescale") ?? 1);
+        var periodStart = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "periodStart") ?? 0);
+        var startNumber = Convert.ToInt32(ObjectUtilities.GetMemberValue(attributeObject, "startNumber") ?? 1);
+        var duration = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "duration"));
 
-        if (type == "static" && segments.Any())
+        dynamic segment = new ExpandoObject();
+        segment.number = startNumber + number;
+        segment.duration = duration / timescale;
+        segment.timeline = periodStart;
+        segment.time = number * duration;
+        return segment;
+    }
+
+    public static List<dynamic> ParseByDuration(dynamic attributes)
+    {
+        object attributeObject = attributes;
+        var type = Convert.ToString(ObjectUtilities.GetMemberValue(attributeObject, "type")) ?? "static";
+        dynamic range = type == "static"
+            ? GetSegmentRangeStatic(attributes)
+            : GetSegmentRangeDynamic(attributes);
+
+        var segments = new List<dynamic>();
+        foreach (var number in Range((int)range.start, Convert.ToDouble(range.end)))
         {
-            var lastSegmentIndex = segments.Count - 1;
-            double sectionDuration = attributes.periodDuration is double periodDuration ? periodDuration : attributes.sourceDuration;
-            segments[lastSegmentIndex].duration = sectionDuration - ((double)attributes.duration / (attributes.timescale ?? 1) * lastSegmentIndex);
+            segments.Add(ToSegment(attributes, number));
+        }
+
+        if (type == "static" && segments.Count > 0)
+        {
+            var lastIndex = segments.Count - 1;
+            var periodDuration = ObjectUtilities.GetMemberValue(attributeObject, "periodDuration");
+            var sectionDuration = Convert.ToDouble(periodDuration ??
+                ObjectUtilities.GetMemberValue(attributeObject, "sourceDuration") ?? 0);
+            var duration = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "duration"));
+            var timescale = Convert.ToDouble(ObjectUtilities.GetMemberValue(attributeObject, "timescale") ?? 1);
+            segments[lastIndex].duration = sectionDuration - duration / timescale * lastIndex;
         }
 
         return segments;
     }
 
-    public static List<int> Range(int start, int end)
+    public static List<int> Range(int start, double end)
     {
-        List<int> res = new List<int>();
-        for (int i = start; i < end; i++)
-        {
-            res.Add(i);
-        }
-
-        return res;
+        var result = new List<int>();
+        for (var value = start; value < end; value++) result.Add(value);
+        return result;
     }
 }

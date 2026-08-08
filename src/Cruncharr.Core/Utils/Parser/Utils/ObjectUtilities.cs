@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Dynamic;
+using System.Reflection;
 
 #pragma warning disable IL2026
 
@@ -14,33 +15,34 @@ public class ObjectUtilities
     {
         var result = new ExpandoObject();
         var resultDict = result as IDictionary<string, object>;
-
-        var targetDict = target as IDictionary<string, object>;
-        var sourceDict = source as IDictionary<string, object>;
-
-        if (targetDict == null && sourceDict == null)
-        {
-            Console.WriteLine("Nothing Merged; both are empty");
-            return result;
-        }
-
-        if (targetDict != null)
-        {
-            foreach (var kvp in targetDict)
-            {
-                resultDict[kvp.Key] = kvp.Value;
-            }
-        }
-
-        if (sourceDict != null)
-        {
-            foreach (var kvp in sourceDict)
-            {
-                resultDict[kvp.Key] = kvp.Value;
-            }
-        }
-
+        CopyMembers(target, resultDict);
+        CopyMembers(source, resultDict);
         return result;
+    }
+
+    // MPD inheritance frequently merges ExpandoObjects with anonymous objects. The old
+    // implementation silently ignored anonymous-object properties, losing initialization,
+    // segment URL, and period metadata along the way.
+    private static void CopyMembers(object? source, IDictionary<string, object> target)
+    {
+        if (source == null) return;
+
+        if (source is IDictionary<string, object> dictionary)
+        {
+            foreach (var item in dictionary)
+            {
+                target[item.Key] = item.Value;
+            }
+            return;
+        }
+
+        foreach (var property in source.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public))
+        {
+            if (property.GetIndexParameters().Length == 0)
+            {
+                target[property.Name] = property.GetValue(source)!;
+            }
+        }
     }
 
     public static void SetAttributeWithDefault(dynamic ob, string attributeName, string defaultValue)

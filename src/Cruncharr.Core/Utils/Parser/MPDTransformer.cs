@@ -114,7 +114,7 @@ public static class MpdParser
                 {
                     if (segments == null || segments.Count == 0)
                     {
-                        var sidxRange = playlist.sidx.ByteRange;
+                        var sidxRange = playlist.sidx.byterange;
 
                         var sidxBytes = await DownloadSidxAsync(
                             httpClient,
@@ -126,8 +126,8 @@ public static class MpdParser
 
                         var byteRange = new ByteRange()
                         {
-                            Length = playlist.sidx.map.ByteRange.length,
-                            Offset = playlist.sidx.map.ByteRange.offset,
+                            Length = playlist.sidx.map.byterange.length,
+                            Offset = playlist.sidx.map.byterange.offset,
                         };
 
                         segmentsFromSidx = BuildSegmentsFromSidx(
@@ -177,7 +177,7 @@ public static class MpdParser
             {
                 if (segments == null || segments.Count == 0)
                 {
-                    var sidxRange = playlist.sidx.ByteRange;
+                    var sidxRange = playlist.sidx.byterange;
 
                     var sidxBytes = await DownloadSidxAsync(
                         httpClient,
@@ -189,8 +189,8 @@ public static class MpdParser
 
                     var byteRange = new ByteRange()
                     {
-                        Length = playlist.sidx.map.ByteRange.length,
-                        Offset = playlist.sidx.map.ByteRange.offset,
+                        Length = playlist.sidx.map.byterange.length,
+                        Offset = playlist.sidx.map.byterange.offset,
                     };
 
                     segmentsFromSidx = BuildSegmentsFromSidx(
@@ -254,10 +254,33 @@ public static class MpdParser
         if (!dict.TryGetValue("com.widevine.alpha", out var widevine))
             return null;
 
-        if (widevine.pssh == null)
-            return null;
+        return EncodePssh(ObjectUtilities.GetMemberValue(widevine, "pssh"));
+    }
 
-        return Convert.ToBase64String(widevine.pssh);
+    internal static string? EncodePssh(object? value)
+    {
+        if (value is byte[] bytes)
+        {
+            return Convert.ToBase64String(bytes);
+        }
+
+        if (value is IDictionary<string, object> dictionary)
+        {
+            var ordered = dictionary
+                .Select(pair => new
+                {
+                    Parsed = int.TryParse(pair.Key, out var index),
+                    Index = int.TryParse(pair.Key, out index) ? index : int.MaxValue,
+                    Value = pair.Value
+                })
+                .Where(item => item.Parsed)
+                .OrderBy(item => item.Index)
+                .Select(item => Convert.ToByte(item.Value))
+                .ToArray();
+            return ordered.Length == 0 ? null : Convert.ToBase64String(ordered);
+        }
+
+        return null;
     }
 
     private static void EnsureHostEntryExists(MPDParsed ret, string host)

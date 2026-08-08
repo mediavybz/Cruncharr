@@ -150,13 +150,13 @@ docker build -t cruncharr .
 docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncharr
 ```
 
-Validate the production image for both supported architectures without publishing:
+For a local fallback, validate both supported architectures without publishing:
 
 ```bash
 bash scripts/publish-docker.sh
 ```
 
-Publish the testing image:
+Or publish the testing image locally when the Unraid runner is unavailable:
 
 ```bash
 bash scripts/publish-docker.sh --tag ghcr.io/mediavybz/cruncharr:testing --push

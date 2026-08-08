@@ -217,6 +217,7 @@ public class ConfigController : ControllerBase
                 DownloadFirstAvailableDub = _config.Download?.DownloadFirstAvailableDub ?? false,
                 DlVideoOnce = _config.Download?.DlVideoOnce ?? false,
                 KeepDubsSeparate = _config.Download?.KeepDubsSeparate ?? false,
+                KeepAudioDescriptionsSeparate = _config.Download?.KeepAudioDescriptionsSeparate ?? false,
                 DownloadDelaySeconds = _config.Download?.DownloadDelaySeconds ?? 0,
                 DownloadDelayUseDubBased = _config.Download?.DownloadDelayUseDubBased ?? false,
                 CooldownDelaySeconds = _config.Download?.CooldownDelaySeconds ?? 0,
@@ -555,6 +556,7 @@ public class ConfigController : ControllerBase
             if (dl.DownloadFirstAvailableDub.HasValue) _config.Download.DownloadFirstAvailableDub = dl.DownloadFirstAvailableDub.Value;
             if (dl.DlVideoOnce.HasValue) _config.Download.DlVideoOnce = dl.DlVideoOnce.Value;
             if (dl.KeepDubsSeparate.HasValue) _config.Download.KeepDubsSeparate = dl.KeepDubsSeparate.Value;
+            if (dl.KeepAudioDescriptionsSeparate.HasValue) _config.Download.KeepAudioDescriptionsSeparate = dl.KeepAudioDescriptionsSeparate.Value;
             if (dl.DownloadDelaySeconds.HasValue) _config.Download.DownloadDelaySeconds = dl.DownloadDelaySeconds.Value;
             if (dl.DownloadDelayUseDubBased.HasValue) _config.Download.DownloadDelayUseDubBased = dl.DownloadDelayUseDubBased.Value;
             if (dl.CooldownDelaySeconds.HasValue) _config.Download.CooldownDelaySeconds = dl.CooldownDelaySeconds.Value;
@@ -829,6 +831,7 @@ public class DownloadUpdateConfig
     public bool? DownloadFirstAvailableDub { get; set; }
     public bool? DlVideoOnce { get; set; }
     public bool? KeepDubsSeparate { get; set; }
+    public bool? KeepAudioDescriptionsSeparate { get; set; }
     public int? DownloadDelaySeconds { get; set; }
     public bool? DownloadDelayUseDubBased { get; set; }
     public int? CooldownDelaySeconds { get; set; }

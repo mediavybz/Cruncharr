@@ -9,14 +9,12 @@ public class UrlType
 {
     public static dynamic UrlTypeToSegment(dynamic input)
     {
-        string baseUrl = Convert.ToString(ObjectUtilities.GetMemberValue(input, "baseUrl"));
-        string source = Convert.ToString(ObjectUtilities.GetMemberValue(input, "source"));
-
-        var baseUri = new Uri(baseUrl, UriKind.Absolute);
+        string baseUrl = Convert.ToString(ObjectUtilities.GetMemberValue(input, "baseUrl")) ?? string.Empty;
+        string source = Convert.ToString(ObjectUtilities.GetMemberValue(input, "source")) ?? string.Empty;
 
         dynamic segment = new ExpandoObject();
         segment.uri = source;
-        segment.resolvedUri = new Uri(baseUri, source).ToString();
+        segment.resolvedUri = UrlUtils.ResolveUrl(baseUrl, source);
 
         string rangeStr = Convert.ToString(
             !string.IsNullOrEmpty(Convert.ToString(ObjectUtilities.GetMemberValue(input, "range")))
@@ -32,7 +30,7 @@ public class UrlType
             long endRange = long.Parse(ranges[1]);
             long length = endRange - startRange + 1;
 
-            segment.ByteRange = new
+            segment.byterange = new
             {
                 length = length,
                 offset = startRange

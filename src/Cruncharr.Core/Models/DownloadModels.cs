@@ -272,9 +272,9 @@ public class CrBrowseEpisodeMetaData
     [JsonProperty("eligible_region")]
     public string? EligibleRegion { get; set; }
     [JsonProperty("available_date")]
-    public DateTime AvailableDate { get; set; }
+    public DateTime? AvailableDate { get; set; }
     [JsonProperty("premium_date")]
-    public DateTime PremiumDate { get; set; }
+    public DateTime? PremiumDate { get; set; }
     [JsonProperty("available_offline")]
     public bool AvailableOffline { get; set; }
     [JsonProperty("closed_captions_available")]

@@ -53,8 +53,8 @@ public class HistorySeries
             // Episode downloaded but selected dubs/subs may be missing
             // Check if any selected dubs are newly available but not downloaded
             var missingDubs = selectedDubs?
-                .Where(dub => e.HistoryEpisodeAvailableDubLang.Contains(dub, StringComparer.OrdinalIgnoreCase) &&
-                              !e.DownloadedDubLang.Contains(dub, StringComparer.OrdinalIgnoreCase))
+                .Where(dub => HistoryEpisode.ContainsNormalized(e.HistoryEpisodeAvailableDubLang, dub) &&
+                              !HistoryEpisode.ContainsNormalized(e.DownloadedDubLang, dub))
                 .Any() ?? false;
 
             var missingSubs = selectedSubs?
@@ -151,6 +151,15 @@ public class HistoryEpisode
         if (episode.SeasonNumber == 0) SpecialEpisode = true;
     }
 
+    internal static bool ContainsNormalized(IEnumerable<string> values, string requested)
+    {
+        var normalized = HistoryEpisode.RemoveAudioDescriptionMarker(requested);
+        return values.Any(value => string.Equals(
+            HistoryEpisode.RemoveAudioDescriptionMarker(value),
+            normalized,
+            StringComparison.OrdinalIgnoreCase));
+    }
+
     public void ClearSonarrEpisodeData()
     {
         SonarrEpisodeId = null;
@@ -206,13 +215,27 @@ public class HistoryEpisode
 
     private static bool IsMissingAny(IEnumerable<string> requested, List<string> downloaded)
     {
-        return requested.Any(r => !downloaded.Contains(r, StringComparer.OrdinalIgnoreCase));
+        var downloadedSet = downloaded
+            .Select(RemoveAudioDescriptionMarker)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return requested.Select(RemoveAudioDescriptionMarker).Any(r => !downloadedSet.Contains(r));
     }
 
     private static bool HasMissingAvailableItem(IEnumerable<string> requested, List<string> downloaded, List<string> available)
     {
-        return requested.Any(r => available.Contains(r, StringComparer.OrdinalIgnoreCase) && !downloaded.Contains(r, StringComparer.OrdinalIgnoreCase));
+        var downloadedSet = downloaded
+            .Select(RemoveAudioDescriptionMarker)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var availableSet = available
+            .Select(RemoveAudioDescriptionMarker)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return requested
+            .Select(RemoveAudioDescriptionMarker)
+            .Any(r => availableSet.Contains(r) && !downloadedSet.Contains(r));
     }
+
+    internal static string RemoveAudioDescriptionMarker(string? locale) =>
+        !string.IsNullOrEmpty(locale) && locale.EndsWith('*') ? locale[..^1] : locale ?? string.Empty;
 }
 
 public enum EpisodeType

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser;
 
@@ -55,7 +56,8 @@ public class PlaylistMerge
 
         foreach (var mediaType in SupportedMediaTypes)
         {
-            var mediaGroups = (IDictionary<string, object>)manifest.mediaGroups[mediaType];
+            var allMediaGroups = (IDictionary<string, object>)manifest.mediaGroups;
+            var mediaGroups = (IDictionary<string, object>)allMediaGroups[mediaType];
             foreach (var groupKey in mediaGroups.Keys)
             {
                 var labels = (IDictionary<string, object>)mediaGroups[groupKey];
@@ -88,30 +90,28 @@ public class PlaylistMerge
                 continue;
             }
 
-            if (playlist.sidx != null)
+            if (ObjectUtilities.GetMemberValue(playlist, "sidx") != null)
             {
                 continue;
             }
 
-            if (!playlist.segments.Any())
-            {
-                continue;
-            }
+            var newSegments = ((IEnumerable<object>)playlist.segments).Cast<dynamic>().ToList();
+            if (newSegments.Count == 0) continue;
 
-            dynamic firstNewSegment = playlist.segments[0];
-            List<dynamic> segmentList = oldPlaylist.segments;
-            dynamic oldMatchingSegmentIndex = segmentList.FindIndex(
+            dynamic firstNewSegment = newSegments[0];
+            var oldSegments = ((IEnumerable<object>)oldPlaylist.segments).Cast<dynamic>().ToList();
+            var oldMatchingSegmentIndex = oldSegments.FindIndex(
                 oldSegment => Math.Abs(oldSegment.presentationTime - firstNewSegment.presentationTime) < TimeFudge
             );
 
             if (oldMatchingSegmentIndex == -1)
             {
-                UpdateMediaSequenceForPlaylist(playlist, oldPlaylist.mediaSequence + oldPlaylist.segments.Count);
-                playlist.segments[0].discontinuity = true;
+                UpdateMediaSequenceForPlaylist(playlist, oldPlaylist.mediaSequence + oldSegments.Count);
+                firstNewSegment.discontinuity = true;
                 playlist.discontinuityStarts.Insert(0, 0);
 
-                if ((!oldPlaylist.segments.Any() && playlist.timeline > oldPlaylist.timeline) ||
-                    (oldPlaylist.segments.Any() && playlist.timeline > oldPlaylist.segments.Last().timeline))
+                if ((oldSegments.Count == 0 && playlist.timeline > oldPlaylist.timeline) ||
+                    (oldSegments.Count > 0 && playlist.timeline > oldSegments.Last().timeline))
                 {
                     playlist.discontinuitySequence--;
                 }
@@ -119,22 +119,27 @@ public class PlaylistMerge
                 continue;
             }
 
-            var oldMatchingSegment = oldPlaylist.segments[oldMatchingSegmentIndex];
+            var oldMatchingSegment = oldSegments[oldMatchingSegmentIndex];
 
-            if (oldMatchingSegment.discontinuity && !firstNewSegment.discontinuity)
+            if ((ObjectUtilities.GetMemberValue(oldMatchingSegment, "discontinuity") as bool? ?? false) &&
+                !(ObjectUtilities.GetMemberValue(firstNewSegment, "discontinuity") as bool? ?? false))
             {
                 firstNewSegment.discontinuity = true;
                 playlist.discontinuityStarts.Insert(0, 0);
                 playlist.discontinuitySequence--;
             }
 
-            UpdateMediaSequenceForPlaylist(playlist, oldPlaylist.segments[oldMatchingSegmentIndex].number);
+            UpdateMediaSequenceForPlaylist(playlist, oldMatchingSegment.number);
         }
     }
 
     public static dynamic FindPlaylistWithName(List<dynamic> playlists, string name)
     {
-        return playlists.FirstOrDefault(playlist => playlist.attributes.NAME == name);
+        return playlists.FirstOrDefault(playlist =>
+            string.Equals(
+                Convert.ToString(ObjectUtilities.GetMemberValue(playlist.attributes, "NAME")),
+                name,
+                StringComparison.Ordinal));
     }
 
     public static void UpdateMediaSequenceForPlaylist(dynamic playlist, int mediaSequence)

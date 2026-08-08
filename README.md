@@ -141,54 +141,15 @@ history:
   remove_missing_episodes: true
 ```
 
-## Building from Source
+## Building Images
 
-```bash
-git clone https://github.com/mediavybz/Cruncharr.git
-cd Cruncharr
-docker build -t cruncharr .
-docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncharr
-```
+All production and testing Docker builds run exclusively on the self-hosted Unraid Forgejo
+`docker-build` runner. Pushes to `testing` validate AMD64 and ARM64, load the AMD64 image, and run a
+container health check. The workflow is `.forgejo/workflows/docker-testing.yml`.
 
-Pushes to the `testing` branch validate the production image for AMD64 and ARM64 on the self-hosted
-Unraid Forgejo runner, then load and health-check an AMD64 container. The workflow is
-`.forgejo/workflows/docker-testing.yml`. To publish `ghcr.io/mediavybz/cruncharr:testing`, manually
-run that workflow with its `publish` input enabled. Publishing requires a repository Actions secret
-named `GHCR_TOKEN` with permission to write the GitHub Container Registry package.
-
-For a local fallback, validate both supported architectures without publishing:
-
-```bash
-bash scripts/publish-docker.sh
-```
-
-Or publish the testing image locally when the Unraid runner is unavailable:
-
-```bash
-bash scripts/publish-docker.sh --tag ghcr.io/mediavybz/cruncharr:testing --push
-```
-
-### Reclaim local Docker build storage
-
-After verifying a published image, remove the disposable cache from the builder used for the publish:
-
-```bash
-docker buildx prune --all --force
-docker image prune --force
-docker system df
-```
-
-If a dedicated temporary builder was created, remove it with `docker buildx rm <builder-name>`. To remove **all** unused local images, stopped containers, networks, build cache, and volumes, use `docker system prune --all --volumes --force`; this is machine-wide and must not be run when unused volumes contain data that should be kept.
-
-On Windows, Docker may free space internally without shrinking its physical VHD. With Docker data already pruned, run the following from an elevated PowerShell window:
-
-```powershell
-$dockerVhd = "$env:LOCALAPPDATA\Docker\wsl\disk\docker_data.vhdx"
-docker desktop stop
-wsl --shutdown
-Optimize-VHD -Path $dockerVhd -Mode Full
-docker desktop start
-```
+To publish `ghcr.io/mediavybz/cruncharr:testing`, manually run that workflow with its `publish`
+input enabled. `scripts/publish-docker.sh` is invoked by the runner workflow and is not a supported
+local fallback. Do not build or publish Docker images from a developer or agent workstation.
 
 ## API Endpoints
 

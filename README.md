@@ -141,48 +141,7 @@ history:
   remove_missing_episodes: true
 ```
 
-## Building from Source
-
-```bash
-git clone https://github.com/mediavybz/Cruncharr.git
-cd Cruncharr
-docker build -t cruncharr .
-docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncharr
-```
-
-For a local fallback, validate both supported architectures without publishing:
-
-```bash
-bash scripts/publish-docker.sh
-```
-
-Or publish the testing image locally when the Unraid runner is unavailable:
-
-```bash
-bash scripts/publish-docker.sh --tag ghcr.io/mediavybz/cruncharr:testing --push
-```
-
-### Reclaim local Docker build storage
-
-After verifying a published image, remove the disposable cache from the builder used for the publish:
-
-```bash
-docker buildx prune --all --force
-docker image prune --force
-docker system df
-```
-
-If a dedicated temporary builder was created, remove it with `docker buildx rm <builder-name>`. To remove **all** unused local images, stopped containers, networks, build cache, and volumes, use `docker system prune --all --volumes --force`; this is machine-wide and must not be run when unused volumes contain data that should be kept.
-
-On Windows, Docker may free space internally without shrinking its physical VHD. With Docker data already pruned, run the following from an elevated PowerShell window:
-
-```powershell
-$dockerVhd = "$env:LOCALAPPDATA\Docker\wsl\disk\docker_data.vhdx"
-docker desktop stop
-wsl --shutdown
-Optimize-VHD -Path $dockerVhd -Mode Full
-docker desktop start
-```
+## Building Images
 
 ## API Endpoints
 

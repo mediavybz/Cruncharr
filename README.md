@@ -150,13 +150,19 @@ docker build -t cruncharr .
 docker run -d -p 8585:8585 -v ./config:/config -v ./downloads:/downloads cruncharr
 ```
 
-Validate the production image for both supported architectures without publishing:
+Pushes to the `testing` branch validate the production image for AMD64 and ARM64 on the self-hosted
+Unraid Forgejo runner, then load and health-check an AMD64 container. The workflow is
+`.forgejo/workflows/docker-testing.yml`. To publish `ghcr.io/mediavybz/cruncharr:testing`, manually
+run that workflow with its `publish` input enabled. Publishing requires a repository Actions secret
+named `GHCR_TOKEN` with permission to write the GitHub Container Registry package.
+
+For a local fallback, validate both supported architectures without publishing:
 
 ```bash
 bash scripts/publish-docker.sh
 ```
 
-Publish the testing image:
+Or publish the testing image locally when the Unraid runner is unavailable:
 
 ```bash
 bash scripts/publish-docker.sh --tag ghcr.io/mediavybz/cruncharr:testing --push

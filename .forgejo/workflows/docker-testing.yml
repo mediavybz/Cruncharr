@@ -1,0 +1,109 @@
+name: Docker testing image
+
+on:
+  push:
+    branches:
+      - testing
+    paths:
+      - .forgejo/workflows/docker-testing.yml
+      - docker/**
+      - Dockerfile
+      - scripts/publish-docker.sh
+      - src/**
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Push ghcr.io/mediavybz/cruncharr:testing after validation
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: cruncharr-docker-testing
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build AMD64 and ARM64 on Unraid
+    runs-on: docker-build
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      SOURCE_REVISION: ${{ forgejo.sha }}
+      PUBLISH_IMAGE: ${{ inputs.publish || 'false' }}
+      SMOKE_CONTAINER: cruncharr-runner-smoke
+      SMOKE_IMAGE: cruncharr-runner-smoke:${{ forgejo.sha }}
+
+    steps:
+      - name: Check out the requested revision
+        uses: https://data.forgejo.org/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ forgejo.sha }}
+          persist-credentials: false
+
+      - name: Verify runner and checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+          docker version
+          docker buildx version
+          docker buildx inspect --bootstrap
+          docker buildx inspect | grep -q 'linux/amd64'
+          docker buildx inspect | grep -q 'linux/arm64'
+          test "$(timeout 60s docker run --rm --platform linux/arm64 alpine:3.20 uname -m)" = "aarch64"
+
+      - name: Build both architectures and smoke-test the image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            docker rm --force "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+            docker image rm --force "$SMOKE_IMAGE" >/dev/null 2>&1 || true
+            docker buildx prune --force --max-used-space 20gb >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          bash scripts/publish-docker.sh
+
+          PLATFORMS=linux/amd64 bash scripts/publish-docker.sh \
+            --tag "$SMOKE_IMAGE" \
+            --load
+
+          docker run --detach \
+            --name "$SMOKE_CONTAINER" \
+            --health-interval 2s \
+            --health-start-period 2s \
+            --health-timeout 2s \
+            --health-retries 30 \
+            "$SMOKE_IMAGE"
+
+          for attempt in $(seq 1 60); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' "$SMOKE_CONTAINER")
+            if [ "$status" = "healthy" ]; then
+              break
+            fi
+            if [ "$status" = "unhealthy" ]; then
+              docker logs "$SMOKE_CONTAINER"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$SMOKE_CONTAINER")" = "healthy"
+          docker logs "$SMOKE_CONTAINER"
+
+          if [ "$PUBLISH_IMAGE" = "true" ]; then
+            test -n "$GHCR_TOKEN"
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username mediavybz --password-stdin
+            bash scripts/publish-docker.sh \
+              --tag ghcr.io/mediavybz/cruncharr:testing \
+              --push
+            docker buildx imagetools inspect ghcr.io/mediavybz/cruncharr:testing | grep -q 'linux/amd64'
+            docker buildx imagetools inspect ghcr.io/mediavybz/cruncharr:testing | grep -q 'linux/arm64'
+            docker logout ghcr.io
+          fi
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}

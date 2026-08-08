@@ -53,6 +53,9 @@ jobs:
           docker buildx inspect | grep -q 'linux/amd64'
           docker buildx inspect | grep -q 'linux/arm64'
           test "$(timeout 60s docker run --rm --platform linux/arm64 alpine:3.20 uname -m)" = "aarch64"
+          docker container prune --force
+          docker volume prune --force
+          docker image prune --force
 
       - name: Build both architectures and smoke-test the image
         shell: bash

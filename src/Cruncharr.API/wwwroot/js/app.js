@@ -132,6 +132,7 @@
         let browseRatingFilter = new Set(); // selected rating tier keys / raw codes; empty = all
         let historyFilterText = '';
         const calendarSeriesTitleCache = new Map(); // seriesId -> canonical title from /series/{id}/list
+        const calendarRequestGate = CruncharrCalendarRequests.createLatestRequestGate();
 
         // Constants
         const AUTH_NOTIFICATION_THROTTLE_MS = 30000;
@@ -283,6 +284,9 @@
             }
             if (currentPage === 'browse' && page !== 'browse') {
                 disconnectBrowseLoadMoreObserver();
+            }
+            if (currentPage === 'calendar' && page !== 'calendar') {
+                calendarRequestGate.cancel();
             }
             // Clear any pending browse result timeout
             if (selectBrowseResultTimeout) {
@@ -1216,6 +1220,9 @@
 
         // ================== CALENDAR ==================
         function renderCalendar(container) {
+            const initialDubFilter = CruncharrCalendarRequests.normalizeDubFilter(
+                config?.calendar?.dubFilter,
+                LANG_OPTIONS);
             container.innerHTML = `
                 <div class="page-title">Calendar</div>
                 <div class="page-subtitle">Upcoming episode releases</div>
@@ -1224,8 +1231,8 @@
                     <div class="calendar-center-controls" style="display:flex; gap:10px; align-items:center;">
                         <button class="header-btn" onclick="fetchCalendar(true)">&#128260; Refresh</button>
                         <select class="form-select mw-170" id="calendar-dub-filter" onchange="onCalendarDubFilterChange(this.value)" title="Filter by audio (dub) language">
-                            <option value="none">All Languages</option>
-                            ${LANG_OPTIONS.map(o=>`<option value="${o.value}">${o.label}</option>`).join('')}
+                            <option value="none" ${initialDubFilter === 'none' ? 'selected' : ''}>All Languages</option>
+                            ${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${initialDubFilter === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
                         </select>
                     </div>
                     <button class="header-btn" onclick="changeWeek(1)">Next &#9654;</button>
@@ -1234,13 +1241,6 @@
                     <div class="loading"><div class="spinner"></div>Loading calendar...</div>
                 </div>
             `;
-            // Set initial dub filter from config (legacy values like "dubbed"/"subbed" fall back to All)
-            const filterSelect = document.getElementById('calendar-dub-filter');
-            if (filterSelect && config?.calendar?.dubFilter) {
-                const configFilter = config.calendar.dubFilter;
-                const option = filterSelect.querySelector(`option[value="${configFilter}"]`);
-                if (option) filterSelect.value = configFilter;
-            }
             fetchCalendar();
         }
 
@@ -1369,20 +1369,24 @@
         }
 
         async function onCalendarDubFilterChange(dubFilter) {
-            // Save to config
+            const normalizedFilter = CruncharrCalendarRequests.normalizeDubFilter(dubFilter, LANG_OPTIONS);
+            if (!config.calendar) config.calendar = {};
+            config.calendar.dubFilter = normalizedFilter;
+
+            // Refresh immediately. Persisting the selection must not leave an older request free
+            // to repaint the grid while the settings request is in flight.
+            const refreshPromise = fetchCalendar();
             try {
-                await fetch('/api/v1/config', {
+                const response = await fetch('/api/v1/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ calendar: { dubFilter: dubFilter } })
+                    body: JSON.stringify({ calendar: { dubFilter: normalizedFilter } })
                 });
-                // Update local config
-                if (!config.calendar) config.calendar = {};
-                config.calendar.dubFilter = dubFilter;
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
             } catch (e) {
                 console.warn('Failed to save calendar dub filter:', e);
             }
-            fetchCalendar();
+            await refreshPromise;
         }
 
         function changeWeek(offset) {
@@ -1391,6 +1395,7 @@
         }
 
         async function fetchCalendar(forceUpdate = false) {
+            const calendarRequest = calendarRequestGate.begin();
             try {
                 // Compute Monday of target week
                 // dayOfWeek: 0=Sun, 1=Mon, ..., 6=Sat
@@ -1402,7 +1407,10 @@
                 monday.setDate(now.getDate() - daysSinceMonday + (calendarWeekOffset * 7));
 
                 const filterSel = document.getElementById('calendar-dub-filter');
-                const dubFilter = filterSel ? filterSel.value : (config?.calendar?.dubFilter || 'none');
+                const dubFilter = CruncharrCalendarRequests.normalizeDubFilter(
+                    filterSel ? filterSel.value : config?.calendar?.dubFilter,
+                    LANG_OPTIONS);
+                if (filterSel && filterSel.value !== dubFilter) filterSel.value = dubFilter;
                 const metaLang = config?.history?.lang || 'en-US';
 
                 // Custom (API-based) calendar: reliable per-episode audio locale, so the
@@ -1412,10 +1420,14 @@
                 sunday.setDate(monday.getDate() + 6);
                 const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
 
-                const res = await fetch(`/api/v1/calendar/custom?date=${sundayStr}&language=${encodeURIComponent(metaLang)}&dubFilter=${encodeURIComponent(dubFilter)}${forceUpdate ? '&forceUpdate=true' : ''}`);
+                const res = await fetch(`/api/v1/calendar/custom?date=${sundayStr}&language=${encodeURIComponent(metaLang)}&dubFilter=${encodeURIComponent(dubFilter)}${forceUpdate ? '&forceUpdate=true' : ''}`, {
+                    signal: calendarRequest.signal
+                });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                if (!calendarRequestGate.isCurrent(calendarRequest)) return;
                 await enrichCalendarSeriesTitles(data.days);
+                if (!calendarRequestGate.isCurrent(calendarRequest)) return;
                 const grid = document.getElementById('calendar-grid');
                 if (!grid) return;
                 if (!data.days || data.days.length === 0) {
@@ -1500,6 +1512,7 @@
                     `;
                 }).join('');
             } catch (e) {
+                if (e?.name === 'AbortError' || !calendarRequestGate.isCurrent(calendarRequest)) return;
                 const grid = document.getElementById('calendar-grid');
                 if (grid) {
                     grid.className = '';
@@ -1509,6 +1522,8 @@
                             <div class="empty-state-title">Failed to load calendar</div>
                         </div>`;
                 }
+            } finally {
+                calendarRequestGate.finish(calendarRequest);
             }
         }
 

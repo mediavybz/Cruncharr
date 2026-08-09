@@ -1,9 +1,10 @@
-name: Docker testing image
+name: Docker image
 
 on:
   push:
     branches:
       - testing
+      - master
     paths:
       - .forgejo/workflows/docker-testing.yml
       - docker/**
@@ -13,13 +14,21 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Push ghcr.io/mediavybz/cruncharr:testing after validation
+        description: Push the selected GHCR channel after validation
         required: true
         default: false
         type: boolean
+      channel:
+        description: GHCR channel to publish
+        required: true
+        default: testing
+        type: choice
+        options:
+          - testing
+          - latest
 
 concurrency:
-  group: cruncharr-docker-testing
+  group: cruncharr-docker-image
   cancel-in-progress: false
 
 jobs:
@@ -31,7 +40,9 @@ jobs:
       contents: read
     env:
       SOURCE_REVISION: ${{ forgejo.sha }}
+      SOURCE_REF: ${{ forgejo.ref }}
       PUBLISH_IMAGE: ${{ inputs.publish || 'false' }}
+      PUBLISH_CHANNEL: ${{ inputs.channel || 'testing' }}
       SMOKE_CONTAINER: cruncharr-runner-smoke
       SMOKE_IMAGE: cruncharr-runner-smoke:${{ forgejo.sha }}
 
@@ -101,12 +112,40 @@ jobs:
           if [ "$PUBLISH_IMAGE" = "true" ]; then
             test -n "$GHCR_TOKEN"
             test -n "$GHCR_USERNAME"
+
+            case "$PUBLISH_CHANNEL" in
+              testing)
+                test "$SOURCE_REF" = "refs/heads/testing"
+                image_tags=(
+                  --tag ghcr.io/mediavybz/cruncharr:testing
+                )
+                verify_tags=(testing)
+                ;;
+              latest)
+                test "$SOURCE_REF" = "refs/heads/master"
+                version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' \
+                  src/Cruncharr.API/Cruncharr.API.csproj)
+                test -n "$version"
+                image_tags=(
+                  --tag ghcr.io/mediavybz/cruncharr:latest
+                  --tag "ghcr.io/mediavybz/cruncharr:$version"
+                )
+                verify_tags=(latest "$version")
+                ;;
+              *)
+                echo "Unsupported publish channel: $PUBLISH_CHANNEL" >&2
+                exit 1
+                ;;
+            esac
+
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
             bash scripts/publish-docker.sh \
-              --tag ghcr.io/mediavybz/cruncharr:testing \
+              "${image_tags[@]}" \
               --push
-            docker buildx imagetools inspect ghcr.io/mediavybz/cruncharr:testing | grep -q 'linux/amd64'
-            docker buildx imagetools inspect ghcr.io/mediavybz/cruncharr:testing | grep -q 'linux/arm64'
+            for tag in "${verify_tags[@]}"; do
+              docker buildx imagetools inspect "ghcr.io/mediavybz/cruncharr:$tag" | grep -q 'linux/amd64'
+              docker buildx imagetools inspect "ghcr.io/mediavybz/cruncharr:$tag" | grep -q 'linux/arm64'
+            done
             docker logout ghcr.io
           fi
         env:

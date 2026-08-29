@@ -1,4 +1,5 @@
 using System.Web;
+using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Moq;
 
@@ -32,6 +33,37 @@ public class SearchResultParsingTests
         var api = new CrunchyrollApiService(auth.Object);
 
         var authenticated = await api.EnsureAuthenticatedAsync(true, CancellationToken.None);
+
+        Assert.True(authenticated);
+        auth.Verify(service => service.AuthenticateAsync(true, It.IsAny<CancellationToken>()), Times.Once);
+        auth.Verify(service => service.RefreshTokenAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EnsureTokenAsync_RefreshesAnExpiredTokenBeforeBrowseRequests()
+    {
+        var auth = new Mock<ICrunchyrollAuthService>();
+        auth.SetupGet(service => service.Token).Returns(new CrToken { access_token = "stale" });
+        var api = new CrunchyrollApiService(auth.Object);
+
+        var authenticated = await api.EnsureTokenAsync(CancellationToken.None);
+
+        Assert.True(authenticated);
+        auth.Verify(service => service.RefreshTokenAsync(true, It.IsAny<CancellationToken>(), false), Times.Once);
+        auth.Verify(service => service.AuthenticateAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EnsureTokenAsync_AuthenticatesWhenNoTokenExists()
+    {
+        var auth = new Mock<ICrunchyrollAuthService>();
+        auth.SetupGet(service => service.Token).Returns((CrToken?)null);
+        auth.Setup(service => service.AuthenticateAsync(true, It.IsAny<CancellationToken>()))
+            .Callback(() => auth.SetupGet(service => service.Token).Returns(new CrToken { access_token = "fresh" }))
+            .ReturnsAsync(false);
+        var api = new CrunchyrollApiService(auth.Object);
+
+        var authenticated = await api.EnsureTokenAsync(CancellationToken.None);
 
         Assert.True(authenticated);
         auth.Verify(service => service.AuthenticateAsync(true, It.IsAny<CancellationToken>()), Times.Once);

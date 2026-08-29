@@ -1,0 +1,50 @@
+name: Mirror to GitHub
+
+# Forgejo is the source of truth; GitHub is the outage backup. Every push to
+# master/testing (and any tag) re-syncs the GitHub mirror to exactly this
+# repository: all branches, all tags, pruning refs deleted here. A daily
+# scheduled sweep catches anything that slips through (e.g. edits made in the
+# Forgejo web UI). Runs only on Forgejo; the job is skipped if GitHub ever
+# evaluates this file.
+
+on:
+  push:
+    branches:
+      - master
+      - testing
+    tags:
+      - '*'
+  schedule:
+    - cron: '0 5 * * *'
+
+concurrency:
+  group: cruncharr-github-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Sync GitHub mirror
+    runs-on: docker-build
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    if: github.server_url != 'https://github.com'
+    env:
+      GH_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+    steps:
+      - name: Check out the full repository from Forgejo
+        uses: https://data.forgejo.org/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Push all branches and tags to GitHub
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GH_MIRROR_TOKEN secret is not set" >&2
+            exit 1
+          fi
+          git update-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
+          git remote add github "https://x-access-token:${GH_TOKEN}@github.com/mediavybz/Cruncharr.git"
+          git push github --prune --tags "refs/remotes/origin/*:refs/heads/*"

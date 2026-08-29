@@ -245,17 +245,37 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     public async Task<bool> AuthenticateAsync(bool useBetaApi, CancellationToken cancellationToken = default)
     {
+        // Serialize with RefreshTokenAsync/LoginAsync: concurrent token loads used to refresh
+        // with an already-rotated refresh_token, which Crunchyroll rejects with 400 and treats
+        // as reuse - revoking the whole session family (the "flaky logout").
+        await _refreshTokenGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await AuthenticateCoreAsync(useBetaApi, cancellationToken);
+        }
+        finally
+        {
+            _refreshTokenGate.Release();
+        }
+    }
+
+    private async Task<bool> AuthenticateCoreAsync(bool useBetaApi, CancellationToken cancellationToken)
+    {
         _logger?.LogInformation("Authenticating with Crunchyroll...");
 
-        if (File.Exists(GetTokenFilePath()))
+        // Prefer the in-memory session: it is always at least as fresh as the token file
+        // (every rotation saves both), while re-reading the file can pick up a refresh token
+        // that has already been rotated and invalidated.
+        if (Token?.refresh_token == null && File.Exists(GetTokenFilePath()))
         {
             var content = await File.ReadAllTextAsync(GetTokenFilePath());
             Token = JsonConvert.DeserializeObject<CrToken>(content);
-            if (Token?.refresh_token != null)
-            {
-                await LoginWithTokenAsync(useBetaApi, cancellationToken);
-                return IsAuthenticated;
-            }
+        }
+
+        if (Token?.refresh_token != null)
+        {
+            await LoginWithTokenAsync(useBetaApi, cancellationToken);
+            return IsAuthenticated;
         }
 
         await AuthAnonymousAsync(useBetaApi, cancellationToken);
@@ -1239,8 +1259,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
         else
         {
+            // Keep the session on a failed token refresh: this used to fall back to
+            // AuthAnonymousAsync, which overwrote the user's token in memory AND on disk with
+            // a guest token - one transient error logged the account out permanently. The
+            // refresh token stays valid for a later retry (RefreshTokenAsync preflights).
             _logger?.LogError("Token Auth Failed: {Error}", error);
-            await AuthAnonymousAsync(useBetaApi, cancellationToken);
         }
 
         return false;

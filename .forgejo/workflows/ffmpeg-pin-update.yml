@@ -1,0 +1,78 @@
+name: FFmpeg pin update
+
+# BtbN prunes dated ffmpeg autobuild releases after a few weeks; a stale pin
+# 404s and breaks every image build (Aug 2026 incident). This job runs weekly
+# from the default branch and rotates the pin on both build branches, with
+# freshly verified SHA256 checksums. The push triggers the docker-testing
+# workflow so the rotated pin is validated automatically (publish stays manual).
+
+on:
+  schedule:
+    - cron: '30 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rotate even if the current pin is young
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: cruncharr-ffmpeg-pin
+  cancel-in-progress: false
+
+jobs:
+  rotate:
+    name: Rotate pinned BtbN ffmpeg autobuild
+    runs-on: docker-build
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      FORCE_INPUT: ${{ inputs.force }}
+    steps:
+      - name: Check out the testing branch
+        uses: https://data.forgejo.org/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: testing
+          persist-credentials: true
+
+      - name: Rotate testing pin
+        run: |
+          set -euo pipefail
+          force_flag=''
+          case "$FORCE_INPUT" in
+            true|True) force_flag='--force' ;;
+          esac
+          bash scripts/update-ffmpeg-pin.sh --apply $force_flag
+          if git diff --quiet Dockerfile; then
+            echo "testing pin already current"
+          else
+            git config user.name "Cruncharr Deploy"
+            git config user.email "deploy@cruncharr.local"
+            git commit -am "build(docker): rotate pinned BtbN ffmpeg autobuild"
+            git push
+          fi
+
+      - name: Check out the master branch
+        uses: https://data.forgejo.org/actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: master
+          persist-credentials: true
+
+      - name: Rotate master pin
+        run: |
+          set -euo pipefail
+          force_flag=''
+          case "$FORCE_INPUT" in
+            true|True) force_flag='--force' ;;
+          esac
+          bash scripts/update-ffmpeg-pin.sh --apply $force_flag
+          if git diff --quiet Dockerfile; then
+            echo "master pin already current"
+          else
+            git config user.name "Cruncharr Deploy"
+            git config user.email "deploy@cruncharr.local"
+            git commit -am "build(docker): rotate pinned BtbN ffmpeg autobuild"
+            git push
+          fi

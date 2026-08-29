@@ -24,8 +24,5 @@
   series, and confirm both Crunchyroll and Sonarr identities. Regression probes include Wistoria's
   collapsed `SP -> CR 1 -> Sonarr S00E02` and Slime's `24.5`, `24.9`, `48.5`, and `65.5` entries.
 - A 64-character value presented beside `ssh-keygen -Y sign` is an SSH-key verification challenge,
-  not a Forgejo API token. Forgejo issue mutation requires a separate scoped API access token; it
-  lives untracked next to the checkout at `../Forgejo API.txt` (git-ignored, never commit it).
-  The GitHub mirror token is the `GH_MIRROR_TOKEN` Forgejo Actions secret - update it whenever the
-  GitHub token rotates.
+  not a Forgejo API token. Forgejo issue mutation requires a separate scoped API access token.
 - Do not store tokens, passwords, API keys, signatures, or live configuration in tracked files.

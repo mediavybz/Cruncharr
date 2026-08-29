@@ -12,9 +12,13 @@ on:
     branches:
       - master
       - testing
+    paths:
+      - '**'
   workflow_dispatch:
   schedule:
-    - cron: '0 5 * * *'
+    # Push triggers are unreliable on this Forgejo build, so the mirror runs
+    # every 15 minutes from the default branch as the primary sync mechanism.
+    - cron: '*/15 * * * *'
 
 concurrency:
   group: cruncharr-github-mirror

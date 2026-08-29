@@ -4,6 +4,11 @@
 # which serves the LFS pointer text (not the image) for LFS-tracked files.
 icon.png -filter -diff -merge -text
 
+# Web assets must be normal blobs too: the Docker build runs without git-lfs,
+# so every wwwroot PNG was copied into the image as LFS pointer text and the
+# UI logo/icons 404'd as broken images (Content-Type image/png, 131 bytes).
+src/Cruncharr.API/wwwroot/*.png -filter -diff -merge -text
+
 # Shell scripts must keep LF endings or the Linux container can't exec them
 # (a CRLF shebang becomes "#!/bin/sh\r" -> bad interpreter).
 *.sh text eol=lf

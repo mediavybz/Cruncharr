@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <!--
 ================================================================================
 CRUNCHARR WEB UI - PORTED FROM CRUNCHY-DOWNLOADER
@@ -9,25 +9,25 @@ This file is a manual port of the Crunchy-Downloader desktop UI (Avalonia/Fluent
 to a web-based single-page application. When updating from new versions of the original
 app, use this mapping to find what needs to be updated:
 
-ORIGINAL FILE → WEB UI SECTION:
-- MainWindow.axaml → Navigation sidebar layout (lines ~860-920)
-- DownloadsPageView.axaml → renderDownloads() function
-- AddDownloadPageView.axaml → renderAddDownload() function  
-- CalendarPageView.axaml → renderCalendar() function
-- SeriesPageView.axaml → renderSeries() / renderSeasons() functions
-- HistoryPageView.axaml → renderHistory() function
-- AccountPageView.axaml → renderAccount() function
-- SettingsPageView.axaml → renderSettings() function
-- ToastNotification.axaml → showToast() function
+ORIGINAL FILE ? WEB UI SECTION:
+- MainWindow.axaml ? Navigation sidebar layout (lines ~860-920)
+- DownloadsPageView.axaml ? renderDownloads() function
+- AddDownloadPageView.axaml ? renderAddDownload() function  
+- CalendarPageView.axaml ? renderCalendar() function
+- SeriesPageView.axaml ? renderSeries() / renderSeasons() functions
+- HistoryPageView.axaml ? renderHistory() function
+- AccountPageView.axaml ? renderAccount() function
+- SettingsPageView.axaml ? renderSettings() function
+- ToastNotification.axaml ? showToast() function
 
 COLOR SCHEME:
 Uses WinUI 3 / Fluent Design System dark theme colors (ported from FluentAvalonia):
-- ApplicationPageBackgroundThemeBrush → --bg-primary (#202020)
-- ControlAltFillColorQuarternary → --bg-secondary (#2c2c2c)
-- ComboBoxDropDownBackground → --bg-card (#1e1e1e)
-- TextFillColorPrimaryBrush → --text-primary (#ffffff)
-- TextFillColorSecondaryBrush → --text-secondary (#a0a0a0)
-- SystemAccentColor → --accent-blue (#4cc2ff)
+- ApplicationPageBackgroundThemeBrush ? --bg-primary (#202020)
+- ControlAltFillColorQuarternary ? --bg-secondary (#2c2c2c)
+- ComboBoxDropDownBackground ? --bg-card (#1e1e1e)
+- TextFillColorPrimaryBrush ? --text-primary (#ffffff)
+- TextFillColorSecondaryBrush ? --text-secondary (#a0a0a0)
+- SystemAccentColor ? --accent-blue (#4cc2ff)
 - Crunchyroll brand color kept as --accent-orange (#f47521)
 
 ICONS:
@@ -35,13 +35,13 @@ Original uses Fluent System Icons (SymbolIcon). We use inline SVGs matching the
 same icon shapes: Download, Add, Calendar, Clock, Library, Contact, Settings.
 
 DATA MODEL MAPPING:
-Original ViewModels → API endpoints:
-- DownloadsPageViewModel → GET/POST /api/v1/queue
-- AddDownloadPageViewModel → GET /api/v1/series/search, GET /api/v1/series/{id}/episodes
-- CalendarPageViewModel → GET /api/v1/calendar
-- HistoryPageViewModel → GET /api/v1/history
-- AccountPageViewModel → GET/POST /api/v1/auth/*
-- SettingsPageViewModel → GET/POST /api/v1/config
+Original ViewModels ? API endpoints:
+- DownloadsPageViewModel ? GET/POST /api/v1/queue
+- AddDownloadPageViewModel ? GET /api/v1/series/search, GET /api/v1/series/{id}/episodes
+- CalendarPageViewModel ? GET /api/v1/calendar
+- HistoryPageViewModel ? GET /api/v1/history
+- AccountPageViewModel ? GET/POST /api/v1/auth/*
+- SettingsPageViewModel ? GET/POST /api/v1/config
 
 MAINTENANCE NOTES:
 - This is a manual port - future updates to Crunchy-Downloader require manual syncing
@@ -55,21 +55,21 @@ MAINTENANCE NOTES:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <title>Cruncharr - Crunchyroll Downloader</title>
-    <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
-    <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="/favicon-32x32.png?v=2" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/favicon-16x16.png?v=2" sizes="16x16" />
+    <link rel="shortcut icon" href="/favicon.ico?v=2" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="/css/app.css?v=1.0.73">
-    <script defer src="/js/calendar-request-state.js?v=1.0.73"></script>
-    <script defer src="/js/app.js?v=1.0.73"></script>
+    <link rel="stylesheet" href="/css/app.css?v=1.0.74">
+    <script defer src="/js/calendar-request-state.js?v=1.0.74"></script>
+    <script defer src="/js/app.js?v=1.0.74"></script>
 </head>
 <body>
     <div id="loading-splash">
-        <img src="/logo.png" alt="Cruncharr" class="splash-logo-img">
+        <img src="/logo.png?v=2" alt="Cruncharr" class="splash-logo-img">
         <div class="splash-spinner"></div>
-        <div class="splash-text">Loading CrunchArr…</div>
+        <div class="splash-text">Loading CrunchArr�</div>
     </div>
     <div class="app-container">
         <div class="topbar-profile hidden" id="topbar-profile" onclick="navigateTo('account')" title="Account">
@@ -78,7 +78,7 @@ MAINTENANCE NOTES:
         </div>
         <aside class="sidebar">
             <div class="sidebar-header">
-                <img src="/logo.png" alt="Cruncharr" class="sidebar-logo-img">
+                <img src="/logo.png?v=2" alt="Cruncharr" class="sidebar-logo-img">
                 <div class="sidebar-title">CrunchArr</div>
             </div>
             <nav class="sidebar-nav">
@@ -137,7 +137,7 @@ MAINTENANCE NOTES:
                 <a class="github-link" href="https://codeberg.org/YomuLoad/CRD/releases" target="_blank" rel="noopener noreferrer" title="Cruncharr on Codeberg" aria-label="Cruncharr on Codeberg">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.955.49A12 12 0 0 0 0 12.49a12 12 0 0 0 1.832 6.373L11.838 5.928a.187.14 0 0 1 .324 0l10.006 12.935A12 12 0 0 0 24 12.49a12 12 0 0 0-12-12 12 12 0 0 0-.045 0zm.375 8.912l4.157 12.481a12 12 0 0 0 3.755-2.271L12.4 9.402a.037.037 0 0 0-.07 0z"/></svg>
                 </a>
-                <!-- Placeholder: no destination yet — replace href when a donation page is set up. -->
+                <!-- Placeholder: no destination yet � replace href when a donation page is set up. -->
                 <a class="github-link" href="#" onclick="return false;" title="Buy me a coffee (coming soon)" aria-label="Buy me a coffee">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.9 2-2V5c0-1.11-.89-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z"/></svg>
                 </a>

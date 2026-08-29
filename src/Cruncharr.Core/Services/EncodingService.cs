@@ -31,9 +31,9 @@ public class EncodingService : IEncodingService
         // User-tuned 2026-07-10: SVT preset 8 -> 6 (slower encode, better compression
         // efficiency: higher quality AND smaller files at the same CRF 24). Config stores the
         // preset by NAME, so the old "(SVT preset 8)" name is aliased below — do not remove it.
-        new(){ PresetName = "[CrunchArr] AV1 Main10 Source (SVT preset 6)", Codec = "libsvtav1", Resolution = "", FrameRate = "", Crf = 24,
-               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 6",
-                   "-svtav1-params tune=0:lookahead=120:aq-mode=2:keyint=240:scd=1:enable-overlays=1",
+        new(){ PresetName = "[CrunchArr] AV1 Main10 Source (SVT preset 5)", Codec = "libsvtav1", Resolution = "", FrameRate = "", Crf = 24,
+               AdditionalParameters ={ "-map 0", "-pix_fmt yuv420p10le", "-preset 5",
+                   "-svtav1-params tune=0:aq-mode=2:enable-overlays=0",
                    "-c:a copy", "-c:s copy", "-c:t copy",
                    "-metadata encoder=CrunchArr", "-metadata encoded_by=CrunchArr",
                    "-metadata encoding_tool=\"FFmpeg Nightly + SVT-AV1\"",
@@ -123,7 +123,8 @@ public class EncodingService : IEncodingService
     // NAME, so every historical name must keep resolving or existing setups silently stop encoding.
     private static readonly Dictionary<string, string> _renamedBuiltIns = new()
     {
-        ["[CrunchArr] AV1 Main10 Source (SVT preset 8)"] = "[CrunchArr] AV1 Main10 Source (SVT preset 6)",
+        ["[CrunchArr] AV1 Main10 Source (SVT preset 8)"] = "[CrunchArr] AV1 Main10 Source (SVT preset 5)",
+        ["[CrunchArr] AV1 Main10 Source (SVT preset 6)"] = "[CrunchArr] AV1 Main10 Source (SVT preset 5)",
     };
 
     private static string NormalizePresetName(string presetName) =>

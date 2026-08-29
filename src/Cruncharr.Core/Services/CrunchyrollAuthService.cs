@@ -245,17 +245,37 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     public async Task<bool> AuthenticateAsync(bool useBetaApi, CancellationToken cancellationToken = default)
     {
+        // Serialize with RefreshTokenAsync/LoginAsync: concurrent token loads used to refresh
+        // with an already-rotated refresh_token, which Crunchyroll rejects with 400 and treats
+        // as reuse - revoking the whole session family (the "flaky logout").
+        await _refreshTokenGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await AuthenticateCoreAsync(useBetaApi, cancellationToken);
+        }
+        finally
+        {
+            _refreshTokenGate.Release();
+        }
+    }
+
+    private async Task<bool> AuthenticateCoreAsync(bool useBetaApi, CancellationToken cancellationToken)
+    {
         _logger?.LogInformation("Authenticating with Crunchyroll...");
 
-        if (File.Exists(GetTokenFilePath()))
+        // Prefer the in-memory session: it is always at least as fresh as the token file
+        // (every rotation saves both), while re-reading the file can pick up a refresh token
+        // that has already been rotated and invalidated.
+        if (Token?.refresh_token == null && File.Exists(GetTokenFilePath()))
         {
             var content = await File.ReadAllTextAsync(GetTokenFilePath());
             Token = JsonConvert.DeserializeObject<CrToken>(content);
-            if (Token?.refresh_token != null)
-            {
-                await LoginWithTokenAsync(useBetaApi, cancellationToken);
-                return IsAuthenticated;
-            }
+        }
+
+        if (Token?.refresh_token != null)
+        {
+            await LoginWithTokenAsync(useBetaApi, cancellationToken);
+            return IsAuthenticated;
         }
 
         await AuthAnonymousAsync(useBetaApi, cancellationToken);
@@ -1239,8 +1259,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
         else
         {
+            // Keep the session on a failed token refresh: this used to fall back to
+            // AuthAnonymousAsync, which overwrote the user's token in memory AND on disk with
+            // a guest token - one transient error logged the account out permanently. The
+            // refresh token stays valid for a later retry (RefreshTokenAsync preflights).
             _logger?.LogError("Token Auth Failed: {Error}", error);
-            await AuthAnonymousAsync(useBetaApi, cancellationToken);
         }
 
         return false;
@@ -1347,6 +1370,22 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         else
         {
             _logger?.LogError("Refresh Token Auth Failed: {Error}", error);
+
+            // A 400 means Crunchyroll rejected the refresh token itself (revoked/rotated
+            // family) - the session is unrecoverable. Drop it from memory AND disk so the UI
+            // shows logged-out cleanly and anonymous-capable endpoints (browse/calendar) fall
+            // back to a guest token instead of retrying the dead bearer forever. Transient
+            // failures (5xx/network/Cloudflare) keep the session for a later retry.
+            var definitive = (content != null && content.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase)) ||
+                             (error != null && error.Contains("400 (", StringComparison.OrdinalIgnoreCase));
+            if (definitive && Token != null)
+            {
+                _logger?.LogWarning("Refresh token rejected by Crunchyroll - dropping dead session (re-login required)");
+                Token = null;
+                Init();
+                DeleteToken();
+            }
+
             if (hadUserSession)
             {
                 _logger?.LogWarning("User session expired - login required");

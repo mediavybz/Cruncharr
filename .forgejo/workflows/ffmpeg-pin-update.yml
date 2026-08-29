@@ -3,8 +3,13 @@ name: FFmpeg pin update
 # BtbN prunes dated ffmpeg autobuild releases after a few weeks; a stale pin
 # 404s and breaks every image build (Aug 2026 incident). This job runs weekly
 # from the default branch and rotates the pin on both build branches, with
-# freshly verified SHA256 checksums. The push triggers the docker-testing
-# workflow so the rotated pin is validated automatically (publish stays manual).
+# freshly verified SHA256 checksums.
+#
+# A rotated pin is validated with a full cache-only build BEFORE it is
+# committed, so a broken upstream build can never land on a branch. (The
+# commit is pushed with the Actions token, and Forgejo does not trigger
+# on.push workflows for Actions-token pushes, so the in-job validation is
+# also the only validation this rotation gets.)
 
 on:
   schedule:
@@ -25,7 +30,7 @@ jobs:
   rotate:
     name: Rotate pinned BtbN ffmpeg autobuild
     runs-on: docker-build
-    timeout-minutes: 30
+    timeout-minutes: 150
     permissions:
       contents: write
     env:
@@ -48,6 +53,8 @@ jobs:
           if git diff --quiet Dockerfile; then
             echo "testing pin already current"
           else
+            echo "Validating rotated pin with a full cache-only build ..."
+            bash scripts/publish-docker.sh
             git config user.name "Cruncharr Deploy"
             git config user.email "deploy@cruncharr.local"
             git commit -am "build(docker): rotate pinned BtbN ffmpeg autobuild"
@@ -71,6 +78,8 @@ jobs:
           if git diff --quiet Dockerfile; then
             echo "master pin already current"
           else
+            echo "Validating rotated pin with a full cache-only build ..."
+            bash scripts/publish-docker.sh
             git config user.name "Cruncharr Deploy"
             git config user.email "deploy@cruncharr.local"
             git commit -am "build(docker): rotate pinned BtbN ffmpeg autobuild"

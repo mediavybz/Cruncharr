@@ -58,6 +58,8 @@ test-data/credentials*
 appsettings.Local.json
 appsettings.*.Local.json
 
+*.token
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,19 +1,18 @@
 name: Mirror to GitHub
 
 # Forgejo is the source of truth; GitHub is the outage backup. Every push to
-# master/testing (and any tag) re-syncs the GitHub mirror to exactly this
-# repository: all branches, all tags, pruning refs deleted here. A daily
-# scheduled sweep catches anything that slips through (e.g. edits made in the
-# Forgejo web UI). Runs only on Forgejo; the job is skipped if GitHub ever
-# evaluates this file.
+# master/testing re-syncs the GitHub mirror to exactly this repository: all
+# branches, all tags, pruning refs deleted here. A daily scheduled sweep
+# catches anything that slips through (e.g. tag pushes or edits made in the
+# Forgejo web UI). If GitHub ever evaluates this file, the sync step exits
+# immediately - disable Actions on the GitHub mirror to keep it dormant.
 
 on:
   push:
     branches:
       - master
       - testing
-    tags:
-      - '*'
+  workflow_dispatch:
   schedule:
     - cron: '0 5 * * *'
 
@@ -28,7 +27,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-    if: github.server_url != 'https://github.com'
     env:
       GH_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
     steps:
@@ -41,6 +39,12 @@ jobs:
       - name: Push all branches and tags to GitHub
         run: |
           set -euo pipefail
+          case "$GITHUB_SERVER_URL" in
+            *github.com*)
+              echo "Running on GitHub - this job only runs on Forgejo"
+              exit 0
+              ;;
+          esac
           if [ -z "$GH_TOKEN" ]; then
             echo "GH_MIRROR_TOKEN secret is not set" >&2
             exit 1

@@ -1404,11 +1404,15 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             // safe as a preflight; without it the browse request goes out with a stale bearer
             // token and fails with 401, which emptied the calendar's Crunchyroll episodes.
             await _authService.RefreshTokenAsync(true, cancellationToken);
+            // A rejected (revoked) refresh token drops the dead session inside
+            // RefreshTokenAsync - fall through and authenticate anonymously so browse,
+            // which works with a guest token, keeps serving the calendar.
+            if (_authService.Token?.access_token != null)
+            {
+                return true;
+            }
         }
-        else
-        {
-            await _authService.AuthenticateAsync(true, cancellationToken);
-        }
+        await _authService.AuthenticateAsync(true, cancellationToken);
         return _authService.Token?.access_token != null;
     }
 

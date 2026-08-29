@@ -58,12 +58,6 @@ test-data/credentials*
 appsettings.Local.json
 appsettings.*.Local.json
 
-# Forgejo/GitHub API tokens - kept untracked NEXT TO this checkout
-# (../Forgejo API.txt); the Unraid mirror script also keeps a forgejo-token file
-Forgejo API.txt
-forgejo-token
-*.token
-
 # OS
 .DS_Store
 Thumbs.db

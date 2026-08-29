@@ -1395,12 +1395,24 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     // Anonymous-capable endpoints (browse/new episodes) only need an access token,
     // not a logged-in account. AuthenticateAsync returns false in anonymous mode
     // even when the guest token was obtained successfully.
-    private async Task<bool> EnsureTokenAsync(CancellationToken cancellationToken)
+    internal async Task<bool> EnsureTokenAsync(CancellationToken cancellationToken)
     {
-        if (_authService.Token?.access_token == null)
+        if (_authService.Token?.access_token != null)
         {
-            await _authService.AuthenticateAsync(true, cancellationToken);
+            // An existing access token can already be expired (they expire within minutes).
+            // RefreshTokenAsync is synchronized and a no-op while the token is fresh, so it is
+            // safe as a preflight; without it the browse request goes out with a stale bearer
+            // token and fails with 401, which emptied the calendar's Crunchyroll episodes.
+            await _authService.RefreshTokenAsync(true, cancellationToken);
+            // A rejected (revoked) refresh token drops the dead session inside
+            // RefreshTokenAsync - fall through and authenticate anonymously so browse,
+            // which works with a guest token, keeps serving the calendar.
+            if (_authService.Token?.access_token != null)
+            {
+                return true;
+            }
         }
+        await _authService.AuthenticateAsync(true, cancellationToken);
         return _authService.Token?.access_token != null;
     }
 

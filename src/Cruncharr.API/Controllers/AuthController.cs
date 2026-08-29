@@ -28,8 +28,12 @@ public class AuthController : ControllerBase
     {
         try
         {
-            // Try to refresh token if needed before returning status
-            if (_auth.IsAuthenticated)
+            // Try to refresh token if needed before returning status. Gate on the refresh
+            // token, NOT IsAuthenticated: right after a restart IsAuthenticated is false
+            // (profile not loaded yet) while the saved access token is usually already
+            // expired - skipping the refresh deadlocked the profile fetch on a 401 and made
+            // the UI report "logged out" until some other call refreshed the token.
+            if (_auth.Token?.refresh_token != null)
             {
                 try
                 {

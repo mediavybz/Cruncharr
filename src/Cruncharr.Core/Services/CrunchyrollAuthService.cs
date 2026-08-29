@@ -1370,6 +1370,22 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         else
         {
             _logger?.LogError("Refresh Token Auth Failed: {Error}", error);
+
+            // A 400 means Crunchyroll rejected the refresh token itself (revoked/rotated
+            // family) - the session is unrecoverable. Drop it from memory AND disk so the UI
+            // shows logged-out cleanly and anonymous-capable endpoints (browse/calendar) fall
+            // back to a guest token instead of retrying the dead bearer forever. Transient
+            // failures (5xx/network/Cloudflare) keep the session for a later retry.
+            var definitive = (content != null && content.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase)) ||
+                             (error != null && error.Contains("400 (", StringComparison.OrdinalIgnoreCase));
+            if (definitive && Token != null)
+            {
+                _logger?.LogWarning("Refresh token rejected by Crunchyroll - dropping dead session (re-login required)");
+                Token = null;
+                Init();
+                DeleteToken();
+            }
+
             if (hadUserSession)
             {
                 _logger?.LogWarning("User session expired - login required");

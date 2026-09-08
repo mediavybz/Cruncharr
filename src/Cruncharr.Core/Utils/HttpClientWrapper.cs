@@ -77,10 +77,18 @@ public class HttpClientWrapper : IDisposable
             var proxy = new WebProxy($"{(config.Socks ? "socks5" : "http")}://{config.Host}:{config.Port}");
             return config.AllTraffic ? proxy : new CrunchyrollOnlyProxy(proxy);
         }
-        public ICredentials? Credentials
+        // SocketsHttpHandler retains the ICredentials instance. Resolve credentials when
+        // authentication occurs so later settings changes do not keep an old password.
+        private readonly ICredentials _credentials = new ConfiguredCredentials(getConfig);
+        public ICredentials? Credentials { get => _credentials; set { } }
+        private sealed class ConfiguredCredentials(Func<ProxyConfig?> getConfig) : ICredentials
         {
-            get { var config = getConfig(); return string.IsNullOrEmpty(config?.Username) ? null : new NetworkCredential(config.Username, config.Password); }
-            set { }
+            public NetworkCredential? GetCredential(Uri uri, string authType)
+            {
+                var config = getConfig();
+                return config?.Enabled == true && !string.IsNullOrEmpty(config.Username)
+                    ? new NetworkCredential(config.Username, config.Password) : null;
+            }
         }
         public Uri? GetProxy(Uri destination) => Current()?.GetProxy(destination) ?? destination;
         public bool IsBypassed(Uri destination) => Current()?.IsBypassed(destination) ?? true;

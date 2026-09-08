@@ -121,6 +121,22 @@ public class SettingsAuditTests : IDisposable
     }
 
     [Fact]
+    public void CachedProxyCredentialsResolveCurrentSettingsAfterEnableAndPasswordChange()
+    {
+        var config = new ProxyConfig { Enabled = false };
+        var proxy = new HttpClientWrapper.ConfiguredProxy(() => config);
+        var cachedCredentials = proxy.Credentials!;
+        var uri = new Uri("http://proxy.example:8080");
+        Assert.Null(cachedCredentials.GetCredential(uri, "Basic"));
+        config.Enabled = true; config.Username = "test-user"; config.Password = "first-test-password";
+        Assert.Equal("first-test-password", cachedCredentials.GetCredential(uri, "Basic")!.Password);
+        config.Password = "second-test-password";
+        Assert.Equal("second-test-password", cachedCredentials.GetCredential(uri, "Basic")!.Password);
+        config.Enabled = false;
+        Assert.Null(cachedCredentials.GetCredential(uri, "Basic"));
+    }
+
+    [Fact]
     public void RuntimeProxyRespondsToSavedEnableHostAndScopeChanges()
     {
         var config = new ProxyConfig { Host = "proxy-one", Port = 8080, Enabled = false };

@@ -3850,7 +3850,15 @@
             document.body.classList.toggle('has-custom-background', !!appearance.backgroundImagePath);
             if (appearance.backgroundImagePath) {
                 const src = '/api/v1/config/background?path=' + encodeURIComponent(appearance.backgroundImagePath);
-                if (background.dataset.source !== src) { background.dataset.source = src; background.src = src; }
+                if (background.dataset.source !== src) {
+                    const replacement = document.createElement('img');
+                    replacement.id = 'custom-background'; replacement.alt = '';
+                    replacement.setAttribute('aria-hidden', 'true'); replacement.dataset.source = src;
+                    if (readLocalStorage('cruncharrApiKey')) {
+                        replacement.dataset.authSrc = src; replacement.src = TRANSPARENT_IMAGE;
+                    } else replacement.src = src;
+                    background.replaceWith(replacement); background = replacement;
+                }
                 background.style.opacity = appearance.backgroundImageOpacity ?? 0.5;
                 background.style.filter = `blur(${appearance.backgroundImageBlurRadius ?? 10}px)`;
             }

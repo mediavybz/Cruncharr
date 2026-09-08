@@ -3173,6 +3173,15 @@
             } catch (e) { showToast(e.message, 'error'); }
         }
 
+        function schedulerStatusText(state) {
+            const status = !state.historyEnabled ? 'History is disabled. Enable it in Settings → History.'
+                : !state.enabled ? 'Scheduler paused.' : state.isRunning ? 'Checking releases…'
+                : state.nextRun ? 'Next check: ' + new Date(state.nextRun).toLocaleString() : 'No active subscriptions.';
+            return status + (state.canDownload ? '' : ' Sign in with a Premium account to queue releases.')
+                + (state.autoDownload ? ' Queued downloads start automatically.'
+                    : ' Enable Settings → Queue → Auto Download to start queued episodes automatically.');
+        }
+
         async function renderSchedulerSettings() {
             const content = document.getElementById('settings-content');
             try {
@@ -3184,9 +3193,7 @@
                         <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added. Series and season language settings apply; existing Sonarr files are skipped.</p>
                         <div class="setting-row"><div><div class="setting-label">Enable scheduler</div><div class="setting-desc">Pause or resume checks for all subscriptions.</div></div><label class="toggle-switch"><input id="setting-scheduler-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                         <div class="setting-row"><div><div class="setting-label">Check every (minutes)</div><div class="setting-desc">New releases enter the queue at the next check. Default: 15 minutes.</div></div><input class="form-input w-100" id="setting-scheduler-interval" type="number" min="1" max="1440" value="${state.intervalMinutes}"></div>
-                        <p role="status">${!state.historyEnabled ? 'History is disabled. Enable it in Settings → History.' : !state.enabled ? 'Scheduler paused.' : state.isRunning ? 'Checking releases…' : state.nextRun ? 'Next check: ' + escapeHtml(new Date(state.nextRun).toLocaleString()) : 'No active subscriptions.'}
-                        ${state.canDownload ? '' : ' Sign in with a Premium account to queue releases.'}
-                        ${state.autoDownload ? ' Queued downloads start automatically.' : 'Enable Settings → Queue → Auto Download to start queued episodes automatically.'}</p>
+                        <p role="status" id="scheduler-summary">${escapeHtml(schedulerStatusText(state))}</p>
                         ${state.lastRun ? `<p class="setting-desc">Last check: ${escapeHtml(new Date(state.lastRun).toLocaleString())} · ${state.lastQueuedCount} added to queue</p>` : ''}
                         ${state.lastError ? `<p role="alert">${escapeHtml(state.lastError)}</p>` : ''}
                         <button class="header-btn" id="btn-scheduler-run" onclick="triggerScheduler()">Run now</button>
@@ -3199,10 +3206,12 @@
             const interval = document.getElementById('setting-scheduler-interval');
             if (!interval || !interval.reportValidity()) return false;
             try {
-                await schedulerRequest('settings', 'POST', {
+                const state = await schedulerRequest('settings', 'POST', {
                     enabled: document.getElementById('setting-scheduler-enabled').checked,
                     intervalMinutes: Number(interval.value)
                 });
+                const summary = document.getElementById('scheduler-summary');
+                if (summary) summary.textContent = schedulerStatusText(state);
                 showToast('Scheduler settings saved', 'success');
                 return true;
             } catch (e) { showToast(e.message, 'error'); return false; }
@@ -5830,4 +5839,3 @@
                 }
             }, 5000);
         }
-

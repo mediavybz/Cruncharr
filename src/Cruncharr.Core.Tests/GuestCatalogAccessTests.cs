@@ -108,6 +108,40 @@ public class GuestCatalogAccessTests
     }
 
     [Fact]
+    public async Task CatalogPagination_AdvancesByReturnedPageSizeAndKeepsZeroEpisodeTitles()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        var starts = new List<string>();
+        SetTransport(ApiTransport(api), new Handler((request, _) =>
+        {
+            var start = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["start"]!;
+            starts.Add(start);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent($"{{\"total\":3,\"data\":[{{\"id\":\"SERIES{start}\",\"title\":\"Title {start}\",\"series_metadata\":{{\"episode_count\":0}}}}]}}")
+            });
+        }));
+        var result = await api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(new[] { "0", "1", "2" }, starts);
+        Assert.Equal(3, result.Count);
+        Assert.All(result, series => Assert.Equal(0, series.EpisodeCount));
+    }
+
+    [Fact]
+    public async Task CatalogPagination_RejectsRepeatedPageInsteadOfLoopingOrReturningPartialSuccess()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        var calls = 0;
+        SetTransport(ApiTransport(api), new Handler((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series.Replace("\"total\":1", "\"total\":3")) });
+        }));
+        await Assert.ThrowsAsync<Newtonsoft.Json.JsonException>(() => api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
     public async Task SearchCancellation_StopsTheUpstreamRequest()
     {
         using var api = new CrunchyrollApiService(Guest().Object);

@@ -452,6 +452,12 @@ public class HistoryController : ControllerBase
             SonarrTvDbId = series.SonarrTvDbId,
             SonarrSlugTitle = series.SonarrSlugTitle,
             SonarrNextAirDate = series.SonarrNextAirDate,
+            SettingsOverride = new HistorySettingsOverrideRequest
+            {
+                VideoQuality = series.HistorySeriesVideoQualityOverride,
+                DubLanguages = series.HistorySeriesDubLangOverride,
+                SoftSubs = series.HistorySeriesSoftSubsOverride
+            },
             Seasons = series.Seasons?.Select(s => new HistorySeasonResponse
             {
                 SeasonId = s.SeasonId,
@@ -459,6 +465,12 @@ public class HistoryController : ControllerBase
                 SeasonNum = s.SeasonNum,
                 SpecialSeason = s.SpecialSeason,
                 DownloadedEpisodes = s.DownloadedEpisodes,
+                SettingsOverride = new HistorySettingsOverrideRequest
+                {
+                    VideoQuality = s.HistorySeasonVideoQualityOverride,
+                    DubLanguages = s.HistorySeasonDubLangOverride,
+                    SoftSubs = s.HistorySeasonSoftSubsOverride
+                },
                 Episodes = s.EpisodesList?.Select(e => new HistoryEpisodeResponse
                 {
                     EpisodeId = e.EpisodeId,
@@ -504,6 +516,7 @@ public class HistoryCheckResponse
 
 public class HistorySeriesResponse
 {
+    public HistorySettingsOverrideRequest SettingsOverride { get; set; } = new();
     public string? SeriesId { get; set; }
     public string? SeriesTitle { get; set; }
     public string? SeriesDescription { get; set; }
@@ -522,6 +535,7 @@ public class HistorySeriesResponse
 
 public class HistorySeasonResponse
 {
+    public HistorySettingsOverrideRequest SettingsOverride { get; set; } = new();
     public string? SeasonId { get; set; }
     public string? SeasonTitle { get; set; }
     public string? SeasonNum { get; set; }

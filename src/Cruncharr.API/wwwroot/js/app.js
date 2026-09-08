@@ -129,6 +129,11 @@
         let globalSearchDebounce = null; // top-bar search debounce timer
         const globalSearchGate = CruncharrCalendarRequests.createLatestRequestGate();
         let globalSearchResults = [];    // last top-bar search results
+        let sonarrLibraryIndex = null;
+        let sonarrLibraryPromise = null;
+        let sonarrLibraryCheckedAt = 0;
+        let sonarrLibraryError = false;
+        let browseHideLibrary = false;
         let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
         let browseSeriesPromise = null;  // de-duplicates background/visible catalog requests
         let browseCatalogLoaded = false;
@@ -154,7 +159,7 @@
         const HISTORY_SEARCH_DEBOUNCE_MS = 200;
         const TOAST_DISPLAY_DURATION_MS = 3000;
         const BROWSE_RENDER_BATCH_SIZE = 96;
-        const BROWSE_CACHE_KEY = 'cruncharrBrowseCatalogV2';
+        const BROWSE_CACHE_KEY = 'cruncharrBrowseCatalogV3';
         const BROWSE_CACHE_TTL_MS = 15 * 60 * 1000;
         const ACTIVE_DROPDOWN_LISTENERS = new Map(); // id -> listener function
 
@@ -683,7 +688,7 @@
                     </div>
                     <div class="search-result-info">
                         <div class="search-result-title">${escapeHtml(s.title)}</div>
-                        <div class="search-result-type">${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
+                        <div class="search-result-type">${libraryIndicator(s)} ${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
                         <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
                     </div>
                 </div>
@@ -1656,6 +1661,7 @@
                         <div class="history-poster clickable" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')">
                             <div class="history-poster-img">
                                 <span class="poster-type-badge">Series</span>
+                                ${libraryIndicator(series)}
                                 ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(series.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                 ${series.episodes?.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
                             </div>
@@ -1677,7 +1683,7 @@
                 <div class="browse-header-row" style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap;">
                     <div>
                         <div class="page-title">Browse All Series</div>
-                        <div class="page-subtitle">Explore all available series</div>
+                        <div class="page-subtitle">Crunchyroll’s catalog for your region, including titles with no episodes currently listed</div>
                     </div>
                     <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; align-items:center;"></div>
                 </div>
@@ -1687,7 +1693,9 @@
                         <option value="">All languages</option>
                         ${LANG_OPTIONS.map(o=>`<option value="${escapeHtmlAttribute(o.value)}" ${browseDubFilter===o.value?'selected':''}>${escapeHtml(o.label)}</option>`).join('')}
                     </select>
+                    <label class="browse-filter-label"><input type="checkbox" id="browse-hide-library" ${browseHideLibrary ? 'checked' : ''} onchange="browseHideLibrary=this.checked;renderBrowseFiltered()"> Hide series in Sonarr</label>
                     <span class="browse-filter-count" id="browse-count"></span>
+                    <span id="browse-library-status" role="status"></span>
                 </div>
                 <div id="browse-content">
                     <div class="loading"><div class="spinner"></div>Loading series...</div>
@@ -1695,10 +1703,11 @@
             `;
             if (browseCatalogLoaded) renderBrowseFiltered();
             else fetchAllSeries();
+            loadSonarrLibrary();
         }
 
         function scheduleBrowsePrefetch() {
-            const prefetch = () => { loadAllBrowseSeries().catch(() => {}); };
+            const prefetch = () => { loadAllBrowseSeries().catch(() => {}); loadSonarrLibrary(); };
             if (typeof window.requestIdleCallback === 'function') {
                 window.requestIdleCallback(prefetch, { timeout: 2000 });
             } else {
@@ -1706,9 +1715,56 @@
             }
         }
 
+        function libraryBadge(series) {
+            const match = CruncharrLibrary.findSeries(sonarrLibraryIndex, series);
+            if (!match) return '';
+            const files = match.episodeFileCount;
+            const detail = files == null ? 'Series is tracked in Sonarr. Open to check episodes.'
+                : files === 0 ? 'Tracked in Sonarr; no episode files yet.'
+                : `${files} episode file(s) in Sonarr. Open the series to check for missing episodes and languages.`;
+            return `<span class="library-badge" title="${escapeHtmlAttribute(detail)}">${files === 0 ? 'Tracked in Sonarr' : 'In Sonarr'}</span>`;
+        }
+
+        function libraryIndicator(series) {
+            return `<span class="library-indicator" data-library-id="${escapeHtmlAttribute(series.id || series.seriesId || '')}" data-library-title="${escapeHtmlAttribute(series.title || series.seriesTitle || '')}">${libraryBadge(series)}</span>`;
+        }
+
+        function updateLibraryIndicators() {
+            document.querySelectorAll('[data-library-id]').forEach(element => {
+                element.innerHTML = libraryBadge({id: element.dataset.libraryId, title: element.dataset.libraryTitle});
+            });
+            const status = document.getElementById('browse-library-status');
+            if (status) status.textContent = sonarrLibraryError ? 'Sonarr library status unavailable' : '';
+            const filter = document.getElementById('browse-hide-library');
+            if (filter) filter.disabled = !sonarrLibraryIndex;
+        }
+
+        async function loadSonarrLibrary() {
+            if (sonarrLibraryCheckedAt && Date.now() - sonarrLibraryCheckedAt < 60000) { updateLibraryIndicators(); return; }
+            if (sonarrLibraryPromise) return sonarrLibraryPromise;
+            sonarrLibraryPromise = (async () => {
+                try {
+                    const response = await fetch('/api/v1/library/sonarr');
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const data = await response.json();
+                    sonarrLibraryIndex = data.enabled ? CruncharrLibrary.createIndex(data.series) : null;
+                    sonarrLibraryError = false;
+                } catch (e) {
+                    sonarrLibraryIndex = null;
+                    sonarrLibraryError = true;
+                } finally {
+                    sonarrLibraryCheckedAt = Date.now();
+                    sonarrLibraryPromise = null;
+                    if (currentPage === 'browse' && browseHideLibrary) renderBrowseFiltered();
+                    updateLibraryIndicators();
+                }
+            })();
+            return sonarrLibraryPromise;
+        }
+
         function compactBrowseSeries(data) {
             return (data || [])
-                .filter(series => series.episodeCount == null || series.episodeCount > 0)
+                .filter(series => series && series.id)
                 .map(series => ({
                     id: series.id,
                     title: series.title,
@@ -1829,6 +1885,7 @@
         function renderBrowseFiltered() {
             buildRatingButtons();
             let list = allBrowseSeries;
+            if (browseHideLibrary && sonarrLibraryIndex) list = list.filter(series => !CruncharrLibrary.findSeries(sonarrLibraryIndex, series));
             if (browseDubFilter) {
                 list = list.filter(s => Array.isArray(s.audioLocales) && s.audioLocales.includes(browseDubFilter));
             }
@@ -1836,7 +1893,7 @@
                 list = list.filter(s => seriesMatchesRating(s, browseRatingFilter));
             }
             const count = document.getElementById('browse-count');
-            if (count) count.textContent = `${list.length} series`;
+            if (count) count.textContent = `${list.length} of ${allBrowseSeries.length} series`;
             const pageContent = document.getElementById('content');
             if (pageContent) pageContent.scrollTop = 0;
             browseFilteredSeries = list;
@@ -1856,11 +1913,12 @@
                 <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
                     <div class="history-poster-img">
                         <span class="poster-type-badge">Series</span>
+                        ${libraryIndicator(s)}
                         ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                     </div>
                     <div class="history-poster-info">
                         <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
-                        <div class="history-poster-meta">${s.episodeCount == null ? 'Episodes available' : `${s.episodeCount} episode(s)`}</div>
+                        <div class="history-poster-meta">${s.episodeCount == null ? 'Episode count unavailable' : s.episodeCount === 0 ? 'No episodes currently listed' : `${s.episodeCount} episode(s)`}</div>
                     </div>
                 </div>
             `).join('');
@@ -2165,7 +2223,7 @@
                         <div class="history-poster ${clickable ? 'clickable' : ''}" ${clickable
                             ? `onclick="selectBrowseResult('${escapeJsString(s.id)}')"`
                             : `title="Not on Crunchyroll yet" style="opacity:.55;"`}>
-                            <div class="history-poster-img"><span class="poster-type-badge">Series</span>${img}</div>
+                            <div class="history-poster-img"><span class="poster-type-badge">Series</span>${libraryIndicator(s)}${img}</div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
                                 <div class="history-poster-meta">${metaMain}</div>
@@ -3475,6 +3533,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Include CR Artists</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cr-artists" ${h.includeCrArtists?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Remove Missing Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-missing" ${h.removeMissingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Check Partial Downloads</div><div class="setting-desc">Track missing dubs/subs on downloaded episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-partial" ${h.checkPartialDownloads!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><label class="setting-label" for="setting-count-sonarr">Count Sonarr</label><div class="setting-desc">Include episodes with files in Sonarr in History’s available counts.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-count-sonarr" ${h.countSonarr ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">History Language</div></div><select class="form-select mw-150" id="setting-history-lang">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${h.lang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div><div class="setting-desc">Set above 0 to run the tracked-show scheduler automatically.</div></div><input type="number" class="form-input w-100" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0"></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div><div class="setting-desc">Fast New Releases checks Crunchyroll's release feed; the other modes refresh tracked History series.</div></div><select class="form-select mw-150" id="setting-history-mode"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
@@ -3969,6 +4028,7 @@
                         includeCrArtists: document.getElementById('setting-cr-artists')?.checked || false,
                         removeMissingEpisodes: document.getElementById('setting-remove-missing')?.checked ?? true,
                         checkPartialDownloads: document.getElementById('setting-history-partial')?.checked ?? true,
+                        countSonarr: document.getElementById('setting-count-sonarr')?.checked ?? false,
                         lang: document.getElementById('setting-history-lang')?.value || 'en-US',
                         autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
                         autoRefreshMode: isNaN(histMode) ? 0 : histMode,
@@ -4349,6 +4409,7 @@
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
                                         episodeId: episode.episodeId,
+                                        ...historyQueueOverrides(episode.episodeId, [series]),
                                         title: episode.episodeTitle || 'Unknown',
                                         seriesTitle: series.seriesTitle || 'Unknown',
                                         seasonNumber: season.seasonNum || 1,
@@ -4818,6 +4879,7 @@
             try {
                 const payload = {
                     episodeId: episodeId,
+                    ...historyQueueOverrides(episodeId),
                     title: episodeTitle || 'Unknown Episode',
                     seriesTitle: seriesTitle || 'Unknown'
                 };
@@ -4878,6 +4940,7 @@
             try {
                 const payload = {
                     episodeId: episodeId,
+                    ...historyQueueOverrides(episodeId),
                     title: episodeTitle || 'Unknown Episode',
                     seriesTitle: seriesTitle || 'Unknown',
                     selectedDubs: dubs.length ? dubs : null,
@@ -4914,6 +4977,7 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 episodeId: ep.id,
+                                ...historyQueueOverrides(ep.id),
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
@@ -5189,6 +5253,33 @@
 
         // ================== SETTINGS OVERRIDE ==================
 
+        function historyOverrideForm(prefix, values = {}) {
+            const selected = (options, saved) => {
+                const all = [...options];
+                for (const value of saved || []) if (!all.some(option => option.value === value)) all.push({value, label:value});
+                return all.map(option => `<option value="${escapeHtmlAttribute(option.value)}" ${(saved || []).includes(option.value) ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('');
+            };
+            const quality = [{value:'',label:'Inherit default'}, ...['best','1080','720','480','360','240','worst'].map(value => ({value,label:value === 'best' ? 'Best available' : value}))];
+            return `
+                <div class="form-group"><label class="form-label" for="${prefix}quality-video">Video Quality</label><select class="form-select" id="${prefix}quality-video">${selected(quality, [values.videoQuality || ''])}</select></div>
+                <div class="form-group"><label class="form-label" for="${prefix}dub-langs">Dub Languages</label><select class="form-select mh-120" id="${prefix}dub-langs" multiple>${selected(LANG_OPTIONS, values.dubLanguages)}</select></div>
+                <div class="form-group"><label class="form-label" for="${prefix}soft-subs">Subtitle Languages</label><select class="form-select mh-120" id="${prefix}soft-subs" multiple>${selected(LANG_OPTIONS, values.softSubs)}</select></div>
+                <div class="hint">Empty language lists inherit defaults. Hold Ctrl or Command to select multiple languages.</div>`;
+        }
+
+        function historyQueueOverrides(episodeId, source = historyData) {
+            for (const series of source) for (const season of series.seasons || []) {
+                if (!(season.episodes || []).some(episode => episode.episodeId === episodeId)) continue;
+                const parent = series.settingsOverride || {};
+                const child = season.settingsOverride || {};
+                return {
+                    selectedDubs: child.dubLanguages?.length ? child.dubLanguages : parent.dubLanguages?.length ? parent.dubLanguages : null,
+                    selectedSubs: child.softSubs?.length ? child.softSubs : parent.softSubs?.length ? parent.softSubs : null
+                };
+            }
+            return {};
+        }
+
         function showSeriesSettingsOverride(seriesId) {
             const series = historyData.find(s => s.seriesId === seriesId);
             if (!series) return;
@@ -5198,32 +5289,8 @@
             const modalFooter = document.getElementById('modal-footer');
             const modalEl = document.getElementById('modal');
             if (modalTitle) modalTitle.textContent = 'Series Settings Override';
-            if (modalBody) modalBody.innerHTML = `
-                <div class="form-group">
-                    <label class="form-label">Video Quality</label>
-                    <select class="form-select mw-150" id="override-quality-video">
-                        <option value="best">Best Available</option>
-                        <option value="1080">1080</option>
-                        <option value="720">720</option>
-                        <option value="480">480</option>
-                        <option value="360">360</option>
-                        <option value="240">240</option>
-                        <option value="worst">Worst</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Dub Languages</label>
-                    <select class="form-select mh-120" id="override-dub-langs" multiple>
-                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Softsubs Languages</label>
-                    <select class="form-select mh-120" id="override-soft-subs" multiple>
-                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
-                    </select>
-                </div>
-            `;
+            historyDetailGate.cancel();
+            if (modalBody) modalBody.innerHTML = historyOverrideForm('override-', series.settingsOverride);
             if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Cancel</button>
                 <button class="header-btn primary" onclick="saveSeriesSettingsOverride('${escapeJsString(seriesId)}')">Save</button>
@@ -5247,8 +5314,13 @@
                     })
                 });
                 if (res.ok) {
+                    const item = historyData.find(series => series.seriesId === seriesId);
+                    if (item) item.settingsOverride = {videoQuality, dubLanguages:dubLangs, softSubs};
+                    historyRequestGate.cancel();
+                    historyRequest = null;
                     showToast('Series settings saved', 'success');
                     closeModal();
+                    await fetchHistoryData();
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showToast(err.message || 'Failed to save settings', 'error');
@@ -5259,37 +5331,15 @@
         }
         
         function showSeasonSettingsOverride(seasonId) {
+            const season = historyData.flatMap(series => series.seasons || []).find(item => item.seasonId === seasonId);
+            if (!season) return;
             const modalTitle = document.getElementById('modal-title');
             const modalBody = document.getElementById('modal-body');
             const modalFooter = document.getElementById('modal-footer');
             const modalEl = document.getElementById('modal');
             if (modalTitle) modalTitle.textContent = 'Season Settings Override';
-            if (modalBody) modalBody.innerHTML = `
-                <div class="form-group">
-                    <label class="form-label">Video Quality</label>
-                    <select class="form-select mw-150" id="override-season-quality-video">
-                        <option value="best">Best Available</option>
-                        <option value="1080">1080</option>
-                        <option value="720">720</option>
-                        <option value="480">480</option>
-                        <option value="360">360</option>
-                        <option value="240">240</option>
-                        <option value="worst">Worst</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Dub Languages</label>
-                    <select class="form-select mh-120" id="override-season-dub-langs" multiple>
-                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Softsubs Languages</label>
-                    <select class="form-select mh-120" id="override-season-soft-subs" multiple>
-                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
-                    </select>
-                </div>
-            `;
+            historyDetailGate.cancel();
+            if (modalBody) modalBody.innerHTML = historyOverrideForm('override-season-', season.settingsOverride);
             if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Cancel</button>
                 <button class="header-btn primary" onclick="saveSeasonSettingsOverride('${escapeJsString(seasonId)}')">Save</button>
@@ -5313,8 +5363,13 @@
                     })
                 });
                 if (res.ok) {
+                    const item = historyData.flatMap(series => series.seasons || []).find(season => season.seasonId === seasonId);
+                    if (item) item.settingsOverride = {videoQuality, dubLanguages:dubLangs, softSubs};
+                    historyRequestGate.cancel();
+                    historyRequest = null;
                     showToast('Season settings saved', 'success');
                     closeModal();
+                    await fetchHistoryData();
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showToast(err.message || 'Failed to save settings', 'error');
@@ -5340,6 +5395,7 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 episodeId: ep.id,
+                                ...historyQueueOverrides(ep.id),
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,

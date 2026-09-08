@@ -582,6 +582,28 @@ public class SonarrServiceTests
     }
 
     [Fact]
+    public async Task CurrentLibrary_CoalescesReadsAndIncludesFileStatistics()
+    {
+        var handler = new StubHttpMessageHandler(async (_, _, token) =>
+        {
+            await Task.Delay(25, token);
+            return JsonResponse("[{\"id\":10,\"title\":\"Series\",\"statistics\":{\"episodeFileCount\":12,\"episodeCount\":24}}]");
+        });
+        var service = new SonarrService(new TestHttpClientFactory(new HttpClient(handler)));
+        var results = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => service.GetCurrentSeriesAsync(CreateTestConfig(), TestContext.Current.CancellationToken)));
+        Assert.Equal(1, handler.CallCount);
+        Assert.All(results, result => Assert.Equal(12, Assert.Single(result).Statistics!.EpisodeFileCount));
+    }
+
+    [Fact]
+    public async Task CurrentLibrary_RejectsFailedReadInsteadOfReturningEmptySuccess()
+    {
+        var handler = new StubHttpMessageHandler((_, _, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
+        var service = new SonarrService(new TestHttpClientFactory(new HttpClient(handler)));
+        await Assert.ThrowsAsync<HttpRequestException>(() => service.GetCurrentSeriesAsync(CreateTestConfig(), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task GetNamingConfigAsync_MapsExistingSonarrContract()
     {
         var handler = new StubHttpMessageHandler((request, _, _) =>

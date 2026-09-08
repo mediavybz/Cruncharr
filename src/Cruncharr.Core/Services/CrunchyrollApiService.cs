@@ -1582,6 +1582,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         }
 
         var complete = new List<SeriesInfo>();
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
         var total = 0;
         var i = 0;
 
@@ -1616,12 +1617,15 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             try
             {
                 var result = JsonConvert.DeserializeObject<CrBrowseSeriesBase>(content);
-                if (result?.Data == null || (result.Data.Count == 0 && complete.Count < result.Total))
+                if (result?.Data == null || (result.Data.Count == 0 && i < result.Total))
                     throw new JsonException("Incomplete Crunchyroll catalog response.");
 
                 total = result.Total;
+                var added = 0;
                 foreach (var item in result.Data)
                 {
+                    if (string.IsNullOrWhiteSpace(item.Id) || !seenIds.Add(item.Id)) continue;
+                    added++;
                     complete.Add(new SeriesInfo
                     {
                         Id = item.Id,
@@ -1635,6 +1639,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                         MaturityRatings = item.SeriesMetadata?.MaturityRatings ?? new List<string>()
                     });
                 }
+                if (result.Data.Count > 0 && added == 0)
+                    throw new JsonException("Crunchyroll catalog pagination did not advance.");
+                i += result.Data.Count;
             }
             catch (Exception ex)
             {
@@ -1642,7 +1649,6 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 throw;
             }
 
-            i += 100;
         } while (i < total);
 
         return complete;

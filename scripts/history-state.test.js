@@ -11,6 +11,7 @@ function app() {
     }]));
     const context = vm.createContext({
         URL, Headers, AbortController, console,
+        CruncharrLibrary: require('../src/Cruncharr.API/wwwroot/js/library-state.js'),
         CruncharrCalendarRequests: require('../src/Cruncharr.API/wwwroot/js/calendar-request-state.js'),
         document: {
             addEventListener() {}, getElementById: id => elements.get(id),
@@ -89,4 +90,23 @@ test('Sonarr counts remain visible when excluded from progress and outages are n
     ui.run('series.sonarrStatusUnavailable = true');
     assert.equal(ui.run('historySonarrSummary(series)'), 'Sonarr status unavailable');
     assert.match(ui.run('getEpisodeStatusTooltip(episode, series)'), /temporarily unavailable/);
+});
+
+test('override dialogs restore saved selections and expose default inheritance', () => {
+    const ui = app();
+    const html = ui.run('historyOverrideForm("override-",{videoQuality:"720",dubLanguages:["en-US"],softSubs:["fr-FR","all"]})');
+    assert.match(html, /value="720" selected/);
+    assert.match(html, /value="en-US" selected/);
+    assert.match(html, /value="fr-FR" selected/);
+    assert.match(html, /value="all" selected/);
+    assert.match(ui.run('historyOverrideForm("override-season-",{})'), /value="" selected/);
+});
+
+test('History queue defaults use season overrides before series overrides', () => {
+    const ui = app();
+    ui.run('historyData=[{settingsOverride:{dubLanguages:["en-US"],softSubs:["fr-FR"]},seasons:[{settingsOverride:{dubLanguages:["de-DE"]},episodes:[{episodeId:"EP"}]}]}]');
+    assert.equal(ui.run('historyQueueOverrides("EP").selectedDubs[0]'), 'de-DE');
+    assert.equal(ui.run('historyQueueOverrides("EP").selectedSubs[0]'), 'fr-FR');
+    ui.run('historyData[0].seasons[0].settingsOverride.dubLanguages=[]');
+    assert.equal(ui.run('historyQueueOverrides("EP").selectedDubs[0]'), 'en-US');
 });

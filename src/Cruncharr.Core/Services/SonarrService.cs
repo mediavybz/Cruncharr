@@ -13,6 +13,7 @@ public interface ISonarrService
     Task<bool> TestConnectionAsync(SonarrConfig config);
     Task<SonarrTestResult> TestConnectionDetailedAsync(SonarrConfig config);
     Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config);
+    Task<List<SonarrSeries>> GetCurrentSeriesAsync(SonarrConfig config, CancellationToken cancellationToken = default);
     Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh);
@@ -191,33 +192,44 @@ public class SonarrService : ISonarrService
         return null;
     }
 
-    public virtual async Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config)
+    public virtual Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config) => GetSeriesCoreAsync(config, false, CancellationToken.None);
+
+    public virtual Task<List<SonarrSeries>> GetCurrentSeriesAsync(SonarrConfig config, CancellationToken cancellationToken = default) =>
+        GetSeriesCoreAsync(config, true, cancellationToken);
+
+    private async Task<List<SonarrSeries>> GetSeriesCoreAsync(SonarrConfig config, bool currentLibrary, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var cacheKey = BuildCacheKey(config);
+        bool CanReuse(DateTime fetchedUtc) => DateTime.UtcNow - fetchedUtc < (currentLibrary ? TimeSpan.FromSeconds(60) : MetadataCacheTtl);
         lock (_metadataCacheLock)
         {
-            if (_seriesCache is { } cached && cached.Key == cacheKey && IsFresh(cached.FetchedUtc))
+            if (_seriesCache is { } cached && cached.Key == cacheKey && CanReuse(cached.FetchedUtc))
             {
                 return cached.Data;
             }
         }
 
-        await _metadataRequestGate.WaitAsync();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (currentLibrary) timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        var acquired = false;
         try
         {
+            await _metadataRequestGate.WaitAsync(timeout.Token);
+            acquired = true;
             lock (_metadataCacheLock)
             {
-                if (_seriesCache is { } cached && cached.Key == cacheKey && IsFresh(cached.FetchedUtc))
+                if (_seriesCache is { } cached && cached.Key == cacheKey && CanReuse(cached.FetchedUtc))
                 {
                     return cached.Data;
                 }
             }
 
             var url = $"{BuildBaseUrl(config)}/series";
-            using var response = await SendGetWithRetryAsync(url, config, "series read");
+            using var response = await SendGetWithRetryAsync(url, config, "series read", timeout.Token);
             if (response?.IsSuccessStatusCode == true)
             {
-                var content = await response.Content.ReadAsStringAsync();
+                var content = await response.Content.ReadAsStringAsync(timeout.Token);
                 // Newtonsoft (not reflection-based System.Text.Json) so deserialization works
                 // in the trimmed published build, which disables STJ reflection.
                 var series = Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrSeries>>(content) ?? new List<SonarrSeries>();
@@ -229,14 +241,20 @@ public class SonarrService : ISonarrService
             {
                 _logger?.LogWarning("Sonarr GetSeries returned HTTP {Status} {Reason}", (int)response.StatusCode, response.ReasonPhrase);
             }
+            if (currentLibrary) throw new HttpRequestException("Sonarr library is temporarily unavailable.");
         }
+        catch (OperationCanceledException) when (currentLibrary && !cancellationToken.IsCancellationRequested)
+        {
+            throw new HttpRequestException("Sonarr library request timed out.");
+        }
+        catch (Exception) when (currentLibrary || cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to get Sonarr series");
         }
         finally
         {
-            _metadataRequestGate.Release();
+            if (acquired) _metadataRequestGate.Release();
         }
 
         lock (_metadataCacheLock)
@@ -569,6 +587,7 @@ public class SonarrNamingConfig
 
 public class SonarrSeries
 {
+    public SonarrSeriesStatistics? Statistics { get; set; }
     public int Id { get; set; }
     public string? Title { get; set; }
     public string? CleanTitle { get; set; }
@@ -582,6 +601,13 @@ public class SonarrSeries
     public string? TitleSlug { get; set; }
     [Newtonsoft.Json.JsonProperty("alternateTitles")]
     public List<SonarrAlternateTitle>? AlternateTitles { get; set; }
+}
+
+public class SonarrSeriesStatistics
+{
+    public int EpisodeFileCount { get; set; }
+    public int EpisodeCount { get; set; }
+    public int TotalEpisodeCount { get; set; }
 }
 
 public class SonarrAlternateTitle

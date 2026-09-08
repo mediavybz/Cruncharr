@@ -579,7 +579,7 @@ public class QueuePumpEligibilityTests
         history.Setup(service => service.CrUpdateSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>())).ReturnsAsync(true);
 
         var sonarr = new Mock<ISonarrService>();
-        sonarr.Setup(service => service.GetEpisodesAsync(10, It.IsAny<SonarrConfig>(), true))
+        sonarr.Setup(service => service.GetCurrentEpisodesAsync(10, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode

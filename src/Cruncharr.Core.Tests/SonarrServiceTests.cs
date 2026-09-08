@@ -531,6 +531,57 @@ public class SonarrServiceTests
     }
 
     [Fact]
+    public async Task CurrentEpisodes_CoalescesPollingAndExplicitRefreshReadsDeletedFileState()
+    {
+        var handler = new StubHttpMessageHandler(async (_, call, token) =>
+        {
+            await Task.Delay(25, token);
+            return JsonResponse($"[{{\"id\":1,\"seriesId\":10,\"hasFile\":{(call == 1 ? "true" : "false")}}}]");
+        });
+        var service = new SonarrService(new TestHttpClientFactory(new HttpClient(handler)));
+        var config = CreateTestConfig();
+        var results = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => service.GetCurrentEpisodesAsync(10, config, cancellationToken: TestContext.Current.CancellationToken)));
+        Assert.All(results, result => Assert.True(Assert.Single(result).HasFile));
+        Assert.Equal(1, handler.CallCount);
+
+        var refreshed = await service.GetCurrentEpisodesAsync(10, config, forceRefresh: true, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.False(Assert.Single(refreshed).HasFile);
+        Assert.Equal(2, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task CurrentEpisodes_FailedRefreshDoesNotClaimStaleFilesOrRetryForEverySeries()
+    {
+        var handler = new StubHttpMessageHandler((_, call, _) => Task.FromResult(call == 1
+            ? JsonResponse("[{\"id\":1,\"seriesId\":10,\"hasFile\":true}]")
+            : new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        var service = new SonarrService(new TestHttpClientFactory(new HttpClient(handler)));
+        var config = CreateTestConfig();
+        await service.GetCurrentEpisodesAsync(10, config, cancellationToken: TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<HttpRequestException>(() => service.GetCurrentEpisodesAsync(10, config, forceRefresh: true, cancellationToken: TestContext.Current.CancellationToken));
+        var callsAfterFailure = handler.CallCount;
+        await Assert.ThrowsAsync<HttpRequestException>(() => service.GetCurrentEpisodesAsync(11, config, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(callsAfterFailure, handler.CallCount);
+        // Naming still retains its last successful metadata during an outage.
+        Assert.True(Assert.Single(await service.GetEpisodesAsync(10, config)).HasFile);
+    }
+
+    [Fact]
+    public async Task CurrentEpisodes_CancellationStopsTransportAndReleasesRequestGate()
+    {
+        var handler = new StubHttpMessageHandler(async (_, call, token) =>
+        {
+            if (call == 1) await Task.Delay(Timeout.Infinite, token);
+            return JsonResponse("[]");
+        });
+        var service = new SonarrService(new TestHttpClientFactory(new HttpClient(handler)));
+        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.GetCurrentEpisodesAsync(10, CreateTestConfig(), cancellationToken: cancel.Token));
+        Assert.Empty(await service.GetCurrentEpisodesAsync(10, CreateTestConfig(), cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(2, handler.CallCount);
+    }
+
+    [Fact]
     public async Task GetNamingConfigAsync_MapsExistingSonarrContract()
     {
         var handler = new StubHttpMessageHandler((request, _, _) =>

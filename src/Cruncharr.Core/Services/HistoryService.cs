@@ -178,31 +178,38 @@ public class HistoryService : IHistoryService, IDisposable
         ISonarrService? sonarrService,
         SonarrConfig sonarrConfig,
         CancellationToken cancellationToken = default,
-        Action<string, Exception>? onError = null)
+        Action<string, Exception>? onError = null,
+        bool forceRefresh = true)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (sonarrService == null || !sonarrConfig.Enabled) return result;
 
-        foreach (var series in history)
+        foreach (var group in history.Where(series => int.TryParse(series.SonarrSeriesId, out _))
+                     .GroupBy(series => int.Parse(series.SonarrSeriesId!)))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!int.TryParse(series.SonarrSeriesId, out var sonarrSeriesId)) continue;
+            var sonarrSeriesId = group.Key;
 
             try
             {
                 // One bulk Sonarr request per matched series. Persisted SonarrHasFile is only a
                 // cache and may be stale after a user deletes a file directly in Sonarr.
-                var currentEpisodes = await sonarrService.GetEpisodesAsync(
+                var currentEpisodes = await sonarrService.GetCurrentEpisodesAsync(
                     sonarrSeriesId,
                     sonarrConfig,
-                    forceRefresh: true);
+                    forceRefresh,
+                    cancellationToken);
                 var currentFileEpisodeIds = currentEpisodes
                     .Where(episode => episode.HasFile)
                     .Select(episode => episode.Id)
                     .ToHashSet();
+                var currentById = currentEpisodes.ToDictionary(episode => episode.Id);
+                foreach (var series in group) series.SonarrNextAirDate = GetNextAirDate(currentEpisodes);
 
-                foreach (var historyEpisode in series.Seasons.SelectMany(season => season.EpisodesList))
+                foreach (var historyEpisode in group.SelectMany(series => series.Seasons).SelectMany(season => season.EpisodesList))
                 {
+                    if (int.TryParse(historyEpisode.SonarrEpisodeId, out var matchedId) && currentById.TryGetValue(matchedId, out var current))
+                        historyEpisode.SonarrIsMonitored = current.Monitored;
                     if (!string.IsNullOrWhiteSpace(historyEpisode.EpisodeId) &&
                         int.TryParse(historyEpisode.SonarrEpisodeId, out var sonarrEpisodeId) &&
                         currentFileEpisodeIds.Contains(sonarrEpisodeId))
@@ -213,7 +220,9 @@ public class HistoryService : IHistoryService, IDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                onError?.Invoke(series.SonarrSeriesId!, ex);
+                if (onError == null) throw;
+                foreach (var series in group) series.SonarrNextAirDate = string.Empty;
+                onError?.Invoke(sonarrSeriesId.ToString(), ex);
             }
         }
 
@@ -959,13 +968,16 @@ public class HistoryService : IHistoryService, IDisposable
         List<SonarrEpisode> episodes;
         try
         {
-            episodes = await _sonarrService.GetEpisodesAsync(sonarrSeriesId, _config.Sonarr);
+            episodes = await _sonarrService.GetCurrentEpisodesAsync(sonarrSeriesId, _config.Sonarr, forceRefresh: rematchAll);
         }
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to fetch Sonarr episodes for series {SeriesId}", seriesId);
-            return;
+            throw new InvalidOperationException("Could not load Sonarr episodes. Existing matches were preserved.", ex);
         }
+
+        if (episodes.Count == 0)
+            throw new InvalidOperationException("Sonarr returned no episodes. Existing matches were preserved.");
 
         var nextAirDate = GetNextAirDate(episodes);
         var episodesById = episodes.ToDictionary(episode => episode.Id);
@@ -975,6 +987,8 @@ public class HistoryService : IHistoryService, IDisposable
         {
             var historySeries = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
             if (historySeries == null) return;
+            if (historySeries.SonarrSeriesId != sonarrSeriesId.ToString())
+                throw new InvalidOperationException("The Sonarr series match changed. Please retry episode matching.");
 
             historySeries.SonarrNextAirDate = nextAirDate;
 

@@ -116,6 +116,10 @@
         let languagePrefsEnabled = false; // adaptive default language feature (loaded from /language-prefs)
         let _langSuggestShownFor = ''; // de-dupe the suggestion prompt within a session
         let historyRichData = []; // Cache for rich history data with episodes
+        let historyRequest = null;
+        let historyLoaded = false;
+        const historyRequestGate = CruncharrCalendarRequests.createLatestRequestGate();
+        const historyDetailGate = CruncharrCalendarRequests.createLatestRequestGate();
         let historySearchQuery = '';
         let historySearchPopupOpen = false;
         let isQueueGloballyPaused = false;
@@ -284,6 +288,9 @@
             if (currentPage === 'history' && page !== 'history' && historyIntervalId) {
                 clearInterval(historyIntervalId);
                 historyIntervalId = null;
+                historyRequestGate.cancel();
+                historyRequest = null;
+                historyDetailGate.cancel();
             }
             if (currentPage === 'browse' && page !== 'browse') {
                 disconnectBrowseLoadMoreObserver();
@@ -2440,10 +2447,12 @@
                         <span>Maintain</span>
                     </button>
                 </div>
+                <div id="history-status" class="history-status" role="status"></div>
                 <div id="history-content">
                     <div class="loading"><div class="spinner"></div>Loading history...</div>
                 </div>
             `;
+            if (historyLoaded) renderHistoryContent();
             fetchHistoryData();
             // Restart history auto-refresh interval if it was cleared
             if (!historyIntervalId) {
@@ -2453,31 +2462,66 @@
             }
         }
 
-        async function fetchHistoryData() {
-            try {
-                const res = await fetch('/api/v1/history/rich');
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                historyData = data || [];
-                // Same endpoint feeds the series-detail modal - keep its cache fresh
-                historyRichData = historyData;
-                renderHistoryContent();
-                // Existing history files may contain the first episode screenshot in the series
-                // image slot. Desktop refreshes series metadata and loads poster_tall; detect that
-                // persisted shape once per session and ask the existing refresh endpoint to repair it.
-                maybeRefreshHistoryCoverArt();
-                // Auto-match against Sonarr once per session so matches "rope in" without the
-                // user manually opening the Sonarr menu (no-op if Sonarr disabled or all matched).
-                // Fire-and-forget so history paints immediately.
-                maybeAutoMatchSonarr();
-            } catch (e) {
-                const el = document.getElementById('history-content');
-                if (el) el.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">&#10060;</div>
-                        <div class="empty-state-title">Failed to load history</div>
-                    </div>`;
-            }
+        function fetchHistoryData(forceRefresh = false) {
+            if (historyRequest && !forceRefresh) return historyRequest;
+            const request = historyRequestGate.begin();
+            historyRequest = (async () => {
+                try {
+                    const res = await fetch('/api/v1/history/rich' + (forceRefresh ? '?forceRefresh=true' : ''), { signal: request.signal });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    if (!historyRequestGate.isCurrent(request)) return;
+                    const changed = !historyLoaded || JSON.stringify(historyData) !== JSON.stringify(data || []);
+                    historyData = data || [];
+                    historyLoaded = true;
+                    // Same endpoint feeds the series-detail modal - keep its cache fresh
+                    historyRichData = historyData;
+                    if (changed) renderHistoryContent();
+                    updateHistoryStatus();
+                    // Existing history files may contain the first episode screenshot in the series
+                    // image slot. Desktop refreshes series metadata and loads poster_tall; detect that
+                    // persisted shape once per session and ask the existing refresh endpoint to repair it.
+                    maybeRefreshHistoryCoverArt();
+                    // Auto-match against Sonarr once per session so matches "rope in" without the
+                    // user manually opening the Sonarr menu (no-op if Sonarr disabled or all matched).
+                    // Fire-and-forget so history paints immediately.
+                    maybeAutoMatchSonarr();
+                } catch (e) {
+                    if (!historyRequestGate.isCurrent(request) || e.name === 'AbortError') return;
+                    if (historyLoaded) {
+                        const status = document.getElementById('history-status');
+                        if (status) status.textContent = 'History refresh failed. Showing the last loaded history; retrying automatically.';
+                        return;
+                    }
+                    const el = document.getElementById('history-content');
+                    if (el) el.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">&#10060;</div>
+                            <div class="empty-state-title">Failed to load history</div>
+                        </div>`;
+                } finally {
+                    if (historyRequestGate.isCurrent(request)) historyRequest = null;
+                }
+            })();
+            return historyRequest;
+        }
+
+        function updateHistoryStatus() {
+            const status = document.getElementById('history-status');
+            if (!status) return;
+            const unavailable = historyData.some(series => series.sonarrStatusUnavailable);
+            status.textContent = unavailable
+                ? 'Sonarr file status is temporarily unavailable. Its files cannot be counted until the connection recovers.'
+                : config?.sonarr?.enabled && config?.history?.countSonarr === false
+                    ? 'Progress counts Cruncharr files. Sonarr files are shown separately; enable Count Sonarr in Settings to include them.'
+                    : '';
+        }
+
+        function historySonarrSummary(series) {
+            if (!series.sonarrSeriesId) return '';
+            if (series.sonarrStatusUnavailable) return 'Sonarr status unavailable';
+            const count = (series.seasons || []).reduce((total, season) => total + (season.episodes || []).filter(episode => episode.sonarrHasFile).length, 0);
+            return `${count} in Sonarr`;
         }
 
         function renderHistoryContent() {
@@ -2509,6 +2553,7 @@
                             <div class="history-poster-meta">${escapeHtml(item.sonarrNextAirDate || '')}</div>
                             <div class="history-poster-meta" style="font-size:0.7em; margin-top:4px;">
                                 ${seriesHaveCount(item)} / ${seriesTotalCount(item)} available
+                                <div>${historySonarrSummary(item)}</div>
                             </div>
                         </div>
                     </div>
@@ -2536,7 +2581,7 @@
                                             <br><small style="color:var(--text-secondary);">${item.seriesDescription ? escapeHtml(item.seriesDescription.substring(0, 80)) + '...' : ''}</small>
                                         </td>
                                         <td>${getHistoryStatusBadge(item)}</td>
-                                        <td>${item.sonarrSeriesId ? `✓ ${escapeHtml(item.sonarrSlugTitle) || 'Matched'}` : '—'}</td>
+                                        <td>${item.sonarrSeriesId ? `${historySonarrSummary(item)}<br><small>${escapeHtml(item.sonarrSlugTitle) || 'Matched'}</small>` : '—'}</td>
                                         <td>${seriesHaveCount(item)} / ${seriesTotalCount(item)}</td>
                                         <td>${item.hasNewEpisodes ? '✓' : '—'}</td>
                                         <td>
@@ -4284,9 +4329,13 @@
             if (!confirm('This will add all missing episodes across all series to the queue. Continue?')) return;
             try {
                 // Fetch rich history to find series with missing episodes
-                const res = await fetch('/api/v1/history/rich');
+                const res = await fetch('/api/v1/history/rich?forceRefresh=true');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                if ((data || []).some(series => series.sonarrStatusUnavailable)) {
+                    showToast('Sonarr status is unavailable. Retry after the connection recovers.', 'error');
+                    return;
+                }
                 let added = 0;
                 
                 // Iterate through history and add missing episodes
@@ -4333,7 +4382,10 @@
                 const res = await fetch(`/api/v1/history/update-series/${encodeURIComponent(id)}`, { method: 'POST' });
                 if (res.ok) {
                     showToast('Series refreshed', 'success');
-                    if (currentPage === 'history') fetchHistoryData();
+                    await fetchHistoryData(true);
+                    if (document.getElementById('modal')?.classList.contains('active') && document.getElementById('modal-title')?.textContent === historyData.find(series => series.seriesId === id)?.seriesTitle) {
+                        await showHistorySeriesDetail(id);
+                    }
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showToast(err.message || 'Failed to refresh series', 'error');
@@ -4557,6 +4609,7 @@
         }
         
         function getEpisodeStatusTooltip(episode, series) {
+            if (series?.sonarrStatusUnavailable && !episode.hasLocalArtifact) return 'Sonarr file status is temporarily unavailable';
             if (!episodeHasCompletedArtifact(episode)) {
                 return episode.wasDownloaded
                     ? 'Previously downloaded, but the completed file is missing — available to re-download'
@@ -4609,52 +4662,31 @@
             if (modalBody) modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
             if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Close</button>
+                <button class="header-btn" onclick="refreshSeries('${escapeJsString(seriesId)}')">Refresh Series</button>
                 <button class="header-btn" onclick="showSeriesSettingsOverride('${escapeJsString(seriesId)}')">Settings</button>
                 ${series.sonarrSeriesId ? `<button class="header-btn" onclick="matchEpisodesForSeries('${escapeJsString(seriesId)}'); closeModal();">Match Episodes</button>` : ''}
                 <button class="header-btn danger" onclick="removeSeriesFromHistory('${escapeJsString(seriesId)}', '${escapeJsString(series.seriesTitle || '')}')">Remove from History</button>
             `;
             if (modalEl) modalEl.classList.add('active');
 
-            // Populate the full season (downloaded + missing) from Crunchyroll the first time this
-            // series is opened, so History shows everything for it - not only what was downloaded.
-            // Once per series per session. The backend may re-key the series to its real CR id, so
-            // afterwards we also match by title.
-            const seriesTitle = series.seriesTitle;
-            window._seriesPopulated = window._seriesPopulated || {};
-            if (!window._seriesPopulated[seriesId]) {
-                window._seriesPopulated[seriesId] = true;
-                try { await fetch(`/api/v1/history/update-series/${encodeURIComponent(seriesId)}`, { method: 'POST' }); }
-                catch (e) { /* keep whatever is already in history */ }
-                historyRichData = null;
-            }
-
-            // Fetch rich data if needed
-            let richSeries = null;
-            if (historyRichData && historyRichData.length > 0) {
-                richSeries = historyRichData.find(s => s.seriesId === seriesId) || historyRichData.find(s => s.seriesTitle === seriesTitle);
-            }
-
-            if (!richSeries) {
-                try {
-                    const res = await fetch('/api/v1/history/rich');
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    historyRichData = data || [];
-                    richSeries = historyRichData.find(s => s.seriesId === seriesId) || historyRichData.find(s => s.seriesTitle === seriesTitle);
-                } catch (e) {
-                    const modalBody = document.getElementById('modal-body');
-                    if (modalBody) modalBody.innerHTML = '<div class="empty-state"><div class="empty-state-title">Failed to load episodes</div></div>';
-                    return;
+            const request = historyDetailGate.begin();
+            renderHistorySeriesDetailContent(series);
+            try {
+                const res = await fetch(`/api/v1/history/series/${encodeURIComponent(seriesId)}`, { signal: request.signal });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const fresh = await res.json();
+                if (!historyDetailGate.isCurrent(request) || !modalEl?.classList.contains('active') || modalTitle?.textContent !== series.seriesTitle) return;
+                historyData = historyData.map(item => item.seriesId === seriesId ? fresh : item);
+                historyRichData = historyData;
+                if (JSON.stringify(series) !== JSON.stringify(fresh)) {
+                    renderHistorySeriesDetailContent(fresh);
+                    renderHistoryContent();
+                    updateHistoryStatus();
                 }
+            } catch (e) {
+                if (!historyDetailGate.isCurrent(request) || e.name === 'AbortError') return;
+                showToast('Could not refresh episode status. Showing the last loaded history.', 'warning');
             }
-            
-            if (!richSeries) {
-                const modalBody = document.getElementById('modal-body');
-                if (modalBody) modalBody.innerHTML = '<div class="empty-state"><div class="empty-state-title">No episode data found</div></div>';
-                return;
-            }
-            
-            renderHistorySeriesDetailContent(richSeries);
         }
 
         async function removeSeriesFromHistory(seriesId, seriesTitle) {
@@ -4684,6 +4716,7 @@
                     </div>
                     <div class="history-detail-info">
                         <div class="history-detail-title">${escapeHtml(series.seriesTitle || 'Unknown')}</div>
+                        <div class="history-poster-meta" role="status">${historySonarrSummary(series)}</div>
                         <div class="history-detail-meta">${escapeHtml(series.seriesDescription || '')}</div>
                         <div class="mt-10">
                             <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Episodes:</div>
@@ -4722,11 +4755,11 @@
                     // Sonarr per-episode indicator (mirrors the desktop app): green check when Sonarr
                     // already has the file, otherwise a neutral Sonarr mark when it's tracked there.
                     const sonarrTip = ep.sonarrEpisodeId
-                        ? (ep.sonarrHasFile ? 'In Sonarr — file present' : (ep.sonarrIsMonitored ? 'In Sonarr — monitored, missing' : 'In Sonarr'))
+                        ? (series.sonarrStatusUnavailable ? 'Sonarr status unavailable' : ep.sonarrHasFile ? 'In Sonarr — file present' : (ep.sonarrIsMonitored ? 'In Sonarr — monitored, missing' : 'In Sonarr'))
                           + (ep.sonarrSeasonEpisodeText ? ` (${ep.sonarrSeasonEpisodeText})` : '')
                         : '';
                     const sonarrBadge = ep.sonarrEpisodeId
-                        ? `<span class="sonarr-ep-badge ${ep.sonarrHasFile ? 'has-file' : 'missing'}" title="${escapeHtmlAttribute(sonarrTip)}">${ep.sonarrHasFile ? '&#10004; Sonarr' : '&#9679; Sonarr'}</span>`
+                        ? `<span class="sonarr-ep-badge ${ep.sonarrHasFile ? 'has-file' : 'missing'}" title="${escapeHtmlAttribute(sonarrTip)}">${series.sonarrStatusUnavailable ? '? Sonarr' : ep.sonarrHasFile ? '&#10004; Sonarr' : '&#9679; Sonarr'}</span>`
                         : '';
 
                     return `
@@ -4743,7 +4776,7 @@
                                     <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
                                 </div>
                             </div>
-                            ${!episodeHasCompletedArtifact(ep) ? `<button class="btn-icon" onclick="event.stopPropagation(); toggleEpisodeOptions(event, '${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}', '${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Pick dubs/subs">&#9881;</button><button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Add to queue (default dubs/subs)">&#128229;</button>` : ''}
+                            ${!episodeHasCompletedArtifact(ep) && !series.sonarrStatusUnavailable ? `<button class="btn-icon" onclick="event.stopPropagation(); toggleEpisodeOptions(event, '${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}', '${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Pick dubs/subs">&#9881;</button><button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Add to queue (default dubs/subs)">&#128229;</button>` : ''}
                         </div>
                     `;
                 }).join('');
@@ -5042,7 +5075,7 @@
                     <span>&#127758;</span> Match All Series
                 </div>
                 <div class="dropdown-divider"></div>
-                <div class="dropdown-item" onclick="fetchHistoryData(); removeDropdown('sonarr-dropdown');">
+                <div class="dropdown-item" onclick="fetchHistoryData(true); removeDropdown('sonarr-dropdown');">
                     <span>&#128260;</span> Refresh History
                 </div>
             `;
@@ -5087,10 +5120,10 @@
         async function matchEpisodesForSeries(seriesId) {
             try {
                 showToast('Matching episodes with Sonarr...', 'info');
-                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${encodeURIComponent(seriesId)}`, { method: 'POST' });
+                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${encodeURIComponent(seriesId)}?rematchAll=true`, { method: 'POST' });
                 if (res.ok) {
                     showToast('Episodes matched successfully', 'success');
-                    fetchHistoryData();
+                    fetchHistoryData(true);
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showToast(err.message || 'Episode match failed', 'error');
@@ -5327,6 +5360,7 @@
         }
 
         function closeModal() {
+            historyDetailGate.cancel();
             const modal = document.getElementById('modal');
             if (modal) modal.classList.remove('active');
         }

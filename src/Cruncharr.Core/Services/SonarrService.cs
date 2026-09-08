@@ -16,6 +16,7 @@ public interface ISonarrService
     Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh);
+    Task<List<SonarrEpisode>> GetCurrentEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh = false, CancellationToken cancellationToken = default);
     Task<SonarrEpisode?> GetEpisodeAsync(int episodeId, SonarrConfig config);
     Task<SonarrNamingConfig?> GetNamingConfigAsync(SonarrConfig config);
 }
@@ -123,6 +124,8 @@ public class SonarrService : ISonarrService
     // The request gate also coalesces concurrent batch-download cache misses instead of bursting
     // identical reads at Sonarr (the live failure was simultaneous connections reset by peer).
     private static readonly TimeSpan MetadataCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan FileStatusCacheTtl = TimeSpan.FromSeconds(15);
+    private (string Key, DateTime RetryAfterUtc)? _fileStatusFailure;
     private const int MaxTransientAttempts = 3;
     private (string Key, DateTime FetchedUtc, List<SonarrSeries> Data)? _seriesCache;
     private (string Key, DateTime FetchedUtc, SonarrNamingConfig Data)? _namingCache;
@@ -145,7 +148,8 @@ public class SonarrService : ISonarrService
     private async Task<HttpResponseMessage?> SendGetWithRetryAsync(
         string url,
         SonarrConfig config,
-        string operation)
+        string operation,
+        CancellationToken cancellationToken = default)
     {
         Exception? lastException = null;
         for (var attempt = 1; attempt <= MaxTransientAttempts; attempt++)
@@ -155,7 +159,7 @@ public class SonarrService : ISonarrService
 
             try
             {
-                var response = await _httpClient.SendAsync(request);
+                var response = await _httpClient.SendAsync(request, cancellationToken);
                 if (response.IsSuccessStatusCode ||
                     !IsTransient(response.StatusCode) ||
                     attempt == MaxTransientAttempts)
@@ -168,9 +172,9 @@ public class SonarrService : ISonarrService
                     "Sonarr {Operation} returned transient HTTP {Status}; retrying attempt {NextAttempt}/{MaxAttempts}",
                     operation, (int)response.StatusCode, attempt + 1, MaxTransientAttempts);
                 response.Dispose();
-                await Task.Delay(delay);
+                await Task.Delay(delay, cancellationToken);
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException) && !cancellationToken.IsCancellationRequested)
             {
                 lastException = ex;
                 if (attempt == MaxTransientAttempts) break;
@@ -179,7 +183,7 @@ public class SonarrService : ISonarrService
                     ex,
                     "Sonarr {Operation} transport failure; retrying attempt {NextAttempt}/{MaxAttempts}",
                     operation, attempt + 1, MaxTransientAttempts);
-                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt));
+                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), cancellationToken);
             }
         }
 
@@ -298,39 +302,65 @@ public class SonarrService : ISonarrService
     public virtual Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config) =>
         GetEpisodesAsync(seriesId, config, forceRefresh: false);
 
-    public virtual async Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh)
+    public virtual Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh) =>
+        GetEpisodesCoreAsync(seriesId, config, forceRefresh, currentFileStatus: false, CancellationToken.None);
+
+    // Naming can use last-known metadata; file availability must never use an unbounded stale fallback.
+    public virtual Task<List<SonarrEpisode>> GetCurrentEpisodesAsync(
+        int seriesId, SonarrConfig config, bool forceRefresh = false, CancellationToken cancellationToken = default) =>
+        GetEpisodesCoreAsync(seriesId, config, forceRefresh, currentFileStatus: true, cancellationToken);
+
+    private async Task<List<SonarrEpisode>> GetEpisodesCoreAsync(
+        int seriesId, SonarrConfig config, bool forceRefresh, bool currentFileStatus, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var configKey = BuildCacheKey(config);
         var listKey = $"{configKey}|series:{seriesId}";
+        var startedUtc = DateTime.UtcNow;
+        var cacheTtl = currentFileStatus ? FileStatusCacheTtl : MetadataCacheTtl;
+        bool CanReuse(DateTime fetchedUtc) => forceRefresh
+            ? fetchedUtc >= startedUtc
+            : DateTime.UtcNow - fetchedUtc < cacheTtl;
         lock (_metadataCacheLock)
         {
-            if (!forceRefresh && _episodeListCache.TryGetValue(listKey, out var cached) && IsFresh(cached.FetchedUtc))
+            if (_episodeListCache.TryGetValue(listKey, out var cached) && CanReuse(cached.FetchedUtc))
             {
                 return cached.Data;
             }
         }
 
-        await _metadataRequestGate.WaitAsync();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (currentFileStatus) timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        var requestToken = timeout.Token;
+        var gateAcquired = false;
         try
         {
+            await _metadataRequestGate.WaitAsync(requestToken);
+            gateAcquired = true;
             lock (_metadataCacheLock)
             {
-                if (!forceRefresh && _episodeListCache.TryGetValue(listKey, out var cached) && IsFresh(cached.FetchedUtc))
+                if (_episodeListCache.TryGetValue(listKey, out var cached) && CanReuse(cached.FetchedUtc))
                 {
                     return cached.Data;
+                }
+                if (currentFileStatus && _fileStatusFailure is { } failure &&
+                    failure.Key == configKey && failure.RetryAfterUtc > DateTime.UtcNow)
+                {
+                    throw new HttpRequestException("Sonarr file status is temporarily unavailable.");
                 }
             }
 
             var url = $"{BuildBaseUrl(config)}/episode?seriesId={seriesId}";
-            using var response = await SendGetWithRetryAsync(url, config, $"episode-list read for series {seriesId}");
+            using var response = await SendGetWithRetryAsync(url, config, $"episode-list read for series {seriesId}", requestToken);
             if (response?.IsSuccessStatusCode == true)
             {
-                var content = await response.Content.ReadAsStringAsync();
+                var content = await response.Content.ReadAsStringAsync(requestToken);
                 var episodes = Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrEpisode>>(content) ?? new List<SonarrEpisode>();
                 var fetchedUtc = DateTime.UtcNow;
                 lock (_metadataCacheLock)
                 {
                     _episodeListCache[listKey] = (fetchedUtc, episodes);
+                    _fileStatusFailure = null;
                     foreach (var episode in episodes)
                     {
                         _episodeCache[$"{configKey}|episode:{episode.Id}"] = (fetchedUtc, episode);
@@ -343,14 +373,27 @@ public class SonarrService : ISonarrService
             {
                 _logger?.LogWarning("Sonarr GetEpisodes returned HTTP {Status} {Reason}", (int)response.StatusCode, response.ReasonPhrase);
             }
+            if (currentFileStatus)
+            {
+                if (response == null || IsTransient(response.StatusCode) ||
+                    response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                    lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusCacheTtl); }
+                throw new HttpRequestException("Could not read current episode status from Sonarr.", null, response?.StatusCode);
+            }
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && currentFileStatus)
+        {
+            lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusCacheTtl); }
+            throw new HttpRequestException("Sonarr episode status timed out. Please try again shortly.");
+        }
+        catch (Exception) when (currentFileStatus || cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to get Sonarr episodes");
         }
         finally
         {
-            _metadataRequestGate.Release();
+            if (gateAcquired) _metadataRequestGate.Release();
         }
 
         lock (_metadataCacheLock)

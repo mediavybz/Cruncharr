@@ -272,6 +272,13 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             Token = JsonConvert.DeserializeObject<CrToken>(content);
         }
 
+        // Concurrent catalog requests queue behind this gate and must reuse a fresh guest
+        // token. Account login keeps its profile/subscription refresh behavior.
+        if (!IsTokenExpiredOrNearExpiry() && string.IsNullOrEmpty(Token?.account_id))
+        {
+            return false;
+        }
+
         if (Token?.refresh_token != null)
         {
             await LoginWithTokenAsync(useBetaApi, cancellationToken);
@@ -1299,14 +1306,15 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     private async Task<bool> RefreshTokenCoreAsync(bool useBetaApi, CancellationToken cancellationToken, bool force)
     {
-        if (EndpointEnum == CrunchyrollEndpoints.Guest)
+        if (EndpointEnum == CrunchyrollEndpoints.Guest ||
+            (Token?.access_token != null && string.IsNullOrEmpty(Token.account_id)))
         {
             if (!force && !IsTokenExpiredOrNearExpiry())
             {
                 return true;
             }
             await AuthAnonymousAsync(useBetaApi, cancellationToken);
-            return true;
+            return Token?.access_token != null && !IsTokenExpiredOrNearExpiry();
         }
 
         if (Token?.access_token == null && Token?.refresh_token == null ||

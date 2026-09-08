@@ -8,6 +8,23 @@ namespace Cruncharr.Core.Tests;
 public class SearchResultParsingTests
 {
     [Fact]
+    public void MixedMusicAndSeriesImageShapes_DoNotDiscardSearchResults()
+    {
+        var results = CrunchyrollApiService.ParseSearchResults("""
+            {"data":[
+                {"type":"music","count":1,"items":[{"id":"MUSIC1","images":{"thumbnail":[{"width":480,"source":"https://example.test/music.jpg"}]}}]},
+                {"type":"series","count":2,"items":[
+                    {"id":"SERIES1","title":"Naruto","images":{"poster_tall":[[{"width":480,"source":"https://example.test/poster.jpg"}]]}},
+                    {"id":"SERIES2","title":"Naruto Shippuden","images":{"poster_tall":[{"width":480,"source":"https://example.test/flat.jpg"}]}}
+                ]}
+            ]}
+            """, "Naruto");
+        Assert.Equal(2, results.Count);
+        Assert.Equal("https://example.test/poster.jpg", results[0].CoverArtUrl);
+        Assert.Equal("https://example.test/flat.jpg", results[1].CoverArtUrl);
+    }
+
+    [Fact]
     public async Task EnsureAuthenticatedAsync_RefreshesAnExistingSessionBeforeCatalogRequests()
     {
         var auth = new Mock<ICrunchyrollAuthService>();
@@ -44,6 +61,7 @@ public class SearchResultParsingTests
     {
         var auth = new Mock<ICrunchyrollAuthService>();
         auth.SetupGet(service => service.Token).Returns(new CrToken { access_token = "stale" });
+        auth.Setup(service => service.RefreshTokenAsync(true, It.IsAny<CancellationToken>(), false)).ReturnsAsync(true);
         var api = new CrunchyrollApiService(auth.Object);
 
         var authenticated = await api.EnsureTokenAsync(CancellationToken.None);

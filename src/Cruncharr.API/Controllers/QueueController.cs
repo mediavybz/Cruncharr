@@ -16,6 +16,7 @@ public class QueueController : ControllerBase
     private readonly IHistoryService _historyService;
     private readonly ILanguagePrefsService _languagePrefs;
     private readonly CruncharrConfig _config;
+    private readonly ICrunchyrollAuthService _auth;
     private readonly ILogger<QueueController> _logger;
     private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings
     {
@@ -24,13 +25,14 @@ public class QueueController : ControllerBase
         NullValueHandling = NullValueHandling.Ignore
     };
 
-    public QueueController(IQueueService queueService, IHistoryService historyService, ILanguagePrefsService languagePrefs, CruncharrConfig config, ILogger<QueueController> logger)
+    public QueueController(IQueueService queueService, IHistoryService historyService, ILanguagePrefsService languagePrefs, CruncharrConfig config, ILogger<QueueController> logger, ICrunchyrollAuthService auth)
     {
         _queueService = queueService;
         _historyService = historyService;
         _languagePrefs = languagePrefs;
         _config = config;
         _logger = logger;
+        _auth = auth;
     }
 
     /// <summary>
@@ -63,6 +65,10 @@ public class QueueController : ControllerBase
     [HttpPost]
     public IActionResult AddToQueue([FromBody] QueueRequest request)
     {
+        if (!_auth.IsAuthenticated || !_auth.Profile.HasPremium)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = "Log in to a Crunchyroll Premium account to download. Browsing and search are available without an account." });
+        }
         try
         {
             if (string.IsNullOrEmpty(request.EpisodeId))

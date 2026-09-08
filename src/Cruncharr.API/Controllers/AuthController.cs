@@ -33,7 +33,7 @@ public class AuthController : ControllerBase
             // (profile not loaded yet) while the saved access token is usually already
             // expired - skipping the refresh deadlocked the profile fetch on a 401 and made
             // the UI report "logged out" until some other call refreshed the token.
-            if (_auth.Token?.refresh_token != null)
+            if (_auth.Token?.refresh_token != null && !string.IsNullOrEmpty(_auth.Token.account_id))
             {
                 try
                 {
@@ -50,7 +50,8 @@ public class AuthController : ControllerBase
             // language (preferred audio/sub) so a change made on crunchyroll.com shows up without a
             // re-login. It's a lightweight account GET (no playback session), so safe to call on
             // demand (e.g. when opening Add Download).
-            if (_auth.Token?.access_token != null && (refresh || _auth.Profile?.Username == "???"))
+            if (_auth.Token?.access_token != null && !string.IsNullOrEmpty(_auth.Token.account_id) &&
+                (refresh || _auth.Profile?.Username == "???"))
             {
                 try
                 {
@@ -70,8 +71,8 @@ public class AuthController : ControllerBase
                 IsAuthenticated = _auth.IsAuthenticated,
                 Username = profile?.Username ?? "",
                 HasPremium = profile?.HasPremium ?? false,
-                PreferredAudioLanguage = profile?.PreferredContentAudioLanguage ?? "",
-                PreferredSubtitleLanguage = profile?.PreferredContentSubtitleLanguage ?? "",
+                PreferredAudioLanguage = _auth.IsAuthenticated ? profile?.PreferredContentAudioLanguage ?? "" : "",
+                PreferredSubtitleLanguage = _auth.IsAuthenticated ? profile?.PreferredContentSubtitleLanguage ?? "" : "",
                 Avatar = profile?.Avatar,
                 MultiProfile = multiProfile?.Profiles?.Select(p => new ProfileDto
                 {

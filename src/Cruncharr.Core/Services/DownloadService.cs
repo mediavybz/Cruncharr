@@ -641,6 +641,10 @@ public class DownloadService : IDownloadService
             {
                 return new DownloadResult { Success = false, ErrorMessage = "Authentication failed. Please log in to your Crunchyroll account.", ErrorType = DownloadErrorType.NotAuthenticated };
             }
+            if (!_auth.Profile.HasPremium)
+            {
+                return new DownloadResult { Success = false, ErrorMessage = "A Crunchyroll Premium account is required to download.", ErrorType = DownloadErrorType.PremiumContent };
+            }
         }
         catch (Exception ex)
         {

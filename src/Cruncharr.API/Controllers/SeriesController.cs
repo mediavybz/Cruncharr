@@ -10,11 +10,13 @@ public class SeriesController : ControllerBase
 {
     private readonly ICrunchyrollApiService _api;
     private readonly ILogger<SeriesController> _logger;
+    private readonly ICrunchyrollAuthService _auth;
 
-    public SeriesController(ICrunchyrollApiService api, ILogger<SeriesController> logger)
+    public SeriesController(ICrunchyrollApiService api, ILogger<SeriesController> logger, ICrunchyrollAuthService auth)
     {
         _api = api;
         _logger = logger;
+        _auth = auth;
     }
 
     /// <summary>
@@ -89,12 +91,16 @@ public class SeriesController : ControllerBase
     /// Get all browseable series (paginated, alphabetical)
     /// </summary>
     [HttpGet("all")]
-    public async Task<ActionResult> GetAllSeries([FromQuery] string? locale = null)
+    public async Task<ActionResult> GetAllSeries([FromQuery] string? locale = null, CancellationToken cancellationToken = default)
     {
         try
         {
-            var results = await _api.GetAllSeriesAsync(locale);
+            var results = await _api.GetAllSeriesAsync(locale, cancellationToken);
             return Ok(results);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -156,6 +162,10 @@ public class SeriesController : ControllerBase
     [HttpPost("item-select-multi-dub")]
     public ActionResult ItemSelectMultiDub([FromBody] ItemSelectMultiDubRequest request)
     {
+        if (!_auth.IsAuthenticated || !_auth.Profile.HasPremium)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = "Log in to a Crunchyroll Premium account to download. Browsing and search are available without an account." });
+        }
         try
         {
             if (request.Episodes == null || request.Episodes.Count == 0)

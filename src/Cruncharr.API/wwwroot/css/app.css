@@ -2846,3 +2846,6 @@
 @media (hover:none) and (pointer:coarse){
   .history-poster:hover,.series-card:hover,.episode-card:hover,.calendar-episode:hover{transform:none;box-shadow:none}
 }
+
+.history-status{margin-bottom:16px;color:var(--text-secondary);font-size:0.85rem}
+.history-status:empty{display:none}

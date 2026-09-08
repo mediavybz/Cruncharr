@@ -105,6 +105,10 @@ public class CruncharrConfig
         return new CruncharrConfig();
     }
 
+    public CruncharrConfig Clone() => Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(
+        Newtonsoft.Json.JsonConvert.SerializeObject(this),
+        new Newtonsoft.Json.JsonSerializerSettings { ObjectCreationHandling = Newtonsoft.Json.ObjectCreationHandling.Replace })!;
+
     public bool Save(string configPath)
     {
         lock (_saveLock)

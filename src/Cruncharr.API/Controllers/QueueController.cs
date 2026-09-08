@@ -85,6 +85,7 @@ public class QueueController : ControllerBase
             var episode = new EpisodeInfo
             {
                 Id = request.EpisodeId,
+                VideoQuality = request.VideoQuality,
                 Title = request.Title ?? $"Episode {request.EpisodeId}",
                 SeriesTitle = request.SeriesTitle ?? "Unknown",
                 // 0 = "unknown, resolve on the backend". A queue-add (per the add-path contract)
@@ -543,6 +544,7 @@ public class QueueController : ControllerBase
 
 public class QueueRequest
 {
+    public string? VideoQuality { get; set; }
     public string EpisodeId { get; set; } = "";
     public string? Title { get; set; }
     public string? SeriesTitle { get; set; }

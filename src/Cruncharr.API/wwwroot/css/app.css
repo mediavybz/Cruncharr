@@ -2854,3 +2854,8 @@
 .library-indicator:empty{display:none}
 .search-result-type .library-badge{margin-right:5px}
 #browse-library-status{color:var(--text-secondary);font-size:0.8rem}
+
+#custom-background { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: cover; pointer-events: none; z-index: 0; }
+body > .app-container { position: relative; }
+
+.has-custom-background .main-content, .has-custom-background .content { background: transparent; }

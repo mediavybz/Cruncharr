@@ -26,3 +26,6 @@
 - A 64-character value presented beside `ssh-keygen -Y sign` is an SSH-key verification challenge,
   not a Forgejo API token. Forgejo issue mutation requires a separate scoped API access token.
 - Do not store tokens, passwords, API keys, signatures, or live configuration in tracked files.
+
+- On Windows, always specify `encoding="utf-8"` and `newline="\n"` for Python source-file writes (UTF-8 for reads too). The system
+  code page cannot encode all UI text, and a failed write can truncate the source file.

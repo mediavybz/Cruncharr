@@ -15,7 +15,8 @@ public interface IQueuePersistenceService : IDisposable
 
 public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 {
-    private readonly string _queueFilePath;
+    private readonly string _initialQueueFilePath;
+    private string _queueFilePath => _config?.Queue.QueueFilePath ?? _initialQueueFilePath;
     private readonly object _syncLock = new();
     private Timer? _saveTimer;
     private readonly ILogger<QueuePersistenceService>? _logger;
@@ -29,7 +30,7 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
     public QueuePersistenceService(string queueFilePath, ILogger<QueuePersistenceService>? logger = null, CruncharrConfig? config = null)
     {
-        _queueFilePath = queueFilePath ?? throw new ArgumentNullException(nameof(queueFilePath));
+        _initialQueueFilePath = queueFilePath ?? throw new ArgumentNullException(nameof(queueFilePath));
         _logger = logger;
         _config = config;
         var dir = Path.GetDirectoryName(_queueFilePath);
@@ -134,6 +135,8 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
         try
         {
+            var directory = Path.GetDirectoryName(_queueFilePath);
+            if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
             // Atomic write (temp + rename) so a crash mid-write can't corrupt the queue file.
             var tmp = _queueFilePath + ".tmp";
             File.WriteAllText(tmp, json);

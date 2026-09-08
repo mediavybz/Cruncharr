@@ -230,7 +230,7 @@ public class DownloadService : IDownloadService
         IReadOnlyCollection<string> subtitleLanguages,
         DownloadHistory? existing = null)
     {
-        if (_history == null || !config.Download.HistoryEnabled) return;
+        if (_history == null || !config.History.Enabled) return;
         try
         {
             var richSeriesId = !string.IsNullOrWhiteSpace(episode.SeriesId)
@@ -596,14 +596,52 @@ public class DownloadService : IDownloadService
         return fileName;
     }
 
+    internal static CruncharrConfig ResolveEpisodeConfig(CruncharrConfig config, EpisodeInfo episode, HistorySeries? series)
+    {
+        var season = series?.Seasons.FirstOrDefault(s =>
+            (!string.IsNullOrEmpty(episode.SeasonId) && s.SeasonId == episode.SeasonId) ||
+            s.EpisodesList.Any(e => e.EpisodeId == episode.Id));
+        if (episode.SelectedDubs is not { Count: > 0 })
+        {
+            var dubs = season?.HistorySeasonDubLangOverride is { Count: > 0 } ? season.HistorySeasonDubLangOverride : series?.HistorySeriesDubLangOverride;
+            if (dubs is { Count: > 0 }) episode.SelectedDubs = dubs.ToList();
+        }
+        if (episode.SelectedSubs is not { Count: > 0 })
+        {
+            var subs = season?.HistorySeasonSoftSubsOverride is { Count: > 0 } ? season.HistorySeasonSoftSubsOverride : series?.HistorySeriesSoftSubsOverride;
+            if (subs is { Count: > 0 }) episode.SelectedSubs = subs.ToList();
+        }
+        var quality = !string.IsNullOrWhiteSpace(episode.VideoQuality) ? episode.VideoQuality :
+            !string.IsNullOrWhiteSpace(season?.HistorySeasonVideoQualityOverride) ? season.HistorySeasonVideoQualityOverride : series?.HistorySeriesVideoQualityOverride;
+        var directory = !string.IsNullOrWhiteSpace(season?.SeasonDownloadPath) ? season.SeasonDownloadPath : series?.SeriesDownloadPath;
+        if (string.IsNullOrWhiteSpace(quality) && string.IsNullOrWhiteSpace(directory)) return config;
+        var effective = config.Clone();
+        if (!string.IsNullOrWhiteSpace(quality)) effective.Download.QualityVideo = quality;
+        if (!string.IsNullOrWhiteSpace(directory)) effective.Download.OutputDirectory = directory;
+        return effective;
+    }
+
     public async Task<DownloadResult> DownloadEpisodeAsync(EpisodeInfo episode, CruncharrConfig config, IProgress<DownloadProgress>? progress = null, CancellationToken cancellationToken = default, Action? onDownloadComplete = null)
     {
         _logger?.LogInformation("Starting download: {EpisodeId} - {Title}", episode.Id, episode.Title);
+        if (config.Download.EncodeEnabled && (string.IsNullOrWhiteSpace(config.Download.EncodingPreset) ||
+            _encodingService?.GetPreset(config.Download.EncodingPreset) == null))
+            return new DownloadResult { Success = false, ErrorMessage = "The selected encoding preset is missing. Choose an existing preset in Settings / Muxing.", ErrorType = DownloadErrorType.Unknown };
+
+        HistorySeries? historySeries = null;
+        if (_history != null && config.History.Enabled)
+        {
+            var history = await _history.GetHistorySeriesAsync();
+            historySeries = history?.FirstOrDefault(s =>
+                (!string.IsNullOrWhiteSpace(episode.SeriesId) && s.SeriesId == episode.SeriesId) ||
+                s.Seasons.Any(season => season.EpisodesList.Any(e => e.EpisodeId == episode.Id)));
+        }
+        config = ResolveEpisodeConfig(config, episode, historySeries);
 
         // A persisted queue may outlive the completed queue row that originally admitted the
         // episode. Treat a matching, still-present history artifact as an idempotent success so a
         // retry/restart cannot redownload it under a numeric suffix.
-        if (_history != null && config.Download.HistoryEnabled && !config.Download.ReplaceExistingFiles)
+        if (_history != null && config.History.Enabled && !config.Download.ReplaceExistingFiles)
         {
             try
             {
@@ -1073,6 +1111,7 @@ public class DownloadService : IDownloadService
         // end. This keeps the heavy mux/transcode read-write off the output SSD. With the temp
         // folder disabled, mux/encode write straight to the output dir as before (no extra move).
         var transcodeInTemp = config.Download.UseTempFolder;
+        var preserveEncodingSource = false;
 
         try
         {
@@ -1969,7 +2008,9 @@ public class DownloadService : IDownloadService
                             if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                             {
                                 progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = $"Encoding {locale}..." });
+                                preserveEncodingSource = true;
                                 await EncodeOutputWithLimitAsync(groupWorkPath, config.Download.EncodingPreset, cancellationToken, progress, locale);
+                                preserveEncodingSource = false;
                             }
 
                             if (!string.Equals(groupWorkPath, groupOutputPath, StringComparison.Ordinal))
@@ -2000,7 +2041,9 @@ public class DownloadService : IDownloadService
                         if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
                         {
                             progress?.Report(new DownloadProgress { State = DownloadState.Processing, Percent = 95, Doing = "Encoding..." });
+                            preserveEncodingSource = true;
                             await EncodeOutputWithLimitAsync(workPath, config.Download.EncodingPreset, cancellationToken, progress);
+                            preserveEncodingSource = false;
                         }
 
                         if (!string.Equals(workPath, outputPath, StringComparison.Ordinal))
@@ -2056,7 +2099,7 @@ public class DownloadService : IDownloadService
             progress?.Report(new DownloadProgress { State = DownloadState.Done, Percent = 100, Doing = "Complete" });
 
             // Record in history
-            if (_history != null && config.Download.HistoryEnabled)
+            if (_history != null && config.History.Enabled)
             {
                 try
                 {
@@ -2147,7 +2190,7 @@ public class DownloadService : IDownloadService
         finally
         {
             // Cleanup the per-download temp working directory (unless NoCleanup is set)
-            if (!config.Download.NoCleanup)
+            if (!config.Download.NoCleanup && !preserveEncodingSource)
             {
                 try
                 {
@@ -3822,61 +3865,17 @@ public class DownloadService : IDownloadService
         var preset = _encodingService?.GetPreset(presetName);
         if (preset == null)
         {
-            _logger?.LogWarning("Encoding preset {PresetName} not found", presetName);
-            return;
+            throw new InvalidOperationException($"Encoding preset {presetName} not found. The source file is preserved at {inputPath}.");
         }
 
         var ffmpegPath = FindExecutable("ffmpeg");
         if (ffmpegPath == null)
         {
-            _logger?.LogError("ffmpeg not found for encoding");
-            return;
+            throw new InvalidOperationException($"ffmpeg not found for encoding. The source file is preserved at {inputPath}.");
         }
 
         var tempOutput = GetEncodingTempOutputPath(inputPath);
-        var args = new List<string>
-        {
-            "-nostdin",
-            "-hide_banner",
-            "-y",
-            "-i", inputPath,
-        };
-
-        if (!string.IsNullOrWhiteSpace(preset.Codec))
-        {
-            args.Add("-c:v");
-            args.Add(preset.Codec!);
-            // Quality flag depends on the codec (CRF for software, -cq/-global_quality/-rc
-            // for the various hardware encoders); mirrors upstream Helpers.GetQualityOption.
-            args.AddRange(GetEncodeQualityOption(preset));
-            // Only build a -vf filter from the parts the preset actually sets. A preset with
-            // empty Resolution AND FrameRate keeps the SOURCE resolution/fps (no filter) —
-            // previously this emitted "-vf scale=,fps=" which ffmpeg rejects.
-            var filters = new List<string>();
-            if (!string.IsNullOrWhiteSpace(preset.Resolution)) filters.Add($"scale={preset.Resolution}");
-            if (!string.IsNullOrWhiteSpace(preset.FrameRate)) filters.Add($"fps={preset.FrameRate}");
-            if (filters.Count > 0)
-            {
-                args.Add("-vf");
-                args.Add(string.Join(",", filters));
-            }
-        }
-
-        // AdditionalParameters (e.g. "-map 0", which maps EVERY stream so all audio/sub
-        // tracks survive the re-encode) are stored as single strings that may hold several
-        // whitespace-separated tokens. ffmpeg needs each token as its own argv element, so
-        // split first — passing "-map 0" as one element makes ffmpeg read the option name as
-        // "map 0" and bail with "Unrecognized option" (mirrors upstream SplitArguments).
-        foreach (var param in preset.AdditionalParameters)
-            args.AddRange(SplitArguments(param));
-
-        // Machine-readable progress on stdout (key=value blocks) so the queue can show
-        // encode percentage + ETA instead of a frozen "Encoding...".
-        args.Add("-progress");
-        args.Add("pipe:1");
-        args.Add("-nostats");
-
-        args.Add(tempOutput);
+        var args = EncodingCommand.Build(preset, inputPath, tempOutput);
 
         var durationSeconds = await ProbeVideoDurationAsync(inputPath, cancellationToken);
         int exitCode;
@@ -3895,8 +3894,7 @@ public class DownloadService : IDownloadService
 
         if (ShouldReplaceEncodedOutput(exitCode, File.Exists(tempOutput)))
         {
-            File.Delete(inputPath);
-            File.Move(tempOutput, inputPath);
+            File.Move(tempOutput, inputPath, overwrite: true);
             _logger?.LogInformation("Encoded output to {Path} with preset {Preset}", inputPath, presetName);
         }
         else
@@ -3910,6 +3908,7 @@ public class DownloadService : IDownloadService
                 exitCode,
                 inputPath,
                 presetName);
+            throw new InvalidOperationException($"Encoding failed with exit code {exitCode} using {presetName}. The source file is preserved at {inputPath}; check encoder availability and preset options.");
         }
     }
 
@@ -4044,39 +4043,7 @@ public class DownloadService : IDownloadService
     }
 
     // Codec-aware quality option (mirrors upstream Helpers.GetQualityOption).
-    private static IEnumerable<string> GetEncodeQualityOption(VideoPreset preset)
-    {
-        if (preset.Crf == -1) return Array.Empty<string>();
-        var q = preset.Crf.ToString();
-        return preset.Codec switch
-        {
-            "h264_nvenc" or "hevc_nvenc" => preset.Crf is >= 0 and <= 51 ? new[] { "-cq", q } : Array.Empty<string>(),
-            "h264_qsv" or "hevc_qsv" => preset.Crf is >= 1 and <= 51 ? new[] { "-global_quality", q } : Array.Empty<string>(),
-            "h264_amf" => preset.Crf is >= 0 and <= 51 ? new[] { "-rc", "cqp", "-qp_i", q, "-qp_p", q, "-qp_b", q } : Array.Empty<string>(),
-            "hevc_amf" => preset.Crf is >= 0 and <= 51 ? new[] { "-rc", "cqp", "-qp_i", q, "-qp_p", q } : Array.Empty<string>(),
-            _ => preset.Crf >= 0 ? new[] { "-crf", q } : Array.Empty<string>()
-        };
-    }
-
-    // Split a single parameter string into ffmpeg argv tokens, honoring double quotes
-    // (mirrors upstream Helpers.SplitArguments).
-    private static IEnumerable<string> SplitArguments(string commandLine)
-    {
-        var args = new List<string>();
-        var current = new System.Text.StringBuilder();
-        bool inQuotes = false;
-        foreach (char c in commandLine)
-        {
-            if (c == '"') { inQuotes = !inQuotes; continue; }
-            if (char.IsWhiteSpace(c) && !inQuotes)
-            {
-                if (current.Length > 0) { args.Add(current.ToString()); current.Clear(); }
-            }
-            else current.Append(c);
-        }
-        if (current.Length > 0) args.Add(current.ToString());
-        return args;
-    }
+    private static IEnumerable<string> SplitArguments(string commandLine) => EncodingCommand.SplitArguments(commandLine);
 
     private string? FindExecutable(string name)
     {
@@ -4132,7 +4099,7 @@ public class DownloadService : IDownloadService
                 Threads = config.Download.PartSize,
                 Retries = config.Download.RetryAttempts,
                 BaseUrl = playlistUrl,
-                Timeout = config.Download.RetryDelay * 1000,
+                Timeout = config.Download.Timeout > 0 ? config.Download.Timeout : 15000,
                 FsRetryTime = config.Download.RetryDelay * 1000,
                 Override = config.Download.ForceOverride ? "Y" : "N"
             };

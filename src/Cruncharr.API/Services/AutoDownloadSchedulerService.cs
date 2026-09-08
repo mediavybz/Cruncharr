@@ -78,11 +78,13 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                 using var scope = _serviceProvider.CreateScope();
                 var config = scope.ServiceProvider.GetRequiredService<CruncharrConfig>();
 
+                await scope.ServiceProvider.GetRequiredService<ScheduledDownloadsService>().RunCheckAsync(false, cancellationToken);
+
                 var intervalMinutes = config.History?.AutoRefreshIntervalMinutes ?? 0;
-                if (intervalMinutes <= 0)
+                if (intervalMinutes <= 0 || LastRun?.AddMinutes(intervalMinutes) > DateTimeOffset.UtcNow)
                 {
                     // No interval set, wait and check again later
-                    await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+                    await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
                     continue;
                 }
 
@@ -92,7 +94,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                 await RunCheckAsync(scope.ServiceProvider, config, cancellationToken);
 
                 _logger.LogInformation("Auto-download check completed. Next check in {Interval} minutes", intervalMinutes);
-                await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -137,7 +139,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                     break;
                 case 1: // DefaultActive
                     _logger.LogInformation("Refreshing active history series...");
-                    await RefreshHistoryAsync(historyService, cancellationToken);
+                    await RefreshHistoryAsync(historyService, cancellationToken, activeOnly: true);
                     break;
                 case 50: // FastNewReleases
                 default:
@@ -147,7 +149,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                     break;
             }
 
-            if (config.History.AutoRefreshAddToQueue)
+            if (config.History.AutoRefreshAddToQueue && authService.IsAuthenticated && authService.Profile.HasPremium)
             {
                 _logger.LogInformation("Adding missing episodes to queue...");
                 await AddNewMissingToQueueAsync(
@@ -169,14 +171,14 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
         }
     }
 
-    private async Task RefreshHistoryAsync(IHistoryService historyService, CancellationToken cancellationToken)
+    private async Task RefreshHistoryAsync(IHistoryService historyService, CancellationToken cancellationToken, bool activeOnly = false)
     {
         try
         {
             var seriesList = await historyService.GetHistorySeriesAsync();
             if (seriesList == null || seriesList.Count == 0) return;
 
-            foreach (var series in seriesList)
+            foreach (var series in seriesList.Where(s => !activeOnly || s.HasNewEpisodes))
             {
                 try
                 {
@@ -300,10 +302,12 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                                  localArtifactEpisodeIds,
                                  currentSonarrArtifactEpisodeIds))
                     {
+                        if (!ScheduledDownloadsService.IsReleased(episode, DateTimeOffset.UtcNow)) continue;
                         // Skip episodes already in queue
                         bool inQueue = queueItems.Any(q =>
                             q.Episode?.Id == episode.EpisodeId ||
                             (q.Episode?.SeriesId == series.SeriesId &&
+                             q.Episode?.SeasonId == season.SeasonId &&
                              q.Episode?.Episode == episode.Episode));
 
                         if (inQueue) continue;

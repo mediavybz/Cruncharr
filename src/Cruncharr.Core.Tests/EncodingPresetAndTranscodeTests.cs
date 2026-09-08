@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Cruncharr.Core.Tests;
 
+[Collection("ConfigurationEnvironment")]
 public class EncodingPresetAndTranscodeTests
 {
     [Fact]

@@ -34,6 +34,7 @@ public interface IQueueService
     Task WaitForProcessingSlotAsync(CancellationToken cancellationToken = default);
     void ReleaseProcessingSlot();
     void SetProcessingLimit(int newLimit);
+    void NotifyConfigChanged() { }
 
     // Transcode (encode-step) slot management — separate limit from processing jobs.
     Task WaitForTranscodeSlotAsync(CancellationToken cancellationToken = default);
@@ -1056,6 +1057,12 @@ public class QueueService : IQueueService, IDisposable
     public void ReleaseProcessingSlot()
     {
         _processingSlots?.Release();
+    }
+
+    public void NotifyConfigChanged()
+    {
+        _persistenceService?.SaveQueue(GetQueue());
+        RequestPump();
     }
 
     public void SetProcessingLimit(int newLimit)

@@ -134,3 +134,16 @@ test('seasonal browsing follows calendar quarters without advancing September or
     const seasons = ['winter', 'winter', 'winter', 'spring', 'spring', 'spring', 'summer', 'summer', 'summer', 'fall', 'fall', 'fall'];
     seasons.forEach((season, month) => assert.equal(ui.run(`currentAnimeSeason(new Date(2026, ${month}, 8))`), season));
 });
+
+test('guest browsing stays quiet, but pending downloads explain the Premium requirement', async () => {
+    for (const state of ['', 'Done', 'Queued']) {
+        const ui = app();
+        ui.run('let warnings = []; showToast = message => warnings.push(message);');
+        ui.run(`queueData = [{downloadProgress:{state:${JSON.stringify(state)}}}];`);
+        const check = ui.run('checkAuthStatus()');
+        ui.reply(0, { isAuthenticated: false, hasPremium: false });
+        await check;
+        assert.equal(ui.run('warnings.length'), state === 'Queued' ? 1 : 0);
+        assert.equal(ui.timers.size, 0);
+    }
+});

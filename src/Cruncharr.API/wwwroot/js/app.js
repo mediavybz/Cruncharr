@@ -5504,28 +5504,21 @@
         
         let lastAuthWarning = 0;
         async function checkAuthStatus() {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), AUTH_STATUS_TIMEOUT_MS);
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), AUTH_STATUS_TIMEOUT_MS);
                 const res = await fetch('/api/v1/auth/status', { signal: controller.signal });
-                clearTimeout(timeoutId);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const status = await res.json();
                 authStatus = status;
                 
                 const now = Date.now();
-                if (!status.isAuthenticated) {
-                    if (now - lastAuthWarning > AUTH_WARNING_THROTTLE_MS) {
-                        lastAuthWarning = now;
-                        showToast('You are not logged in. Please go to Account tab to log in.', 'warning');
-                    }
-                } else if (!status.hasPremium) {
-                    // Check if there are premium items in queue
-                    const hasPremiumItems = queueData.some(i => i.episode?.isPremium);
-                    if (hasPremiumItems && now - lastAuthWarning > AUTH_WARNING_THROTTLE_MS) {
-                        lastAuthWarning = now;
-                        showToast('No premium subscription detected. Premium content will fail to download.', 'warning');
-                    }
+                const needsDownloadAccess = queueData.some(item =>
+                    ['queued', 'downloading', 'paused'].includes(String(item.downloadProgress?.state || '').toLowerCase()));
+                if (needsDownloadAccess && (!status.isAuthenticated || !status.hasPremium) &&
+                    now - lastAuthWarning > AUTH_WARNING_THROTTLE_MS) {
+                    lastAuthWarning = now;
+                    showToast('Log in to a Crunchyroll Premium account to download queued episodes.', 'warning');
                 }
             } catch (e) {
                 // Only log once to avoid console spam
@@ -5533,6 +5526,8 @@
                     window._authCheckFailed = true;
                     console.warn('Auth status check failed (will retry silently):', e.message);
                 }
+            } finally {
+                clearTimeout(timeoutId);
             }
         }
         

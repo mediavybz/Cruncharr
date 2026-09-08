@@ -2849,3 +2849,8 @@
 
 .history-status{margin-bottom:16px;color:var(--text-secondary);font-size:0.85rem}
 .history-status:empty{display:none}
+.library-badge{display:inline-block;padding:3px 7px;border-radius:5px;background:#145c42;color:#e5fff3;font-size:0.7rem;font-weight:600;line-height:1.3}
+.history-poster-img>.library-indicator{position:absolute;right:7px;bottom:8px;z-index:2}
+.library-indicator:empty{display:none}
+.search-result-type .library-badge{margin-right:5px}
+#browse-library-status{color:var(--text-secondary);font-size:0.8rem}

@@ -694,7 +694,7 @@ public class HistoryService : IHistoryService, IDisposable
         }
     }
 
-    private async Task SaveRichHistoryAsync()
+    private async Task SaveRichHistoryAsync(bool throwOnError = false)
     {
         try
         {
@@ -703,6 +703,7 @@ public class HistoryService : IHistoryService, IDisposable
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to save rich history");
+            if (throwOnError) throw;
         }
     }
 
@@ -2366,8 +2367,9 @@ public class HistoryService : IHistoryService, IDisposable
         {
             await EnsureLoadedAsync();
             var historySeries = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
-            if (historySeries == null) return;
+            if (historySeries == null) throw new KeyNotFoundException("History series was not found.");
 
+            var previous = (historySeries.HistorySeriesVideoQualityOverride, historySeries.HistorySeriesDubLangOverride, historySeries.HistorySeriesSoftSubsOverride);
             if (!string.IsNullOrEmpty(videoQuality))
                 historySeries.HistorySeriesVideoQualityOverride = videoQuality;
             else
@@ -2376,7 +2378,12 @@ public class HistoryService : IHistoryService, IDisposable
             historySeries.HistorySeriesDubLangOverride = NormalizeLocales(dubLanguages);
             historySeries.HistorySeriesSoftSubsOverride = NormalizeLocales(softSubs);
 
-            await SaveRichHistoryAsync();
+            try { await SaveRichHistoryAsync(throwOnError: true); }
+            catch
+            {
+                (historySeries.HistorySeriesVideoQualityOverride, historySeries.HistorySeriesDubLangOverride, historySeries.HistorySeriesSoftSubsOverride) = previous;
+                throw;
+            }
         }
         finally
         {
@@ -2396,6 +2403,7 @@ public class HistoryService : IHistoryService, IDisposable
                 var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
                 if (historySeason != null)
                 {
+                    var previous = (historySeason.HistorySeasonVideoQualityOverride, historySeason.HistorySeasonDubLangOverride, historySeason.HistorySeasonSoftSubsOverride);
                     if (!string.IsNullOrEmpty(videoQuality))
                         historySeason.HistorySeasonVideoQualityOverride = videoQuality;
                     else
@@ -2404,10 +2412,16 @@ public class HistoryService : IHistoryService, IDisposable
                     historySeason.HistorySeasonDubLangOverride = NormalizeLocales(dubLanguages);
                     historySeason.HistorySeasonSoftSubsOverride = NormalizeLocales(softSubs);
 
-                    await SaveRichHistoryAsync();
+                    try { await SaveRichHistoryAsync(throwOnError: true); }
+                    catch
+                    {
+                        (historySeason.HistorySeasonVideoQualityOverride, historySeason.HistorySeasonDubLangOverride, historySeason.HistorySeasonSoftSubsOverride) = previous;
+                        throw;
+                    }
                     return;
                 }
             }
+            throw new KeyNotFoundException("History season was not found.");
         }
         finally
         {

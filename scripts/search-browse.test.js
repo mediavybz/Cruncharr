@@ -14,6 +14,7 @@ function app() {
     let nextTimer = 0;
     const context = vm.createContext({
         URL, Headers, AbortController, console,
+        CruncharrLibrary: require('../src/Cruncharr.API/wwwroot/js/library-state.js'),
         CruncharrCalendarRequests: requests,
         document: {
             addEventListener() {},
@@ -45,6 +46,12 @@ test('typing shows cached matches synchronously before the network debounce', ()
     assert.doesNotMatch(ui.popup.innerHTML, /Searching/);
     assert.equal(ui.pending.length, 0);
     assert.equal(ui.timers.size, 1);
+});
+
+test('browse keeps every provider title including zero-episode entries', () => {
+    const ui = app();
+    assert.equal(ui.run('compactBrowseSeries([{id:"ZERO",title:"Death Parade",episodeCount:0},{id:"READY",episodeCount:12}]).length'), 2);
+    assert.match(ui.run('renderBrowseCards([{id:"ZERO",title:"Death Parade",episodeCount:0}])'), /No episodes currently listed/);
 });
 
 test('a new query cancels and ignores the older response even before its debounce runs', async () => {
@@ -103,7 +110,7 @@ test('failed remote search preserves cached matches and exposes the failure', as
 
 test('empty catalog cache is rejected and a failed load can be retried', async () => {
     const ui = app();
-    ui.storage.set('cruncharrBrowseCatalogV2', JSON.stringify({ cachedAt: Date.now(), series: [] }));
+    ui.storage.set('cruncharrBrowseCatalogV3', JSON.stringify({ cachedAt: Date.now(), series: [] }));
     assert.equal(ui.run('restoreBrowseCatalog()'), false);
     const first = ui.run('loadAllBrowseSeries()');
     ui.reply(0, [], true);

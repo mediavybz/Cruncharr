@@ -162,7 +162,7 @@ public class QueuePumpEligibilityTests
             .AddSingleton(history.Object)
             .AddSingleton(queue.Object)
             .AddSingleton(Mock.Of<ICrunchyrollApiService>())
-            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>(a => a.IsAuthenticated == true && a.Profile == new CrProfile { HasPremium = true }))
             .BuildServiceProvider();
         var scheduler = new AutoDownloadSchedulerService(
             provider,
@@ -293,7 +293,7 @@ public class QueuePumpEligibilityTests
             .AddSingleton(history.Object)
             .AddSingleton(queue.Object)
             .AddSingleton(Mock.Of<ICrunchyrollApiService>())
-            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>(a => a.IsAuthenticated == true && a.Profile == new CrProfile { HasPremium = true }))
             .BuildServiceProvider();
         var scheduler = new AutoDownloadSchedulerService(
             provider,
@@ -356,7 +356,7 @@ public class QueuePumpEligibilityTests
             .AddSingleton(history.Object)
             .AddSingleton(Mock.Of<IQueueService>())
             .AddSingleton(Mock.Of<ICrunchyrollApiService>())
-            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>(a => a.IsAuthenticated == true && a.Profile == new CrProfile { HasPremium = true }))
             .BuildServiceProvider();
         using var scheduler = new AutoDownloadSchedulerService(
             provider,
@@ -604,7 +604,7 @@ public class QueuePumpEligibilityTests
             .AddSingleton(history.Object)
             .AddSingleton(queue.Object)
             .AddSingleton(Mock.Of<ICrunchyrollApiService>())
-            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>(a => a.IsAuthenticated == true && a.Profile == new CrProfile { HasPremium = true }))
             .AddSingleton(sonarr.Object)
             .BuildServiceProvider();
         using var scheduler = new AutoDownloadSchedulerService(

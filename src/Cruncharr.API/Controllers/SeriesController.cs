@@ -22,6 +22,14 @@ public class SeriesController : ControllerBase
     /// <summary>
     /// Search for series on Crunchyroll
     /// </summary>
+    [HttpGet("resolve-episode/{episodeId}")]
+    public async Task<ActionResult> ResolveEpisode(string episodeId, CancellationToken cancellationToken)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(episodeId, "^[A-Za-z0-9_-]{1,64}$")) return BadRequest();
+        var episode = await _api.GetEpisodeAsync(episodeId, true, cancellationToken);
+        return episode == null ? NotFound() : Ok(episode);
+    }
+
     [HttpGet("search")]
     public async Task<ActionResult> Search([FromQuery] string query, [FromQuery] bool premium = false, CancellationToken cancellationToken = default)
     {

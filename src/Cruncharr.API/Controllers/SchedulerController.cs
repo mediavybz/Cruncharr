@@ -7,13 +7,13 @@ namespace Cruncharr.API.Controllers;
 [Route("api/v1/[controller]")]
 public class SchedulerController : ControllerBase
 {
-    private readonly AutoDownloadSchedulerService _scheduler;
     private readonly ILogger<SchedulerController> _logger;
+    private readonly ScheduledDownloadsService _subscriptions;
 
-    public SchedulerController(AutoDownloadSchedulerService scheduler, ILogger<SchedulerController> logger)
+    public SchedulerController(ILogger<SchedulerController> logger, ScheduledDownloadsService subscriptions)
     {
-        _scheduler = scheduler;
         _logger = logger;
+        _subscriptions = subscriptions;
     }
 
     [HttpGet("status")]
@@ -21,11 +21,7 @@ public class SchedulerController : ControllerBase
     {
         try
         {
-            return Ok(new
-            {
-                IsRunning = _scheduler.IsRunning,
-                LastRun = _scheduler.LastRun?.ToString("O")
-            });
+            return Ok(_subscriptions.GetStatus());
         }
         catch (Exception ex)
         {
@@ -40,9 +36,7 @@ public class SchedulerController : ControllerBase
         try
         {
             _logger.LogInformation("Manual scheduler trigger requested");
-            using var scope = HttpContext.RequestServices.CreateScope();
-            var config = scope.ServiceProvider.GetRequiredService<Cruncharr.Core.Configuration.CruncharrConfig>();
-            await _scheduler.RunCheckAsync(scope.ServiceProvider, config, HttpContext.RequestAborted);
+            await _subscriptions.RunCheckAsync(true, HttpContext.RequestAborted);
             return Ok(new { Message = "Scheduler check triggered successfully" });
         }
         catch (Exception ex)
@@ -51,4 +45,40 @@ public class SchedulerController : ControllerBase
             return StatusCode(500, new { Error = "Scheduler trigger failed", Details = ex.Message });
         }
     }
+
+    [HttpPost("settings")]
+    public async Task<IActionResult> Configure(SchedulerSettingsRequest request)
+    {
+        try
+        {
+            await _subscriptions.ConfigureAsync(request.Enabled, request.IntervalMinutes, HttpContext.RequestAborted);
+            return Ok(_subscriptions.GetStatus());
+        }
+        catch (ArgumentException ex) { return BadRequest(new { Message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { Message = ex.Message }); }
+    }
+
+    [HttpPut("subscriptions/{seriesId}")]
+    public async Task<IActionResult> Subscribe(string seriesId, SubscriptionRequest request)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(seriesId, "^[A-Za-z0-9_-]{1,64}$"))
+            return BadRequest(new { Message = "Invalid series ID" });
+        try
+        {
+            await _subscriptions.SubscribeAsync(seriesId, request.Enabled, HttpContext.RequestAborted);
+            return Ok(_subscriptions.GetStatus());
+        }
+        catch (ArgumentException ex) { return BadRequest(new { Message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { Message = ex.Message }); }
+    }
+
+    [HttpDelete("subscriptions/{seriesId}")]
+    public async Task<IActionResult> Unsubscribe(string seriesId)
+    {
+        await _subscriptions.RemoveAsync(seriesId, HttpContext.RequestAborted);
+        return NoContent();
+    }
 }
+
+public record SchedulerSettingsRequest(bool Enabled, int IntervalMinutes);
+public record SubscriptionRequest(bool Enabled);

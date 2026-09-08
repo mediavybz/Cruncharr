@@ -256,7 +256,13 @@
             }
         }
 
-        function navigateTo(page) {
+        async function navigateTo(page) {
+            if (currentPage === 'settings') {
+                if (window._settingsSaveTimer) {
+                    clearTimeout(window._settingsSaveTimer); window._settingsSaveTimer = null;
+                    if (!await startSettingsSave()) return false;
+                } else if (window._settingsSavePromise && !await window._settingsSavePromise) return false;
+            }
             writeLocalStorage('cruncharr_current_page', page);
             loadPage(page);
             // Secondary/system pages live behind More on phones; keep the visible destination
@@ -421,8 +427,8 @@
                 const d = await res.json();
                 const running = d.isRunning ?? d.IsRunning ?? false;
                 const lastRun = d.lastRun ?? d.LastRun ?? null;
-                let label = running ? 'running…' : 'idle';
-                if (!running && lastRun) {
+                let label = running ? 'running…' : !d.enabled ? 'paused' : !d.subscriptions?.some(s => s.enabled) ? 'no subscriptions' : !d.canDownload ? 'Premium login needed' : 'waiting for next check';
+                if (!running && lastRun && d.enabled && d.canDownload) {
                     const dt = new Date(lastRun);
                     if (!isNaN(dt)) label = `idle (last run ${dt.toLocaleTimeString()})`;
                 }
@@ -440,12 +446,14 @@
             try {
                 const res = await fetch('/api/v1/scheduler/trigger', { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                if (typeof showToast === 'function') showToast('Auto-download check started', 'success');
+                if (typeof showToast === 'function') showToast('Scheduled release check completed', 'success');
             } catch (e) {
                 if (typeof showToast === 'function') showToast('Scheduler trigger failed', 'error');
             } finally {
                 if (btn) { btn.disabled = false; btn.innerHTML = '&#9889; Run now'; }
-                setTimeout(() => { loadSchedulerStatus(); fetchDownloads(); fetchQueueStats(); }, 1500);
+                loadSchedulerStatus(); fetchQueueStats();
+                if (currentPage === 'settings' && settingsTab === 'scheduler') await renderSchedulerSettings();
+                if (currentPage === 'downloads') fetchDownloads();
             }
         }
 
@@ -630,6 +638,7 @@
                         <input type="checkbox" id="add-all-checkbox" onchange="toggleAddAll(this.checked)">
                         All
                     </label>
+                    <button class="header-btn" id="series-schedule" style="display:none" onclick="toggleSeriesSchedule(this)">Schedule new episodes</button>
                     <button class="header-btn" id="music-btn" onclick="showFeaturedMusic()" style="display:none;">
                         <span>&#127925;</span> Music
                     </button>
@@ -712,6 +721,25 @@
         }
 
         async function doGlobalSearch(query) {
+            if (/^https?:\/\//i.test(query)) {
+                try {
+                    const url = new URL(query);
+                    if (!/^(www\.)?crunchyroll\.com$/i.test(url.hostname)) throw new Error('Use a Crunchyroll series or episode URL.');
+                    const match = url.pathname.match(/\/(series|watch)\/([A-Za-z0-9_-]+)/);
+                    if (!match) throw new Error('Use a Crunchyroll series or episode URL.');
+                    closeGlobalSearch();
+                    if (match[1] === 'series') { await selectBrowseResult(match[2]); return; }
+                    const response = await fetch('/api/v1/series/resolve-episode/' + encodeURIComponent(match[2]));
+                    if (!response.ok) throw new Error('Could not load this episode.');
+                    const episode = await response.json();
+                    if (config?.addDownload?.singleEpisodeInstantAdd && authStatus?.isAuthenticated && authStatus?.hasPremium) {
+                        await addEpisodeToQueue(episode.id, episode.seriesTitle, episode.episode, episode.thumbnailUrl, episode.audioLocale);
+                    } else {
+                        await selectBrowseResult(episode.seriesId, { episodeId: episode.id, audioLocale: episode.audioLocale });
+                    }
+                } catch (e) { showToast(e.message, 'error'); }
+                return;
+            }
             const popup = document.getElementById('global-search-popup');
             if (!popup) return;
             const request = globalSearchGate.begin();
@@ -736,6 +764,11 @@
         }
 
         function selectGlobalResult(seriesId) {
+            if (config?.addDownload?.searchAddToHistory && config?.history?.enabled) {
+                fetch('/api/v1/history/update-series/' + encodeURIComponent(seriesId), { method: 'POST' })
+                    .then(async r => { if (!r.ok || !(await r.json()).success) throw new Error('Could not add series to History.'); })
+                    .catch(e => showToast(e.message, 'error'));
+            }
             closeGlobalSearch();
             const input = document.getElementById('global-search');
             if (input) input.value = '';
@@ -1072,7 +1105,7 @@
                                 selectedDubs: item.selectedDubs || [],
                                 selectedSubs: item.downloadSubs || [],
                                 hslang: item.hslang || 'none',
-                                videoQuality: item.videoQuality || 'best'
+                                videoQuality: item.videoQuality || null
                                 // NOTE: deliberately NOT sending `versions`. The ItemSelectMultiDub
                                 // variants carry the BASE episode guid (item.id) for every dub and
                                 // have no per-version MediaGuid, so a posted versions array made the
@@ -1997,7 +2030,7 @@
         }
 
         async function selectBrowseResult(seriesId, episodeSelection = null) {
-            navigateTo('add-download');
+            if (await navigateTo('add-download') === false) return;
             const loadGeneration = ++selectBrowseGeneration;
             selectedEpisodes.clear();
             selectedEpisodeDubs.clear();
@@ -2046,6 +2079,8 @@
                     const browseTitle = addDownloadEpisodeList[0]?.seasonTitle || 'Selected Series';
                     addDownloadSelectedSeries = { id: seriesId, title: browseTitle };
 
+                    const scheduleBtn = document.getElementById('series-schedule');
+                    if (scheduleBtn) { scheduleBtn.dataset.scheduleSeries = seriesId; scheduleBtn.style.display = ''; updateScheduleButtons(); }
                     const musicBtn = document.getElementById('music-btn');
                     if (musicBtn) musicBtn.style.display = 'inline-flex';
                     
@@ -3025,6 +3060,7 @@
                             <button class="settings-tab ${settingsTab === 'general' ? 'active' : ''}" onclick="setSettingsTab('general', event)">General</button>
                             <button class="settings-tab ${settingsTab === 'download' ? 'active' : ''}" onclick="setSettingsTab('download', event)">Download</button>
                             <button class="settings-tab ${settingsTab === 'queue' ? 'active' : ''}" onclick="setSettingsTab('queue', event)">Queue</button>
+                            <button class="settings-tab ${settingsTab === 'scheduler' ? 'active' : ''}" onclick="setSettingsTab('scheduler', event)">Scheduler</button>
                             <button class="settings-tab ${settingsTab === 'history' ? 'active' : ''}" onclick="setSettingsTab('history', event)">History</button>
                             <button class="settings-tab ${settingsTab === 'sonarr' ? 'active' : ''}" onclick="setSettingsTab('sonarr', event)">Sonarr</button>
                             <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications', event)">Notifications</button>
@@ -3062,13 +3098,15 @@
             const el = document.getElementById('settings-content');
             if (!el || el._autosaveBound) return;
             el._autosaveBound = true;
-            el.addEventListener('change', () => {
+            const scheduleSave = () => {
                 clearTimeout(window._settingsSaveTimer);
                 window._settingsSaveTimer = setTimeout(() => {
                     window._settingsSaveTimer = null;
                     startSettingsSave();
-                }, 250);
-            });
+                }, 500);
+            };
+            el.addEventListener('change', scheduleSave);
+            el.addEventListener('input', scheduleSave);
         }
 
         function startSettingsSave() {
@@ -3089,6 +3127,87 @@
             return pendingSave;
         }
 
+
+        async function schedulerRequest(path = 'status', method = 'GET', data) {
+            const res = await fetch('/api/v1/scheduler/' + path, {
+                method, headers: { 'Content-Type': 'application/json' },
+                ...(data === undefined ? {} : { body: JSON.stringify(data) })
+            });
+            const result = res.status === 204 ? {} : await res.json();
+            if (!res.ok) throw new Error(result.message || result.error || 'Scheduler request failed');
+            return result;
+        }
+
+        async function updateScheduleButtons() {
+            try {
+                const state = await schedulerRequest();
+                document.querySelectorAll('[data-schedule-series]').forEach(button => {
+                    const sub = state.subscriptions.find(s => s.seriesId === button.dataset.scheduleSeries);
+                    button.textContent = sub?.enabled ? 'Scheduled · Pause' : sub ? 'Resume schedule' : 'Schedule new episodes';
+                    button.disabled = false;
+                });
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function toggleSeriesSchedule(button) {
+            const seriesId = button.dataset.scheduleSeries;
+            if (!seriesId) return;
+            button.disabled = true;
+            try {
+                const state = await schedulerRequest();
+                const sub = state.subscriptions.find(s => s.seriesId === seriesId);
+                button.textContent = 'Saving schedule…';
+                const result = await schedulerRequest('subscriptions/' + encodeURIComponent(seriesId), 'PUT', { enabled: !sub?.enabled });
+                showToast(sub?.enabled ? 'Schedule paused' : 'New episodes scheduled. Existing episodes stay unchanged.', 'success');
+                if (!result.canDownload) showToast('The schedule is saved. Sign in with Premium to queue new episodes.', 'info');
+                await updateScheduleButtons();
+                if (settingsTab === 'scheduler' && currentPage === 'settings') await renderSchedulerSettings();
+            } catch (e) { showToast(e.message, 'error'); await updateScheduleButtons(); }
+            finally { button.disabled = false; }
+        }
+
+        async function removeSeriesSchedule(seriesId) {
+            try {
+                await schedulerRequest('subscriptions/' + encodeURIComponent(seriesId), 'DELETE');
+                await renderSchedulerSettings();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function renderSchedulerSettings() {
+            const content = document.getElementById('settings-content');
+            try {
+                const state = await schedulerRequest();
+                if (!content || settingsTab !== 'scheduler') return;
+                content.innerHTML = `<div class="settings-section">
+                    <div class="settings-section-header"><span class="settings-section-title">Scheduled new episodes</span></div>
+                    <div class="settings-section-body">
+                        <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added. Series and season language settings apply; existing Sonarr files are skipped.</p>
+                        <div class="setting-row"><div><div class="setting-label">Enable scheduler</div><div class="setting-desc">Pause or resume checks for all subscriptions.</div></div><label class="toggle-switch"><input id="setting-scheduler-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+                        <div class="setting-row"><div><div class="setting-label">Check every (minutes)</div><div class="setting-desc">New releases enter the queue at the next check. Default: 15 minutes.</div></div><input class="form-input w-100" id="setting-scheduler-interval" type="number" min="1" max="1440" value="${state.intervalMinutes}"></div>
+                        <p role="status">${!state.historyEnabled ? 'History is disabled. Enable it in Settings → History.' : !state.enabled ? 'Scheduler paused.' : state.isRunning ? 'Checking releases…' : state.nextRun ? 'Next check: ' + escapeHtml(new Date(state.nextRun).toLocaleString()) : 'No active subscriptions.'}
+                        ${state.canDownload ? '' : ' Sign in with a Premium account to queue releases.'}
+                        ${state.autoDownload ? ' Queued downloads start automatically.' : 'Enable Settings → Queue → Auto Download to start queued episodes automatically.'}</p>
+                        ${state.lastRun ? `<p class="setting-desc">Last check: ${escapeHtml(new Date(state.lastRun).toLocaleString())} · ${state.lastQueuedCount} added to queue</p>` : ''}
+                        ${state.lastError ? `<p role="alert">${escapeHtml(state.lastError)}</p>` : ''}
+                        <button class="header-btn" id="btn-scheduler-run" onclick="triggerScheduler()">Run now</button>
+                        <div>${state.subscriptions.map(sub => `<div class="setting-row"><div>${escapeHtml(sub.title)}</div><div style="display:flex;gap:8px"><button class="header-btn" data-schedule-series="${escapeHtmlAttribute(sub.seriesId)}" onclick="toggleSeriesSchedule(this)">${sub.enabled ? 'Scheduled · Pause' : 'Resume schedule'}</button><button class="header-btn" onclick="removeSeriesSchedule('${escapeJsString(sub.seriesId)}')">Remove</button></div></div>`).join('') || '<p>No series scheduled yet.</p>'}</div>
+                    </div></div>`;
+            } catch (e) { if (settingsTab === 'scheduler') content.textContent = e.message; }
+        }
+
+        async function saveSchedulerSettings() {
+            const interval = document.getElementById('setting-scheduler-interval');
+            if (!interval || !interval.reportValidity()) return false;
+            try {
+                await schedulerRequest('settings', 'POST', {
+                    enabled: document.getElementById('setting-scheduler-enabled').checked,
+                    intervalMinutes: Number(interval.value)
+                });
+                showToast('Scheduler settings saved', 'success');
+                return true;
+            } catch (e) { showToast(e.message, 'error'); return false; }
+        }
+
         async function loadEncodingPresets() {
             const select = document.getElementById('setting-encode-preset');
             if (!select) return;
@@ -3096,7 +3215,8 @@
                 const res = await fetch('/api/v1/encoding/presets');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const presets = await res.json();
-                const currentValue = select.value || (config?.download?.encodingPreset || '');
+                const currentValue = select.value;
+                if (currentValue && !presets.includes(currentValue)) presets.unshift(currentValue);
                 select.innerHTML = '<option value="">None</option>' +
                     (presets || []).map(p => `<option value="${escapeHtmlAttribute(p)}" ${p === currentValue ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('');
             } catch (e) {
@@ -3106,6 +3226,7 @@
 
         // ===== Encoding preset editor (ports upstream "Edit Preset" dialog) =====
         const PRESET_RESOLUTIONS = [
+            ['', 'Keep source resolution'],
             ['3840:2160','4K exact (3840:2160)'],['-2:2160','4K keep AR (-2:2160)'],
             ['3440:1440','UWQHD exact (3440:1440)'],['2560:1440','1440p exact (2560:1440)'],
             ['-2:1440','1440p keep AR (-2:1440)'],['2560:1080','UW FHD exact (2560:1080)'],
@@ -3134,7 +3255,7 @@
             body.innerHTML = `
                 <div style="display:flex; gap:18px; flex-wrap:wrap;">
                     <div style="flex:1; min-width:200px;">
-                        <div style="font-weight:600; margin-bottom:8px;">Custom Presets</div>
+                        <div style="font-weight:600; margin-bottom:8px;">Presets</div>
                         <div id="preset-list" style="display:flex; flex-direction:column; gap:6px;"><div style="color:var(--text-muted);">Loading…</div></div>
                     </div>
                     <div style="flex:2; min-width:320px; display:flex; flex-direction:column; gap:6px;">
@@ -3148,8 +3269,8 @@
                         <select class="form-select" id="pe-res" onchange="updatePresetCmd()">${resOpts}</select>
                         <label class="form-label mt-6">Enter Frame Rate</label>
                         <input class="form-input" id="pe-fps" placeholder="24000/1001" oninput="updatePresetCmd()">
-                        <label class="form-label mt-6">Enter CRF (0-51) - (cq, global_quality, qp)</label>
-                        <input class="form-input" id="pe-crf" type="number" min="0" max="51" value="28" oninput="updatePresetCmd()">
+                        <label class="form-label mt-6">Quality (CRF / CQ / QP; -1 = encoder default)</label>
+                        <input class="form-input" id="pe-crf" type="number" min="-1" max="63" value="28" oninput="updatePresetCmd()">
                         <label class="form-label mt-6">Additional Parameters</label>
                         <textarea class="form-input" id="pe-params" rows="3" placeholder="-map 0" oninput="updatePresetCmd()">-map 0</textarea>
                         <div class="setting-desc">One parameter (or flag + value) per line.</div>
@@ -3162,7 +3283,7 @@
                 <button class="header-btn primary" type="button" onclick="savePresetEditor()">Save Preset</button>
                 <button class="header-btn" type="button" onclick="closeModal()">Close</button>`;
             modal.classList.add('active');
-            document.getElementById('pe-res').value = '1920:1080';
+            document.getElementById('pe-res').value = '';
             updatePresetCmd();
             await refreshPresetList();
         }
@@ -3171,26 +3292,33 @@
             ['pe-original','pe-name','pe-codec','pe-fps'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
             const crf = document.getElementById('pe-crf'); if (crf) crf.value = '28';
             const params = document.getElementById('pe-params'); if (params) params.value = '-map 0';
-            const res = document.getElementById('pe-res'); if (res) res.value = '1920:1080';
+            const res = document.getElementById('pe-res'); if (res) res.value = '';
             updatePresetCmd();
         }
 
+        let presetPreviewGeneration = 0;
+        let presetPreviewTimer;
         function updatePresetCmd() {
-            const el = document.getElementById('pe-cmd');
-            if (!el) return;
-            const codec = document.getElementById('pe-codec')?.value.trim();
-            const res = document.getElementById('pe-res')?.value;
-            const fps = document.getElementById('pe-fps')?.value.trim();
-            const crf = document.getElementById('pe-crf')?.value.trim();
-            const params = (document.getElementById('pe-params')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
-            let parts = ['ffmpeg', '-i', '"input.mkv"'];
-            if (codec) parts.push('-c:v', codec);
-            if (crf !== '' && crf !== undefined) parts.push('-crf', crf);
-            if (res) parts.push('-vf', `scale=${res}`);
-            if (fps) parts.push('-r', fps);
-            parts.push(...params);
-            parts.push('"output.mkv"');
-            el.textContent = parts.join(' ');
+            const generation = ++presetPreviewGeneration;
+            clearTimeout(presetPreviewTimer);
+            presetPreviewTimer = setTimeout(async () => {
+                const element = document.getElementById('pe-cmd');
+                if (!element) return;
+                const preset = {
+                    presetName: document.getElementById('pe-name')?.value.trim() || 'Preview',
+                    codec: document.getElementById('pe-codec')?.value.trim() || '',
+                    resolution: document.getElementById('pe-res')?.value || '',
+                    frameRate: document.getElementById('pe-fps')?.value.trim() || '',
+                    crf: Number(document.getElementById('pe-crf')?.value),
+                    additionalParameters: (document.getElementById('pe-params')?.value || '').split('\n').map(s => s.trim()).filter(Boolean)
+                };
+                try {
+                    const res = await fetch('/api/v1/encoding/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset) });
+                    const data = await res.json();
+                    if (generation !== presetPreviewGeneration) return;
+                    element.textContent = res.ok ? 'ffmpeg ' + data.arguments.map(a => /\s/.test(a) ? JSON.stringify(a) : a).join(' ') : data.error;
+                } catch (e) { if (generation === presetPreviewGeneration) element.textContent = 'Command preview unavailable.'; }
+            }, 150);
         }
 
         async function refreshPresetList() {
@@ -3199,7 +3327,8 @@
             try {
                 const res = await fetch('/api/v1/encoding/presets/all');
                 const all = await res.json();
-                const custom = (all || []).filter(p => !p.builtIn);
+                if (!res.ok) throw new Error('Failed to load presets');
+                const custom = all || [];
                 if (custom.length === 0) { list.innerHTML = '<div style="color:var(--text-muted); font-size:0.85em;">No custom presets yet.</div>'; return; }
                 // Reference presets by index instead of serializing the object into the
                 // onclick attribute: a preset name containing a quote or angle bracket
@@ -3207,21 +3336,25 @@
                 window._customPresets = custom;
                 list.innerHTML = custom.map((p, i) => `
                     <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; background:var(--bg-tertiary); border-radius:var(--radius-sm);">
-                        <span style="cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" onclick="loadPresetIntoForm(window._customPresets[${i}])">${escapeHtml(p.presetName)}</span>
-                        <button class="btn-icon danger" title="Delete" onclick="deletePresetEditor('${escapeJsString(p.presetName)}')">&#128465;</button>
+                        <span style="cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" onclick="loadPresetIntoForm(window._customPresets[${i}])">${escapeHtml(p.presetName)}${p.builtIn ? ' (built-in)' : ''}</span>
+                        ${p.builtIn ? '' : `<button class="btn-icon danger" title="Delete" onclick="deletePresetEditor('${escapeJsString(p.presetName)}')">&#128465;</button>`}
                     </div>`).join('');
             } catch (e) { list.innerHTML = '<div style="color:var(--accent-red); font-size:0.85em;">Failed to load presets</div>'; }
         }
 
         function loadPresetIntoForm(p) {
             document.getElementById('pe-original').value = p.presetName || '';
-            document.getElementById('pe-name').value = p.presetName || '';
+            document.getElementById('pe-name').value = p.builtIn ? p.presetName + ' (custom)' : p.presetName || '';
             document.getElementById('pe-codec').value = p.codec || '';
             document.getElementById('pe-fps').value = p.frameRate || '';
             document.getElementById('pe-crf').value = (p.crf ?? 28);
             document.getElementById('pe-params').value = (p.additionalParameters || []).join('\n');
             const res = document.getElementById('pe-res');
-            if (res) res.value = p.resolution || '1920:1080';
+            if (res) {
+                const value = p.resolution || '';
+                if (!Array.from(res.options).some(o => o.value === value)) res.add(new Option(value, value));
+                res.value = value;
+            }
             updatePresetCmd();
         }
 
@@ -3229,7 +3362,7 @@
             const name = document.getElementById('pe-name')?.value.trim();
             if (!name) { showToast('Preset name required', 'error'); return; }
             const crf = parseInt(document.getElementById('pe-crf')?.value, 10);
-            if (isNaN(crf) || crf < 0 || crf > 51) { showToast('CRF must be 0–51', 'error'); return; }
+            if (isNaN(crf)) { showToast('Quality must be a number', 'error'); return; }
             const preset = {
                 presetName: name,
                 codec: document.getElementById('pe-codec')?.value.trim() || '',
@@ -3313,6 +3446,7 @@
         }
 
         function renderSettingsTab() {
+            if (settingsTab === 'scheduler') { renderSchedulerSettings(); return; }
             const content = document.getElementById('settings-content');
             if (!content) return;
             const dl = config?.download || {};
@@ -3346,7 +3480,6 @@
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Crunchyroll Settings</span><span class="settings-section-desc">Crunchyroll-specific options</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Use Beta API</div><div class="setting-desc">Use Crunchyroll's newer (beta) API endpoints</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-beta-api" ${cr.useBetaApi?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Mark as Watched</div><div class="setting-desc">Mark downloaded episodes as watched on Crunchyroll</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mark-watched" ${cr.markAsWatched?'checked':''}><span class="toggle-slider"></span></label></div>
 
                             </div>
@@ -3405,7 +3538,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Delay Between Dubs</div><div class="setting-desc">Apply the delay per dub instead of per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-delay-dub-based" ${dl.downloadDelayUseDubBased?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Cooldown Between Downloads (seconds)</div><div class="setting-desc">Delay before starting next download</div></div><input type="number" class="form-input w-100" id="setting-cooldown" value="${escapeHtmlAttribute(dl.cooldownDelaySeconds||0)}" min="0"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Downloads</div></div><input type="number" class="form-input w-80" id="setting-concurrent" value="${escapeHtmlAttribute(dl.simultaneousDownloads||2)}" min="1" max="10"></div>
-                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input w-80" id="setting-proc-jobs" value="${escapeHtmlAttribute(dl.simultaneousProcessingJobs||2)}" min="1"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input w-80" id="setting-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs ?? 2)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Speed Limit (KB/s)</div><div class="setting-desc">0 = unlimited</div></div><input type="number" class="form-input w-120" id="setting-speed-limit" value="${escapeHtmlAttribute(dl.downloadSpeedLimit||0)}" min="0"></div>
                                 <div class="setting-row"><div><div class="setting-label">Show Speed in Bits (Mbps)</div><div class="setting-desc">Display transfer speeds as Mbps instead of MB/s</div></div><label class="toggle-switch"><input type="checkbox" id="setting-speed-bits" ${dl.downloadSpeedInBits?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Retry Attempts</div></div><input type="number" class="form-input w-80" id="setting-retry" value="${escapeHtmlAttribute(dl.retryAttempts||5)}" min="1"></div>
@@ -3501,7 +3634,7 @@
                                 <div class="setting-row mt-10"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
                                 ${renderListInput('setting-ffmpeg', dl.ffmpegOptions, '-option')}
                                 <div class="setting-row mt-10"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><div style="display:flex; gap:8px; align-items:center;"><select class="form-select mw-200" id="setting-encode-preset" onfocus="loadEncodingPresets()"><option value="">${escapeHtml(dl.encodingPreset || 'None')}</option></select><button class="header-btn" type="button" onclick="openPresetEditor()">Manage Presets</button></div></div>
+                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><div style="display:flex; gap:8px; align-items:center;"><select class="form-select mw-200" id="setting-encode-preset"><option value="${escapeHtmlAttribute(dl.encodingPreset || '')}">${escapeHtml(dl.encodingPreset || 'None')}</option></select><button class="header-btn" type="button" onclick="openPresetEditor()">Manage Presets</button></div></div>
                             </div>
                         </div>
                     `;
@@ -3516,7 +3649,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Persist Queue</div><div class="setting-desc">Always on — the queue is saved to /config so downloads and transcodes resume automatically after a container restart.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-persist-queue" checked disabled><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Wait for Selected Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div><div class="setting-desc">How many downloads may be in the mux/encode phase at once</div></div><input type="number" class="form-input w-80" id="setting-queue-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs||2)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Transcodes</div><div class="setting-desc">Max concurrent transcodes (the CPU-heavy encode step). Downloads/muxing stay parallel; only encoding is limited. Keep at 1 for software encoding; raise it for hardware encoders.</div></div><input type="number" class="form-input w-80" id="setting-queue-transcodes" value="${escapeHtmlAttribute(q.maxSimultaneousTranscodes||1)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Queue File Path</div></div><input type="text" class="form-input w-250" id="setting-queue-path" value="${escapeHtmlAttribute(q.queueFilePath||'Cruncharr/queue.json')}"></div>
@@ -3535,9 +3668,9 @@
                                 <div class="setting-row"><div><div class="setting-label">Check Partial Downloads</div><div class="setting-desc">Track missing dubs/subs on downloaded episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-partial" ${h.checkPartialDownloads!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><label class="setting-label" for="setting-count-sonarr">Count Sonarr</label><div class="setting-desc">Include episodes with files in Sonarr in History’s available counts.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-count-sonarr" ${h.countSonarr ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">History Language</div></div><select class="form-select mw-150" id="setting-history-lang">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${h.lang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div><div class="setting-desc">Set above 0 to run the tracked-show scheduler automatically.</div></div><input type="number" class="form-input w-100" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0"></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div><div class="setting-desc">Fast New Releases checks Crunchyroll's release feed; the other modes refresh tracked History series.</div></div><select class="form-select mw-150" id="setting-history-mode"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto-add Missing Episodes to Queue</div><div class="setting-desc">After each scheduler refresh, queue newly missing tracked episodes using season/series language overrides. Enable Queue → Auto Download if they should start without manual approval.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-auto-add" ${h.autoRefreshAddToQueue!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div><div class="setting-desc">Legacy bulk refresh of ALL History series. 0 disables this. Use the Scheduler tab for individual show subscriptions.</div></div><input type="number" class="form-input w-100" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0"></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div><div class="setting-desc">Fast New Releases checks Crunchyroll's release feed; the other modes refresh tracked History series.</div></div><select class="form-select mw-150" id="setting-history-mode"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>With Missing Episodes</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Bulk-add Missing History Episodes</div><div class="setting-desc">After each legacy bulk refresh, queue missing episodes from ALL History series using season/series language overrides. Enable Queue → Auto Download if they should start without manual approval.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-auto-add" ${h.autoRefreshAddToQueue!==false?'checked':''}><span class="toggle-slider"></span></label></div>
 
                             </div>
                         </div>
@@ -3617,10 +3750,6 @@
                                 <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input w-200" id="setting-flare-host" value="${escapeHtmlAttribute(f.host||'localhost')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input w-100" id="setting-flare-port" value="${escapeHtmlAttribute(f.port||0)}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-ssl" ${f.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-mitm" ${f.mitmEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Host</div></div><input type="text" class="form-input w-200" id="setting-flare-mitm-host" value="${escapeHtmlAttribute(f.mitmHost||'localhost')}"></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Port</div></div><input type="number" class="form-input w-100" id="setting-flare-mitm-port" value="${escapeHtmlAttribute(f.mitmPort||8080)}"></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-mitm-ssl" ${f.mitmUseSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -3641,7 +3770,6 @@
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Add Search Results to History</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-search-history" ${ad.searchAddToHistory!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Single Episode Instant Add</div><div class="setting-desc">Add single-episode URLs to the queue immediately</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-instant-add" ${ad.singleEpisodeInstantAdd!==false?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Default to Search</div><div class="setting-desc">Search by title instead of expecting a URL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-default-search" ${ad.defaultSearchEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -3653,7 +3781,7 @@
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select mw-150" id="setting-theme" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Nebula" ${a.theme==='Nebula'?'selected':''}>Nebula</option><option value="Seerr" ${a.theme==='Seerr'?'selected':''}>Seerr</option><option value="Sonarr" ${a.theme==='Sonarr'?'selected':''}>Sonarr</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input w-80" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input w-300" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Image Path</div><div class="setting-desc">JPG, PNG, WebP or GIF file inside the container (for example /config/background.jpg).</div></div><input type="text" class="form-input w-300" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input w-100" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity ?? 0.5)}" min="0" max="1" step="0.1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input w-100" id="setting-bg-blur" value="${escapeHtmlAttribute(a.backgroundImageBlurRadius ?? 10)}" min="0"></div>
                             </div>
@@ -3711,6 +3839,21 @@
             // (Crunchyroll orange); treat that (and empty) as "no custom accent" so it does
             // NOT override a theme that defines its own accent (e.g. Seerr/Nebula's indigo).
             // Always clear first so switching back to a theme restores its accent.
+            const appearance = config?.appearance || {};
+            let background = document.getElementById('custom-background');
+            if (!background) {
+                background = document.createElement('img'); background.id = 'custom-background';
+                background.alt = ''; background.setAttribute('aria-hidden', 'true');
+                document.body.prepend(background);
+            }
+            background.style.display = appearance.backgroundImagePath ? 'block' : 'none';
+            document.body.classList.toggle('has-custom-background', !!appearance.backgroundImagePath);
+            if (appearance.backgroundImagePath) {
+                const src = '/api/v1/config/background?path=' + encodeURIComponent(appearance.backgroundImagePath);
+                if (background.dataset.source !== src) { background.dataset.source = src; background.src = src; }
+                background.style.opacity = appearance.backgroundImageOpacity ?? 0.5;
+                background.style.filter = `blur(${appearance.backgroundImageBlurRadius ?? 10}px)`;
+            }
             const accentColor = config?.appearance?.accentColor;
             document.documentElement.style.removeProperty('--accent');
             if (accentColor && accentColor.toUpperCase() !== '#F47521') {
@@ -3740,6 +3883,9 @@
         }
 
         async function saveSettings() {
+            if (settingsTab === 'scheduler') return saveSchedulerSettings();
+            const invalid = document.querySelector('#settings-content input:invalid');
+            if (invalid) { invalid.reportValidity(); return false; }
             let newConfig = {};
             
             switch(settingsTab) {
@@ -3757,8 +3903,6 @@
                     
                 case 'crunchyroll': {
                     const cr = {};
-                    const useBeta = getFieldValue('setting-use-beta-api', 'bool');
-                    if (useBeta !== undefined) cr.useBetaApi = useBeta;
                     const markWatched = getFieldValue('setting-mark-watched', 'bool');
                     if (markWatched !== undefined) cr.markAsWatched = markWatched;
                     
@@ -4016,7 +4160,6 @@
                     newConfig.addDownload = {
                         searchAddToHistory: document.getElementById('setting-ad-search-history')?.checked ?? true,
                         singleEpisodeInstantAdd: document.getElementById('setting-ad-instant-add')?.checked ?? true,
-                        defaultSearchEnabled: document.getElementById('setting-ad-default-search')?.checked || false
                     };
                     break;
                     
@@ -4043,13 +4186,13 @@
                         host: document.getElementById('setting-sonarr-host')?.value || null,
                         port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
                         useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
-                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null,
+                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value ?? '',
                         useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
                     };
                     // GET /config returns the placeholder "[configured]" instead of the real key -
                     // only send the key if the user actually typed a new one
                     const sonarrApiKey = document.getElementById('setting-sonarr-apikey')?.value;
-                    if (sonarrApiKey && sonarrApiKey !== '[configured]') newConfig.sonarr.apiKey = sonarrApiKey;
+                    if (sonarrApiKey !== undefined && sonarrApiKey !== '[configured]') newConfig.sonarr.apiKey = sonarrApiKey;
                     break;
                 }
                     
@@ -4063,7 +4206,7 @@
                         }
                     });
                     newConfig.notifications = {
-                        webhookUrl: document.getElementById('setting-webhook-url')?.value || null,
+                        webhookUrl: document.getElementById('setting-webhook-url')?.value ?? '',
                         webhookEnabled: document.getElementById('setting-webhook-enabled')?.checked || false,
                         webhookMethod: document.getElementById('setting-webhook-method')?.value || 'POST',
                         webhookContentType: document.getElementById('setting-webhook-ct')?.value || 'application/json',
@@ -4081,14 +4224,14 @@
                         enabled: document.getElementById('setting-proxy-enabled')?.checked || false,
                         allTraffic: document.getElementById('setting-proxy-all-traffic')?.checked ?? true,
                         socks: document.getElementById('setting-proxy-socks')?.checked || false,
-                        host: document.getElementById('setting-proxy-host')?.value || null,
+                        host: document.getElementById('setting-proxy-host')?.value ?? '',
                         port: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
-                        username: document.getElementById('setting-proxy-user')?.value || null
+                        username: document.getElementById('setting-proxy-user')?.value ?? ''
                     };
                     // GET /config returns the placeholder "[configured]" instead of the real password -
                     // only send it if the user actually typed a new one
                     const proxyPassword = document.getElementById('setting-proxy-pass')?.value;
-                    if (proxyPassword && proxyPassword !== '[configured]') newConfig.proxy.password = proxyPassword;
+                    if (proxyPassword !== undefined && proxyPassword !== '[configured]') newConfig.proxy.password = proxyPassword;
                     break;
                 }
                     
@@ -4098,10 +4241,6 @@
                         host: document.getElementById('setting-flare-host')?.value || 'localhost',
                         port: parseInt(document.getElementById('setting-flare-port')?.value) || 0,
                         useSsl: document.getElementById('setting-flare-ssl')?.checked || false,
-                        mitmEnabled: document.getElementById('setting-flare-mitm')?.checked || false,
-                        mitmHost: document.getElementById('setting-flare-mitm-host')?.value || 'localhost',
-                        mitmPort: parseInt(document.getElementById('setting-flare-mitm-port')?.value) || 8080,
-                        mitmUseSsl: document.getElementById('setting-flare-mitm-ssl')?.checked || false
                     };
                     break;
                     
@@ -4111,8 +4250,8 @@
                     const bgBlur = parseFloat(document.getElementById('setting-bg-blur')?.value);
                     newConfig.appearance = {
                         theme: document.getElementById('setting-theme')?.value || 'System',
-                        accentColor: document.getElementById('setting-accent')?.value || null,
-                        backgroundImagePath: document.getElementById('setting-bg-path')?.value || null,
+                        accentColor: document.getElementById('setting-accent')?.value ?? '',
+                        backgroundImagePath: document.getElementById('setting-bg-path')?.value ?? '',
                         backgroundImageOpacity: isNaN(bgOpacity) ? 0.5 : bgOpacity,
                         backgroundImageBlurRadius: isNaN(bgBlur) ? 10 : bgBlur
                     };
@@ -4132,16 +4271,13 @@
                 });
                 if (res.ok) {
                     showToast('Settings saved', 'success');
-                    // Deep merge: merge each section's properties individually
-                    // to avoid overwriting properties from other tabs
-                    Object.keys(newConfig).forEach(section => {
-                        config[section] = config[section] || {};
-                        Object.assign(config[section], newConfig[section]);
-                    });
+                    const saved = await fetch('/api/v1/config');
+                    if (saved.ok) config = await saved.json();
                     applyTheme();
                     return true;
                 }
-                showToast('Failed to save settings', 'error');
+                const failure = await res.json().catch(() => ({}));
+                showToast(failure.message || failure.error || 'Failed to save settings', 'error');
                 return false;
             } catch (e) {
                 showToast('Error saving settings', 'error');
@@ -4154,6 +4290,7 @@
         // saveSettings() - which only collects+POSTs THIS tab's fields, so the server
         // merge leaves every other tab untouched. Finally reload the real config.
         async function resetCurrentTab() {
+            if (settingsTab === 'scheduler') { await schedulerRequest('settings', 'POST', { enabled: true, intervalMinutes: 15 }); await renderSchedulerSettings(); return; }
             const tabName = settingsTab;
             if (!confirm('Reset the "' + tabName + '" tab to default settings?')) return;
             clearTimeout(window._settingsSaveTimer);
@@ -4184,6 +4321,7 @@
                 if (window._settingsSavePromise) await window._settingsSavePromise;
                 const res = await fetch('/api/v1/config/reset', { method: 'POST' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
+                await schedulerRequest('settings', 'POST', { enabled: true, intervalMinutes: 15 });
                 await fetchConfig();
                 renderSettingsTab();
                 showToast('All settings reset to default', 'success');
@@ -4194,6 +4332,7 @@
         }
 
         async function testWebhook() {
+            if (!await startSettingsSave()) return;
             const url = document.getElementById('setting-webhook-url')?.value;
             if (!url) {
                 showToast('Webhook URL is required', 'error');
@@ -4778,6 +4917,7 @@
                     <div class="history-detail-info">
                         <div class="history-detail-title">${escapeHtml(series.seriesTitle || 'Unknown')}</div>
                         <div class="history-poster-meta" role="status">${historySonarrSummary(series)}</div>
+                        <button class="header-btn" data-schedule-series="${escapeHtmlAttribute(series.seriesId)}" onclick="toggleSeriesSchedule(this)">Schedule new episodes</button>
                         <div class="history-detail-meta">${escapeHtml(series.seriesDescription || '')}</div>
                         <div class="mt-10">
                             <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Episodes:</div>
@@ -4863,6 +5003,7 @@
             }).join('');
             
             body.innerHTML = html;
+            updateScheduleButtons();
         }
         
         function toggleSeasonCollapse(header) {
@@ -5221,7 +5362,7 @@
                 host: document.getElementById('setting-sonarr-host')?.value || null,
                 port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
                 useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
-                urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null
+                urlBase: document.getElementById('setting-sonarr-urlbase')?.value ?? ''
             };
             // Only send the key if the user typed a real one; otherwise the server reuses the stored key.
             if (apiKeyVal && apiKeyVal !== '[configured]') payload.apiKey = apiKeyVal;

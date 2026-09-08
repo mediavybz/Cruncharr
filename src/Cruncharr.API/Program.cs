@@ -139,6 +139,7 @@ public class Program
             client.Timeout = TimeSpan.FromSeconds(30);
         })
         .ConfigurePrimaryHttpMessageHandler(WebhookUrlValidator.CreateHttpMessageHandler);
+        builder.Services.AddSingleton<ScheduledDownloadsService>();
         builder.Services.AddSingleton<AutoDownloadSchedulerService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<AutoDownloadSchedulerService>());
         builder.Services.AddSingleton<UpdateCheckerService>();

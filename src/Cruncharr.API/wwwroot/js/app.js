@@ -73,7 +73,10 @@
         })();
 
         async function readQueueAdmission(response) {
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.message || error.error || `HTTP ${response.status}`);
+            }
             try {
                 const data = await response.json();
                 return { added: data.added !== false, data };
@@ -120,7 +123,7 @@
         let selectBrowseResultTimeout = null;
         let selectBrowseGeneration = 0;
         let globalSearchDebounce = null; // top-bar search debounce timer
-        let globalSearchAbort = null;    // top-bar search in-flight request
+        const globalSearchGate = CruncharrCalendarRequests.createLatestRequestGate();
         let globalSearchResults = [];    // last top-bar search results
         let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
         let browseSeriesPromise = null;  // de-duplicates background/visible catalog requests
@@ -147,7 +150,7 @@
         const HISTORY_SEARCH_DEBOUNCE_MS = 200;
         const TOAST_DISPLAY_DURATION_MS = 3000;
         const BROWSE_RENDER_BATCH_SIZE = 96;
-        const BROWSE_CACHE_KEY = 'cruncharrBrowseCatalogV1';
+        const BROWSE_CACHE_KEY = 'cruncharrBrowseCatalogV2';
         const BROWSE_CACHE_TTL_MS = 15 * 60 * 1000;
         const ACTIVE_DROPDOWN_LISTENERS = new Map(); // id -> listener function
 
@@ -636,17 +639,62 @@
         }
 
         // ===== Top-bar global search (Seerr-style) =====
-        function onGlobalSearchInput(value) {
+        function closeGlobalSearch() {
             clearTimeout(globalSearchDebounce);
+            globalSearchGate.cancel();
+            globalSearchResults = [];
             const popup = document.getElementById('global-search-popup');
-            if (!value.trim()) {
-                if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
+            if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
+        }
+
+        function localSearchResults(query) {
+            const text = query.toLowerCase();
+            const terms = text.split(/\s+/).filter(Boolean);
+            const rank = series => {
+                const title = (series.title || '').toLowerCase();
+                return title === text ? 0 : title.startsWith(text) ? 1 : title.includes(text) ? 2 : 3;
+            };
+            return allBrowseSeries
+                .filter(series => terms.every(term => (series.title || '').toLowerCase().includes(term)))
+                .sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title))
+                .slice(0, 30);
+        }
+
+        function renderGlobalSearchResults(results, emptyMessage = 'No results found') {
+            const popup = document.getElementById('global-search-popup');
+            if (!popup) return;
+            globalSearchResults = results;
+            popup.style.display = 'block';
+            if (results.length === 0) {
+                popup.innerHTML = `<div style="padding:14px; color:var(--text-muted);">${escapeHtml(emptyMessage)}</div>`;
                 return;
             }
-            globalSearchDebounce = setTimeout(() => doGlobalSearch(value.trim()), 350);
+            popup.innerHTML = globalSearchResults.map(s => `
+                <div class="search-result-item" onclick="selectGlobalResult('${escapeJsString(s.id)}')">
+                    <div class="search-result-poster">
+                        ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                    </div>
+                    <div class="search-result-info">
+                        <div class="search-result-title">${escapeHtml(s.title)}</div>
+                        <div class="search-result-type">${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
+                        <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function onGlobalSearchInput(value) {
+            closeGlobalSearch();
+            const query = value.trim();
+            if (!query) return;
+            if (!browseCatalogLoaded) restoreBrowseCatalog();
+            // The prefetched catalog gives immediate matches while remote search fills gaps.
+            renderGlobalSearchResults(localSearchResults(query), 'Searching…');
+            globalSearchDebounce = setTimeout(() => doGlobalSearch(query), 200);
         }
 
         function onGlobalSearchEnter() {
+            clearTimeout(globalSearchDebounce);
             const input = document.getElementById('global-search');
             if (input && input.value.trim()) doGlobalSearch(input.value.trim());
         }
@@ -654,55 +702,37 @@
         async function doGlobalSearch(query) {
             const popup = document.getElementById('global-search-popup');
             if (!popup) return;
-            if (globalSearchAbort) globalSearchAbort.abort();
-            const controller = new AbortController();
-            globalSearchAbort = controller;
-            popup.innerHTML = '<div style="padding:14px; color:var(--text-muted);">Searching…</div>';
-            popup.style.display = 'block';
+            const request = globalSearchGate.begin();
+            const local = localSearchResults(query);
+            renderGlobalSearchResults(local, 'Searching…');
             try {
-                const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`, { signal: controller.signal });
+                const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`, { signal: request.signal });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                globalSearchResults = (await res.json()) || [];
-                if (globalSearchResults.length === 0) {
-                    popup.innerHTML = '<div style="padding:14px; color:var(--text-muted);">No results found</div>';
-                    return;
-                }
-                popup.innerHTML = globalSearchResults.map(s => `
-                    <div class="search-result-item" onclick="selectGlobalResult('${escapeJsString(s.id)}')">
-                        <div class="search-result-poster">
-                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
-                        </div>
-                        <div class="search-result-info">
-                            <div class="search-result-title">${escapeHtml(s.title)}</div>
-                            <div class="search-result-type">${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
-                            <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
-                        </div>
-                    </div>
-                `).join('');
+                const results = await res.json();
+                if (!globalSearchGate.isCurrent(request)) return;
+                if (!Array.isArray(results)) throw new Error('Invalid search response');
+                const merged = [...results, ...localSearchResults(query)];
+                renderGlobalSearchResults(Array.from(new Map(merged.map(series => [series.id, series])).values()).slice(0, 50));
             } catch (e) {
-                if (e.name === 'AbortError') return;
-                popup.innerHTML = '<div style="padding:14px; color:var(--accent-red);">Search failed</div>';
+                if (!globalSearchGate.isCurrent(request) || e.name === 'AbortError') return;
+                const cached = localSearchResults(query);
+                renderGlobalSearchResults(cached, 'Search unavailable. Please try again.');
+                if (cached.length) popup.insertAdjacentHTML('beforeend', '<div class="hint" style="padding:14px;">Showing cached matches. Live search is unavailable.</div>');
             } finally {
-                if (globalSearchAbort === controller) globalSearchAbort = null;
+                globalSearchGate.finish(request);
             }
         }
 
         function selectGlobalResult(seriesId) {
-            const popup = document.getElementById('global-search-popup');
-            if (popup) { popup.style.display = 'none'; popup.innerHTML = ''; }
+            closeGlobalSearch();
             const input = document.getElementById('global-search');
             if (input) input.value = '';
-            // Reuse the Browse flow: navigate to Add Download and load the series' episodes.
             selectBrowseResult(seriesId);
         }
 
-        // Close the global search dropdown when clicking outside it.
         document.addEventListener('click', (e) => {
             const wrap = document.querySelector('.global-search');
-            const popup = document.getElementById('global-search-popup');
-            if (wrap && popup && !wrap.contains(e.target)) {
-                popup.style.display = 'none';
-            }
+            if (wrap && !wrap.contains(e.target)) closeGlobalSearch();
         });
 
         async function onSeasonChange(seasonId) {
@@ -1675,6 +1705,8 @@
                 .map(series => ({
                     id: series.id,
                     title: series.title,
+                    description: series.description,
+                    contentType: series.contentType,
                     coverArtUrl: series.coverArtUrl,
                     thumbnailUrl: series.thumbnailUrl,
                     episodeCount: series.episodeCount,
@@ -1690,7 +1722,7 @@
                 const parsed = JSON.parse(cached);
                 const cachedAt = Number(parsed?.cachedAt);
                 if (!Number.isFinite(cachedAt) || Date.now() - cachedAt > BROWSE_CACHE_TTL_MS ||
-                    !Array.isArray(parsed?.series)) {
+                    !Array.isArray(parsed?.series) || parsed.series.length === 0) {
                     removeSessionStorage(BROWSE_CACHE_KEY);
                     return false;
                 }
@@ -1711,6 +1743,7 @@
                     const res = await fetch('/api/v1/series/all');
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
+                    if (!Array.isArray(data) || data.length === 0) throw new Error('Catalog is empty. Please retry.');
                     allBrowseSeries = compactBrowseSeries(data);
                     browseCatalogLoaded = true;
                     writeSessionStorage(BROWSE_CACHE_KEY, JSON.stringify({
@@ -1739,6 +1772,7 @@
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load series</div>
+                        <button class="header-btn" onclick="fetchAllSeries()">Retry</button>
                     </div>`;
             }
         }
@@ -2044,22 +2078,16 @@
 
         // ================== SEASONAL ==================
         let seasonalSeason = null, seasonalYear = null;
-        // Map current month to the anime season (Winter Dec-Feb, Spring Mar-May, etc.).
-        function currentAnimeSeason() {
-            const m = new Date().getMonth();
-            if (m === 11 || m <= 1) return 'winter';
-            if (m <= 4) return 'spring';
-            if (m <= 7) return 'summer';
-            return 'fall';
+        // Catalog seasons are calendar quarters: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec.
+        function currentAnimeSeason(date = new Date()) {
+            return ['winter', 'spring', 'summer', 'fall'][Math.floor(date.getMonth() / 3)];
         }
 
         function renderSeasonal(container) {
             if (!seasonalSeason) {
                 const now = new Date();
-                seasonalSeason = currentAnimeSeason();
-                // Anime Winter spans Dec-Feb but is named for Jan/Feb's year. In December,
-                // default to the upcoming Winter instead of the past January season.
-                seasonalYear = now.getFullYear() + (now.getMonth() === 11 ? 1 : 0);
+                seasonalSeason = currentAnimeSeason(now);
+                seasonalYear = now.getFullYear();
             }
             const seasons = [['winter','Winter'],['spring','Spring'],['summer','Summer'],['fall','Fall']];
             const thisYear = new Date().getFullYear();

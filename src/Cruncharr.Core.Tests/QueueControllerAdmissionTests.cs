@@ -26,7 +26,8 @@ public class QueueControllerAdmissionTests
             Mock.Of<IHistoryService>(),
             Mock.Of<ILanguagePrefsService>(),
             new CruncharrConfig(),
-            NullLogger<QueueController>.Instance);
+            NullLogger<QueueController>.Instance,
+            Mock.Of<ICrunchyrollAuthService>(auth => auth.IsAuthenticated == true && auth.Profile == new CrProfile { HasPremium = true }));
 
         var response = Assert.IsType<OkObjectResult>(controller.AddToQueue(new QueueRequest
         {
@@ -62,7 +63,8 @@ public class QueueControllerAdmissionTests
             Mock.Of<IHistoryService>(),
             preferences.Object,
             new CruncharrConfig(),
-            NullLogger<QueueController>.Instance);
+            NullLogger<QueueController>.Instance,
+            Mock.Of<ICrunchyrollAuthService>(auth => auth.IsAuthenticated == true && auth.Profile == new CrProfile { HasPremium = true }));
 
         var response = Assert.IsType<OkObjectResult>(controller.AddToQueue(new QueueRequest
         {

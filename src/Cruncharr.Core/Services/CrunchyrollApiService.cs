@@ -67,9 +67,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         // the bearer token, so search is forced to beta exactly like GetAllSeries/Browse —
         // the incoming useBetaApi flag (the controller's "premium" default = false) would
         // otherwise route to the broken www host and every search came back empty.
-        if (!await EnsureAuthenticatedAsync(true, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
-            return new List<SeriesInfo>();
+            throw new HttpRequestException("Crunchyroll search is unavailable. Please try again.");
         }
 
         var directSeriesId = ExtractDirectSeriesId(query);
@@ -98,17 +98,17 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 var start = page * pageSize;
                 var request = HttpClientWrapper.CreateRequest(BuildSearchUri(query, pageSize, start).ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
-                var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+                var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
                 if (!isOk)
                 {
                     _logger?.LogError("Search page {Page} failed: {Error}", page + 1, error);
-                    if (page == 0) return [];
+                    if (page == 0) throw new HttpRequestException("Crunchyroll search is unavailable. Please try again.");
                     break;
                 }
 
                 var result = JsonConvert.DeserializeObject<CrSearchResult>(content);
-                if (result?.Data == null) break;
+                if (result?.Data == null) throw new JsonException("Invalid Crunchyroll search response.");
                 groups.AddRange(result.Data);
 
                 if (!SearchHasNextPage(result, start)) break;
@@ -129,7 +129,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to parse search results");
-            return new List<SeriesInfo>();
+            throw new HttpRequestException("Crunchyroll search is unavailable. Please try again.");
         }
     }
 
@@ -222,7 +222,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     {
         _logger?.LogInformation("Getting series: {SeriesId}", seriesId);
 
-        if (!await EnsureAuthenticatedAsync(useBetaApi, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
             return null;
         }
@@ -241,14 +241,14 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             }
         }
 
-        var uriBuilder = new UriBuilder($"{ApiUrls.Cms(useBetaApi)}/series/{id}")
+        var uriBuilder = new UriBuilder($"{ApiUrls.Cms(true)}/series/{id}")
         {
             Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
         };
 
         var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
 
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk)
         {
@@ -315,7 +315,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     {
         _logger?.LogInformation("Getting episode: {EpisodeId}", episodeId);
 
-        if (!await EnsureAuthenticatedAsync(useBetaApi, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
             return null;
         }
@@ -323,12 +323,12 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         var id = ExtractIdFromUrl(episodeId);
 
         var request = HttpClientWrapper.CreateRequest(
-            $"{ApiUrls.Cms(useBetaApi)}/episodes/{id}",
+            $"{ApiUrls.Cms(true)}/episodes/{id}",
             HttpMethod.Get,
             true,
             _authService.Token?.access_token);
 
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk)
         {
@@ -437,7 +437,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
             var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
 
-            var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+            var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
             if (!isOk)
             {
@@ -546,7 +546,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     {
         _logger?.LogInformation("Parsing episode by ID: {EpisodeId}, locale: {Locale}", id, crLocale);
 
-        if (!await EnsureAuthenticatedAsync(true, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
             return null;
         }
@@ -568,7 +568,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         };
 
         var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk)
         {
@@ -610,7 +610,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                             };
 
                             var checkRequest = HttpClientWrapper.CreateRequest(checkUriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
-                            var (checkOk, _, _) = await _httpClient.SendRequestAsync(checkRequest);
+                            var (checkOk, _, _) = await _httpClient.SendRequestAsync(checkRequest, cancellationToken: cancellationToken);
 
                             if (!checkOk)
                             {
@@ -685,7 +685,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             true,
             _authService.Token.access_token);
 
-        var (isOk, _, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, _, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk)
         {
@@ -699,18 +699,18 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
     private async Task<List<SeasonInfo>> GetSeasonsAsync(string seriesId, bool useBetaApi, CancellationToken cancellationToken = default)
     {
-        if (!await EnsureAuthenticatedAsync(useBetaApi, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
             return new List<SeasonInfo>();
         }
 
         var request = HttpClientWrapper.CreateRequest(
-            $"{ApiUrls.Cms(useBetaApi)}/series/{seriesId}/seasons",
+            $"{ApiUrls.Cms(true)}/series/{seriesId}/seasons",
             HttpMethod.Get,
             true,
             _authService.Token?.access_token);
 
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk) return new List<SeasonInfo>();
 
@@ -735,7 +735,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
     private async Task<List<EpisodeInfo>> GetSeasonEpisodesAsync(string seasonId, bool useBetaApi, string? crLocale = null, bool forcedLang = false, CancellationToken cancellationToken = default)
     {
-        if (!await EnsureAuthenticatedAsync(useBetaApi, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
             return new List<EpisodeInfo>();
         }
@@ -751,14 +751,14 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             }
         }
 
-        var uriBuilder = new UriBuilder($"{ApiUrls.Cms(useBetaApi)}/seasons/{seasonId}/episodes")
+        var uriBuilder = new UriBuilder($"{ApiUrls.Cms(true)}/seasons/{seasonId}/episodes")
         {
             Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
         };
 
         var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
 
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk) return new List<EpisodeInfo>();
 
@@ -806,7 +806,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
     public async Task<List<SeasonInfo>> ParseSeriesByIdAsync(string id, string? crLocale, bool forced = false, CancellationToken cancellationToken = default)
     {
-        if (!await EnsureAuthenticatedAsync(true, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
             return new List<SeasonInfo>();
         }
@@ -829,7 +829,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         };
 
         var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk)
         {
@@ -1336,7 +1336,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     // Helper to get raw season episodes for ListSeriesId
     private async Task<List<CrEpisodeDetail>> GetSeasonEpisodesRawAsync(string seasonId, string? crLocale, bool forcedLang, CancellationToken cancellationToken)
     {
-        if (!await EnsureAuthenticatedAsync(true, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
             return new List<CrEpisodeDetail>();
         }
@@ -1358,7 +1358,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         };
 
         var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk)
         {
@@ -1403,13 +1403,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             // RefreshTokenAsync is synchronized and a no-op while the token is fresh, so it is
             // safe as a preflight; without it the browse request goes out with a stale bearer
             // token and fails with 401, which emptied the calendar's Crunchyroll episodes.
-            await _authService.RefreshTokenAsync(true, cancellationToken);
+            var refreshed = await _authService.RefreshTokenAsync(true, cancellationToken);
             // A rejected (revoked) refresh token drops the dead session inside
             // RefreshTokenAsync - fall through and authenticate anonymously so browse,
             // which works with a guest token, keeps serving the calendar.
             if (_authService.Token?.access_token != null)
             {
-                return true;
+                return refreshed;
             }
         }
         await _authService.AuthenticateAsync(true, cancellationToken);
@@ -1576,9 +1576,9 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     {
         _logger?.LogInformation("Getting all series");
 
-        if (!await EnsureAuthenticatedAsync(true, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
-            return new List<SeriesInfo>();
+            throw new HttpRequestException("Crunchyroll catalog is unavailable. Please try again.");
         }
 
         var complete = new List<SeriesInfo>();
@@ -1589,7 +1589,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         {
             var queryParams = new NameValueCollection{
                 { "start", i.ToString() },
-                { "n", "50" },
+                { "n", "100" },
+                { "type", "series" },
                 { "sort_by", "alphabetical" }
             };
 
@@ -1604,18 +1605,19 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             };
 
             var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
-            var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+            var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
             if (!isOk)
             {
                 _logger?.LogError("GetAllSeries request failed: {Error}", error);
-                return complete;
+                throw new HttpRequestException("Crunchyroll catalog is unavailable. Please try again.");
             }
 
             try
             {
                 var result = JsonConvert.DeserializeObject<CrBrowseSeriesBase>(content);
-                if (result?.Data == null) break;
+                if (result?.Data == null || (result.Data.Count == 0 && complete.Count < result.Total))
+                    throw new JsonException("Incomplete Crunchyroll catalog response.");
 
                 total = result.Total;
                 foreach (var item in result.Data)
@@ -1637,10 +1639,10 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Failed to parse GetAllSeries results");
-                break;
+                throw;
             }
 
-            i += 50;
+            i += 100;
         } while (i < total);
 
         return complete;
@@ -1790,7 +1792,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
     private async Task<List<SeriesInfo>> GetSeasonalFromCrunchyrollAsync(string season, string year, string? crLocale, CancellationToken cancellationToken)
     {
-        if (!await EnsureAuthenticatedAsync(true, cancellationToken))
+        if (!await EnsureTokenAsync(cancellationToken))
         {
             return new List<SeriesInfo>();
         }
@@ -1812,7 +1814,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         };
 
         var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, _authService.Token?.access_token);
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk)
         {
@@ -2081,7 +2083,34 @@ public class CrSearchItem
     public string Id { get; set; } = "";
     public string Title { get; set; } = "";
     public string Description { get; set; } = "";
+    [JsonConverter(typeof(SearchImagesConverter))]
     public Dictionary<string, List<List<object>>>? Images { get; set; }
+}
+
+// Music search results use flat thumbnail arrays; series use arrays of size variants.
+// Normalize both before deserialization so an unrelated music hit cannot break search.
+public sealed class SearchImagesConverter : JsonConverter<Dictionary<string, List<List<object>>>>
+{
+    public override bool CanWrite => false;
+
+    public override Dictionary<string, List<List<object>>>? ReadJson(JsonReader reader, Type objectType,
+        Dictionary<string, List<List<object>>>? existingValue, bool hasExistingValue, JsonSerializer serializer)
+    {
+        var token = JToken.Load(reader);
+        if (token is not JObject images) return null;
+        var result = new Dictionary<string, List<List<object>>>();
+        foreach (var property in images.Properties())
+        {
+            if (property.Value is not JArray variants) continue;
+            result[property.Name] = variants
+                .Select(variant => variant is JArray sizes ? sizes.Cast<object>().ToList() : new List<object> { variant })
+                .ToList();
+        }
+        return result;
+    }
+
+    public override void WriteJson(JsonWriter writer, Dictionary<string, List<List<object>>>? value, JsonSerializer serializer) =>
+        throw new NotSupportedException();
 }
 
 // Browse series models for GetAllSeries/GetSeasonalSeries

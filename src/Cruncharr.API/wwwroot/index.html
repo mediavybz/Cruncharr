@@ -61,15 +61,15 @@ MAINTENANCE NOTES:
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="/css/app.css?v=1.0.74">
-    <script defer src="/js/calendar-request-state.js?v=1.0.74"></script>
-    <script defer src="/js/app.js?v=1.0.74"></script>
+    <link rel="stylesheet" href="/css/app.css?v=1.0.75">
+    <script defer src="/js/calendar-request-state.js?v=1.0.75"></script>
+    <script defer src="/js/app.js?v=1.0.75"></script>
 </head>
 <body>
     <div id="loading-splash">
         <img src="/logo.png?v=2" alt="Cruncharr" class="splash-logo-img">
         <div class="splash-spinner"></div>
-        <div class="splash-text">Loading CrunchArr…</div>
+        <div class="splash-text">Loading CrunchArr&hellip;</div>
     </div>
     <div class="app-container">
         <div class="topbar-profile hidden" id="topbar-profile" onclick="navigateTo('account')" title="Account">
@@ -137,7 +137,7 @@ MAINTENANCE NOTES:
                 <a class="github-link" href="https://codeberg.org/YomuLoad/CRD/releases" target="_blank" rel="noopener noreferrer" title="Cruncharr on Codeberg" aria-label="Cruncharr on Codeberg">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.955.49A12 12 0 0 0 0 12.49a12 12 0 0 0 1.832 6.373L11.838 5.928a.187.14 0 0 1 .324 0l10.006 12.935A12 12 0 0 0 24 12.49a12 12 0 0 0-12-12 12 12 0 0 0-.045 0zm.375 8.912l4.157 12.481a12 12 0 0 0 3.755-2.271L12.4 9.402a.037.037 0 0 0-.07 0z"/></svg>
                 </a>
-                <!-- Placeholder: no destination yet — replace href when a donation page is set up. -->
+                <!-- Placeholder: no destination yet &mdash; replace href when a donation page is set up. -->
                 <a class="github-link" href="#" onclick="return false;" title="Buy me a coffee (coming soon)" aria-label="Buy me a coffee">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.9 2-2V5c0-1.11-.89-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z"/></svg>
                 </a>
@@ -150,7 +150,7 @@ MAINTENANCE NOTES:
                     <span>&#128269;</span>
                     <input type="text" id="global-search" placeholder="Search Movies &amp; Series..." autocomplete="off"
                            oninput="onGlobalSearchInput(this.value)"
-                           onkeydown="if(event.key==='Enter'){event.preventDefault();onGlobalSearchEnter();}">
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();onGlobalSearchEnter();}else if(event.key==='Escape'){closeGlobalSearch();this.blur();}">
                     <div class="search-popup" id="global-search-popup" style="display:none;"></div>
                 </div>
             </header>

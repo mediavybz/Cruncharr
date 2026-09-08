@@ -218,9 +218,9 @@ public class HttpClientWrapper : IDisposable
         }
     }
 
-    public async Task<(bool IsOk, string ResponseContent, string Error)> SendRequestAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true)
+    public async Task<(bool IsOk, string ResponseContent, string Error)> SendRequestAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true, CancellationToken cancellationToken = default)
     {
-        var result = await SendRequestWithHeadersAsync(request, suppressError, attachCookies);
+        var result = await SendRequestWithHeadersAsync(request, suppressError, attachCookies, cancellationToken);
         return (result.IsOk, result.ResponseContent, result.Error);
     }
 
@@ -257,6 +257,10 @@ public class HttpClientWrapper : IDisposable
                 CaptureResponseCookies(response, request.RequestUri);
             }
             return (true, content, "", headers);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception e)
         {

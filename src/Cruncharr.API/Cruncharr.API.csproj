@@ -6,9 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-    <AssemblyVersion>1.0.79.0</AssemblyVersion>
-    <FileVersion>1.0.79.0</FileVersion>
-    <Version>1.0.79</Version>
+    <AssemblyVersion>1.0.80.0</AssemblyVersion>
+    <FileVersion>1.0.80.0</FileVersion>
+    <Version>1.0.80</Version>
   </PropertyGroup>
 
   <ItemGroup>

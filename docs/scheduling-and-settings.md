@@ -26,7 +26,7 @@ History entries. Its default is 0 (disabled). Its auto-add option can queue miss
 back-catalog episodes; use Scheduler subscriptions for new releases only. Adding a
 subscription does not enable the bulk operation.
 
-## Settings fixes in 1.0.80
+## Settings fixes in 1.0.81
 
 - Settings autosave while typing and before navigation. Invalid or failed saves do
   not partially update runtime configuration. Optional text fields can be cleared.

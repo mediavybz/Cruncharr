@@ -6,10 +6,10 @@ namespace Cruncharr.API.Controllers;
 
 [ApiController]
 [Route("api/v1/library")]
-public class LibraryController(ISonarrService sonarr, IHistoryService history, CruncharrConfig config, ILogger<LibraryController> logger) : ControllerBase
+public class LibraryController(ISonarrService sonarr, IHistoryService history, CruncharrConfig config, ILogger<LibraryController> logger, ICrunchyrollApiService? api = null) : ControllerBase
 {
     [HttpGet("sonarr")]
-    public async Task<IActionResult> GetSonarrLibrary(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetSonarrLibrary(CancellationToken cancellationToken, [FromQuery] bool verifyTitles = true)
     {
         if (!config.Sonarr.Enabled) return Ok(new { Enabled = false, Series = Array.Empty<LibrarySeriesResponse>() });
         try
@@ -18,16 +18,52 @@ public class LibraryController(ISonarrService sonarr, IHistoryService history, C
             var tracked = await history.GetHistorySeriesAsync();
             var idsBySonarr = tracked.Where(entry => !string.IsNullOrEmpty(entry.SonarrSeriesId) && !string.IsNullOrEmpty(entry.SeriesId))
                 .ToLookup(entry => entry.SonarrSeriesId!, entry => entry.SeriesId!);
+            var catalogIds = new Dictionary<int, List<string>>();
+            var matchingUnavailable = false;
+            if (api != null && verifyTitles)
+            {
+                try
+                {
+                    var index = new SonarrTitleIndex(series);
+                    foreach (var entry in await api.GetAllSeriesAsync(cancellationToken: cancellationToken))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (string.IsNullOrWhiteSpace(entry.Title) || string.IsNullOrEmpty(entry.Id)) continue;
+                        var match = index.FindExact(entry.Title);
+                        if (match == null && index.Exact(entry.Title).Count == 0 && index.Candidates(entry.Title).Count > 0)
+                        {
+                            if (entry.EpisodeCount == 0) continue;
+                            try { match = await sonarr.ResolveSeriesAsync(entry.Id, entry.Title, config.Sonarr, cancellationToken); }
+                            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                            catch (Exception ex)
+                            {
+                                matchingUnavailable = true;
+                                logger.LogWarning(ex, "Could not verify Sonarr identity for {Title}", entry.Title);
+                            }
+                        }
+                        if (match == null) continue;
+                        if (!catalogIds.TryGetValue(match.Id, out var ids)) catalogIds[match.Id] = ids = [];
+                        ids.Add(entry.Id);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    matchingUnavailable = true;
+                    logger.LogWarning(ex, "Could not finish verifying catalog titles against Sonarr");
+                }
+            }
             return Ok(new
             {
                 Enabled = true,
+                MatchingUnavailable = matchingUnavailable,
                 Series = series.Select(item => new LibrarySeriesResponse
                 {
                     SonarrSeriesId = item.Id,
                     Title = item.Title ?? "",
                     Titles = new[] { item.Title, item.CleanTitle }.Concat(item.AlternateTitles?.Select(title => title.Title) ?? [])
                         .Where(title => !string.IsNullOrWhiteSpace(title)).Select(title => title!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                    CrunchyrollSeriesIds = idsBySonarr[item.Id.ToString()].Distinct().ToList(),
+                    CrunchyrollSeriesIds = idsBySonarr[item.Id.ToString()].Concat(catalogIds.GetValueOrDefault(item.Id) ?? []).Distinct().ToList(),
                     EpisodeFileCount = item.Statistics?.EpisodeFileCount,
                     EpisodeCount = item.Statistics?.EpisodeCount
                 }).ToList()

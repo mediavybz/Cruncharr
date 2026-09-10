@@ -887,6 +887,24 @@ public class HistoryService : IHistoryService, IDisposable
             return new SonarrMatchResult(0, 0, 0);
         }
 
+        // Resolve network-dependent aliases outside the History lock, using the same verified
+        // identity as Browse and download naming. Preserve explicit saved links.
+        var titleIndex = new SonarrTitleIndex(sonarrSeries);
+        var resolvedTitles = new Dictionary<(string? Id, string Title), SonarrSeries?>();
+        foreach (var entry in await GetHistorySeriesAsync())
+        {
+            var title = entry.SeriesTitle ?? "";
+            if (!string.IsNullOrEmpty(entry.SonarrSeriesId) || resolvedTitles.ContainsKey((entry.SeriesId, title))) continue;
+            var match = titleIndex.FindExact(title);
+            if (match == null && titleIndex.Exact(title).Count == 0 && titleIndex.Candidates(title).Count > 0)
+            {
+                // Propagate lookup outages so a release check retries instead of treating an
+                // unverified owned series as missing and downloading duplicates.
+                match = await _sonarrService.ResolveSeriesAsync(entry.SeriesId ?? "", title, _config.Sonarr);
+            }
+            resolvedTitles[(entry.SeriesId, title)] = match;
+        }
+
         var sonarrSeriesById = updateAll
             ? sonarrSeries.ToDictionary(series => series.Id.ToString())
             : [];
@@ -903,7 +921,7 @@ public class HistoryService : IHistoryService, IDisposable
 
                 if (string.IsNullOrEmpty(historySeries.SonarrSeriesId))
                 {
-                    var matchedSeries = FindClosestMatch(historySeries.SeriesTitle ?? string.Empty, sonarrSeries);
+                    var matchedSeries = resolvedTitles.GetValueOrDefault((historySeries.SeriesId, historySeries.SeriesTitle ?? string.Empty));
                     if (matchedSeries != null)
                     {
                         historySeries.SonarrSeriesId = matchedSeries.Id.ToString();
@@ -1139,54 +1157,6 @@ public class HistoryService : IHistoryService, IDisposable
         {
             _lock.Release();
         }
-    }
-
-    private static SonarrSeries? FindClosestMatch(string title, List<SonarrSeries> sonarrSeries)
-    {
-        if (string.IsNullOrEmpty(title) || sonarrSeries.Count == 0)
-        {
-            return null;
-        }
-
-        SonarrSeries? closestMatch = null;
-        double highestSimilarity = 0.0;
-        var lockObject = new object();
-
-        var needle = title.ToLower();
-
-        Parallel.ForEach(sonarrSeries, series =>
-        {
-            // Score against the primary title AND any alternate titles (anime in Sonarr
-            // often carry romaji/native/english variants there; CR uses a different one).
-            double best = 0.0;
-            if (series.Title != null)
-            {
-                best = StringSimilarity.CalculateSimilarity(series.Title.ToLower(), needle);
-            }
-            if (series.AlternateTitles != null)
-            {
-                foreach (var alt in series.AlternateTitles)
-                {
-                    if (string.IsNullOrEmpty(alt.Title)) continue;
-                    var sim = StringSimilarity.CalculateSimilarity(alt.Title.ToLower(), needle);
-                    if (sim > best) best = sim;
-                }
-            }
-
-            if (best > 0.0)
-            {
-                lock (lockObject)
-                {
-                    if (best > highestSimilarity)
-                    {
-                        highestSimilarity = best;
-                        closestMatch = series;
-                    }
-                }
-            }
-        });
-
-        return highestSimilarity < 0.8 ? null : closestMatch;
     }
 
     private static (SonarrEpisode? Episode, double Score) FindClosestMatchEpisodeWithScore(List<SonarrEpisode> episodeList, string title)

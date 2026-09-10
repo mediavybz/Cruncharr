@@ -12,6 +12,26 @@ namespace Cruncharr.Core.Tests;
 public class LibraryControllerTests
 {
     [Fact]
+    public async Task VerifiedCatalogIdsWorkWithoutAddingShowsToHistory()
+    {
+        var config = new CruncharrConfig();
+        config.Sonarr.Enabled = true;
+        var owned = new SonarrSeries { Id = 312, TvdbId = 251908, Title = "Haganai: I Don't Have Many Friends" };
+        var sonarr = new Mock<ISonarrService>();
+        sonarr.Setup(s => s.GetCurrentSeriesAsync(config.Sonarr, It.IsAny<CancellationToken>())).ReturnsAsync([owned]);
+        sonarr.Setup(s => s.ResolveSeriesAsync("GYX0PN4MR", "Haganai", config.Sonarr, It.IsAny<CancellationToken>())).ReturnsAsync(owned);
+        var history = new Mock<IHistoryService>();
+        history.Setup(h => h.GetHistorySeriesAsync()).ReturnsAsync([]);
+        var api = new Mock<ICrunchyrollApiService>();
+        api.Setup(a => a.GetAllSeriesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(
+            [new SeriesInfo { Id = "GYX0PN4MR", Title = "Haganai", EpisodeCount = 24 }]);
+        var controller = new LibraryController(sonarr.Object, history.Object, config, NullLogger<LibraryController>.Instance, api.Object);
+        var response = Assert.IsType<OkObjectResult>(await controller.GetSonarrLibrary(TestContext.Current.CancellationToken));
+        Assert.Equal("GYX0PN4MR", JObject.FromObject(response.Value!)["Series"]![0]!["CrunchyrollSeriesIds"]![0]!.Value<string>());
+        history.Verify(h => h.CrUpdateSeriesAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task LibraryIncludesSonarrSeriesOutsideHistoryAndFileCountsWithoutPrivatePaths()
     {
         var sonarr = new Mock<ISonarrService>();

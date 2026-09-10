@@ -1,4 +1,4 @@
-# Sonarr library detection (1.0.82)
+# Sonarr library detection (1.0.83)
 
 Browse and Search now share verified Crunchyroll-to-Sonarr series identities with
 History and download naming. A show does not have to be in Cruncharr History to
@@ -9,7 +9,9 @@ Exact primary, clean and alternate titles match after punctuation, accent and
 ampersand normalization. Shortened titles and subtitles are candidates only.
 Sonarr's metadata lookup checks those candidates against other TVDB shows,
 including shows outside the user's library. Two distinct episode titles must
-also agree before a non-exact series match is accepted. Ambiguous franchises,
+also agree before a non-exact series match is accepted. Translated episode names
+can instead qualify with one long exact title and two additional episodes sharing
+multiple meaningful words. Ambiguous franchises,
 generic episode numbers, and repeated dub versions cannot prove identity.
 
 Exact badges appear immediately. The Browse status explains when alternate names

@@ -2,7 +2,8 @@ name: Mirror to GitHub
 
 # Forgejo is the source of truth; GitHub is the outage backup. Every push to
 # master/testing re-syncs the GitHub mirror to exactly this repository: all
-# branches, all tags, pruning refs deleted here. A daily scheduled sweep
+# branches, all tags, pruning branches deleted here, plus published release
+# notes. A scheduled sweep
 # catches anything that slips through (e.g. tag pushes or edits made in the
 # Forgejo web UI). If GitHub ever evaluates this file, the sync step exits
 # immediately - disable Actions on the GitHub mirror to keep it dormant.
@@ -56,3 +57,12 @@ jobs:
           git update-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
           git remote add github "https://x-access-token:${GH_TOKEN}@github.com/mediavybz/Cruncharr.git"
           git push github --prune --tags "refs/remotes/origin/*:refs/heads/*"
+          source_refs=$(git ls-remote --heads --tags origin | sort)
+          backup_refs=$(git ls-remote --heads --tags github | sort)
+          if [ "$source_refs" != "$backup_refs" ]; then
+            echo "Forgejo and GitHub branch/tag hashes differ after mirroring" >&2
+            exit 1
+          fi
+
+      - name: Sync published release notes to GitHub
+        run: node scripts/mirror-release-notes.cjs

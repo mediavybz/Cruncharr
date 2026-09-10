@@ -56,6 +56,8 @@ jobs:
           fi
           git update-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
           git remote add github "https://x-access-token:${GH_TOKEN}@github.com/mediavybz/Cruncharr.git"
+          git lfs fetch --all origin
+          git lfs push --all github
           git push github --prune --tags "refs/remotes/origin/*:refs/heads/*"
           source_refs=$(git ls-remote --heads --tags origin | sort)
           backup_refs=$(git ls-remote --heads --tags github | sort)

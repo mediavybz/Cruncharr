@@ -4,8 +4,9 @@ Forgejo is the primary Git repository; GitHub is its backup. Compare matching
 branches when checking synchronization: `master` is stable and `testing` is beta.
 Their tips intentionally differ. A repository's default page shows `master`.
 
-The `mirror-github.yml` Forgejo workflow copies all branches, tags and published
-release notes to GitHub. It preserves destination-only release records and assets.
+The `mirror-github.yml` Forgejo workflow copies all branches, tags, historical Git
+LFS objects and published release notes to GitHub. It preserves destination-only
+release records and assets.
 Release attachments, container images, issues and runtime configuration are not
 copied by this workflow; they need their own backups. No release attachments
 were present when release-note synchronization was added.

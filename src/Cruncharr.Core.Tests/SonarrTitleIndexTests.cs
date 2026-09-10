@@ -5,6 +5,16 @@ namespace Cruncharr.Core.Tests;
 public class SonarrTitleIndexTests
 {
     [Fact]
+    public void TranslatedEpisodeTitlesNeedAnExactAnchorAndMultipleDistinctSupportingEpisodes()
+    {
+        string[] provider = ["My Favorite Animal is Pegasus", "Is the busty cream girl here yet?", "Please, Always Be a Fan, Okay?"];
+        string[] sonarr = ["The Animal I Like is the Pegasus", "No Big-Busted Cream Girl Yet?!", "Please, Always Be a Fan, Okay?"];
+        Assert.True(SonarrTitleIndex.EpisodesConfirmIdentity(provider, sonarr));
+        Assert.False(SonarrTitleIndex.EpisodesConfirmIdentity(provider.Take(2), sonarr));
+        Assert.False(SonarrTitleIndex.EpisodesConfirmIdentity([provider[0], provider[0], provider[2]], sonarr));
+    }
+
+    [Fact]
     public void EpisodeConfirmationRejectsGenericOrRepeatedTitlesAndUnrelatedContent()
     {
         Assert.False(SonarrTitleIndex.EpisodesConfirmIdentity(["Episode 1", "Episode 2"], ["Episode 1", "Episode 2"]));

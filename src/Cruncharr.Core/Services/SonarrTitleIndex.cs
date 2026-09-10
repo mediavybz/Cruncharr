@@ -70,8 +70,29 @@ public sealed class SonarrTitleIndex
     public static bool EpisodesConfirmIdentity(IEnumerable<string?> providerTitles, IEnumerable<string?> sonarrTitles)
     {
         bool Specific(string title) => title.Length >= 5 && !Regex.IsMatch(title, @"^(?:episode|ep|chapter|part)?\d+$");
-        var matches = providerTitles.Select(Normalize).Where(Specific).ToHashSet();
-        matches.IntersectWith(sonarrTitles.Select(Normalize).Where(Specific));
-        return matches.Count >= 2;
+        var provider = providerTitles.Where(t => Specific(Normalize(t))).DistinctBy(Normalize).ToList();
+        var sonarr = sonarrTitles.Where(t => Specific(Normalize(t))).DistinctBy(Normalize).ToList();
+        var matches = provider.Select(Normalize).ToHashSet();
+        matches.IntersectWith(sonarr.Select(Normalize));
+        if (matches.Count >= 2) return true;
+        // Translations can preserve nouns while changing almost all wording. Require one long
+        // exact title AND two additional, distinct episodes sharing two meaningful words each.
+        // For example: "My Favorite Animal is Pegasus" / "The Animal I Like is the Pegasus".
+        if (!matches.Any(t => t.Length >= 20)) return false;
+        var used = new HashSet<string>(matches);
+        var supporting = 0;
+        foreach (var title in provider.Where(t => !matches.Contains(Normalize(t))))
+        {
+            var words = EvidenceWords(title!);
+            var match = sonarr.FirstOrDefault(t => !used.Contains(Normalize(t)) && words.Intersect(EvidenceWords(t!)).Count() >= 2);
+            if (match == null) continue;
+            used.Add(Normalize(match));
+            if (++supporting >= 2) return true;
+        }
+        return false;
     }
+
+    private static readonly HashSet<string> CommonWords = new("episode chapter part special this that with from your have will here there what when them they always first last final story season about".Split(' '));
+    private static HashSet<string> EvidenceWords(string title) => Regex.Matches(title.ToLowerInvariant(), @"[\p{L}\p{N}]+")
+        .Select(m => Normalize(m.Value)).Where(w => w.Length >= 4 && !CommonWords.Contains(w)).ToHashSet();
 }

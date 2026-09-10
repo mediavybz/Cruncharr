@@ -3,7 +3,7 @@
     if (typeof module === 'object' && module.exports) module.exports = api;
     else root.CruncharrLibrary = api;
 })(typeof window !== 'undefined' ? window : this, function () {
-    const normalizeTitle = title => String(title || '').normalize('NFKD').toLowerCase().replace(/\p{M}/gu, '').replace(/[^\p{L}\p{N}]/gu, '');
+    const normalizeTitle = title => String(title || '').replace(/&/g, 'and').normalize('NFKD').toLowerCase().replace(/\p{M}/gu, '').replace(/[^\p{L}\p{N}]/gu, '');
 
     function createIndex(series) {
         const ids = new Map();

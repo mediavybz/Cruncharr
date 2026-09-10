@@ -961,7 +961,7 @@ public class DownloadService : IDownloadService
                 // Never replace a saved identity when its exact Sonarr read is temporarily down.
                 if (sonarrEpisode == null && !savedSonarrEpisodeId.HasValue)
                 {
-                    sonarrSeries = await _sonarrService.GetSeriesByTitleAsync(episode.SeriesTitle, config.Sonarr);
+                    sonarrSeries = await _sonarrService.ResolveSeriesAsync(episode.SeriesId ?? "", episode.SeriesTitle, config.Sonarr, cancellationToken);
                     if (sonarrSeries != null)
                     {
                         var sonarrEpisodes = await _sonarrService.GetEpisodesAsync(sonarrSeries.Id, config.Sonarr);

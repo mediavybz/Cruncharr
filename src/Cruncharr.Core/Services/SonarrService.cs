@@ -15,6 +15,7 @@ public interface ISonarrService
     Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config);
     Task<List<SonarrSeries>> GetCurrentSeriesAsync(SonarrConfig config, CancellationToken cancellationToken = default);
     Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config);
+    Task<SonarrSeries?> ResolveSeriesAsync(string seriesId, string title, SonarrConfig config, CancellationToken cancellationToken = default);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh);
     Task<List<SonarrEpisode>> GetCurrentEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh = false, CancellationToken cancellationToken = default);
@@ -36,11 +37,13 @@ public class SonarrService : ISonarrService
 {
     private readonly ILogger<SonarrService>? _logger;
     private readonly HttpClient _httpClient;
+    private readonly ICrunchyrollApiService? _api;
 
-    public SonarrService(IHttpClientFactory httpClientFactory, ILogger<SonarrService>? logger = null)
+    public SonarrService(IHttpClientFactory httpClientFactory, ILogger<SonarrService>? logger = null, ICrunchyrollApiService? api = null)
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient();
+        _api = api;
     }
 
     private string BuildBaseUrl(SonarrConfig config)
@@ -274,48 +277,69 @@ public class SonarrService : ISonarrService
         var series = await GetSeriesAsync(config);
         if (string.IsNullOrWhiteSpace(title) || series.Count == 0) return null;
 
-        // 1) Exact (case-insensitive) on primary/clean/alternate identity after removing display
-        // punctuation. Sonarr's CleanTitle is punctuation-free, while CR commonly changes ':' to
-        // '-' or omits it entirely.
-        var normalizedTitle = NormalizeTitleForMatch(title);
-        var exact = series.FirstOrDefault(s =>
-            s.Title?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
-            s.CleanTitle?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
-            NormalizeTitleForMatch(s.Title) == normalizedTitle ||
-            NormalizeTitleForMatch(s.CleanTitle) == normalizedTitle ||
-            (s.AlternateTitles?.Any(a =>
-                a.Title?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
-                NormalizeTitleForMatch(a.Title) == normalizedTitle) ?? false));
-        if (exact != null) return exact;
-
-        // 2) Fuzzy fallback. CR titles frequently differ from Sonarr's (romaji vs english,
-        //    punctuation, season/year suffixes). The old exact-only match silently failed for those,
-        //    so UseSonarrNumbering fell back to Crunchyroll numbers. Score against the primary +
-        //    alternate titles with the same StringSimilarity + 0.8 threshold as the history matcher.
-        var needle = title.ToLowerInvariant();
-        SonarrSeries? best = null;
-        double bestSim = 0.0;
-        foreach (var s in series)
-        {
-            double sim = s.Title != null ? StringSimilarity.CalculateSimilarity(s.Title.ToLowerInvariant(), needle) : 0.0;
-            if (s.AlternateTitles != null)
-            {
-                foreach (var alt in s.AlternateTitles)
-                {
-                    if (string.IsNullOrEmpty(alt.Title)) continue;
-                    var altSim = StringSimilarity.CalculateSimilarity(alt.Title.ToLowerInvariant(), needle);
-                    if (altSim > sim) sim = altSim;
-                }
-            }
-            if (sim > bestSim) { bestSim = sim; best = s; }
-        }
-        return bestSim >= 0.8 ? best : null;
+        var index = new SonarrTitleIndex(series);
+        if (index.Exact(title).Count > 0) return index.FindExact(title);
+        if (index.Candidates(title).Count == 0) return null;
+        var lookup = await LookupSeriesAsync(title, config);
+        return SonarrTitleIndex.ResolveLookup(title, series, lookup);
     }
 
-    private static string NormalizeTitleForMatch(string? title) =>
-        string.IsNullOrWhiteSpace(title)
-            ? string.Empty
-            : new string(title.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+    private readonly SemaphoreSlim _lookupGate = new(1, 1);
+    private readonly Dictionary<string, (DateTime Fetched, List<SonarrSeries> Series)> _lookupCache = new();
+
+    private readonly SemaphoreSlim _matchGate = new(1, 1);
+    private readonly Dictionary<string, (DateTime Expires, bool Matches)> _episodeMatchCache = new();
+
+    public async Task<SonarrSeries?> ResolveSeriesAsync(string seriesId, string title, SonarrConfig config, CancellationToken cancellationToken = default)
+    {
+        var library = await GetSeriesAsync(config);
+        var index = new SonarrTitleIndex(library);
+        if (index.Exact(title).Count > 0) return index.FindExact(title);
+        if (_api == null || string.IsNullOrEmpty(seriesId)) return null;
+        var candidate = await GetSeriesByTitleAsync(title, config).WaitAsync(cancellationToken);
+        if (candidate == null) return null;
+        var key = BuildCacheKey(config) + $"|{seriesId}|{title}|{candidate.TvdbId}";
+        await _matchGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_episodeMatchCache.TryGetValue(key, out var cached) && cached.Expires > DateTime.UtcNow)
+                return cached.Matches ? candidate : null;
+            // Public title search can return the parent for concerts, movies and spin-offs.
+            // Require distinct episode titles before accepting a non-exact series identity.
+            var providerEpisodes = await _api.GetEpisodesAsync(seriesId, true, cancellationToken);
+            var sonarrEpisodes = await GetEpisodesAsync(candidate.Id, config).WaitAsync(cancellationToken);
+            if (providerEpisodes.Count == 0 || sonarrEpisodes.Count == 0)
+                throw new HttpRequestException("Episode metadata is unavailable; Sonarr identity could not be verified.");
+            var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title));
+            _episodeMatchCache[key] = (DateTime.UtcNow.Add(matches ? TimeSpan.FromDays(1) : TimeSpan.FromMinutes(5)), matches);
+            return matches ? candidate : null;
+        }
+        finally { _matchGate.Release(); }
+    }
+
+    private async Task<List<SonarrSeries>> LookupSeriesAsync(string title, SonarrConfig config)
+    {
+        var key = BuildCacheKey(config) + "|" + title;
+        // Coalesce catalog, History and download requests. Successful metadata is reusable for
+        // one day; failed lookups never become a cached "not in library" result.
+        await _lookupGate.WaitAsync();
+        try
+        {
+            if (_lookupCache.TryGetValue(key, out var cached) && DateTime.UtcNow - cached.Fetched < TimeSpan.FromDays(1))
+                return cached.Series;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var response = await SendGetWithRetryAsync(
+                $"{BuildBaseUrl(config)}/series/lookup?term={Uri.EscapeDataString(title)}", config, "series lookup", timeout.Token);
+            if (response == null) throw new HttpRequestException("Sonarr title lookup is unavailable.");
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadAsStringAsync(timeout.Token);
+            var result = Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrSeries>>(body)
+                ?? throw new HttpRequestException("Sonarr returned invalid title lookup data.");
+            _lookupCache[key] = (DateTime.UtcNow, result);
+            return result;
+        }
+        finally { _lookupGate.Release(); }
+    }
 
     public virtual Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config) =>
         GetEpisodesAsync(seriesId, config, forceRefresh: false);

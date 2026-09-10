@@ -1767,7 +1767,8 @@
                 element.innerHTML = libraryBadge({id: element.dataset.libraryId, title: element.dataset.libraryTitle});
             });
             const status = document.getElementById('browse-library-status');
-            if (status) status.textContent = sonarrLibraryError ? 'Sonarr library status unavailable' : '';
+            if (status) status.textContent = sonarrLibraryError
+                ? (sonarrLibraryIndex ? 'Some Sonarr titles could not be verified' : 'Sonarr library status unavailable') : '';
             const filter = document.getElementById('browse-hide-library');
             if (filter) filter.disabled = !sonarrLibraryIndex;
         }
@@ -1775,13 +1776,26 @@
         async function loadSonarrLibrary() {
             if (sonarrLibraryCheckedAt && Date.now() - sonarrLibraryCheckedAt < 60000) { updateLibraryIndicators(); return; }
             if (sonarrLibraryPromise) return sonarrLibraryPromise;
+            const libraryStatus = document.getElementById('browse-library-status');
+            if (libraryStatus) libraryStatus.textContent = 'Checking Sonarr library…';
             sonarrLibraryPromise = (async () => {
                 try {
+                    // Paint exact matches immediately while the backend verifies alternate names.
+                    if (!sonarrLibraryIndex) {
+                        const quick = await fetch('/api/v1/library/sonarr?verifyTitles=false');
+                        if (!quick.ok) throw new Error(`HTTP ${quick.status}`);
+                        const initial = await quick.json();
+                        sonarrLibraryIndex = initial.enabled ? CruncharrLibrary.createIndex(initial.series) : null;
+                        updateLibraryIndicators();
+                        if (currentPage === 'browse' && browseHideLibrary) renderBrowseFiltered();
+                        const status = document.getElementById('browse-library-status');
+                        if (status && initial.enabled) status.textContent = 'Checking alternate Sonarr titles…';
+                    }
                     const response = await fetch('/api/v1/library/sonarr');
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const data = await response.json();
                     sonarrLibraryIndex = data.enabled ? CruncharrLibrary.createIndex(data.series) : null;
-                    sonarrLibraryError = false;
+                    sonarrLibraryError = !!data.matchingUnavailable;
                 } catch (e) {
                     sonarrLibraryIndex = null;
                     sonarrLibraryError = true;

@@ -1849,7 +1849,7 @@
                 } finally {
                     sonarrLibraryCheckedAt = Date.now();
                     sonarrLibraryPromise = null;
-                    if (currentPage === 'browse' && browseHideLibrary) renderBrowseFiltered();
+                    if (currentPage === 'browse' && browseHideLibrary) renderBrowseFiltered(true);
                     updateLibraryIndicators();
                     if (sonarrLibraryInProgress) sonarrLibraryRefreshTimer = setTimeout(() => {
                         sonarrLibraryCheckedAt = 0;
@@ -1980,7 +1980,7 @@
         }
 
         // Apply the current dub-language + rating filters to the cached series list and render.
-        function renderBrowseFiltered() {
+        function renderBrowseFiltered(preservePosition = false) {
             buildRatingButtons();
             let list = allBrowseSeries;
             if (browseHideLibrary && sonarrLibraryIndex) list = list.filter(series =>
@@ -1993,11 +1993,16 @@
             }
             const count = document.getElementById('browse-count');
             if (count) count.textContent = `${list.length} of ${allBrowseSeries.length} series`;
+            if (preservePosition && list.length === browseFilteredSeries.length &&
+                list.every((series, i) => series.id === browseFilteredSeries[i].id)) return;
             const pageContent = document.getElementById('content');
-            if (pageContent) pageContent.scrollTop = 0;
+            const scrollTop = preservePosition ? (pageContent?.scrollTop || 0) : 0;
+            const initialCount = preservePosition ? Math.max(browseRenderedCount, BROWSE_RENDER_BATCH_SIZE) : BROWSE_RENDER_BATCH_SIZE;
             browseFilteredSeries = list;
             browseRenderedCount = 0;
-            renderBrowseContent(list);
+            renderBrowseContent(list, initialCount);
+            if (pageContent) pageContent.scrollTop = scrollTop;
+            updateLibraryIndicators();
         }
 
         function disconnectBrowseLoadMoreObserver() {
@@ -2065,7 +2070,7 @@
             browseLoadMoreObserver.observe(sentinel);
         }
 
-        function renderBrowseContent(series) {
+        function renderBrowseContent(series, initialCount = BROWSE_RENDER_BATCH_SIZE) {
             disconnectBrowseLoadMoreObserver();
             const content = document.getElementById('browse-content');
             if (!content) return;
@@ -2078,7 +2083,7 @@
                 return;
             }
 
-            browseRenderedCount = Math.min(BROWSE_RENDER_BATCH_SIZE, series.length);
+            browseRenderedCount = Math.min(initialCount, series.length);
             content.innerHTML = `
                 <div class="history-poster-grid">
                     ${renderBrowseCards(series.slice(0, browseRenderedCount))}

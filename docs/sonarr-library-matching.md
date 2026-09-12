@@ -37,6 +37,10 @@ from the former initial response, including We Without Wings, Haganai, Witchblad
 and WorldEnd. This was a loading and cache problem after series identification;
 the fix applies to every verified identity rather than adding title exceptions.
 
+UI scripts and styles now revalidate on page load. Earlier builds cached these
+files for a week, so an updated server could still run an older filter in the
+browser. The 1.0.86 asset URLs also bypass those existing cached copies.
+
 Verified against the actual library: Haganai (24/24 provider episodes with files),
 We Without Wings (12/12), Senran Kagura (12/12), and SHINOVI MASTER (24/24).
 The broader catalog also recovered Basilisk: The Ouka Ninja Scrolls, Corpse

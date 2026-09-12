@@ -294,25 +294,39 @@ public class SonarrService : ISonarrService
     {
         var library = await GetSeriesAsync(config);
         var index = new SonarrTitleIndex(library);
-        if (index.Exact(title).Count > 0) return index.FindExact(title);
+        if (index.FindExact(title) is { } exact) return exact;
         if (_api == null || string.IsNullOrEmpty(seriesId)) return null;
-        var candidate = await GetSeriesByTitleAsync(title, config).WaitAsync(cancellationToken);
-        if (candidate == null) return null;
-        var key = BuildCacheKey(config) + $"|{seriesId}|{title}|{candidate.TvdbId}";
+        var candidates = index.Candidates(title);
+        if (candidates.Count == 0) return null;
+        // A lookup can identify an unowned spin-off with reused episode titles. Respect that
+        // identity, except an unsuffixed name can also mean a year-qualified remake (Witchblade).
+        var lookup = await LookupSeriesAsync(title, config).WaitAsync(cancellationToken);
+        var lookupExact = new SonarrTitleIndex(lookup).Exact(title);
+        if (lookupExact.Count > 0)
+            candidates = candidates.Where(candidate => lookupExact.Any(item => item.TvdbId == candidate.TvdbId) ||
+                SonarrTitleIndex.IsYearQualifiedEdition(title, candidate)).ToList();
+        if (candidates.Count == 0) return null;
         await _matchGate.WaitAsync(cancellationToken);
         try
         {
-            if (_episodeMatchCache.TryGetValue(key, out var cached) && cached.Expires > DateTime.UtcNow)
-                return cached.Matches ? candidate : null;
-            // Public title search can return the parent for concerts, movies and spin-offs.
-            // Require distinct episode titles before accepting a non-exact series identity.
-            var providerEpisodes = await _api.GetEpisodesAsync(seriesId, true, cancellationToken);
-            var sonarrEpisodes = await GetEpisodesAsync(candidate.Id, config).WaitAsync(cancellationToken);
-            if (providerEpisodes.Count == 0 || sonarrEpisodes.Count == 0)
-                throw new HttpRequestException("Episode metadata is unavailable; Sonarr identity could not be verified.");
-            var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title));
-            _episodeMatchCache[key] = (DateTime.UtcNow.Add(matches ? TimeSpan.FromDays(1) : TimeSpan.FromMinutes(5)), matches);
-            return matches ? candidate : null;
+            List<Cruncharr.Core.Models.EpisodeInfo>? providerEpisodes = null;
+            var confirmed = new List<SonarrSeries>();
+            foreach (var candidate in candidates)
+            {
+                var key = BuildCacheKey(config) + $"|{seriesId}|{title}|{candidate.Id}|{candidate.TvdbId}";
+                if (!_episodeMatchCache.TryGetValue(key, out var cached) || cached.Expires <= DateTime.UtcNow)
+                {
+                    providerEpisodes ??= await _api.GetEpisodesAsync(seriesId, true, cancellationToken);
+                    var sonarrEpisodes = await GetEpisodesAsync(candidate.Id, config).WaitAsync(cancellationToken);
+                    if (providerEpisodes.Count == 0 || sonarrEpisodes.Count == 0)
+                        throw new HttpRequestException("Episode metadata is unavailable; Sonarr identity could not be verified.");
+                    var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title));
+                    cached = (DateTime.UtcNow.Add(matches ? TimeSpan.FromDays(1) : TimeSpan.FromMinutes(5)), matches);
+                    _episodeMatchCache[key] = cached;
+                }
+                if (cached.Matches) confirmed.Add(candidate);
+            }
+            return confirmed.Count == 1 ? confirmed[0] : null;
         }
         finally { _matchGate.Release(); }
     }

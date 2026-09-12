@@ -1,6 +1,6 @@
 # Cruncharr
 
-A self-hosted companion for organizing and maintaining your personal anime media library — a headless backend with a REST API plus a single-page web interface.
+Cruncharr is a self-hosted app for organizing and maintaining your personal anime media library. It provides a headless backend, a REST API, and a single-page web interface.
 
 ## Quick Deploy
 
@@ -50,14 +50,22 @@ docker-compose up -d
 ## First Time Setup
 
 1. **Open the web interface** at `http://your-server:8585`
-2. **Sign in** with your account credentials
+2. **Browse or search** without signing in. Downloads require a signed-in Premium account.
 3. **Configure settings**:
    - Library directory: `/downloads` (inside container)
    - Temp directory: `/tmp/cruncharr`
    - Endpoints: use defaults (recommended)
    - Audio languages: `ja-JP` (Japanese) by default
    - Subtitles: `en-US` (English) by default
-   - Adjust these in Settings, then click Save
+   - Adjust these in Settings; changes save automatically
+
+## Stable and beta versions
+
+`master` contains the stable release; `testing` contains beta changes. Compare the
+same branch on [Forgejo](https://forgejo.foss.homes/shoy/Cruncharr/src/branch/testing)
+and [GitHub](https://github.com/mediavybz/Cruncharr/tree/testing) when checking sync.
+Use `ghcr.io/mediavybz/cruncharr:testing` to test beta fixes. The `latest` image follows
+the stable release. See [repository backups](docs/repository-backups.md) for sync checks.
 
 ## Volume Mounts
 

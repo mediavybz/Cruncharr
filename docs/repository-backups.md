@@ -22,3 +22,8 @@ After repository work, push to Forgejo, run the mirror and compare all remote
 branch/tag hashes with `git ls-remote --heads --tags`. Fetch both remotes locally
 with tags so the local repository contains their history. Check release records
 separately: Git does not store release notes. Keep credentials out of these files.
+
+From the local checkout, run `pwsh -File scripts/verify-repository-sync.ps1 -Fetch`.
+It compares all local and remote branch/tag hashes and reports uncommitted files.
+It exits with an error when any copy differs. Use `-OutputPath report.json` to save
+the dated result. Fetching updates remote-tracking refs; it does not merge branches.

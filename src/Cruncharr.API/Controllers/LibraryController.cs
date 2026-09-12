@@ -20,6 +20,7 @@ public class LibraryController(ISonarrService sonarr, IHistoryService history, C
                 .ToLookup(entry => entry.SonarrSeriesId!, entry => entry.SeriesId!);
             var catalogIds = new Dictionary<int, List<string>>();
             var matchingUnavailable = false;
+            var matchingFailures = new List<LibraryMatchingFailure>();
             if (api != null && verifyTitles)
             {
                 try
@@ -30,7 +31,7 @@ public class LibraryController(ISonarrService sonarr, IHistoryService history, C
                         cancellationToken.ThrowIfCancellationRequested();
                         if (string.IsNullOrWhiteSpace(entry.Title) || string.IsNullOrEmpty(entry.Id)) continue;
                         var match = index.FindExact(entry.Title);
-                        if (match == null && index.Exact(entry.Title).Count == 0 && index.Candidates(entry.Title).Count > 0)
+                        if (match == null && index.Candidates(entry.Title).Count > 0)
                         {
                             if (entry.EpisodeCount == 0) continue;
                             try { match = await sonarr.ResolveSeriesAsync(entry.Id, entry.Title, config.Sonarr, cancellationToken); }
@@ -38,6 +39,7 @@ public class LibraryController(ISonarrService sonarr, IHistoryService history, C
                             catch (Exception ex)
                             {
                                 matchingUnavailable = true;
+                                matchingFailures.Add(new LibraryMatchingFailure(entry.Id, entry.Title));
                                 logger.LogWarning(ex, "Could not verify Sonarr identity for {Title}", entry.Title);
                             }
                         }
@@ -57,6 +59,7 @@ public class LibraryController(ISonarrService sonarr, IHistoryService history, C
             {
                 Enabled = true,
                 MatchingUnavailable = matchingUnavailable,
+                MatchingFailures = matchingFailures,
                 Series = series.Select(item => new LibrarySeriesResponse
                 {
                     SonarrSeriesId = item.Id,
@@ -77,6 +80,8 @@ public class LibraryController(ISonarrService sonarr, IHistoryService history, C
         }
     }
 }
+
+public record LibraryMatchingFailure(string SeriesId, string Title);
 
 public class LibrarySeriesResponse
 {

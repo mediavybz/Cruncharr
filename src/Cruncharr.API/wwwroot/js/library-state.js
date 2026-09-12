@@ -8,6 +8,7 @@
     function createIndex(series) {
         const ids = new Map();
         const titles = new Map();
+        const editions = new Map();
         const add = (map, key, item) => {
             if (!key) return;
             if (!map.has(key)) map.set(key, item);
@@ -15,8 +16,12 @@
         };
         for (const item of series || []) {
             for (const id of item.crunchyrollSeriesIds || []) add(ids, id, item);
-            for (const title of [item.title, ...(item.titles || [])]) add(titles, normalizeTitle(title), item);
+            for (const title of [item.title, ...(item.titles || [])]) {
+                add(titles, normalizeTitle(title), item);
+                add(editions, normalizeTitle(String(title || '').replace(/\s*\((?:19|20)\d{2}\)\s*$/, '')), item);
+            }
         }
+        for (const [title, item] of editions) if (item === null) titles.set(title, null);
         return { ids, titles };
     }
 

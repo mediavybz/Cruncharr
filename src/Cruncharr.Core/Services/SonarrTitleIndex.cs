@@ -4,12 +4,13 @@ using System.Text.RegularExpressions;
 
 namespace Cruncharr.Core.Services;
 
-// A subtitle is a candidate, never proof of identity: "Code Geass" can refer to several
-// different TVDB series. Resolve candidates against Sonarr's complete lookup results.
+// Similar names only select candidates. Episode evidence must resolve editions and spin-offs.
 public sealed class SonarrTitleIndex
 {
     private readonly Dictionary<string, List<SonarrSeries>> _exact = new();
     private readonly Dictionary<string, List<SonarrSeries>> _shortened = new();
+    private readonly Dictionary<string, List<SonarrSeries>> _editions = new();
+    private readonly Dictionary<string, List<(SonarrSeries Series, HashSet<string> Words)>> _words = new();
 
     public SonarrTitleIndex(IEnumerable<SonarrSeries> series)
     {
@@ -17,8 +18,14 @@ public sealed class SonarrTitleIndex
         foreach (var title in Titles(item))
         {
             Add(_exact, Normalize(title), item);
-            var prefix = Regex.Split(title, @"\s+[-–—]\s+|:\s+")[0];
-            if (prefix != title) Add(_shortened, Normalize(prefix), item);
+            Add(_editions, Normalize(WithoutYear(title)), item);
+            foreach (var key in CandidateKeys(title)) Add(_shortened, key, item);
+            var words = TitleWords(title);
+            foreach (var word in words)
+            {
+                if (!_words.TryGetValue(word, out var entries)) _words[word] = entries = [];
+                entries.Add((item, words));
+            }
         }
     }
 
@@ -39,16 +46,45 @@ public sealed class SonarrTitleIndex
     }
 
     public IReadOnlyList<SonarrSeries> Exact(string title) => _exact.GetValueOrDefault(Normalize(title)) ?? [];
-    public SonarrSeries? FindExact(string title) => Exact(title) is { Count: 1 } matches ? matches[0] : null;
+    public SonarrSeries? FindExact(string title) => Exact(title) is { Count: 1 } matches &&
+        (_editions.GetValueOrDefault(Normalize(title))?.Count ?? 0) <= 1 ? matches[0] : null;
 
     public List<SonarrSeries> Candidates(string title)
     {
-        var matches = new List<SonarrSeries>();
-        matches.AddRange(_shortened.GetValueOrDefault(Normalize(title)) ?? []);
-        var prefix = Regex.Split(title, @"\s+[-–—]\s+|:\s+")[0];
-        if (prefix != title) matches.AddRange(_exact.GetValueOrDefault(Normalize(prefix)) ?? []);
+        var matches = Exact(title).ToList();
+        foreach (var key in CandidateKeys(title))
+            matches.AddRange(_shortened.GetValueOrDefault(key) ?? []);
+        var words = TitleWords(title);
+        foreach (var entry in words.SelectMany(word => _words.GetValueOrDefault(word) ?? []))
+        {
+            var shared = words.Intersect(entry.Words).Count();
+            if (shared >= 2 && 2.0 * shared / (words.Count + entry.Words.Count) >= 0.7)
+                matches.Add(entry.Series);
+        }
+        // Compound franchise names can omit a scene alias (e.g. a Monogatari chapter).
+        foreach (var word in words.Where(word => word.Length >= 8))
+        foreach (var pair in _words.Where(pair => pair.Key.Length >= 8 && pair.Key != word &&
+                     (word.EndsWith(pair.Key, StringComparison.Ordinal) || pair.Key.EndsWith(word, StringComparison.Ordinal)) &&
+                     (double)Math.Min(word.Length, pair.Key.Length) / Math.Max(word.Length, pair.Key.Length) >= 0.65))
+            matches.AddRange(pair.Value.Select(entry => entry.Series));
         return matches.DistinctBy(Identity).ToList();
     }
+
+    private static IEnumerable<string> CandidateKeys(string title)
+    {
+        // Keep years in exact identities. Removing one here only permits an episode comparison.
+        var withoutYear = WithoutYear(title);
+        yield return Normalize(withoutYear);
+        var prefix = Regex.Split(withoutYear, @"\s+[-–—]\s+|:\s+")[0];
+        if (prefix != withoutYear && Normalize(prefix).Length >= 4) yield return Normalize(prefix);
+    }
+
+    private static string WithoutYear(string title) => Regex.Replace(title, @"\s*\((?:19|20)\d{2}\)\s*$", "");
+    public static bool IsYearQualifiedEdition(string title, SonarrSeries candidate) => Titles(candidate)
+        .Any(alias => WithoutYear(alias) != alias && Normalize(WithoutYear(alias)) == Normalize(title));
+
+    private static HashSet<string> TitleWords(string title) => Regex.Matches(title.ToLowerInvariant(), @"[\p{L}\p{N}]+")
+        .Select(m => Normalize(m.Value)).Where(w => w.Length >= 3 && !CommonWords.Contains(w)).ToHashSet();
 
     public static SonarrSeries? ResolveLookup(string title, List<SonarrSeries> library, List<SonarrSeries> lookup)
     {
@@ -69,11 +105,14 @@ public sealed class SonarrTitleIndex
 
     public static bool EpisodesConfirmIdentity(IEnumerable<string?> providerTitles, IEnumerable<string?> sonarrTitles)
     {
+        // TVDB may prepend the arc and part to every episode title.
+        string NormalizeEpisode(string? title) => Normalize(Regex.Replace(title ?? "",
+            @"^.*?\b(?:arc|chapter)\s+[ivxlcdm\d]+:\s*", "", RegexOptions.IgnoreCase));
         bool Specific(string title) => title.Length >= 5 && !Regex.IsMatch(title, @"^(?:episode|ep|chapter|part)?\d+$");
-        var provider = providerTitles.Where(t => Specific(Normalize(t))).DistinctBy(Normalize).ToList();
-        var sonarr = sonarrTitles.Where(t => Specific(Normalize(t))).DistinctBy(Normalize).ToList();
-        var matches = provider.Select(Normalize).ToHashSet();
-        matches.IntersectWith(sonarr.Select(Normalize));
+        var provider = providerTitles.Where(t => Specific(NormalizeEpisode(t))).DistinctBy(NormalizeEpisode).ToList();
+        var sonarr = sonarrTitles.Where(t => Specific(NormalizeEpisode(t))).DistinctBy(NormalizeEpisode).ToList();
+        var matches = provider.Select(NormalizeEpisode).ToHashSet();
+        matches.IntersectWith(sonarr.Select(NormalizeEpisode));
         if (matches.Count >= 2) return true;
         // Translations can preserve nouns while changing almost all wording. Require one long
         // exact title AND two additional, distinct episodes sharing two meaningful words each.
@@ -81,12 +120,12 @@ public sealed class SonarrTitleIndex
         if (!matches.Any(t => t.Length >= 20)) return false;
         var used = new HashSet<string>(matches);
         var supporting = 0;
-        foreach (var title in provider.Where(t => !matches.Contains(Normalize(t))))
+        foreach (var title in provider.Where(t => !matches.Contains(NormalizeEpisode(t))))
         {
             var words = EvidenceWords(title!);
-            var match = sonarr.FirstOrDefault(t => !used.Contains(Normalize(t)) && words.Intersect(EvidenceWords(t!)).Count() >= 2);
+            var match = sonarr.FirstOrDefault(t => !used.Contains(NormalizeEpisode(t)) && words.Intersect(EvidenceWords(t!)).Count() >= 2);
             if (match == null) continue;
-            used.Add(Normalize(match));
+            used.Add(NormalizeEpisode(match));
             if (++supporting >= 2) return true;
         }
         return false;

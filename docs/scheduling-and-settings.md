@@ -8,9 +8,11 @@ from a new baseline.
 
 Manage subscriptions under **Settings → Scheduler**. Checks run every 15 minutes by
 default (configurable from 1 to 1440 minutes). New episodes enter the queue on the
-next check after release. A signed-in Premium account is required to queue them.
-Enable **Settings → Queue → Auto Download** to start them automatically. Global queue
-pause still applies. Guest browsing and saving a schedule remain available.
+next check after release. Premium accounts use the Cruncharr queue; enable
+**Settings → Queue → Auto Download** to start downloads automatically. Global queue
+pause still applies. With **Use Sonarr without Premium** enabled, guest and free
+accounts send new episodes to Sonarr to monitor and search instead. Guest browsing
+and saving a schedule remain available.
 
 History must be enabled. Season language overrides take priority over series
 overrides. Without an override, single-dub mode uses Default Audio; multi-dub mode

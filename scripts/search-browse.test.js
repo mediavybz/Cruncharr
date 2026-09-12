@@ -18,6 +18,7 @@ function app() {
         CruncharrCalendarRequests: requests,
         document: {
             addEventListener() {},
+            querySelectorAll() { return []; },
             createElement: () => ({ textContent: '', get innerHTML() { return this.textContent.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'); } }),
             getElementById: id => id === 'global-search-popup' ? popup : id === 'global-search' ? input : null
         },
@@ -129,6 +130,56 @@ test('concurrent catalog loads share one request', async () => {
     assert.equal(ui.pending.length, 1);
     ui.reply(0, [{ id: 'N', title: 'Naruto', episodeCount: 220 }]);
     await Promise.all([first, second]);
+});
+
+test('Sonarr filter excludes pending aliases, then uses verified IDs without History entries', async () => {
+    const ui = app();
+    ui.run(`currentPage = 'browse'; browseHideLibrary = true;
+        allBrowseSeries = [{id:'WINGS',title:'We, Without Wings - under the innocent sky'}, {id:'NEW',title:'New show'}];
+        let visible = []; renderBrowseContent = rows => { visible = rows; };
+        buildRatingButtons = () => {};`);
+    const first = ui.run('loadSonarrLibrary()');
+    const concurrent = ui.run('loadSonarrLibrary()');
+    assert.equal(ui.pending.length, 1);
+    assert.match(ui.pending[0].url, /background=true/);
+    ui.reply(0, {enabled:true, matchingInProgress:true, pendingSeriesIds:['WINGS'], series:[{sonarrSeriesId:858,title:'We Without Wings'}]});
+    await Promise.all([first, concurrent]);
+    assert.equal(ui.run('visible.map(s => s.id).join()'), 'NEW');
+    assert.match(ui.run('libraryBadge(allBrowseSeries[0])'), /Checking Sonarr/);
+    assert.equal(ui.timers.size, 1);
+
+    const poll = ui.run('sonarrLibraryCheckedAt=0; loadSonarrLibrary()');
+    ui.reply(1, {enabled:true, matchingInProgress:false, pendingSeriesIds:[], series:[{sonarrSeriesId:858,title:'We Without Wings',crunchyrollSeriesIds:['WINGS'],episodeFileCount:13}]});
+    await poll;
+    assert.equal(ui.run('visible.map(s => s.id).join()'), 'NEW');
+    assert.match(ui.run('libraryBadge(allBrowseSeries[0])'), /In Sonarr/);
+    assert.equal(ui.timers.size, 0);
+});
+
+test('a failed Sonarr refresh preserves the filter and known aliases', async () => {
+    const ui = app();
+    ui.run(`currentPage='browse'; browseHideLibrary=true;
+        allBrowseSeries=[{id:'OWNED',title:'Alternate name'},{id:'NEW',title:'New show'}];
+        sonarrLibraryIndex=CruncharrLibrary.createIndex([{sonarrSeriesId:1,title:'Owned show',crunchyrollSeriesIds:['OWNED']}]);
+        let visible=[]; renderBrowseContent=rows=>{visible=rows;}; buildRatingButtons=()=>{};`);
+    const refresh = ui.run('loadSonarrLibrary()');
+    ui.reply(0, {}, false);
+    await refresh;
+    assert.equal(ui.run('visible.map(s => s.id).join()'), 'NEW');
+    assert.equal(ui.run('sonarrLibraryError'), true);
+    assert.match(ui.run('libraryBadge(allBrowseSeries[0])'), /In Sonarr/);
+});
+
+test('a rejected candidate returns to Browse while an unavailable candidate remains marked', async () => {
+    const ui = app();
+    ui.run(`currentPage='browse'; browseHideLibrary=true;
+        allBrowseSeries=[{id:'UNRELATED',title:'An unrelated spin-off'},{id:'FAILED',title:'Metadata unavailable'}];
+        let visible=[]; renderBrowseContent=rows=>{visible=rows;}; buildRatingButtons=()=>{};`);
+    const refresh = ui.run('loadSonarrLibrary()');
+    ui.reply(0, {enabled:true, matchingUnavailable:true, pendingSeriesIds:['FAILED'], series:[]});
+    await refresh;
+    assert.equal(ui.run('visible.map(s => s.id).join()'), 'UNRELATED');
+    assert.match(ui.run('libraryBadge(allBrowseSeries[1])'), /Sonarr match unverified/);
 });
 
 test('download rejection displays the server reason', async () => {

@@ -17,8 +17,8 @@ on:
       - '**'
   workflow_dispatch:
   schedule:
-    # Push triggers are unreliable on this Forgejo build, so the mirror runs
-    # every 15 minutes from the default branch as the primary sync mechanism.
+    # Sweep every 15 minutes to catch missed pushes and release-note edits.
+    # Unraid also dispatches this workflow as an independent scheduling backup.
     - cron: '*/15 * * * *'
 
 concurrency:

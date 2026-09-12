@@ -30,6 +30,10 @@
 - After pushing and mirroring, run `scripts/verify-repository-sync.ps1 -Fetch` to compare every
   local, Forgejo and GitHub branch/tag hash. Compare the same branch; do not promote beta to
   `master` merely to make their version numbers equal.
+- Matching Git refs do not prove Forgejo's database is synchronized. Also run
+  `scripts/verify-forgejo-metadata.sh` inside Forgejo as `git` (database
+  `/data/forgejo.db`, bare repository `/data/git/repositories/shoy/cruncharr.git`,
+  repository ID `4`). See `docs/repository-backups.md` for hook and metadata repair.
 
 - On Windows, always specify `encoding="utf-8"` and `newline="\n"` for Python source-file writes (UTF-8 for reads too). The system
   code page cannot encode all UI text, and a failed write can truncate the source file.

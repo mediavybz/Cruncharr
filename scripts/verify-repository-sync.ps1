@@ -30,6 +30,7 @@ $differences = @(
 $changes = @(Invoke-Git @('status', '--porcelain'))
 $report = [ordered]@{
     checkedAtUtc = [DateTime]::UtcNow.ToString('o')
+    scope = 'Git refs and local working tree only. Check Forgejo hooks and database with verify-forgejo-metadata.sh.'
     synchronized = $differences.Count -eq 0 -and $changes.Count -eq 0
     currentBranch = (Invoke-Git @('branch', '--show-current')) -join ''
     refs = $primary

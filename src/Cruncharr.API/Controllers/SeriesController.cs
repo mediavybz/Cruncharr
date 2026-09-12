@@ -170,10 +170,6 @@ public class SeriesController : ControllerBase
     [HttpPost("item-select-multi-dub")]
     public ActionResult ItemSelectMultiDub([FromBody] ItemSelectMultiDubRequest request)
     {
-        if (!_auth.IsAuthenticated || !_auth.Profile.HasPremium)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { Message = "Log in to a Crunchyroll Premium account to download. Browsing and search are available without an account." });
-        }
         try
         {
             if (request.Episodes == null || request.Episodes.Count == 0)

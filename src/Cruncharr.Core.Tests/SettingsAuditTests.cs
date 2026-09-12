@@ -28,6 +28,22 @@ public class SettingsAuditTests : IDisposable
     }
 
     [Fact]
+    public void SonarrAcquisitionSettingsRoundTripThroughTheApiAndDisk()
+    {
+        Assert.IsType<OkObjectResult>(Controller().UpdateConfig(new ConfigUpdateRequest { Sonarr = new SonarrUpdateConfig {
+            AutoAddSeries = false, SearchWithoutPremium = false, UnmonitorPremiumRequests = false,
+            QualityProfileId = 9, RootFolderPath = "/library/anime", DownloadPath = "/incoming/cruncharr"
+        } }));
+        var restored = CruncharrConfig.Load(Path.Combine(_root, "config.yaml"));
+        Assert.False(restored.Sonarr.AutoAddSeries);
+        Assert.False(restored.Sonarr.SearchWithoutPremium);
+        Assert.False(restored.Sonarr.UnmonitorPremiumRequests);
+        Assert.Equal(9, restored.Sonarr.QualityProfileId);
+        Assert.Equal("/library/anime", restored.Sonarr.RootFolderPath);
+        Assert.Equal("/incoming/cruncharr", restored.Sonarr.DownloadPath);
+    }
+
+    [Fact]
     public void SavingUnrelatedSettingsNeverAddsDefaultLanguages()
     {
         _config.Download.DubLanguages = ["en-US"];

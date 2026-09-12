@@ -72,6 +72,53 @@
             };
         })();
 
+        const sonarrChoices = new Map();
+        let sonarrChoiceResolve = null;
+        function finishSonarrChoice(tvdbId) {
+            const resolve = sonarrChoiceResolve;
+            sonarrChoiceResolve = null;
+            closeModal();
+            if (resolve) resolve(tvdbId);
+        }
+
+        function chooseSonarrSeries(candidates) {
+            return new Promise(resolve => {
+                sonarrChoiceResolve = resolve;
+                document.getElementById('modal-title').textContent = 'Choose the matching series';
+                document.getElementById('modal-body').innerHTML = '<p>Confirm the series Sonarr should use. Similar titles can refer to different editions.</p>' + candidates.map(candidate =>
+                    `<p><button class="header-btn" onclick="finishSonarrChoice(${Number(candidate.tvdbId)})">${escapeHtml(candidate.title)}${candidate.year ? ' (' + Number(candidate.year) + ')' : ''} · TVDB ${Number(candidate.tvdbId)}</button></p>`).join('');
+                document.getElementById('modal-footer').innerHTML = '<button class="header-btn" onclick="finishSonarrChoice(null)">Cancel</button>';
+                document.getElementById('modal').classList.add('active');
+            });
+        }
+
+        async function sendDownloadRequest(options) {
+            let response = await fetch('/api/v1/queue', options);
+            if (response.status === 409) {
+                const error = await response.clone().json().catch(() => ({}));
+                if (Array.isArray(error.candidates) && error.candidates.length) {
+                    let choice = sonarrChoices.get(error.seriesId);
+                    if (!error.candidates.some(candidate => candidate.tvdbId === choice))
+                        choice = await chooseSonarrSeries(error.candidates);
+                    if (!choice) throw new Error('Request cancelled. No episodes were queued or searched.');
+                    sonarrChoices.set(error.seriesId, choice);
+                    response = await fetch('/api/v1/queue', { ...options,
+                        body: JSON.stringify({ ...JSON.parse(options.body), sonarrTvdbId: choice }) });
+                }
+            }
+            if (response.ok && config?.sonarr?.enabled) {
+                sonarrLibraryCheckedAt = 0;
+                void loadSonarrLibrary();
+            }
+            return response;
+        }
+
+        function downloadActionLabel() {
+            return !authStatus?.isAuthenticated || !authStatus?.hasPremium
+                ? config?.sonarr?.enabled && config?.sonarr?.searchWithoutPremium !== false ? 'Request in Sonarr' : 'Download'
+                : 'Download with Cruncharr';
+        }
+
         async function readQueueAdmission(response) {
             if (!response.ok) {
                 const error = await response.json().catch(() => ({}));
@@ -79,7 +126,7 @@
             }
             try {
                 const data = await response.json();
-                return { added: data.added !== false, data };
+                return { added: data.added !== false, destination: data.destination || 'cruncharr', data };
             } catch (e) {
                 // Compatibility with an older backend that returned no admission flag.
                 return { added: true, data: null };
@@ -631,9 +678,9 @@
         function renderAddDownload(container) {
             container.innerHTML = `
                 <div class="page-title">Add Download</div>
-                <div class="page-subtitle">Use the search bar at the top to find a series or paste a URL</div>
+                <div class="page-subtitle">Use the search bar at the top to find a series or paste a URL. ${escapeHtml(downloadActionLabel())}: ${authStatus?.isAuthenticated && authStatus?.hasPremium ? 'selected episodes download through Cruncharr.' : 'Sonarr uses its configured sources and quality profile when enabled.'}</div>
                 <div class="season-selector">
-                    <button class="header-btn primary" id="add-btn" onclick="addSelectedToQueue()" disabled>Add</button>
+                    <button class="header-btn primary" id="add-btn" onclick="addSelectedToQueue()" disabled>${downloadActionLabel()}</button>
                     <label class="checkbox-label">
                         <input type="checkbox" id="add-all-checkbox" onchange="toggleAddAll(this.checked)">
                         All
@@ -1085,13 +1132,14 @@
                     return res.json();
                 }));
                 groupedItems.forEach(items => Object.assign(queueItems, items));
+                if (!Object.keys(queueItems).length) throw new Error('No episodes matched the selection. Check the selected audio languages.');
                 
                 // Add each queue item to the queue
                 let added = 0;
                 const markAsWatched = config?.crunchyroll?.markAsWatched || false;
                 for (const [key, item] of Object.entries(queueItems)) {
                     if (item && item.episodeId) {
-                        const queueRes = await fetch('/api/v1/queue', {
+                        const queueRes = await sendDownloadRequest({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1133,7 +1181,7 @@
                     }
                 }
                 
-                showToast(`Added ${added} episode(s) to queue`, 'success');
+                showToast(added ? `Submitted ${added} episode request(s)` : 'Selected episodes are already available or queued.', added ? 'success' : 'info');
                 selectedEpisodes.clear();
                 selectedEpisodeDubs.clear();
                 renderAddEpisodesMultiDub();
@@ -1274,11 +1322,12 @@
         
         async function addMusicVideoToQueue(videoId, title) {
             try {
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         episodeId: videoId,
+                        isMusicVideo: true,
                         title: title || 'Music Video',
                         seriesTitle: 'Music Video',
                         episodeNumber: 1,
@@ -1289,7 +1338,7 @@
                 const admission = await readQueueAdmission(res);
                 showToast(admission.added ? 'Added music video to queue' : 'Music video is already in the queue', admission.added ? 'success' : 'info');
             } catch (e) {
-                showToast('Failed to add to queue', 'error');
+                showToast(e.message || 'Failed to submit download request', 'error');
             }
         }
 
@@ -1578,7 +1627,7 @@
                                         ${ep.isUpcoming
                                             ? '<span class="badge badge-upcoming">Upcoming</span>'
                                             : (ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : '')}
-                                        ${ep.hasAired && !ep.isUpcoming ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(chosenDub)}')">Download</button>` : ''}
+                                        ${ep.hasAired && !ep.isUpcoming ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(chosenDub)}')">${downloadActionLabel()}</button>` : ''}
                                     </div>
                                     `;
                                 }).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
@@ -1619,13 +1668,13 @@
                 // As selectedDubs the backend refetches versions and resolves the real per-dub
                 // stream — same path as Add Download (add-path invariant).
                 if (audioLocale) payload.selectedDubs = [audioLocale];
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const admission = await readQueueAdmission(res);
-                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
+                showToast(admission.data?.message || (admission.added ? 'Added to queue' : 'Episode is already in the queue'), admission.added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to add', 'error');
             }
@@ -2488,7 +2537,7 @@
 
         async function addEpisodeToQueueWithDetails(episodeId, title, seriesTitle) {
             try {
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -2498,9 +2547,9 @@
                     })
                 });
                 const admission = await readQueueAdmission(res);
-                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
+                showToast(admission.data?.message || (admission.added ? 'Added to queue' : 'Episode is already in the queue'), admission.added ? 'success' : 'info');
             } catch (e) {
-                showToast('Failed to add to queue', 'error');
+                showToast(e.message || 'Failed to submit download request', 'error');
             }
         }
 
@@ -3173,7 +3222,7 @@
                 button.textContent = 'Saving schedule…';
                 const result = await schedulerRequest('subscriptions/' + encodeURIComponent(seriesId), 'PUT', { enabled: !sub?.enabled });
                 showToast(sub?.enabled ? 'Schedule paused' : 'New episodes scheduled. Existing episodes stay unchanged.', 'success');
-                if (!result.canDownload) showToast('The schedule is saved. Sign in with Premium to queue new episodes.', 'info');
+                if (!result.canDownload) showToast('The schedule is saved. Enable Sonarr requests or sign in with Premium.', 'info');
                 await updateScheduleButtons();
                 if (settingsTab === 'scheduler' && currentPage === 'settings') await renderSchedulerSettings();
             } catch (e) { showToast(e.message, 'error'); await updateScheduleButtons(); }
@@ -3191,8 +3240,8 @@
             const status = !state.historyEnabled ? 'History is disabled. Enable it in Settings → History.'
                 : !state.enabled ? 'Scheduler paused.' : state.isRunning ? 'Checking releases…'
                 : state.nextRun ? 'Next check: ' + new Date(state.nextRun).toLocaleString() : 'No active subscriptions.';
-            return status + (state.canDownload ? '' : ' Sign in with a Premium account to queue releases.')
-                + (state.autoDownload ? ' Queued downloads start automatically.'
+            return status + (state.canDownload ? (state.destination === 'sonarr' ? ' New episodes will be requested from Sonarr.' : '') : ' Enable Sonarr requests or sign in with Premium.')
+                + (state.destination === 'sonarr' ? '' : state.autoDownload ? ' Queued downloads start automatically.'
                     : ' Enable Settings → Queue → Auto Download to start queued episodes automatically.');
         }
 
@@ -3713,12 +3762,20 @@
                                 <div class="setting-row"><div><div class="setting-label">API Key</div></div><input type="text" class="form-input w-250" id="setting-sonarr-apikey" value="${escapeHtmlAttribute(s.apiKey||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-ssl" ${s.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input w-200" id="setting-sonarr-urlbase" value="${escapeHtmlAttribute(s.urlBase||'')}"></div>
+                                <div class="setting-row"><div><div class="setting-label">Register Cruncharr downloads in Sonarr</div><div class="setting-desc">Add the series before downloading and submit completed files for import. Newly added series start unmonitored, with no automatic search.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-auto-add" ${s.autoAddSeries!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Use Sonarr without Premium</div><div class="setting-desc">Send selected episodes to Sonarr when Crunchyroll Premium is unavailable. Sonarr monitors and searches those episodes using its configured sources.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-guest-search" ${s.searchWithoutPremium!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Turn off Sonarr monitoring for Premium requests</div><div class="setting-desc">Also turn off monitoring for an existing show while Cruncharr supplies it. Existing downloads already queued in Sonarr are unaffected.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-unmonitor" ${s.unmonitorPremiumRequests!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Quality profile for new Sonarr series</div><div class="setting-desc">Automatic uses the most common profile in the current Sonarr library.</div></div><select class="form-select" id="setting-sonarr-profile"><option value="${Number(s.qualityProfileId)||0}">${s.qualityProfileId?'Saved profile':'Automatic'}</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Root folder for new Sonarr series</div><div class="setting-desc">Automatic uses the folder containing the most existing Sonarr series.</div></div><select class="form-select" id="setting-sonarr-root"><option value="${escapeHtmlAttribute(s.rootFolderPath||'')}">${escapeHtml(s.rootFolderPath||'Automatic')}</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Cruncharr download folder as seen by Sonarr</div><div class="setting-desc">Leave blank when both apps see the same paths. Otherwise enter Sonarr's path to Cruncharr's download folder. Imports copy files into Sonarr's library.</div></div><input class="form-input w-300" id="setting-sonarr-download-path" value="${escapeHtmlAttribute(s.downloadPath||'')}" placeholder="Same path in both apps"></div>
+                                <div class="setting-row"><div id="sonarr-request-status" role="status">Loading Sonarr request status…</div><button class="header-btn" onclick="loadSonarrRequestSettings()">Refresh status</button></div>
                                 <div class="setting-row" id="sonarr-numbering-row"><div><div class="setting-label">Use Sonarr Naming / TVDB Numbering</div><div class="setting-desc">Use the matched Sonarr series path/title, naming replacements, season-folder format, TVDB season/episode numbers, and Sonarr episode title. If a saved Sonarr match is temporarily unavailable, the download retries instead of writing a differently named fallback. <span id="sonarr-numbering-warn" style="color:var(--accent-red); display:${s.enabled?'none':'inline'};">Requires Sonarr to be enabled and connected above.</span></div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-numbering" ${s.useSonarrNumbering?'checked':''} ${s.enabled?'':'disabled'}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Connection</div><div class="setting-desc">Verify host, port and API key against your Sonarr server</div></div><button class="header-btn" id="sonarr-test-btn" onclick="testSonarrConnection()">Test Connection</button></div>
                                 <div class="setting-row" id="sonarr-test-result" style="display:none;"><div id="sonarr-test-msg" style="font-size:0.85em;"></div></div>
                             </div>
                         </div>
                     `;
+                    void loadSonarrRequestSettings();
                     break;
                 case 'notifications':
                     content.innerHTML = `
@@ -4218,7 +4275,13 @@
                         port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
                         useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
                         urlBase: document.getElementById('setting-sonarr-urlbase')?.value ?? '',
-                        useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
+                        useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false,
+                        autoAddSeries: document.getElementById('setting-sonarr-auto-add')?.checked ?? true,
+                        searchWithoutPremium: document.getElementById('setting-sonarr-guest-search')?.checked ?? true,
+                        unmonitorPremiumRequests: document.getElementById('setting-sonarr-unmonitor')?.checked ?? true,
+                        qualityProfileId: Number(document.getElementById('setting-sonarr-profile')?.value || 0),
+                        rootFolderPath: document.getElementById('setting-sonarr-root')?.value ?? '',
+                        downloadPath: document.getElementById('setting-sonarr-download-path')?.value ?? ''
                     };
                     // GET /config returns the placeholder "[configured]" instead of the real key -
                     // only send the key if the user actually typed a new one
@@ -4574,7 +4637,7 @@
                         for (const episode of (season.episodes || [])) {
                             if (!episodeHasCompletedArtifact(episode) && episode.episodeId) {
                                 if (episode.isEpisodeAvailableOnStreamingService === false) continue;
-                                const queueRes = await fetch('/api/v1/queue', {
+                                const queueRes = await sendDownloadRequest({
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
@@ -4594,7 +4657,7 @@
                 }
                 
                 if (added > 0) {
-                    showToast(`Added ${added} missing episode(s) to queue`, 'success');
+                    showToast(`Submitted ${added} missing episode request(s)`, 'success');
                 } else {
                     showToast('No missing episodes found', 'info');
                 }
@@ -5056,15 +5119,15 @@
                     seriesTitle: seriesTitle || 'Unknown'
                 };
                 if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const admission = await readQueueAdmission(res);
-                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
+                showToast(admission.data?.message || (admission.added ? 'Added to queue' : 'Episode is already in the queue'), admission.added ? 'success' : 'info');
             } catch (e) {
-                showToast('Failed to add to queue', 'error');
+                showToast(e.message || 'Failed to submit download request', 'error');
             }
         }
 
@@ -5119,23 +5182,23 @@
                     selectedSubs: subs.length ? subs : null
                 };
                 if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const admission = await readQueueAdmission(res);
-                showToast(admission.added ? 'Added to queue with selected dubs/subs' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
+                showToast(admission.data?.message || (admission.added ? 'Added to queue with selected dubs/subs' : 'Episode is already in the queue'), admission.added ? 'success' : 'info');
                 panel.remove();
                 checkLanguageSuggestion();
             } catch (e) {
                 btn.disabled = false;
-                showToast('Failed to add to queue', 'error');
+                showToast(e.message || 'Failed to submit download request', 'error');
             }
         }
         
         async function downloadSeason(seriesId, seasonId) {
-            if (!confirm('This will add all episodes in this season to the queue. Continue?')) return;
+            if (!confirm(downloadActionLabel() + ': request all episodes in this season?')) return;
             try {
                 const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/episodes`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -5144,7 +5207,7 @@
                 
                 for (const ep of (episodes || [])) {
                     if (ep.seasonId === seasonId || ep.seasonNumber === parseInt(seasonId)) {
-                        const queueRes = await fetch('/api/v1/queue', {
+                        const queueRes = await sendDownloadRequest({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -5163,7 +5226,7 @@
                     }
                 }
                 
-                showToast(`Added ${added} episode(s) to queue`, 'success');
+                showToast(added ? `Submitted ${added} episode request(s)` : 'Selected episodes are already available or queued.', added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to queue season', 'error');
             }
@@ -5371,6 +5434,32 @@
         
         // Live-gate the Sonarr-dependent settings on the Enabled toggle so a checkbox never
         // sits there doing nothing. Called on render and whenever Enabled is flipped.
+        async function loadSonarrRequestSettings() {
+            const status = document.getElementById('sonarr-request-status');
+            if (!status) return;
+            try {
+                const [optionResponse, requestResponse] = await Promise.all([
+                    fetch('/api/v1/sonarr/options'), fetch('/api/v1/sonarr/requests')
+                ]);
+                if (!optionResponse.ok) throw new Error((await optionResponse.json()).message || 'Could not read Sonarr options');
+                if (!requestResponse.ok) throw new Error('Could not read Sonarr request status');
+                const options = await optionResponse.json();
+                const requests = await requestResponse.json();
+                if (!status.isConnected) return;
+                const profile = document.getElementById('setting-sonarr-profile');
+                const root = document.getElementById('setting-sonarr-root');
+                const profileValue = profile.value;
+                const rootValue = root.value;
+                profile.innerHTML = '<option value="0">Automatic</option>' + options.qualityProfiles.map(p => `<option value="${Number(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+                root.innerHTML = '<option value="">Automatic</option>' + options.rootFolders.map(r => `<option value="${escapeHtmlAttribute(r.path)}">${escapeHtml(r.path)}</option>`).join('');
+                if (![...profile.options].some(o => o.value === profileValue)) profile.add(new Option('Saved profile unavailable', profileValue));
+                if (![...root.options].some(o => o.value === rootValue)) root.add(new Option('Saved folder unavailable', rootValue));
+                profile.value = profileValue;
+                root.value = rootValue;
+                status.innerHTML = requests.length ? requests.map(r => `<p><strong>${escapeHtml(r.title)}</strong>: ${escapeHtml(r.lastError || r.status)}<br><small>${Number(r.episodeFileCount)} / ${Number(r.episodeCount)} files · ${Number(r.pendingEpisodes)} episodes pending · ${Number(r.pendingImports)} imports pending</small></p>`).join('') : 'No Sonarr requests yet.';
+            } catch (error) { if (status.isConnected) status.textContent = error.message; }
+        }
+
         function updateSonarrGating() {
             const enabled = document.getElementById('setting-sonarr-enabled')?.checked || false;
             const banner = document.getElementById('sonarr-disabled-banner');
@@ -5552,7 +5641,7 @@
         }
         
         async function downloadSeries(id) {
-            if (!confirm('This will add all episodes in this series to the queue. Continue?')) return;
+            if (!confirm(downloadActionLabel() + ': request all episodes in this series?')) return;
             try {
                 // Get episodes and add all to queue
                 const res = await fetch(`/api/v1/series/${encodeURIComponent(id)}/episodes`);
@@ -5562,7 +5651,7 @@
                 
                 for (const ep of (episodes || [])) {
                     if (ep.id) {
-                        const queueRes = await fetch('/api/v1/queue', {
+                        const queueRes = await sendDownloadRequest({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -5581,13 +5670,14 @@
                     }
                 }
                 
-                showToast(`Added ${added} episode(s) to queue`, 'success');
+                showToast(added ? `Submitted ${added} episode request(s)` : 'Selected episodes are already available or queued.', added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to queue series', 'error');
             }
         }
 
         function closeModal() {
+            if (sonarrChoiceResolve) { const resolve = sonarrChoiceResolve; sonarrChoiceResolve = null; resolve(null); }
             historyDetailGate.cancel();
             const modal = document.getElementById('modal');
             if (modal) modal.classList.remove('active');
@@ -5677,6 +5767,11 @@
             // Check auth status periodically
             checkAuthStatus();
             authIntervalId = setInterval(checkAuthStatus, AUTH_NOTIFICATION_THROTTLE_MS);
+            const sonarrInterval = setInterval(() => {
+                if (document.hidden) return;
+                if (['browse', 'seasonal', 'add-download', 'history'].includes(currentPage)) void loadSonarrLibrary();
+                if (currentPage === 'settings' && settingsTab === 'sonarr') void loadSonarrRequestSettings();
+            }, 60000);
             
             // Use SSE for real-time queue updates instead of polling
             startQueueSSE();
@@ -5690,6 +5785,7 @@
             
             // Clear intervals and SSE on page unload
             window.addEventListener('beforeunload', () => {
+                clearInterval(sonarrInterval);
                 if (authIntervalId) clearInterval(authIntervalId);
                 if (historyIntervalId) clearInterval(historyIntervalId);
                 if (sseReconnectTimeout) clearTimeout(sseReconnectTimeout);

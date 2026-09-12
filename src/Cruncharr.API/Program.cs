@@ -120,6 +120,11 @@ public class Program
         builder.Services.AddSingleton<IQueueService, QueueService>();
         builder.Services.AddSingleton<QueueBroadcastService>();
         builder.Services.AddSingleton<ISonarrService, SonarrService>();
+        builder.Services.AddSingleton<ISonarrAcquisitionService>(sp => new SonarrAcquisitionService(
+            sp.GetRequiredService<ISonarrService>(), sp.GetRequiredService<ICrunchyrollApiService>(),
+            sp.GetRequiredService<IHistoryService>(), config, sp.GetService<ILogger<SonarrAcquisitionService>>(),
+            Path.Combine(configDir, "sonarr-requests.json")));
+        builder.Services.AddHostedService<SonarrSyncService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<ISyncingService, SyncingService>();
         builder.Services.AddSingleton<IVideoSyncer, VideoSyncer>();

@@ -43,8 +43,9 @@ public class DownloadService : IDownloadService
     private readonly IHistoryService? _history;
     private readonly IQueueService? _queueService;
     private readonly ISonarrService? _sonarrService;
+    private readonly ISonarrAcquisitionService? _sonarrRequests;
 
-    public DownloadService(ICrunchyrollAuthService auth, ICrunchyrollApiService api, ILogger<DownloadService>? logger = null, IHistoryService? history = null, IVideoSyncer? videoSyncer = null, IEncodingService? encodingService = null, IQueueService? queueService = null, ISonarrService? sonarrService = null)
+    public DownloadService(ICrunchyrollAuthService auth, ICrunchyrollApiService api, ILogger<DownloadService>? logger = null, IHistoryService? history = null, IVideoSyncer? videoSyncer = null, IEncodingService? encodingService = null, IQueueService? queueService = null, ISonarrService? sonarrService = null, ISonarrAcquisitionService? sonarrRequests = null)
     {
         _auth = auth;
         _api = api;
@@ -54,6 +55,7 @@ public class DownloadService : IDownloadService
         _encodingService = encodingService;
         _queueService = queueService;
         _sonarrService = sonarrService;
+        _sonarrRequests = sonarrRequests;
         _httpClient = auth.HttpClient;
         // Use /widevine for Docker, fallback to default path
         var widevineDir = "/widevine";
@@ -653,6 +655,22 @@ public class DownloadService : IDownloadService
                 {
                     _logger?.LogInformation("Skipping already-downloaded episode {EpisodeId}; existing output is {OutputPath}", episode.Id, existing.OutputPath);
                     await AdoptExistingArtifactAsync(episode, config, existing.OutputPath, requestedAudio, requestedSubs, existing);
+                    if (!episode.IsMusicVideo && config.Sonarr.Enabled && config.Sonarr.AutoAddSeries && _sonarrRequests != null)
+                    {
+                        try
+                        {
+                            var registered = await _sonarrRequests.PrepareAsync(episode, true, cancellationToken: cancellationToken);
+                            if (!registered.AlreadyInSonarr)
+                                await _sonarrRequests.RegisterImportAsync(episode, existing.OutputPath, cancellationToken);
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                        catch (Exception ex)
+                        {
+                            return new DownloadResult { Success = false, OutputPath = existing.OutputPath,
+                                ErrorMessage = $"The download already exists, but Sonarr import registration failed: {ex.Message}",
+                                ErrorType = DownloadErrorType.Unknown };
+                        }
+                    }
                     progress?.Report(new DownloadProgress { State = DownloadState.Done, Percent = 100, Doing = "Already downloaded" });
                     onDownloadComplete?.Invoke();
                     return new DownloadResult
@@ -664,6 +682,7 @@ public class DownloadService : IDownloadService
                     };
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "Could not check download history before downloading {EpisodeId}; continuing", episode.Id);
@@ -714,6 +733,26 @@ public class DownloadService : IDownloadService
             else
             {
                 _logger?.LogWarning("Failed to fetch full episode details for {EpisodeId}", episode.Id);
+            }
+        }
+
+        if (!episode.IsMusicVideo && config.Sonarr.Enabled && config.Sonarr.AutoAddSeries && _sonarrRequests != null)
+        {
+            progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 10, Doing = "Registering series with Sonarr..." });
+            try
+            {
+                var registered = await _sonarrRequests.PrepareAsync(episode, true, cancellationToken: cancellationToken);
+                if (registered.AlreadyInSonarr)
+                {
+                    progress?.Report(new DownloadProgress { State = DownloadState.Done, Percent = 100, Doing = "Already in Sonarr" });
+                    onDownloadComplete?.Invoke();
+                    return new DownloadResult { Success = true, SkippedExisting = true, Episode = episode };
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                return new DownloadResult { Success = false, ErrorMessage = $"Sonarr registration failed: {ex.Message}", ErrorType = DownloadErrorType.Unknown };
             }
         }
 
@@ -2166,6 +2205,9 @@ public class DownloadService : IDownloadService
                     _logger?.LogWarning(ex, "Failed to record download history");
                 }
             }
+
+            if (!episode.IsMusicVideo && config.Sonarr.Enabled && config.Sonarr.AutoAddSeries && _sonarrRequests != null && !config.Download.SkipMuxing)
+                await _sonarrRequests.RegisterImportAsync(episode, outputPath, cancellationToken);
 
             // [PT] Mark as watched on Crunchyroll if configured
             if (config.Crunchyroll.MarkAsWatched)

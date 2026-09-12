@@ -973,7 +973,6 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     {
         var ret = new Dictionary<string, CrunchyEpMeta>();
 
-        var hasPremium = _authService.Profile?.HasPremium ?? false;
         var hslang = "none"; // Use default, could be fetched from config if needed
 
         bool ShouldInclude(string checkKey) =>
@@ -997,11 +996,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
                 item.SeqId = epNum;
 
-                if (item.IsPremiumOnly && !hasPremium)
-                {
-                    _logger?.LogWarning("Episode is premium only - skipping {EpisodeId}", item.Id);
-                    continue;
-                }
+                // Selection returns metadata for both Cruncharr and guest Sonarr requests.
+                // Premium authorization is enforced when admitting and executing downloads.
 
                 // history override could be added here if HistoryService is injected
                 var effectiveDubs = dubLang ?? new List<string>();

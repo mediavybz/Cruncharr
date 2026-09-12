@@ -21,6 +21,14 @@ public interface ISonarrService
     Task<List<SonarrEpisode>> GetCurrentEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh = false, CancellationToken cancellationToken = default);
     Task<SonarrEpisode?> GetEpisodeAsync(int episodeId, SonarrConfig config);
     Task<SonarrNamingConfig?> GetNamingConfigAsync(SonarrConfig config);
+    Task<List<SonarrSeries>> LookupSeriesAsync(string title, SonarrConfig config);
+    Task<SonarrSetupOptions> GetSetupOptionsAsync(SonarrConfig config, CancellationToken cancellationToken = default);
+    Task<SonarrSeries> AddSeriesAsync(int tvdbId, SonarrConfig config, CancellationToken cancellationToken = default);
+    Task SetMonitoringAsync(int seriesId, bool monitored, SonarrConfig config, CancellationToken cancellationToken = default);
+    Task<int> SearchEpisodesAsync(int seriesId, IReadOnlyList<int> episodeIds, SonarrConfig config, CancellationToken cancellationToken = default);
+    Task<int> ImportFileAsync(string path, int seriesId, SonarrConfig config, CancellationToken cancellationToken = default, int? episodeId = null);
+    Task<string> GetCommandStatusAsync(int commandId, SonarrConfig config, CancellationToken cancellationToken = default);
+    void InvalidateCache();
 }
 
 /// <summary>Outcome of a Sonarr connection test, with a human-readable reason.</summary>
@@ -33,7 +41,7 @@ public record SonarrTestResult(bool Success, string Message);
 /// </summary>
 public record SonarrMatchResult(int HistoryTotal, int Matched, int SonarrSeriesCount);
 
-public class SonarrService : ISonarrService
+public partial class SonarrService : ISonarrService
 {
     private readonly ILogger<SonarrService>? _logger;
     private readonly HttpClient _httpClient;
@@ -331,7 +339,7 @@ public class SonarrService : ISonarrService
         finally { _matchGate.Release(); }
     }
 
-    private async Task<List<SonarrSeries>> LookupSeriesAsync(string title, SonarrConfig config)
+    public virtual async Task<List<SonarrSeries>> LookupSeriesAsync(string title, SonarrConfig config)
     {
         var key = BuildCacheKey(config) + "|" + title;
         // Coalesce catalog, History and download requests. Successful metadata is reusable for
@@ -634,6 +642,8 @@ public class SonarrSeries
     public string? Overview { get; set; }
     public List<SonarrSeason>? Seasons { get; set; }
     public int Year { get; set; }
+    public int QualityProfileId { get; set; }
+    public bool Monitored { get; set; }
     public string? Path { get; set; }
     public int TvdbId { get; set; }
     public string? TitleSlug { get; set; }

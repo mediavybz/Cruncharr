@@ -15,15 +15,17 @@ public sealed class ScheduledDownloadsService
     private readonly ICrunchyrollAuthService _auth;
     private readonly ISonarrService _sonarr;
     private readonly CruncharrConfig _config;
+    private readonly ISonarrAcquisitionService? _sonarrRequests;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SchedulerState _state;
     private readonly string? _loadError;
     public bool IsRunning { get; private set; }
 
     public ScheduledDownloadsService(IHistoryService history, IQueueService queue,
-        ICrunchyrollAuthService auth, ISonarrService sonarr, CruncharrConfig config, string? statePath = null)
+        ICrunchyrollAuthService auth, ISonarrService sonarr, CruncharrConfig config, string? statePath = null, ISonarrAcquisitionService? sonarrRequests = null)
     {
         (_history, _queue, _auth, _sonarr, _config) = (history, queue, auth, sonarr, config);
+        _sonarrRequests = sonarrRequests;
         var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
         _path = statePath ?? Path.Combine(Path.GetDirectoryName(configPath) ?? ".", "subscriptions.json");
         // A corrupt subscription file must not reset the baseline and enqueue old episodes.
@@ -55,7 +57,9 @@ public sealed class ScheduledDownloadsService
             NextRun = state.Enabled && _config.History.Enabled && state.Subscriptions.Any(s => s.Enabled)
                 ? state.LastRun?.AddMinutes(state.IntervalMinutes) ?? DateTimeOffset.UtcNow : (DateTimeOffset?)null,
             HistoryEnabled = _config.History.Enabled,
-            CanDownload = _auth.IsAuthenticated && _auth.Profile.HasPremium,
+            CanDownload = _auth.IsAuthenticated && _auth.Profile.HasPremium ||
+                _config.Sonarr.Enabled && _config.Sonarr.SearchWithoutPremium && _sonarrRequests != null,
+            Destination = _auth.IsAuthenticated && _auth.Profile.HasPremium ? "cruncharr" : "sonarr",
             AutoDownload = _config.Queue.AutoDownload,
             Subscriptions = state.Subscriptions.Select(s => new { s.SeriesId, s.Title, s.Enabled, s.CreatedAt }).ToList()
         };
@@ -154,8 +158,8 @@ public sealed class ScheduledDownloadsService
                         throw new InvalidOperationException($"Could not refresh {subscription.Title}; will retry.");
                     var series = (await _history.GetHistorySeriesAsync()).FirstOrDefault(s => s.SeriesId == subscription.SeriesId)
                         ?? throw new InvalidOperationException($"{subscription.Title} is missing from History.");
-                    // Guest browsing remains usable; only premium accounts may enqueue downloads.
-                    if (!_auth.IsAuthenticated || !_auth.Profile.HasPremium) continue;
+                    var premium = _auth.IsAuthenticated && _auth.Profile.HasPremium;
+                    if (!premium && (!_config.Sonarr.Enabled || !_config.Sonarr.SearchWithoutPremium || _sonarrRequests == null)) continue;
                     var local = HistoryService.GetEpisodeIdsWithExistingArtifacts(await _history.GetAllAsync(0, int.MaxValue) ?? []);
                     bool sonarrUnavailable = false;
                     var files = _config.Sonarr.Enabled
@@ -167,11 +171,21 @@ public sealed class ScheduledDownloadsService
                     {
                         if (!IsReleased(episode, DateTimeOffset.UtcNow) || subscription.HandledEpisodeIds.Contains(episode.EpisodeId!)) continue;
                         if ((season.SpecialSeason || episode.SpecialEpisode) && !_config.History.AddSpecials) continue;
-                        if (_config.History.SkipUnmonitored && _config.Sonarr.Enabled &&
+                        if (_config.History.SkipUnmonitored && _config.Sonarr.Enabled && !_config.Sonarr.AutoAddSeries &&
                             !string.IsNullOrEmpty(episode.SonarrEpisodeId) && !episode.SonarrIsMonitored) continue;
                         if (local.Contains(episode.EpisodeId!) || files.Contains(episode.EpisodeId!))
                         {
                             subscription.HandledEpisodeIds.Add(episode.EpisodeId!);
+                            continue;
+                        }
+                        if (!premium)
+                        {
+                            await _sonarrRequests!.PrepareAsync(new EpisodeInfo {
+                                Id = episode.EpisodeId!, SeriesId = series.SeriesId, SeriesTitle = series.SeriesTitle ?? subscription.Title,
+                                SeasonId = season.SeasonId, Title = episode.EpisodeTitle ?? "Episode"
+                            }, false, cancellationToken: ct);
+                            subscription.HandledEpisodeIds.Add(episode.EpisodeId!);
+                            state.LastQueuedCount++;
                             continue;
                         }
                         var dubs = (season.HistorySeasonDubLangOverride.Count > 0 ? season.HistorySeasonDubLangOverride :

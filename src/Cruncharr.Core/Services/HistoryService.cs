@@ -39,6 +39,8 @@ public interface IHistoryService
     // Sonarr integration
     Task<SonarrMatchResult> MatchHistorySeriesWithSonarrAsync(bool updateAll = false);
     Task MatchHistoryEpisodesWithSonarrAsync(string seriesId, bool rematchAll = false);
+    Task SetSonarrSeriesAsync(string seriesId, SonarrSeries sonarrSeries);
+    Task RefreshSonarrFileStatusAsync(CancellationToken cancellationToken = default);
 
     // Utilities
     double CalculateSimilarity(string source, string target);
@@ -864,6 +866,48 @@ public class HistoryService : IHistoryService, IDisposable
         {
             // ignored
         }
+    }
+
+    public async Task SetSonarrSeriesAsync(string seriesId, SonarrSeries sonarrSeries)
+    {
+        await EnsureLoadedAsync();
+        await _lock.WaitAsync();
+        try
+        {
+            var series = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
+            if (series == null) return;
+            if (series.SonarrSeriesId != sonarrSeries.Id.ToString())
+                foreach (var episode in series.Seasons.SelectMany(s => s.EpisodesList)) episode.ClearSonarrEpisodeData();
+            series.SonarrSeriesId = sonarrSeries.Id.ToString();
+            series.SonarrTvDbId = sonarrSeries.TvdbId.ToString();
+            series.SonarrSlugTitle = sonarrSeries.TitleSlug;
+            await SaveRichHistoryAsync(throwOnError: true);
+        }
+        finally { _lock.Release(); }
+    }
+
+    public async Task RefreshSonarrFileStatusAsync(CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetHistorySeriesAsync();
+        var failures = new HashSet<string>();
+        var files = await GetCurrentSonarrArtifactEpisodeIdsAsync(snapshot, _sonarrService, _config.Sonarr,
+            cancellationToken, (id, _) => failures.Add(id));
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var current = snapshot.SelectMany(s => s.Seasons).SelectMany(s => s.EpisodesList)
+                .Where(e => !string.IsNullOrEmpty(e.SonarrEpisodeId)).GroupBy(e => e.SonarrEpisodeId!)
+                .ToDictionary(g => g.Key, g => g.First());
+            foreach (var episode in _historyList.Where(s => !failures.Contains(s.SonarrSeriesId ?? ""))
+                         .SelectMany(s => s.Seasons).SelectMany(s => s.EpisodesList))
+                if (episode.SonarrEpisodeId != null && current.TryGetValue(episode.SonarrEpisodeId, out var fresh))
+                {
+                    episode.SonarrHasFile = files.Contains(episode.EpisodeId ?? "");
+                    episode.SonarrIsMonitored = fresh.SonarrIsMonitored;
+                }
+            await SaveRichHistoryAsync(throwOnError: true);
+        }
+        finally { _lock.Release(); }
     }
 
     // Sonarr integration methods

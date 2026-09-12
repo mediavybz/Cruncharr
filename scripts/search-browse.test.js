@@ -182,6 +182,23 @@ test('a rejected candidate returns to Browse while an unavailable candidate rema
     assert.match(ui.run('libraryBadge(allBrowseSeries[1])'), /Sonarr match unverified/);
 });
 
+test('background Sonarr updates preserve scroll and loaded cards, and skip unchanged grids', async () => {
+    const ui = app();
+    ui.run(`currentPage='browse'; browseHideLibrary=true;
+        allBrowseSeries=Array.from({length:400},(_,i)=>({id:String(i),title:'Series '+i}));
+        browseFilteredSeries=allBrowseSeries; browseRenderedCount=300;
+        let scroller={scrollTop:2400}; document.getElementById=id=>id==='content'?scroller:null;
+        let renders=0; let retainedCards=0;
+        renderBrowseContent=(rows,count)=>{renders++;retainedCards=count;}; buildRatingButtons=()=>{};`);
+    const data = {enabled:true,series:[{sonarrSeriesId:1,title:'Series 0',crunchyrollSeriesIds:['0']}]};
+    const first = ui.run('loadSonarrLibrary()'); ui.reply(0,data); await first;
+    assert.equal(ui.run('scroller.scrollTop'),2400);
+    assert.equal(ui.run('retainedCards'),300);
+    const poll = ui.run('sonarrLibraryCheckedAt=0;loadSonarrLibrary()'); ui.reply(1,data); await poll;
+    assert.equal(ui.run('renders'),1);
+    assert.equal(ui.run('scroller.scrollTop'),2400);
+});
+
 test('download rejection displays the server reason', async () => {
     const ui = app();
     await assert.rejects(ui.run('readQueueAdmission({ok:false,status:403,json:async()=>({message:"Log in to a Crunchyroll Premium account to download."})})'), /Premium account/);

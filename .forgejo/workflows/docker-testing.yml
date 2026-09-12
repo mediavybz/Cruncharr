@@ -60,9 +60,10 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
           docker version
           docker buildx version
-          docker buildx inspect --bootstrap
-          docker buildx inspect | grep -q 'linux/amd64'
-          docker buildx inspect | grep -q 'linux/arm64'
+          platform_info=$(docker buildx inspect --bootstrap)
+          printf '%s\n' "$platform_info"
+          grep -q 'linux/amd64' <<< "$platform_info"
+          grep -q 'linux/arm64' <<< "$platform_info"
           test "$(timeout 60s docker run --rm --platform linux/arm64 alpine:3.20 uname -m)" = "aarch64"
           docker container prune --force
           docker volume prune --force
@@ -143,8 +144,9 @@ jobs:
               "${image_tags[@]}" \
               --push
             for tag in "${verify_tags[@]}"; do
-              docker buildx imagetools inspect "ghcr.io/mediavybz/cruncharr:$tag" | grep -q 'linux/amd64'
-              docker buildx imagetools inspect "ghcr.io/mediavybz/cruncharr:$tag" | grep -q 'linux/arm64'
+              manifest_info=$(docker buildx imagetools inspect "ghcr.io/mediavybz/cruncharr:$tag")
+              grep -q 'linux/amd64' <<< "$manifest_info"
+              grep -q 'linux/arm64' <<< "$manifest_info"
             done
             docker logout ghcr.io
           fi

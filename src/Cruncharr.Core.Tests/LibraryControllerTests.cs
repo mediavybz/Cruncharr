@@ -19,7 +19,7 @@ public class LibraryControllerTests
         var owned = new SonarrSeries { Id = 312, TvdbId = 251908, Title = "Haganai: I Don't Have Many Friends" };
         var sonarr = new Mock<ISonarrService>();
         sonarr.Setup(s => s.GetCurrentSeriesAsync(config.Sonarr, It.IsAny<CancellationToken>())).ReturnsAsync([owned]);
-        sonarr.Setup(s => s.ResolveSeriesAsync("GYX0PN4MR", "Haganai", config.Sonarr, It.IsAny<CancellationToken>())).ReturnsAsync(owned);
+        sonarr.Setup(s => s.ResolveSeriesAsync("GYX0PN4MR", "Haganai", It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>())).ReturnsAsync(owned);
         var history = new Mock<IHistoryService>();
         history.Setup(h => h.GetHistorySeriesAsync()).ReturnsAsync([]);
         var api = new Mock<ICrunchyrollApiService>();
@@ -63,7 +63,7 @@ public class LibraryControllerTests
         var sonarr = new Mock<ISonarrService>();
         sonarr.Setup(s => s.GetCurrentSeriesAsync(config.Sonarr, It.IsAny<CancellationToken>()))
             .ReturnsAsync([new SonarrSeries { Id = 10, Title = "A Certain Series: Full Title" }]);
-        sonarr.Setup(s => s.ResolveSeriesAsync("unavailable", "A Certain Series", config.Sonarr, It.IsAny<CancellationToken>()))
+        sonarr.Setup(s => s.ResolveSeriesAsync("unavailable", "A Certain Series", It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Metadata unavailable"));
         var history = new Mock<IHistoryService>();
         history.Setup(h => h.GetHistorySeriesAsync()).ReturnsAsync([]);

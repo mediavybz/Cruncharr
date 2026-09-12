@@ -180,6 +180,9 @@
         let sonarrLibraryPromise = null;
         let sonarrLibraryCheckedAt = 0;
         let sonarrLibraryError = false;
+        let sonarrLibraryInProgress = false;
+        let sonarrLibraryPending = new Set();
+        let sonarrLibraryRefreshTimer = null;
         let browseHideLibrary = false;
         let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
         let browseSeriesPromise = null;  // de-duplicates background/visible catalog requests
@@ -1799,6 +1802,8 @@
 
         function libraryBadge(series) {
             const match = CruncharrLibrary.findSeries(sonarrLibraryIndex, series);
+            if (!match && sonarrLibraryPending.has(series.id || series.seriesId))
+                return `<span class="library-badge">${sonarrLibraryInProgress ? 'Checking Sonarr…' : 'Sonarr match unverified'}</span>`;
             if (!match) return '';
             const files = match.episodeFileCount;
             const detail = files == null ? 'Series is tracked in Sonarr. Open to check episodes.'
@@ -1816,8 +1821,10 @@
                 element.innerHTML = libraryBadge({id: element.dataset.libraryId, title: element.dataset.libraryTitle});
             });
             const status = document.getElementById('browse-library-status');
-            if (status) status.textContent = sonarrLibraryError
-                ? (sonarrLibraryIndex ? 'Some Sonarr titles could not be verified' : 'Sonarr library status unavailable') : '';
+            if (status) status.textContent = sonarrLibraryInProgress ? 'Checking alternate Sonarr titles…'
+                : sonarrLibraryError ? (sonarrLibraryIndex ? 'Some Sonarr titles could not be verified; keeping known matches' : 'Sonarr library status unavailable') : '';
+            if (status && browseHideLibrary && sonarrLibraryPending.size)
+                status.textContent += ` ${sonarrLibraryPending.size} unverified series excluded while this filter is on.`;
             const filter = document.getElementById('browse-hide-library');
             if (filter) filter.disabled = !sonarrLibraryIndex;
         }
@@ -1825,34 +1832,29 @@
         async function loadSonarrLibrary() {
             if (sonarrLibraryCheckedAt && Date.now() - sonarrLibraryCheckedAt < 60000) { updateLibraryIndicators(); return; }
             if (sonarrLibraryPromise) return sonarrLibraryPromise;
+            clearTimeout(sonarrLibraryRefreshTimer);
             const libraryStatus = document.getElementById('browse-library-status');
             if (libraryStatus) libraryStatus.textContent = 'Checking Sonarr library…';
             sonarrLibraryPromise = (async () => {
                 try {
-                    // Paint exact matches immediately while the backend verifies alternate names.
-                    if (!sonarrLibraryIndex) {
-                        const quick = await fetch('/api/v1/library/sonarr?verifyTitles=false');
-                        if (!quick.ok) throw new Error(`HTTP ${quick.status}`);
-                        const initial = await quick.json();
-                        sonarrLibraryIndex = initial.enabled ? CruncharrLibrary.createIndex(initial.series) : null;
-                        updateLibraryIndicators();
-                        if (currentPage === 'browse' && browseHideLibrary) renderBrowseFiltered();
-                        const status = document.getElementById('browse-library-status');
-                        if (status && initial.enabled) status.textContent = 'Checking alternate Sonarr titles…';
-                    }
-                    const response = await fetch('/api/v1/library/sonarr');
+                    const response = await fetch('/api/v1/library/sonarr?background=true');
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const data = await response.json();
                     sonarrLibraryIndex = data.enabled ? CruncharrLibrary.createIndex(data.series) : null;
+                    sonarrLibraryInProgress = !!data.matchingInProgress;
+                    sonarrLibraryPending = new Set(data.pendingSeriesIds || []);
                     sonarrLibraryError = !!data.matchingUnavailable;
                 } catch (e) {
-                    sonarrLibraryIndex = null;
                     sonarrLibraryError = true;
                 } finally {
                     sonarrLibraryCheckedAt = Date.now();
                     sonarrLibraryPromise = null;
                     if (currentPage === 'browse' && browseHideLibrary) renderBrowseFiltered();
                     updateLibraryIndicators();
+                    if (sonarrLibraryInProgress) sonarrLibraryRefreshTimer = setTimeout(() => {
+                        sonarrLibraryCheckedAt = 0;
+                        void loadSonarrLibrary();
+                    }, 2000);
                 }
             })();
             return sonarrLibraryPromise;
@@ -1981,7 +1983,8 @@
         function renderBrowseFiltered() {
             buildRatingButtons();
             let list = allBrowseSeries;
-            if (browseHideLibrary && sonarrLibraryIndex) list = list.filter(series => !CruncharrLibrary.findSeries(sonarrLibraryIndex, series));
+            if (browseHideLibrary && sonarrLibraryIndex) list = list.filter(series =>
+                !CruncharrLibrary.findSeries(sonarrLibraryIndex, series) && !sonarrLibraryPending.has(series.id));
             if (browseDubFilter) {
                 list = list.filter(s => Array.isArray(s.audioLocales) && s.audioLocales.includes(browseDubFilter));
             }

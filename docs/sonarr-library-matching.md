@@ -1,4 +1,4 @@
-# Sonarr library detection (1.0.84)
+# Sonarr library detection (1.0.86)
 
 Browse and Search now share verified Crunchyroll-to-Sonarr series identities with
 History and download naming. A show does not have to be in Cruncharr History to
@@ -17,12 +17,25 @@ multiple meaningful words. Ambiguous franchises,
 generic episode numbers, and repeated dub versions cannot prove identity. Arc
 labels prepended by TVDB are ignored during this series comparison.
 
-Exact badges appear immediately. The Browse status explains when alternate names
-are being checked. Successful metadata lookups and episode confirmations are
-cached for a day; a negative episode comparison is retried after five minutes.
-File availability uses the existing fresh Sonarr checks, independently of these
-identity caches. Failed verification is reported and retried; it is not cached
-as a missing series. Existing saved History links remain intact.
+Exact badges and saved verified identities appear in the first library response.
+Alternate-name verification runs once in the background for all browsers, with
+progress available without waiting for the entire catalog. Closing a page does
+not cancel that work. Verified identities are saved beside the configuration in
+`sonarr-library-identities.json` for up to a day and survive restarts. Changing the
+Sonarr connection, series identities or aliases invalidates the saved matches.
+File availability still uses fresh Sonarr data independently of identity caching.
+
+While **Hide series in Sonarr** is on, candidates awaiting verification are also
+excluded; Browse shows the number still unverified. A rejected candidate becomes
+visible again. Failed checks remain marked as unverified and retry after five
+minutes. A failed library refresh keeps known matches instead of resetting the
+filter. Turn the filter off to inspect unverified listings. History entries are
+not required for these badges or filters.
+
+The September 12 filter audit found 21 verified alternate-name listings missing
+from the former initial response, including We Without Wings, Haganai, Witchblade
+and WorldEnd. This was a loading and cache problem after series identification;
+the fix applies to every verified identity rather than adding title exceptions.
 
 Verified against the actual library: Haganai (24/24 provider episodes with files),
 We Without Wings (12/12), Senran Kagura (12/12), and SHINOVI MASTER (24/24).

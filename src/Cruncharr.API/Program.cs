@@ -120,6 +120,10 @@ public class Program
         builder.Services.AddSingleton<IQueueService, QueueService>();
         builder.Services.AddSingleton<QueueBroadcastService>();
         builder.Services.AddSingleton<ISonarrService, SonarrService>();
+        builder.Services.AddSingleton(sp => new SonarrLibraryVerificationService(
+            sp.GetRequiredService<ISonarrService>(), sp.GetRequiredService<ICrunchyrollApiService>(),
+            sp.GetService<ILogger<SonarrLibraryVerificationService>>(), Path.Combine(configDir, "sonarr-library-identities.json"),
+            sp.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping));
         builder.Services.AddSingleton<ISonarrAcquisitionService>(sp => new SonarrAcquisitionService(
             sp.GetRequiredService<ISonarrService>(), sp.GetRequiredService<ICrunchyrollApiService>(),
             sp.GetRequiredService<IHistoryService>(), config, sp.GetService<ILogger<SonarrAcquisitionService>>(),

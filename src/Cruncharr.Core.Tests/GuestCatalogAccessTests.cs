@@ -41,6 +41,19 @@ public class GuestCatalogAccessTests
         typeof(HttpClientWrapper).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(wrapper, new HttpClient(handler));
     }
 
+    [Fact]
+    public void GuestCanSelectPremiumEpisodeMetadataForSonarrRequests()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        var selected = api.ItemSelectMultiDub(new Dictionary<string, EpisodeAndLanguage> {
+            ["1"] = new() { Variants = [new EpisodeVariant(new CrEpisodeDetail {
+                Id = "GEPISODE1", Episode = "1", Title = "Example", SeriesTitle = "Example", SeriesId = "GSERIES01",
+                SeasonId = "GSEASON01", IsPremiumOnly = true
+            }, new LanguageItem { CrLocale = "ja-JP" })] }
+        }, ["ja-JP"], false, ["1"]);
+        Assert.Equal("GEPISODE1", Assert.Single(selected).Value.EpisodeId);
+    }
+
     [Theory]
     [InlineData("search")]
     [InlineData("direct-search")]
@@ -212,12 +225,12 @@ public class GuestCatalogAccessTests
         auth.SetupGet(value => value.HttpClient).Returns(transport);
         var queue = new Mock<IQueueService>();
         var controller = new QueueController(queue.Object, Mock.Of<IHistoryService>(), Mock.Of<ILanguagePrefsService>(), new CruncharrConfig(), NullLogger<QueueController>.Instance, auth.Object);
-        var response = Assert.IsType<ObjectResult>(controller.AddToQueue(new QueueRequest { EpisodeId = "GEPISODE1" }));
+        var response = Assert.IsType<ObjectResult>(await controller.AddToQueue(new QueueRequest { EpisodeId = "GEPISODE1" }, TestContext.Current.CancellationToken));
         Assert.Equal(403, response.StatusCode);
         queue.Verify(value => value.AddToQueue(It.IsAny<EpisodeInfo>()), Times.Never);
         var api = new Mock<ICrunchyrollApiService>();
         var series = new SeriesController(api.Object, NullLogger<SeriesController>.Instance, auth.Object);
-        Assert.Equal(403, Assert.IsType<ObjectResult>(series.ItemSelectMultiDub(new ItemSelectMultiDubRequest())).StatusCode);
+        Assert.IsType<BadRequestObjectResult>(series.ItemSelectMultiDub(new ItemSelectMultiDubRequest()));
         var download = new DownloadService(auth.Object, api.Object);
         var result = await download.DownloadEpisodeAsync(new EpisodeInfo { Id = "GEPISODE1" }, new CruncharrConfig(), cancellationToken: TestContext.Current.CancellationToken);
         Assert.False(result.Success);

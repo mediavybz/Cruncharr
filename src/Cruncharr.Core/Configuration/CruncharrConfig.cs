@@ -698,6 +698,24 @@ public class SonarrConfig
 
     [YamlMember(Alias = "use_sonarr_numbering", ApplyNamingConventions = false)]
     public bool UseSonarrNumbering { get; set; } = false;
+
+    [YamlMember(Alias = "auto_add_series", ApplyNamingConventions = false)]
+    public bool AutoAddSeries { get; set; } = true;
+
+    [YamlMember(Alias = "search_without_premium", ApplyNamingConventions = false)]
+    public bool SearchWithoutPremium { get; set; } = true;
+
+    [YamlMember(Alias = "unmonitor_premium_requests", ApplyNamingConventions = false)]
+    public bool UnmonitorPremiumRequests { get; set; } = true;
+
+    [YamlMember(Alias = "quality_profile_id", ApplyNamingConventions = false)]
+    public int QualityProfileId { get; set; }
+
+    [YamlMember(Alias = "root_folder_path", ApplyNamingConventions = false)]
+    public string RootFolderPath { get; set; } = "";
+
+    [YamlMember(Alias = "download_path", ApplyNamingConventions = false)]
+    public string DownloadPath { get; set; } = "";
 }
 
 public class ProxyConfig

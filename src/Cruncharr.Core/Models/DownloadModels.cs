@@ -77,6 +77,7 @@ public sealed record QueueAddResult(bool Added, QueueItem Item);
 
 public class EpisodeInfo
 {
+    public bool IsMusicVideo { get; set; }
     public string? VideoQuality { get; set; }
     public string Id { get; set; } = "";
     public string Guid { get; set; } = "";

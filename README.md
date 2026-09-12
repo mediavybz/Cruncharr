@@ -50,7 +50,7 @@ docker-compose up -d
 ## First Time Setup
 
 1. **Open the web interface** at `http://your-server:8585`
-2. **Browse or search** without signing in. Downloads require a signed-in Premium account.
+2. **Browse or search** without signing in. Direct Cruncharr downloads require Premium. With Sonarr enabled, guest and free-account requests can use Sonarr instead.
 3. **Configure settings**:
    - Library directory: `/downloads` (inside container)
    - Temp directory: `/tmp/cruncharr`
@@ -58,6 +58,8 @@ docker-compose up -d
    - Audio languages: `ja-JP` (Japanese) by default
    - Subtitles: `en-US` (English) by default
    - Adjust these in Settings; changes save automatically
+
+See [Sonarr requests](docs/sonarr-requests.md) for automatic series registration, completed-file imports, and guest requests.
 
 ## Stable and beta versions
 

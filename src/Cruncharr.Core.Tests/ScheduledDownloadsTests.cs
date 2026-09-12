@@ -47,6 +47,28 @@ public class ScheduledDownloadsTests : IDisposable
     }
 
     [Fact]
+    public async Task GuestSubscriptionDelegatesNewEpisodesToSonarrOnce()
+    {
+        _auth.SetupGet(a => a.IsAuthenticated).Returns(false);
+        _config.Sonarr.Enabled = true;
+        _config.Sonarr.SearchWithoutPremium = true;
+        _sonarr.Setup(s => s.GetCurrentEpisodesAsync(10, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        var requests = new Mock<ISonarrAcquisitionService>();
+        requests.Setup(r => r.PrepareAsync(It.IsAny<EpisodeInfo>(), false, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SonarrAcquisitionState());
+        var service = new ScheduledDownloadsService(_history.Object, _queue.Object, _auth.Object,
+            _sonarr.Object, _config, Path.Combine(_root, "subscriptions.json"), requests.Object);
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        Episode("NEW");
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Empty(_queued);
+        requests.Verify(r => r.PrepareAsync(It.Is<EpisodeInfo>(e => e.Id == "NEW" && e.SeriesId == "SERIES"), false, null,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task SubscribingSeedsBackCatalogAndNewEpisodesAreQueuedOnceAcrossRestart()
     {
         Episode("OLD");

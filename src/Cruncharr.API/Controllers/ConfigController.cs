@@ -315,7 +315,13 @@ public class ConfigController : ControllerBase
                 ApiKey = !string.IsNullOrEmpty(_config.Sonarr?.ApiKey) ? "[configured]" : null,
                 UseSsl = _config.Sonarr?.UseSsl ?? false,
                 UrlBase = _config.Sonarr?.UrlBase ?? "",
-                UseSonarrNumbering = _config.Sonarr?.UseSonarrNumbering ?? false
+                UseSonarrNumbering = _config.Sonarr?.UseSonarrNumbering ?? false,
+                AutoAddSeries = _config.Sonarr?.AutoAddSeries ?? true,
+                SearchWithoutPremium = _config.Sonarr?.SearchWithoutPremium ?? true,
+                UnmonitorPremiumRequests = _config.Sonarr?.UnmonitorPremiumRequests ?? true,
+                QualityProfileId = _config.Sonarr?.QualityProfileId ?? 0,
+                RootFolderPath = _config.Sonarr?.RootFolderPath ?? "",
+                DownloadPath = _config.Sonarr?.DownloadPath ?? ""
             },
             Proxy = new
             {
@@ -759,6 +765,12 @@ public class ConfigController : ControllerBase
             if (s.UseSsl.HasValue) _config.Sonarr.UseSsl = s.UseSsl.Value;
             if (s.UrlBase != null) _config.Sonarr.UrlBase = s.UrlBase;
             if (s.UseSonarrNumbering.HasValue) _config.Sonarr.UseSonarrNumbering = s.UseSonarrNumbering.Value;
+            if (s.AutoAddSeries.HasValue) _config.Sonarr.AutoAddSeries = s.AutoAddSeries.Value;
+            if (s.SearchWithoutPremium.HasValue) _config.Sonarr.SearchWithoutPremium = s.SearchWithoutPremium.Value;
+            if (s.UnmonitorPremiumRequests.HasValue) _config.Sonarr.UnmonitorPremiumRequests = s.UnmonitorPremiumRequests.Value;
+            if (s.QualityProfileId.HasValue) _config.Sonarr.QualityProfileId = Math.Max(0, s.QualityProfileId.Value);
+            if (s.RootFolderPath != null) _config.Sonarr.RootFolderPath = s.RootFolderPath;
+            if (s.DownloadPath != null) _config.Sonarr.DownloadPath = s.DownloadPath;
         }
 
         if (request.Proxy != null)
@@ -991,6 +1003,12 @@ public class NotificationsUpdateConfig
 
 public class SonarrUpdateConfig
 {
+    public bool? AutoAddSeries { get; set; }
+    public bool? SearchWithoutPremium { get; set; }
+    public bool? UnmonitorPremiumRequests { get; set; }
+    public int? QualityProfileId { get; set; }
+    public string? RootFolderPath { get; set; }
+    public string? DownloadPath { get; set; }
     public bool? Enabled { get; set; }
     public string? Host { get; set; }
     public int? Port { get; set; }

@@ -17,6 +17,7 @@ public class QueueController : ControllerBase
     private readonly ILanguagePrefsService _languagePrefs;
     private readonly CruncharrConfig _config;
     private readonly ICrunchyrollAuthService _auth;
+    private readonly ISonarrAcquisitionService? _sonarrRequests;
     private readonly ILogger<QueueController> _logger;
     private static readonly JsonSerializerSettings _sseJsonSettings = new JsonSerializerSettings
     {
@@ -25,7 +26,7 @@ public class QueueController : ControllerBase
         NullValueHandling = NullValueHandling.Ignore
     };
 
-    public QueueController(IQueueService queueService, IHistoryService historyService, ILanguagePrefsService languagePrefs, CruncharrConfig config, ILogger<QueueController> logger, ICrunchyrollAuthService auth)
+    public QueueController(IQueueService queueService, IHistoryService historyService, ILanguagePrefsService languagePrefs, CruncharrConfig config, ILogger<QueueController> logger, ICrunchyrollAuthService auth, ISonarrAcquisitionService? sonarrRequests = null)
     {
         _queueService = queueService;
         _historyService = historyService;
@@ -33,6 +34,7 @@ public class QueueController : ControllerBase
         _config = config;
         _logger = logger;
         _auth = auth;
+        _sonarrRequests = sonarrRequests;
     }
 
     /// <summary>
@@ -63,9 +65,10 @@ public class QueueController : ControllerBase
     /// Add episode to download queue
     /// </summary>
     [HttpPost]
-    public IActionResult AddToQueue([FromBody] QueueRequest request)
+    public async Task<IActionResult> AddToQueue([FromBody] QueueRequest request, CancellationToken cancellationToken = default)
     {
-        if (!_auth.IsAuthenticated || !_auth.Profile.HasPremium)
+        var premium = _auth.IsAuthenticated && _auth.Profile.HasPremium;
+        if (!premium && (request.IsMusicVideo || !_config.Sonarr.Enabled || !_config.Sonarr.SearchWithoutPremium || _sonarrRequests == null))
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { Message = "Log in to a Crunchyroll Premium account to download. Browsing and search are available without an account." });
         }
@@ -85,6 +88,7 @@ public class QueueController : ControllerBase
             var episode = new EpisodeInfo
             {
                 Id = request.EpisodeId,
+                IsMusicVideo = request.IsMusicVideo,
                 VideoQuality = request.VideoQuality,
                 Title = request.Title ?? $"Episode {request.EpisodeId}",
                 SeriesTitle = request.SeriesTitle ?? "Unknown",
@@ -108,6 +112,16 @@ public class QueueController : ControllerBase
                 Versions = request.Versions
             };
 
+            SonarrAcquisitionState? sonarrState = null;
+            if (!episode.IsMusicVideo && _sonarrRequests != null && _config.Sonarr.Enabled && (!premium || _config.Sonarr.AutoAddSeries))
+                sonarrState = await _sonarrRequests.PrepareAsync(episode, premium, request.SonarrTvdbId, cancellationToken);
+            if (sonarrState?.AlreadyInSonarr == true)
+                return Ok(new { Added = false, Destination = "sonarr", Message = sonarrState.Status,
+                    EpisodeId = request.EpisodeId, sonarrState.SonarrSeriesId, sonarrState.EpisodeCount, sonarrState.EpisodeFileCount });
+            if (!premium)
+                return Ok(new { Added = true, Destination = "sonarr", Message = sonarrState!.Status,
+                    EpisodeId = request.EpisodeId, sonarrState.SonarrSeriesId, sonarrState.EpisodeCount, sonarrState.EpisodeFileCount });
+
             var result = _queueService.AddToQueue(episode);
             _logger.LogInformation(result.Added
                 ? "Added episode {EpisodeId} to queue"
@@ -124,12 +138,18 @@ public class QueueController : ControllerBase
             return Ok(new
             {
                 result.Added,
+                Destination = "cruncharr",
                 Message = result.Added ? "Added to queue" : "Episode is already in the queue",
                 EpisodeId = request.EpisodeId,
                 QueueItemId = result.Item.Id,
                 State = result.Item.DownloadProgress.State.ToString()
             });
         }
+        catch (SonarrMatchRequiredException ex)
+        {
+            return Conflict(new { ex.Message, ex.SeriesId, ex.Candidates });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to add episode to queue");
@@ -544,6 +564,8 @@ public class QueueController : ControllerBase
 
 public class QueueRequest
 {
+    public bool IsMusicVideo { get; set; }
+    public int? SonarrTvdbId { get; set; }
     public string? VideoQuality { get; set; }
     public string EpisodeId { get; set; } = "";
     public string? Title { get; set; }

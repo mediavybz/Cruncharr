@@ -12,7 +12,7 @@ namespace Cruncharr.Core.Tests;
 public class QueueControllerAdmissionTests
 {
     [Fact]
-    public void AddToQueue_PreservesRawEpisodeIdentitySeparatelyFromIntegerNumber()
+    public async Task AddToQueue_PreservesRawEpisodeIdentitySeparatelyFromIntegerNumber()
     {
         EpisodeInfo? captured = null;
         var queue = new Mock<IQueueService>();
@@ -29,14 +29,14 @@ public class QueueControllerAdmissionTests
             NullLogger<QueueController>.Instance,
             Mock.Of<ICrunchyrollAuthService>(auth => auth.IsAuthenticated == true && auth.Profile == new CrProfile { HasPremium = true }));
 
-        var response = Assert.IsType<OkObjectResult>(controller.AddToQueue(new QueueRequest
+        var response = Assert.IsType<OkObjectResult>(await controller.AddToQueue(new QueueRequest
         {
             EpisodeId = "GDECIMAL01",
             Episode = "24.9",
             EpisodeNumber = 0,
             SeasonNumber = 2,
             Title = "Digression: Hinata Sakaguchi"
-        }));
+        }, TestContext.Current.CancellationToken));
 
         Assert.NotNull(response.Value);
         Assert.NotNull(captured);
@@ -46,7 +46,7 @@ public class QueueControllerAdmissionTests
     }
 
     [Fact]
-    public void AddToQueue_ReturnsExistingAdmissionWithoutLearningDuplicatePreferences()
+    public async Task AddToQueue_ReturnsExistingAdmissionWithoutLearningDuplicatePreferences()
     {
         var existing = new QueueItem
         {
@@ -66,12 +66,12 @@ public class QueueControllerAdmissionTests
             NullLogger<QueueController>.Instance,
             Mock.Of<ICrunchyrollAuthService>(auth => auth.IsAuthenticated == true && auth.Profile == new CrProfile { HasPremium = true }));
 
-        var response = Assert.IsType<OkObjectResult>(controller.AddToQueue(new QueueRequest
+        var response = Assert.IsType<OkObjectResult>(await controller.AddToQueue(new QueueRequest
         {
             EpisodeId = "GCTRL0001",
             SelectedDubs = ["en-US"],
             SelectedSubs = ["en-US"]
-        }));
+        }, TestContext.Current.CancellationToken));
         var body = JObject.FromObject(response.Value!);
 
         Assert.False(body.Value<bool>("Added"));

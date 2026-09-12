@@ -56,6 +56,33 @@ public class LibraryControllerTests
     }
 
     [Fact]
+    public async Task FailedTitleVerificationIdentifiesTheAffectedShowAndKeepsOtherMatches()
+    {
+        var config = new CruncharrConfig();
+        config.Sonarr.Enabled = true;
+        var sonarr = new Mock<ISonarrService>();
+        sonarr.Setup(s => s.GetCurrentSeriesAsync(config.Sonarr, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrSeries { Id = 10, Title = "A Certain Series: Full Title" }]);
+        sonarr.Setup(s => s.ResolveSeriesAsync("unavailable", "A Certain Series", config.Sonarr, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Metadata unavailable"));
+        var history = new Mock<IHistoryService>();
+        history.Setup(h => h.GetHistorySeriesAsync()).ReturnsAsync([]);
+        var api = new Mock<ICrunchyrollApiService>();
+        api.Setup(a => a.GetAllSeriesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync([
+            new SeriesInfo { Id = "unavailable", Title = "A Certain Series", EpisodeCount = 12 },
+            new SeriesInfo { Id = "available", Title = "A Certain Series: Full Title", EpisodeCount = 12 }
+        ]);
+        var controller = new LibraryController(sonarr.Object, history.Object, config, NullLogger<LibraryController>.Instance, api.Object);
+
+        var response = Assert.IsType<OkObjectResult>(await controller.GetSonarrLibrary(TestContext.Current.CancellationToken));
+        var json = JObject.FromObject(response.Value!);
+
+        Assert.True(json["MatchingUnavailable"]!.Value<bool>());
+        Assert.Equal("unavailable", json["MatchingFailures"]![0]!["SeriesId"]!.Value<string>());
+        Assert.Equal(new[] { "available" }, json["Series"]![0]!["CrunchyrollSeriesIds"]!.Values<string>());
+    }
+
+    [Fact]
     public async Task LibraryFailureIsNotReportedAsAnEmptyLibrary()
     {
         var sonarr = new Mock<ISonarrService>();

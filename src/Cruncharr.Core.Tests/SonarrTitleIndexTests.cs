@@ -5,6 +5,18 @@ namespace Cruncharr.Core.Tests;
 public class SonarrTitleIndexTests
 {
     [Fact]
+    public void ArcLabelsAndCompoundChapterNamesCanBeVerifiedWithoutHardcodedSeriesIds()
+    {
+        var series=new SonarrSeries {Id=1,Title="Monogatari"};
+        Assert.Single(new SonarrTitleIndex([series]).Candidates("Tsukimonogatari"));
+        Assert.Single(new SonarrTitleIndex([series]).Candidates("Nekomonogatari Black"));
+        Assert.True(SonarrTitleIndex.EpisodesConfirmIdentity(["Distant Memories","Haruka's Heart"],
+            ["Migiwa Kazuha Arc I: Distant Memories","Migiwa Kazuha Arc IV: Haruka's Heart"]));
+        Assert.False(SonarrTitleIndex.EpisodesConfirmIdentity(["Distant Memories"],
+            ["First Arc I: Distant Memories","Second Arc I: Distant Memories"]));
+    }
+
+    [Fact]
     public void TranslatedEpisodeTitlesNeedAnExactAnchorAndMultipleDistinctSupportingEpisodes()
     {
         string[] provider = ["My Favorite Animal is Pegasus", "Is the busty cream girl here yet?", "Please, Always Be a Fan, Okay?"];
@@ -27,6 +39,8 @@ public class SonarrTitleIndexTests
     [InlineData("Haganai", "Haganai: I Don't Have Many Friends")]
     [InlineData("We, Without Wings - under the innocent sky", "We Without Wings")]
     [InlineData("Sankarea", "Sankarea: Undying Love")]
+    [InlineData("Witchblade", "Witchblade (2006)")]
+    [InlineData("WorldEnd: What do you do at the end of the world? Are you busy? Will you save us", "WorldEnd: What are you doing at the end of the world? Are you busy? Will you save us?")]
     public void SubtitlesRequireLookupConfirmation(string providerTitle, string sonarrTitle)
     {
         var owned = new SonarrSeries { Id = 7, TvdbId = 100, Title = sonarrTitle };
@@ -72,5 +86,17 @@ public class SonarrTitleIndexTests
         Assert.Equal(SonarrTitleIndex.Normalize("Rozé"), SonarrTitleIndex.Normalize("Roze"));
         Assert.Null(new SonarrTitleIndex([owned, new SonarrSeries { Id = 2, Title = owned.Title }]).FindExact(owned.Title!));
         Assert.Null(new SonarrTitleIndex([owned]).FindExact(""));
+    }
+
+    [Fact]
+    public void CandidateDiscoveryKeepsRemakesDistinctAndFindsTranslatedSubtitleVariants()
+    {
+        var original = new SonarrSeries { Id = 1, Title = "Witchblade" };
+        var anime = new SonarrSeries { Id = 2, Title = "Witchblade (2006)" };
+        var index = new SonarrTitleIndex([original, anime]);
+        Assert.Null(index.FindExact("Witchblade"));
+        Assert.Equal(2, index.Candidates("Witchblade").Count);
+        Assert.Single(new SonarrTitleIndex([anime]).Candidates("Witchblade"));
+        Assert.Empty(new SonarrTitleIndex([anime]).Candidates("Unrelated series"));
     }
 }

@@ -2,6 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {createIndex, findSeries} = require('../src/Cruncharr.API/wwwroot/js/library-state.js');
 
+test('year-qualified editions need a verified provider identity when the unsuffixed name is ambiguous', () => {
+    const original = {sonarrSeriesId:1,title:'Witchblade'};
+    const anime = {sonarrSeriesId:2,title:'Witchblade (2006)',crunchyrollSeriesIds:['CR-ANIME']};
+    const index = createIndex([original,anime]);
+    assert.equal(findSeries(index,{title:'Witchblade'}),null);
+    assert.equal(findSeries(index,{id:'CR-ANIME',title:'Witchblade'}),anime);
+    assert.equal(findSeries(index,{title:'Witchblade (2006)'}),anime);
+});
+
 test('library badges match titles and aliases for shows that are not in Cruncharr history', () => {
     const series = {sonarrSeriesId: 1, title:'Attack on Titan', titles:['Shingeki no Kyojin'], episodeFileCount:90};
     const index = createIndex([series]);

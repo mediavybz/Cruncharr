@@ -54,11 +54,10 @@ public class HttpClientWrapper : IDisposable
             }
         };
 
-        // Configure proxy if enabled
-        if (config?.Proxy?.Enabled == true)
-        {
-            ConfigureProxy(_handler, config.Proxy);
-        }
+        // IWebProxy is consulted for each request, so saved changes apply without replacing
+        // a client that may still be serving active downloads.
+        _handler.Proxy = new ConfiguredProxy(() => _config?.Proxy);
+        _handler.UseProxy = true;
 
         _client = new HttpClient(_handler);
         _client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36");
@@ -66,36 +65,33 @@ public class HttpClientWrapper : IDisposable
         _client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip, deflate, br");
         _client.DefaultRequestHeaders.Connection.ParseAdd("keep-alive");
 
-        // Setup FlareSolverr client if enabled
-        if (config?.FlareSolverr?.Enabled == true)
-        {
-            _flareSolverrClient = new HttpClient();
-            _flareSolverrClient.Timeout = TimeSpan.FromMinutes(2);
-        }
+        _flareSolverrClient = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
     }
 
-    private void ConfigureProxy(SocketsHttpHandler handler, ProxyConfig proxy)
+    internal sealed class ConfiguredProxy(Func<ProxyConfig?> getConfig) : IWebProxy
     {
-        try
+        private IWebProxy? Current()
         {
-            var proxyUri = $"{(proxy.Socks ? "socks5" : "http")}://{proxy.Host}:{proxy.Port}";
-            var webProxy = new WebProxy(proxyUri);
-
-            if (!string.IsNullOrEmpty(proxy.Username))
+            var config = getConfig();
+            if (config?.Enabled != true || string.IsNullOrWhiteSpace(config.Host)) return null;
+            var proxy = new WebProxy($"{(config.Socks ? "socks5" : "http")}://{config.Host}:{config.Port}");
+            return config.AllTraffic ? proxy : new CrunchyrollOnlyProxy(proxy);
+        }
+        // SocketsHttpHandler retains the ICredentials instance. Resolve credentials when
+        // authentication occurs so later settings changes do not keep an old password.
+        private readonly ICredentials _credentials = new ConfiguredCredentials(getConfig);
+        public ICredentials? Credentials { get => _credentials; set { } }
+        private sealed class ConfiguredCredentials(Func<ProxyConfig?> getConfig) : ICredentials
+        {
+            public NetworkCredential? GetCredential(Uri uri, string authType)
             {
-                webProxy.Credentials = new NetworkCredential(proxy.Username, proxy.Password);
+                var config = getConfig();
+                return config?.Enabled == true && !string.IsNullOrEmpty(config.Username)
+                    ? new NetworkCredential(config.Username, config.Password) : null;
             }
-
-            // [PT] Upstream: proxy_all_traffic=false routes only Crunchyroll traffic through the proxy
-            handler.Proxy = proxy.AllTraffic ? webProxy : new CrunchyrollOnlyProxy(webProxy);
-            handler.UseProxy = true;
-            var proxyScope = proxy.AllTraffic ? "all traffic" : "Crunchyroll traffic only";
-            _logger?.LogInformation("Proxy configured for {ProxyScope}: {ProxyUri}", proxyScope, proxyUri);
         }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to configure proxy");
-        }
+        public Uri? GetProxy(Uri destination) => Current()?.GetProxy(destination) ?? destination;
+        public bool IsBypassed(Uri destination) => Current()?.IsBypassed(destination) ?? true;
     }
 
     // [PT] Ported from upstream HttpClientReq.CrunchyrollOnlyProxy
@@ -164,7 +160,7 @@ public class HttpClientWrapper : IDisposable
     // FlareSolverr solves Cloudflare challenges through request.get — GET only. A POST (login /
     // token) routed here would be silently downgraded to a GET, so those must go direct.
     private bool ShouldUseFlareSolverr(HttpRequestMessage request) =>
-        _flareSolverrClient != null && request.Method == HttpMethod.Get &&
+        _config?.FlareSolverr?.Enabled == true && _flareSolverrClient != null && request.Method == HttpMethod.Get &&
         request.RequestUri != null && IsCrunchyrollHost(request.RequestUri);
 
     // Match the proxy's CR-detection instead of a loose substring ("crunchyroll") so an
@@ -218,9 +214,9 @@ public class HttpClientWrapper : IDisposable
         }
     }
 
-    public async Task<(bool IsOk, string ResponseContent, string Error)> SendRequestAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true)
+    public async Task<(bool IsOk, string ResponseContent, string Error)> SendRequestAsync(HttpRequestMessage request, bool suppressError = false, bool attachCookies = true, CancellationToken cancellationToken = default)
     {
-        var result = await SendRequestWithHeadersAsync(request, suppressError, attachCookies);
+        var result = await SendRequestWithHeadersAsync(request, suppressError, attachCookies, cancellationToken);
         return (result.IsOk, result.ResponseContent, result.Error);
     }
 
@@ -257,6 +253,10 @@ public class HttpClientWrapper : IDisposable
                 CaptureResponseCookies(response, request.RequestUri);
             }
             return (true, content, "", headers);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception e)
         {

@@ -10,6 +10,51 @@ namespace Cruncharr.Core.Tests;
 public class HistoryArtifactAvailabilityTests
 {
     [Fact]
+    public async Task SeriesDetail_OnlyChecksRequestedSeriesAndReportsSonarrOutage()
+    {
+        var history = new Mock<IHistoryService>();
+        history.Setup(service => service.GetHistorySeriesAsync()).ReturnsAsync(
+        [
+            new HistorySeries { SeriesId = "ONE", SonarrSeriesId = "10" },
+            new HistorySeries { SeriesId = "TWO", SonarrSeriesId = "20" }
+        ]);
+        history.Setup(service => service.GetAllAsync(0, int.MaxValue)).ReturnsAsync([]);
+        var sonarr = new Mock<ISonarrService>(MockBehavior.Strict);
+        sonarr.Setup(service => service.GetCurrentEpisodesAsync(10, It.IsAny<Cruncharr.Core.Configuration.SonarrConfig>(), false, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Offline"));
+        var config = new Cruncharr.Core.Configuration.CruncharrConfig();
+        config.Sonarr.Enabled = true;
+        var controller = new HistoryController(history.Object, NullLogger<HistoryController>.Instance, sonarr.Object, config);
+
+        var action = await controller.GetSeriesHistory("ONE");
+        var response = Assert.IsType<HistorySeriesResponse>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.True(response.SonarrStatusUnavailable);
+        sonarr.Verify(service => service.GetCurrentEpisodesAsync(10, It.IsAny<Cruncharr.Core.Configuration.SonarrConfig>(), false, It.IsAny<CancellationToken>()), Times.Once);
+        sonarr.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task SonarrAvailability_DeduplicatesSeriesAndRefreshesAirDateAndMonitoring()
+    {
+        var first = new HistorySeries { SeriesId = "ONE", SonarrSeriesId = "10", SonarrNextAirDate = "Yesterday",
+            Seasons = [new HistorySeason { EpisodesList = [new HistoryEpisode { EpisodeId = "A", SonarrEpisodeId = "100" }] }] };
+        var second = new HistorySeries { SeriesId = "TWO", SonarrSeriesId = "10",
+            Seasons = [new HistorySeason { EpisodesList = [new HistoryEpisode { EpisodeId = "B", SonarrEpisodeId = "100" }] }] };
+        var sonarr = new Mock<ISonarrService>();
+        sonarr.Setup(service => service.GetCurrentEpisodesAsync(10, It.IsAny<Cruncharr.Core.Configuration.SonarrConfig>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrEpisode { Id = 100, HasFile = true, Monitored = true, AirDateUtc = DateTimeOffset.UtcNow.AddDays(1) }]);
+        var result = await HistoryService.GetCurrentSonarrArtifactEpisodeIdsAsync([first, second], sonarr.Object,
+            new Cruncharr.Core.Configuration.SonarrConfig { Enabled = true }, TestContext.Current.CancellationToken, forceRefresh: false);
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains("A", result);
+        Assert.Contains("B", result);
+        Assert.True(first.Seasons[0].EpisodesList[0].SonarrIsMonitored);
+        Assert.Equal(DateTime.UtcNow.AddDays(1).ToString("dd.MM.yyyy"), first.SonarrNextAirDate);
+        sonarr.Verify(service => service.GetCurrentEpisodesAsync(10, It.IsAny<Cruncharr.Core.Configuration.SonarrConfig>(), false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task RichHistory_ExposesMissingCompletedArtifactForRedownload()
     {
         var response = await GetEpisodeResponseAsync(
@@ -125,10 +170,10 @@ public class HistoryArtifactAvailabilityTests
             }
         ]);
         var sonarr = new Mock<ISonarrService>();
-        sonarr.Setup(service => service.GetEpisodesAsync(
+        sonarr.Setup(service => service.GetCurrentEpisodesAsync(
                 10,
                 It.IsAny<Cruncharr.Core.Configuration.SonarrConfig>(),
-                true))
+                It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode { Id = 100, SeriesId = 10, HasFile = currentSonarrHasFile }

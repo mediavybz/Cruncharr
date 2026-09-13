@@ -1,12 +1,13 @@
 # Cruncharr operations handoff
 
 - Work on the `testing` branch unless the user explicitly requests another branch.
-- Forgejo remote: `ssh://git@192.168.10.10:2222/shoy/Cruncharr.git`.
+- Forgejo remote: `https://forgejo.foss.homes/shoy/Cruncharr.git`.
 - GitHub mirror: `https://github.com/mediavybz/Cruncharr.git`.
 - Test image: `ghcr.io/mediavybz/cruncharr:testing`.
 - Live UI/API: `http://192.168.10.10:8585/` and `/api/v1`.
 - Sonarr is configured by the live app at `192.168.10.10:8991`; never copy its API key into this repository.
-- Repository SSH uses `~/.ssh/forgejo_cruncharr`; this checkout pins it with `core.sshCommand`.
+- This checkout uses its configured Git credential helper for repository access. Check `git remote -v`
+  when resuming; the older `forgejo_cruncharr` SSH key is not present on this workstation.
 - Unraid container access uses `root@192.168.10.10` with `~/.ssh/unraid-easymedia`.
 - The live container is `CrunchArr` and is managed by Unraid template
   `/boot/config/plugins/dockerMan/templates-user/my-Cruncharr.xml`.
@@ -26,3 +27,13 @@
 - A 64-character value presented beside `ssh-keygen -Y sign` is an SSH-key verification challenge,
   not a Forgejo API token. Forgejo issue mutation requires a separate scoped API access token.
 - Do not store tokens, passwords, API keys, signatures, or live configuration in tracked files.
+- After pushing and mirroring, run `scripts/verify-repository-sync.ps1 -Fetch` to compare every
+  local, Forgejo and GitHub branch/tag hash. Compare the same branch; do not promote beta to
+  `master` merely to make their version numbers equal.
+- Matching Git refs do not prove Forgejo's database is synchronized. Also run
+  `scripts/verify-forgejo-metadata.sh` inside Forgejo as `git` (database
+  `/data/forgejo.db`, bare repository `/data/git/repositories/shoy/cruncharr.git`,
+  repository ID `4`). See `docs/repository-backups.md` for hook and metadata repair.
+
+- On Windows, always specify `encoding="utf-8"` and `newline="\n"` for Python source-file writes (UTF-8 for reads too). The system
+  code page cannot encode all UI text, and a failed write can truncate the source file.

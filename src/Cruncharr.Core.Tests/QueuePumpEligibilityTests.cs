@@ -162,7 +162,7 @@ public class QueuePumpEligibilityTests
             .AddSingleton(history.Object)
             .AddSingleton(queue.Object)
             .AddSingleton(Mock.Of<ICrunchyrollApiService>())
-            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>(a => a.IsAuthenticated == true && a.Profile == new CrProfile { HasPremium = true }))
             .BuildServiceProvider();
         var scheduler = new AutoDownloadSchedulerService(
             provider,
@@ -293,7 +293,7 @@ public class QueuePumpEligibilityTests
             .AddSingleton(history.Object)
             .AddSingleton(queue.Object)
             .AddSingleton(Mock.Of<ICrunchyrollApiService>())
-            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>(a => a.IsAuthenticated == true && a.Profile == new CrProfile { HasPremium = true }))
             .BuildServiceProvider();
         var scheduler = new AutoDownloadSchedulerService(
             provider,
@@ -356,7 +356,7 @@ public class QueuePumpEligibilityTests
             .AddSingleton(history.Object)
             .AddSingleton(Mock.Of<IQueueService>())
             .AddSingleton(Mock.Of<ICrunchyrollApiService>())
-            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>(a => a.IsAuthenticated == true && a.Profile == new CrProfile { HasPremium = true }))
             .BuildServiceProvider();
         using var scheduler = new AutoDownloadSchedulerService(
             provider,
@@ -579,7 +579,7 @@ public class QueuePumpEligibilityTests
         history.Setup(service => service.CrUpdateSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>())).ReturnsAsync(true);
 
         var sonarr = new Mock<ISonarrService>();
-        sonarr.Setup(service => service.GetEpisodesAsync(10, It.IsAny<SonarrConfig>(), true))
+        sonarr.Setup(service => service.GetCurrentEpisodesAsync(10, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode
@@ -604,7 +604,7 @@ public class QueuePumpEligibilityTests
             .AddSingleton(history.Object)
             .AddSingleton(queue.Object)
             .AddSingleton(Mock.Of<ICrunchyrollApiService>())
-            .AddSingleton(Mock.Of<ICrunchyrollAuthService>())
+            .AddSingleton(Mock.Of<ICrunchyrollAuthService>(a => a.IsAuthenticated == true && a.Profile == new CrProfile { HasPremium = true }))
             .AddSingleton(sonarr.Object)
             .BuildServiceProvider();
         using var scheduler = new AutoDownloadSchedulerService(

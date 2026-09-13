@@ -151,7 +151,7 @@ public class HistoryEpisode
         if (episode.SeasonNumber == 0) SpecialEpisode = true;
     }
 
-    internal static bool ContainsNormalized(IEnumerable<string> values, string requested)
+    public static bool ContainsNormalized(IEnumerable<string> values, string requested)
     {
         var normalized = HistoryEpisode.RemoveAudioDescriptionMarker(requested);
         return values.Any(value => string.Equals(

@@ -113,39 +113,19 @@ public class ConfigController : ControllerBase
         {
             lock (_configLock)
             {
-                var email = _config.Crunchyroll?.Email ?? "";
-                var password = _config.Crunchyroll?.Password ?? "";
-                var ep1 = _config.Crunchyroll?.StreamEndpoint;
-                var ep2 = _config.Crunchyroll?.StreamEndpointSecondary;
-                var tokenPath = _config.TokenFilePath;
-
                 var fresh = new CruncharrConfig();
-                _config.Crunchyroll = fresh.Crunchyroll;
-                _config.Crunchyroll.Email = email;
-                _config.Crunchyroll.Password = password;
-                if (ep1 != null) _config.Crunchyroll.StreamEndpoint = ep1;
-                if (ep2 != null) _config.Crunchyroll.StreamEndpointSecondary = ep2;
-                _config.Download = fresh.Download;
-                _config.History = fresh.History;
-                _config.HistoryPageProperties = fresh.HistoryPageProperties;
-                _config.SeasonsPageProperties = fresh.SeasonsPageProperties;
-                _config.Queue = fresh.Queue;
-                _config.Notifications = fresh.Notifications;
-                _config.Sonarr = fresh.Sonarr;
-                _config.Proxy = fresh.Proxy;
-                _config.FlareSolverr = fresh.FlareSolverr;
-                _config.Calendar = fresh.Calendar;
-                _config.Appearance = fresh.Appearance;
-                _config.AddDownload = fresh.AddDownload;
-                _config.LogMode = fresh.LogMode;
-                _config.RemoveFinishedDownload = fresh.RemoveFinishedDownload;
-                _config.TokenFilePath = tokenPath;
-                _queueService.SetProcessingLimit(_config.Queue.SimultaneousProcessingJobs);
-                _queueService.SetTranscodeLimit(_config.Queue.MaxSimultaneousTranscodes);
-
+                fresh.Crunchyroll.Email = _config.Crunchyroll.Email;
+                fresh.Crunchyroll.Password = _config.Crunchyroll.Password;
+                fresh.Crunchyroll.StreamEndpoint = _config.Crunchyroll.StreamEndpoint;
+                fresh.Crunchyroll.StreamEndpointSecondary = _config.Crunchyroll.StreamEndpointSecondary;
+                fresh.TokenFilePath = _config.TokenFilePath;
+                fresh.Queue.QueueFilePath = _config.Queue.QueueFilePath;
+                fresh.Download.OutputDirectory = _config.Download.OutputDirectory;
+                fresh.Download.TempDirectory = _config.Download.TempDirectory;
                 var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
                 configPath = ValidatePath(configPath, "ConfigPath");
-                _config.Save(configPath);
+                fresh.Save(configPath);
+                ApplySavedConfig(fresh, configPath);
                 _logger.LogInformation("Configuration reset to defaults (login preserved), saved to {Path}", configPath);
             }
             // Also clear the learned adaptive-language history so a global reset is a clean slate.
@@ -335,7 +315,13 @@ public class ConfigController : ControllerBase
                 ApiKey = !string.IsNullOrEmpty(_config.Sonarr?.ApiKey) ? "[configured]" : null,
                 UseSsl = _config.Sonarr?.UseSsl ?? false,
                 UrlBase = _config.Sonarr?.UrlBase ?? "",
-                UseSonarrNumbering = _config.Sonarr?.UseSonarrNumbering ?? false
+                UseSonarrNumbering = _config.Sonarr?.UseSonarrNumbering ?? false,
+                AutoAddSeries = _config.Sonarr?.AutoAddSeries ?? true,
+                SearchWithoutPremium = _config.Sonarr?.SearchWithoutPremium ?? true,
+                UnmonitorPremiumRequests = _config.Sonarr?.UnmonitorPremiumRequests ?? true,
+                QualityProfileId = _config.Sonarr?.QualityProfileId ?? 0,
+                RootFolderPath = _config.Sonarr?.RootFolderPath ?? "",
+                DownloadPath = _config.Sonarr?.DownloadPath ?? ""
             },
             Proxy = new
             {
@@ -422,8 +408,17 @@ public class ConfigController : ControllerBase
                 message = "This is a test webhook from Cruncharr",
                 timestamp = DateTime.UtcNow
             };
-            var content = System.Net.Http.Json.JsonContent.Create(payload);
-            using var response = await client.PostAsync(request.Url, content, cts.Token);
+            var notifications = _config.Notifications;
+            var json = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
+            var body = string.IsNullOrEmpty(notifications.WebhookBodyTemplate) ? json : notifications.WebhookBodyTemplate
+                .Replace("{{payload}}", json).Replace("{{timestamp}}", DateTime.UtcNow.ToString("O"));
+            using var message = new HttpRequestMessage(new HttpMethod(notifications.WebhookMethod), request.Url)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, notifications.WebhookContentType)
+            };
+            foreach (var header in notifications.WebhookHeaders)
+                message.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            using var response = await client.SendAsync(message, cts.Token);
             if (response.IsSuccessStatusCode)
             {
                 return Ok(new { Success = true, Message = "Webhook test sent successfully" });
@@ -449,20 +444,84 @@ public class ConfigController : ControllerBase
 
             lock (_configLock)
             {
-                UpdateConfigFromRequest(request);
+                var candidate = _config.Clone();
+                UpdateConfigFromRequest(request, candidate);
+                ValidateSettings(candidate);
 
                 var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
                 configPath = ValidatePath(configPath, "ConfigPath");
-                _config.Save(configPath);
+                candidate.Save(configPath);
+                ApplySavedConfig(candidate, configPath);
+                if (request.Crunchyroll?.StreamEndpoint != null || request.Crunchyroll?.StreamEndpointSecondary != null || request.General?.TokenFilePath != null)
+                    HttpContext?.RequestServices?.GetService<ICrunchyrollAuthService>()?.RefreshConfiguration();
                 _logger.LogInformation("Configuration saved to {Path}", configPath);
             }
             return Ok(new { Success = true, Message = "Configuration saved" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { Success = false, Message = ex.Message });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to save configuration");
             return StatusCode(500, new { Success = false, Message = ex.Message });
         }
+    }
+
+    private void ApplySavedConfig(CruncharrConfig candidate, string configPath)
+    {
+        foreach (var property in typeof(CruncharrConfig).GetProperties().Where(p => p.CanWrite))
+            property.SetValue(_config, property.GetValue(candidate));
+        _queueService.SetProcessingLimit(_config.Queue.SimultaneousProcessingJobs);
+        _queueService.SetTranscodeLimit(_config.Queue.MaxSimultaneousTranscodes);
+        _queueService.NotifyConfigChanged();
+        if (_config.LogMode) LogManager.EnableLogMode(Path.Combine(Path.GetDirectoryName(configPath) ?? ".", "logfile.txt"));
+        else LogManager.DisableLogMode();
+    }
+
+    private void ValidateSettings(CruncharrConfig candidate)
+    {
+        static void Range(double value, double min, double max, string name)
+        {
+            if (!double.IsFinite(value) || value < min || value > max)
+                throw new ArgumentException($"{name} must be between {min} and {max}.");
+        }
+        Range(candidate.Download.SimultaneousDownloads, 1, 32, "Simultaneous downloads");
+        Range(candidate.Queue.SimultaneousProcessingJobs, 1, 32, "Processing jobs");
+        Range(candidate.Queue.MaxSimultaneousTranscodes, 1, 32, "Simultaneous transcodes");
+        Range(candidate.Download.PartSize, 1, 1000, "Download threads");
+        Range(candidate.Download.RetryAttempts, 0, 100, "Retry attempts");
+        Range(candidate.Download.DownloadSpeedLimit, 0, int.MaxValue, "Speed limit");
+        Range(candidate.History.AutoRefreshIntervalMinutes, 0, 1440, "History refresh interval");
+        if (candidate.History.AutoRefreshMode is not (0 or 1 or 50)) throw new ArgumentException("Invalid history refresh mode.");
+        Range(candidate.Appearance.BackgroundImageOpacity, 0, 1, "Background opacity");
+        Range(candidate.Appearance.BackgroundImageBlurRadius, 0, 100, "Background blur");
+        if (candidate.Proxy.Enabled && (string.IsNullOrWhiteSpace(candidate.Proxy.Host) || candidate.Proxy.Port is < 1 or > 65535))
+            throw new ArgumentException("An enabled proxy needs a host and port (1–65535).");
+        if (candidate.FlareSolverr.Enabled && (string.IsNullOrWhiteSpace(candidate.FlareSolverr.Host) || candidate.FlareSolverr.Port is < 1 or > 65535))
+            throw new ArgumentException("FlareSolverr needs a host and port (1–65535).");
+        if (candidate.Download.EncodeEnabled)
+        {
+            var encoding = HttpContext?.RequestServices?.GetService<IEncodingService>();
+            if (string.IsNullOrWhiteSpace(candidate.Download.EncodingPreset) || encoding?.GetPreset(candidate.Download.EncodingPreset) == null)
+                throw new ArgumentException("Choose an existing encoding preset before enabling encoding.");
+            if (candidate.Download.SkipMuxing || candidate.Download.NoVideo)
+                throw new ArgumentException("Video encoding requires video downloads and muxing to be enabled.");
+        }
+    }
+
+    [HttpGet("background")]
+    public IActionResult Background()
+    {
+        var path = _config.Appearance.BackgroundImagePath;
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path)) return NotFound();
+        var mime = Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg", ".png" => "image/png", ".webp" => "image/webp", ".gif" => "image/gif", _ => null
+        };
+        if (mime == null) return BadRequest(new { Message = "Use a JPG, PNG, WebP or GIF background image." });
+        return PhysicalFile(Path.GetFullPath(path), mime);
     }
 
     private static object? SanitizeStreamEndpoint(object? endpoint)
@@ -506,7 +565,7 @@ public class ConfigController : ControllerBase
         return path;
     }
 
-    private void UpdateConfigFromRequest(ConfigUpdateRequest request)
+    private void UpdateConfigFromRequest(ConfigUpdateRequest request, CruncharrConfig _config)
     {
         if (request.Crunchyroll != null)
         {
@@ -580,7 +639,7 @@ public class ConfigController : ControllerBase
             if (!string.IsNullOrEmpty(dl.CcSubsFont)) _config.Download.CcSubsFont = dl.CcSubsFont;
             if (!string.IsNullOrEmpty(dl.SubsAddScaledBorder)) _config.Download.SubsAddScaledBorder = dl.SubsAddScaledBorder;
             if (dl.SimultaneousDownloads.HasValue) _config.Download.SimultaneousDownloads = dl.SimultaneousDownloads.Value;
-            if (dl.SimultaneousProcessingJobs.HasValue) _config.Download.SimultaneousProcessingJobs = dl.SimultaneousProcessingJobs.Value;
+            if (dl.SimultaneousProcessingJobs.HasValue) _config.Queue.SimultaneousProcessingJobs = _config.Download.SimultaneousProcessingJobs = dl.SimultaneousProcessingJobs.Value;
             if (dl.DownloadMethodeNew.HasValue) _config.Download.DownloadMethodeNew = dl.DownloadMethodeNew.Value;
             if (dl.DownloadAllowEarlyStart.HasValue) _config.Download.DownloadAllowEarlyStart = dl.DownloadAllowEarlyStart.Value;
             if (dl.DownloadOnlyWithAllSelectedDubSub.HasValue) _config.Download.DownloadOnlyWithAllSelectedDubSub = dl.DownloadOnlyWithAllSelectedDubSub.Value;
@@ -624,12 +683,11 @@ public class ConfigController : ControllerBase
             if (request.Queue.SimultaneousProcessingJobs.HasValue)
             {
                 _config.Queue.SimultaneousProcessingJobs = request.Queue.SimultaneousProcessingJobs.Value;
-                _queueService.SetProcessingLimit(request.Queue.SimultaneousProcessingJobs.Value); // apply live
+                _config.Download.SimultaneousProcessingJobs = request.Queue.SimultaneousProcessingJobs.Value;
             }
             if (request.Queue.MaxSimultaneousTranscodes.HasValue)
             {
-                _config.Queue.MaxSimultaneousTranscodes = Math.Max(1, request.Queue.MaxSimultaneousTranscodes.Value);
-                _queueService.SetTranscodeLimit(_config.Queue.MaxSimultaneousTranscodes); // apply live
+                _config.Queue.MaxSimultaneousTranscodes = request.Queue.MaxSimultaneousTranscodes.Value;
             }
             if (!string.IsNullOrEmpty(request.Queue.QueueFilePath)) _config.Queue.QueueFilePath = ValidatePath(request.Queue.QueueFilePath, nameof(request.Queue.QueueFilePath));
             if (request.Queue.ShutdownWhenQueueEmpty.HasValue) _config.Queue.ShutdownWhenQueueEmpty = request.Queue.ShutdownWhenQueueEmpty.Value;
@@ -707,6 +765,12 @@ public class ConfigController : ControllerBase
             if (s.UseSsl.HasValue) _config.Sonarr.UseSsl = s.UseSsl.Value;
             if (s.UrlBase != null) _config.Sonarr.UrlBase = s.UrlBase;
             if (s.UseSonarrNumbering.HasValue) _config.Sonarr.UseSonarrNumbering = s.UseSonarrNumbering.Value;
+            if (s.AutoAddSeries.HasValue) _config.Sonarr.AutoAddSeries = s.AutoAddSeries.Value;
+            if (s.SearchWithoutPremium.HasValue) _config.Sonarr.SearchWithoutPremium = s.SearchWithoutPremium.Value;
+            if (s.UnmonitorPremiumRequests.HasValue) _config.Sonarr.UnmonitorPremiumRequests = s.UnmonitorPremiumRequests.Value;
+            if (s.QualityProfileId.HasValue) _config.Sonarr.QualityProfileId = Math.Max(0, s.QualityProfileId.Value);
+            if (s.RootFolderPath != null) _config.Sonarr.RootFolderPath = s.RootFolderPath;
+            if (s.DownloadPath != null) _config.Sonarr.DownloadPath = s.DownloadPath;
         }
 
         if (request.Proxy != null)
@@ -939,6 +1003,12 @@ public class NotificationsUpdateConfig
 
 public class SonarrUpdateConfig
 {
+    public bool? AutoAddSeries { get; set; }
+    public bool? SearchWithoutPremium { get; set; }
+    public bool? UnmonitorPremiumRequests { get; set; }
+    public int? QualityProfileId { get; set; }
+    public string? RootFolderPath { get; set; }
+    public string? DownloadPath { get; set; }
     public bool? Enabled { get; set; }
     public string? Host { get; set; }
     public int? Port { get; set; }

@@ -39,6 +39,8 @@ public interface IHistoryService
     // Sonarr integration
     Task<SonarrMatchResult> MatchHistorySeriesWithSonarrAsync(bool updateAll = false);
     Task MatchHistoryEpisodesWithSonarrAsync(string seriesId, bool rematchAll = false);
+    Task SetSonarrSeriesAsync(string seriesId, SonarrSeries sonarrSeries);
+    Task RefreshSonarrFileStatusAsync(CancellationToken cancellationToken = default);
 
     // Utilities
     double CalculateSimilarity(string source, string target);
@@ -178,31 +180,38 @@ public class HistoryService : IHistoryService, IDisposable
         ISonarrService? sonarrService,
         SonarrConfig sonarrConfig,
         CancellationToken cancellationToken = default,
-        Action<string, Exception>? onError = null)
+        Action<string, Exception>? onError = null,
+        bool forceRefresh = true)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (sonarrService == null || !sonarrConfig.Enabled) return result;
 
-        foreach (var series in history)
+        foreach (var group in history.Where(series => int.TryParse(series.SonarrSeriesId, out _))
+                     .GroupBy(series => int.Parse(series.SonarrSeriesId!)))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!int.TryParse(series.SonarrSeriesId, out var sonarrSeriesId)) continue;
+            var sonarrSeriesId = group.Key;
 
             try
             {
                 // One bulk Sonarr request per matched series. Persisted SonarrHasFile is only a
                 // cache and may be stale after a user deletes a file directly in Sonarr.
-                var currentEpisodes = await sonarrService.GetEpisodesAsync(
+                var currentEpisodes = await sonarrService.GetCurrentEpisodesAsync(
                     sonarrSeriesId,
                     sonarrConfig,
-                    forceRefresh: true);
+                    forceRefresh,
+                    cancellationToken);
                 var currentFileEpisodeIds = currentEpisodes
                     .Where(episode => episode.HasFile)
                     .Select(episode => episode.Id)
                     .ToHashSet();
+                var currentById = currentEpisodes.ToDictionary(episode => episode.Id);
+                foreach (var series in group) series.SonarrNextAirDate = GetNextAirDate(currentEpisodes);
 
-                foreach (var historyEpisode in series.Seasons.SelectMany(season => season.EpisodesList))
+                foreach (var historyEpisode in group.SelectMany(series => series.Seasons).SelectMany(season => season.EpisodesList))
                 {
+                    if (int.TryParse(historyEpisode.SonarrEpisodeId, out var matchedId) && currentById.TryGetValue(matchedId, out var current))
+                        historyEpisode.SonarrIsMonitored = current.Monitored;
                     if (!string.IsNullOrWhiteSpace(historyEpisode.EpisodeId) &&
                         int.TryParse(historyEpisode.SonarrEpisodeId, out var sonarrEpisodeId) &&
                         currentFileEpisodeIds.Contains(sonarrEpisodeId))
@@ -213,7 +222,9 @@ public class HistoryService : IHistoryService, IDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                onError?.Invoke(series.SonarrSeriesId!, ex);
+                if (onError == null) throw;
+                foreach (var series in group) series.SonarrNextAirDate = string.Empty;
+                onError?.Invoke(sonarrSeriesId.ToString(), ex);
             }
         }
 
@@ -297,6 +308,8 @@ public class HistoryService : IHistoryService, IDisposable
 
                 if (historySeason != null)
                 {
+                    historySeason.SeasonTitle = firstEpisode.SeasonTitle;
+                    historySeason.SpecialSeason = IsSpecialSeasonTitle(firstEpisode.SeasonTitle);
                     // Update existing season
                     foreach (var episode in episodes)
                     {
@@ -578,8 +591,7 @@ public class HistoryService : IHistoryService, IDisposable
             SeasonId = firstEpisode.SeasonId,
             SeasonNum = firstEpisode.SeasonNumber.ToString(),
             EpisodesList = [],
-            SpecialSeason = firstEpisode.SeasonNumber == 0 ||
-                            firstEpisode.SeasonTitle?.Contains("special", StringComparison.OrdinalIgnoreCase) == true
+            SpecialSeason = IsSpecialSeasonTitle(firstEpisode.SeasonTitle)
         };
 
         foreach (var episode in episodes)
@@ -685,7 +697,7 @@ public class HistoryService : IHistoryService, IDisposable
         }
     }
 
-    private async Task SaveRichHistoryAsync()
+    private async Task SaveRichHistoryAsync(bool throwOnError = false)
     {
         try
         {
@@ -694,6 +706,7 @@ public class HistoryService : IHistoryService, IDisposable
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to save rich history");
+            if (throwOnError) throw;
         }
     }
 
@@ -855,6 +868,48 @@ public class HistoryService : IHistoryService, IDisposable
         }
     }
 
+    public async Task SetSonarrSeriesAsync(string seriesId, SonarrSeries sonarrSeries)
+    {
+        await EnsureLoadedAsync();
+        await _lock.WaitAsync();
+        try
+        {
+            var series = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
+            if (series == null) return;
+            if (series.SonarrSeriesId != sonarrSeries.Id.ToString())
+                foreach (var episode in series.Seasons.SelectMany(s => s.EpisodesList)) episode.ClearSonarrEpisodeData();
+            series.SonarrSeriesId = sonarrSeries.Id.ToString();
+            series.SonarrTvDbId = sonarrSeries.TvdbId.ToString();
+            series.SonarrSlugTitle = sonarrSeries.TitleSlug;
+            await SaveRichHistoryAsync(throwOnError: true);
+        }
+        finally { _lock.Release(); }
+    }
+
+    public async Task RefreshSonarrFileStatusAsync(CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetHistorySeriesAsync();
+        var failures = new HashSet<string>();
+        var files = await GetCurrentSonarrArtifactEpisodeIdsAsync(snapshot, _sonarrService, _config.Sonarr,
+            cancellationToken, (id, _) => failures.Add(id));
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var current = snapshot.SelectMany(s => s.Seasons).SelectMany(s => s.EpisodesList)
+                .Where(e => !string.IsNullOrEmpty(e.SonarrEpisodeId)).GroupBy(e => e.SonarrEpisodeId!)
+                .ToDictionary(g => g.Key, g => g.First());
+            foreach (var episode in _historyList.Where(s => !failures.Contains(s.SonarrSeriesId ?? ""))
+                         .SelectMany(s => s.Seasons).SelectMany(s => s.EpisodesList))
+                if (episode.SonarrEpisodeId != null && current.TryGetValue(episode.SonarrEpisodeId, out var fresh))
+                {
+                    episode.SonarrHasFile = files.Contains(episode.EpisodeId ?? "");
+                    episode.SonarrIsMonitored = fresh.SonarrIsMonitored;
+                }
+            await SaveRichHistoryAsync(throwOnError: true);
+        }
+        finally { _lock.Release(); }
+    }
+
     // Sonarr integration methods
     public async Task<SonarrMatchResult> MatchHistorySeriesWithSonarrAsync(bool updateAll = false)
     {
@@ -877,6 +932,24 @@ public class HistoryService : IHistoryService, IDisposable
             return new SonarrMatchResult(0, 0, 0);
         }
 
+        // Resolve network-dependent aliases outside the History lock, using the same verified
+        // identity as Browse and download naming. Preserve explicit saved links.
+        var titleIndex = new SonarrTitleIndex(sonarrSeries);
+        var resolvedTitles = new Dictionary<(string? Id, string Title), SonarrSeries?>();
+        foreach (var entry in await GetHistorySeriesAsync())
+        {
+            var title = entry.SeriesTitle ?? "";
+            if (!string.IsNullOrEmpty(entry.SonarrSeriesId) || resolvedTitles.ContainsKey((entry.SeriesId, title))) continue;
+            var match = titleIndex.FindExact(title);
+            if (match == null && titleIndex.Candidates(title).Count > 0)
+            {
+                // Propagate lookup outages so a release check retries instead of treating an
+                // unverified owned series as missing and downloading duplicates.
+                match = await _sonarrService.ResolveSeriesAsync(entry.SeriesId ?? "", title, _config.Sonarr);
+            }
+            resolvedTitles[(entry.SeriesId, title)] = match;
+        }
+
         var sonarrSeriesById = updateAll
             ? sonarrSeries.ToDictionary(series => series.Id.ToString())
             : [];
@@ -893,7 +966,7 @@ public class HistoryService : IHistoryService, IDisposable
 
                 if (string.IsNullOrEmpty(historySeries.SonarrSeriesId))
                 {
-                    var matchedSeries = FindClosestMatch(historySeries.SeriesTitle ?? string.Empty, sonarrSeries);
+                    var matchedSeries = resolvedTitles.GetValueOrDefault((historySeries.SeriesId, historySeries.SeriesTitle ?? string.Empty));
                     if (matchedSeries != null)
                     {
                         historySeries.SonarrSeriesId = matchedSeries.Id.ToString();
@@ -959,13 +1032,16 @@ public class HistoryService : IHistoryService, IDisposable
         List<SonarrEpisode> episodes;
         try
         {
-            episodes = await _sonarrService.GetEpisodesAsync(sonarrSeriesId, _config.Sonarr);
+            episodes = await _sonarrService.GetCurrentEpisodesAsync(sonarrSeriesId, _config.Sonarr, forceRefresh: rematchAll);
         }
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to fetch Sonarr episodes for series {SeriesId}", seriesId);
-            return;
+            throw new InvalidOperationException("Could not load Sonarr episodes. Existing matches were preserved.", ex);
         }
+
+        if (episodes.Count == 0)
+            throw new InvalidOperationException("Sonarr returned no episodes. Existing matches were preserved.");
 
         var nextAirDate = GetNextAirDate(episodes);
         var episodesById = episodes.ToDictionary(episode => episode.Id);
@@ -975,6 +1051,8 @@ public class HistoryService : IHistoryService, IDisposable
         {
             var historySeries = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
             if (historySeries == null) return;
+            if (historySeries.SonarrSeriesId != sonarrSeriesId.ToString())
+                throw new InvalidOperationException("The Sonarr series match changed. Please retry episode matching.");
 
             historySeries.SonarrNextAirDate = nextAirDate;
 
@@ -1048,6 +1126,46 @@ public class HistoryService : IHistoryService, IDisposable
             var failedEpisodes = new List<HistoryEpisode>();
             var matchedHistoryEpisodes = new HashSet<HistoryEpisode>();
 
+            // Establish a season's numbering from several independent title/overview anchors.
+            // This prevents a vaguely similar title from taking another episode's numeric slot.
+            foreach (var season in historySeries.Seasons)
+            {
+                var numbered = season.EpisodesList.Where(source => !IsSpecialHistoryEpisode(historySeries, source) &&
+                    int.TryParse(source.Episode, out var number) && number > 0).ToHashSet();
+                if (numbered.Count < 3) continue;
+                var storedAnchors = numbered.Where(source => int.TryParse(source.SonarrEpisodeId, out var id) && episodesById.ContainsKey(id))
+                    .Select(source => new { HistoryEpisode = source, Episode = episodesById[int.Parse(source.SonarrEpisodeId!)],
+                        Score = CalculateEpisodeEvidenceScore(source, episodesById[int.Parse(source.SonarrEpisodeId!)]) });
+                var anchors = identityCandidates.Concat(storedAnchors).Where(candidate => candidate.Score >= 0.8 &&
+                        numbered.Contains(candidate.HistoryEpisode) && candidate.Episode.SeasonNumber > 0)
+                    .OrderByDescending(candidate => candidate.Score)
+                    .GroupBy(candidate => candidate.HistoryEpisode).Select(group => group.First()).ToList();
+                var alignment = anchors.GroupBy(candidate => (candidate.Episode.SeasonNumber,
+                        Offset: candidate.Episode.EpisodeNumber - int.Parse(candidate.HistoryEpisode.Episode!)))
+                    .OrderByDescending(group => group.Count()).FirstOrDefault();
+                if (alignment == null || alignment.Count() < 3 || alignment.Count() < numbered.Count * 0.6) continue;
+                var assignedInSeason = season.EpisodesList.Where(source => !string.IsNullOrEmpty(source.SonarrEpisodeId))
+                    .Select(source => source.SonarrEpisodeId!).ToHashSet();
+                // Recaps can reuse a regular episode's number. Leave those competing entries
+                // to title/overview matching instead of letting provider order choose a winner.
+                foreach (var source in numbered.GroupBy(source => source.Episode)
+                             .Where(group => group.Count() == 1).Select(group => group.Single())
+                             .Where(episodesToMatch.Contains))
+                {
+                    var target = episodes.FirstOrDefault(target => target.SeasonNumber == alignment.Key.SeasonNumber &&
+                        target.EpisodeNumber == int.Parse(source.Episode!) + alignment.Key.Offset);
+                    if (target == null || assignedInSeason.Contains(target.Id.ToString())) continue;
+                    // A decisive conflicting title still overrides the majority numbering.
+                    var best = identityCandidates.FirstOrDefault(candidate => candidate.HistoryEpisode == source);
+                    if (best != null && best.Episode.Id != target.Id && best.Score >= 0.95 &&
+                        CalculateEpisodeEvidenceScore(source, target) + 0.15 < best.Score) continue;
+                    assignedInSeason.Add(target.Id.ToString());
+                    source.AssignSonarrEpisodeData(target);
+                    usedSonarrEpisodeIds.Add(target.Id);
+                    matchedHistoryEpisodes.Add(source);
+                }
+            }
+
             foreach (var candidate in identityCandidates)
             {
                 if (matchedHistoryEpisodes.Contains(candidate.HistoryEpisode)) continue;
@@ -1058,6 +1176,32 @@ public class HistoryService : IHistoryService, IDisposable
             }
 
             failedEpisodes.AddRange(episodesToMatch.Where(historyEpisode => !matchedHistoryEpisodes.Contains(historyEpisode)));
+
+            // Provider season numbers can refer to a different cut or arc. Require independent
+            // episode evidence before using either seasonal or absolute numbering as a fallback.
+            var seasonByEpisode = historySeries.Seasons.SelectMany(season => season.EpisodesList
+                .Select(source => (source, season))).ToDictionary(pair => pair.source, pair => pair.season);
+            var numberingAnchors = historySeries.Seasons.ToDictionary(season => season, season => season.EpisodesList
+                .Where(source => !IsSpecialHistoryEpisode(historySeries, source))
+                .SelectMany(source => episodes.Where(target => target.SeasonNumber > 0 &&
+                        (source.Episode == target.AbsoluteEpisodeNumber.ToString() ||
+                         (source.Episode == target.EpisodeNumber.ToString() && source.EpisodeSeasonNum == target.SeasonNumber.ToString())))
+                    .Select(target => (Source: source, Target: target)))
+                // Two agreeing numbered episodes can corroborate translated titles that are
+                // individually too weak for the unrestricted title matcher.
+                .Where(pair => CalculateEpisodeEvidenceScore(pair.Source, pair.Target) >= 0.6)
+                .ToList());
+            bool CanUseNumber(HistoryEpisode source, SonarrEpisode target, bool absolute)
+            {
+                if (target.SeasonNumber == 0) return false;
+                if (string.IsNullOrWhiteSpace(source.EpisodeTitle) && string.IsNullOrWhiteSpace(source.EpisodeDescription)) return true;
+                return numberingAnchors[seasonByEpisode[source]].Where(pair => absolute
+                    ? pair.Source.Episode == pair.Target.AbsoluteEpisodeNumber.ToString()
+                    : pair.Target.SeasonNumber == target.SeasonNumber &&
+                      pair.Source.EpisodeSeasonNum == pair.Target.SeasonNumber.ToString() &&
+                      pair.Source.Episode == pair.Target.EpisodeNumber.ToString())
+                    .Select(pair => pair.Source.Episode).Distinct().Count() >= 2;
+            }
 
             // Try matching by episode/season number
             foreach (var historyEpisode in failedEpisodes.ToList())
@@ -1077,7 +1221,8 @@ public class HistoryService : IHistoryService, IDisposable
                     var episodeNumberStr = ele.EpisodeNumber.ToString();
                     var seasonNumberStr = ele.SeasonNumber.ToString();
 
-                    return episodeNumberStr == historyEpisode.Episode && seasonNumberStr == historyEpisode.EpisodeSeasonNum;
+                    return episodeNumberStr == historyEpisode.Episode && seasonNumberStr == historyEpisode.EpisodeSeasonNum &&
+                        CanUseNumber(historyEpisode, ele, absolute: false);
                 });
 
                 if (TryAssignSonarrEpisode(historyEpisode, episode, usedSonarrEpisodeIds))
@@ -1105,6 +1250,7 @@ public class HistoryService : IHistoryService, IDisposable
                 var episode = episodes.FirstOrDefault(ele =>
                     !usedSonarrEpisodeIds.Contains(ele.Id) &&
                     !IsSpecialHistoryEpisode(historySeries, historyEpisode) &&
+                    CanUseNumber(historyEpisode, ele, absolute: true) &&
                     ele.AbsoluteEpisodeNumber.ToString() == historyEpisode.Episode);
 
                 if (TryAssignSonarrEpisode(historyEpisode, episode, usedSonarrEpisodeIds))
@@ -1118,60 +1264,33 @@ public class HistoryService : IHistoryService, IDisposable
                 historyEpisode.ClearSonarrEpisodeData();
             }
 
+            // Different provider cuts/dubs can represent the same episode with different IDs.
+            // Reuse an established match only when numbering and episode evidence agree.
+            foreach (var historyEpisode in failedEpisodes)
+            {
+                var equivalent = allHistoryEpisodes.Where(other => other != historyEpisode &&
+                        !historySeries.Seasons.Any(season => season.EpisodesList.Contains(other) && season.EpisodesList.Contains(historyEpisode)) &&
+                        !string.IsNullOrEmpty(other.SonarrEpisodeId) && other.Episode == historyEpisode.Episode &&
+                        (other.EpisodeSeasonNum == historyEpisode.EpisodeSeasonNum ||
+                         other.EpisodeSeasonNum == "0" || historyEpisode.EpisodeSeasonNum == "0") &&
+                        IsSpecialHistoryEpisode(historySeries, other) == IsSpecialHistoryEpisode(historySeries, historyEpisode))
+                    .Where(other =>
+                        (!string.IsNullOrWhiteSpace(historyEpisode.EpisodeTitle) &&
+                         !IsGenericEpisodeTitle(historyEpisode.EpisodeTitle) &&
+                         SonarrTitleIndex.Normalize(historyEpisode.EpisodeTitle) == SonarrTitleIndex.Normalize(other.EpisodeTitle)) ||
+                        CalculateEpisodeEvidenceScore(historyEpisode, episodesById[int.Parse(other.SonarrEpisodeId!)]) >= 0.8)
+                    .Select(other => episodesById.GetValueOrDefault(int.Parse(other.SonarrEpisodeId!)))
+                    .Where(target => target != null)
+                    .DistinctBy(target => target!.Id).ToList();
+                if (equivalent.Count == 1) historyEpisode.AssignSonarrEpisodeData(equivalent[0]!);
+            }
+
             await SaveRichHistoryAsync();
         }
         finally
         {
             _lock.Release();
         }
-    }
-
-    private static SonarrSeries? FindClosestMatch(string title, List<SonarrSeries> sonarrSeries)
-    {
-        if (string.IsNullOrEmpty(title) || sonarrSeries.Count == 0)
-        {
-            return null;
-        }
-
-        SonarrSeries? closestMatch = null;
-        double highestSimilarity = 0.0;
-        var lockObject = new object();
-
-        var needle = title.ToLower();
-
-        Parallel.ForEach(sonarrSeries, series =>
-        {
-            // Score against the primary title AND any alternate titles (anime in Sonarr
-            // often carry romaji/native/english variants there; CR uses a different one).
-            double best = 0.0;
-            if (series.Title != null)
-            {
-                best = StringSimilarity.CalculateSimilarity(series.Title.ToLower(), needle);
-            }
-            if (series.AlternateTitles != null)
-            {
-                foreach (var alt in series.AlternateTitles)
-                {
-                    if (string.IsNullOrEmpty(alt.Title)) continue;
-                    var sim = StringSimilarity.CalculateSimilarity(alt.Title.ToLower(), needle);
-                    if (sim > best) best = sim;
-                }
-            }
-
-            if (best > 0.0)
-            {
-                lock (lockObject)
-                {
-                    if (best > highestSimilarity)
-                    {
-                        highestSimilarity = best;
-                        closestMatch = series;
-                    }
-                }
-            }
-        });
-
-        return highestSimilarity < 0.8 ? null : closestMatch;
     }
 
     private static (SonarrEpisode? Episode, double Score) FindClosestMatchEpisodeWithScore(List<SonarrEpisode> episodeList, string title)
@@ -1402,9 +1521,12 @@ public class HistoryService : IHistoryService, IDisposable
             })
             .OrderByDescending(candidate => candidate.Score)
             .FirstOrDefault();
+        var storedScore = CalculateEpisodeEvidenceScore(historyEpisode, storedEpisode);
+        // Reconsider weak saved identities through the corroborated numbering pass. Older
+        // versions accepted matching numbers even when the provider described a different cut.
+        if (storedScore < 0.8) return false;
         if (best == null || best.Episode.Id == storedEpisode.Id) return true;
 
-        var storedScore = CalculateEpisodeEvidenceScore(historyEpisode, storedEpisode);
         // Only replace a persisted identity when metadata provides a decisive better answer. This
         // heals older number-based mappings without churning generic/translated episode titles.
         return best.Score < 0.8 || storedScore + 0.15 >= best.Score;
@@ -1447,10 +1569,14 @@ public class HistoryService : IHistoryService, IDisposable
             : dotProduct / (sourceNorm * targetNorm);
     }
 
+    private static bool IsSpecialSeasonTitle(string? title) => !string.IsNullOrWhiteSpace(title) &&
+        System.Text.RegularExpressions.Regex.IsMatch(title,
+            @"\bSpecials\b|(?:^|[:\-–—]\s*)Special(?:\s+\d+)?$|^Season\s+0$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     private static bool IsSpecialHistorySeason(HistorySeason historySeason) =>
-        historySeason.SpecialSeason ||
-        historySeason.SeasonTitle?.Contains("special", StringComparison.OrdinalIgnoreCase) == true ||
-        historySeason.SeasonNum == "0";
+        IsSpecialSeasonTitle(historySeason.SeasonTitle) ||
+        (string.IsNullOrWhiteSpace(historySeason.SeasonTitle) && historySeason.SpecialSeason);
 
     private static bool IsSpecialHistoryEpisode(
         HistorySeries historySeries,
@@ -2352,8 +2478,9 @@ public class HistoryService : IHistoryService, IDisposable
         {
             await EnsureLoadedAsync();
             var historySeries = _historyList.FirstOrDefault(s => s.SeriesId == seriesId);
-            if (historySeries == null) return;
+            if (historySeries == null) throw new KeyNotFoundException("History series was not found.");
 
+            var previous = (historySeries.HistorySeriesVideoQualityOverride, historySeries.HistorySeriesDubLangOverride, historySeries.HistorySeriesSoftSubsOverride);
             if (!string.IsNullOrEmpty(videoQuality))
                 historySeries.HistorySeriesVideoQualityOverride = videoQuality;
             else
@@ -2362,7 +2489,12 @@ public class HistoryService : IHistoryService, IDisposable
             historySeries.HistorySeriesDubLangOverride = NormalizeLocales(dubLanguages);
             historySeries.HistorySeriesSoftSubsOverride = NormalizeLocales(softSubs);
 
-            await SaveRichHistoryAsync();
+            try { await SaveRichHistoryAsync(throwOnError: true); }
+            catch
+            {
+                (historySeries.HistorySeriesVideoQualityOverride, historySeries.HistorySeriesDubLangOverride, historySeries.HistorySeriesSoftSubsOverride) = previous;
+                throw;
+            }
         }
         finally
         {
@@ -2382,6 +2514,7 @@ public class HistoryService : IHistoryService, IDisposable
                 var historySeason = historySeries.Seasons.FirstOrDefault(s => s.SeasonId == seasonId);
                 if (historySeason != null)
                 {
+                    var previous = (historySeason.HistorySeasonVideoQualityOverride, historySeason.HistorySeasonDubLangOverride, historySeason.HistorySeasonSoftSubsOverride);
                     if (!string.IsNullOrEmpty(videoQuality))
                         historySeason.HistorySeasonVideoQualityOverride = videoQuality;
                     else
@@ -2390,10 +2523,16 @@ public class HistoryService : IHistoryService, IDisposable
                     historySeason.HistorySeasonDubLangOverride = NormalizeLocales(dubLanguages);
                     historySeason.HistorySeasonSoftSubsOverride = NormalizeLocales(softSubs);
 
-                    await SaveRichHistoryAsync();
+                    try { await SaveRichHistoryAsync(throwOnError: true); }
+                    catch
+                    {
+                        (historySeason.HistorySeasonVideoQualityOverride, historySeason.HistorySeasonDubLangOverride, historySeason.HistorySeasonSoftSubsOverride) = previous;
+                        throw;
+                    }
                     return;
                 }
             }
+            throw new KeyNotFoundException("History season was not found.");
         }
         finally
         {

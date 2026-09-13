@@ -11,6 +11,7 @@ using Moq;
 
 namespace Cruncharr.Core.Tests;
 
+[Collection("ConfigurationEnvironment")]
 public class SecurityRegressionTests
 {
     [Fact]
@@ -243,7 +244,7 @@ public class SecurityRegressionTests
                 },
                 Sonarr = new SonarrUpdateConfig { ApiKey = "[configured]" },
                 Proxy = new ProxyUpdateConfig { Password = "[configured]" }
-            }
+            }, config
         ]);
 
         Assert.Equal("stored-sonarr-key", config.Sonarr.ApiKey);
@@ -280,7 +281,7 @@ public class SecurityRegressionTests
                     FilenameTemplate = "",
                     FilenameWhitespaceSubstitute = ""
                 }
-            }
+            }, config
         ]);
 
         Assert.Empty(config.Download.FilenameTemplate);

@@ -120,6 +120,15 @@ public class Program
         builder.Services.AddSingleton<IQueueService, QueueService>();
         builder.Services.AddSingleton<QueueBroadcastService>();
         builder.Services.AddSingleton<ISonarrService, SonarrService>();
+        builder.Services.AddSingleton(sp => new SonarrLibraryVerificationService(
+            sp.GetRequiredService<ISonarrService>(), sp.GetRequiredService<ICrunchyrollApiService>(),
+            sp.GetService<ILogger<SonarrLibraryVerificationService>>(), Path.Combine(configDir, "sonarr-library-identities.json"),
+            sp.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping));
+        builder.Services.AddSingleton<ISonarrAcquisitionService>(sp => new SonarrAcquisitionService(
+            sp.GetRequiredService<ISonarrService>(), sp.GetRequiredService<ICrunchyrollApiService>(),
+            sp.GetRequiredService<IHistoryService>(), config, sp.GetService<ILogger<SonarrAcquisitionService>>(),
+            Path.Combine(configDir, "sonarr-requests.json")));
+        builder.Services.AddHostedService<SonarrSyncService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<ISyncingService, SyncingService>();
         builder.Services.AddSingleton<IVideoSyncer, VideoSyncer>();
@@ -139,6 +148,7 @@ public class Program
             client.Timeout = TimeSpan.FromSeconds(30);
         })
         .ConfigurePrimaryHttpMessageHandler(WebhookUrlValidator.CreateHttpMessageHandler);
+        builder.Services.AddSingleton<ScheduledDownloadsService>();
         builder.Services.AddSingleton<AutoDownloadSchedulerService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<AutoDownloadSchedulerService>());
         builder.Services.AddSingleton<UpdateCheckerService>();
@@ -226,16 +236,17 @@ public class Program
         app.UseAuthorization();
         app.MapControllers();
 
-        // Serve static files for web UI. Force HTML to always revalidate: without an
-        // explicit Cache-Control browsers apply heuristic caching and can serve a stale
-        // index.html for hours after an update (UI appears "frozen"/half-modernized).
-        // no-cache keeps the ETag (cheap 304s) but never serves stale markup.
+        // Revalidate UI markup, scripts and styles after updates. no-cache retains
+        // ETags for cheap 304s without depending on manually bumped asset URLs.
         app.UseDefaultFiles();
         app.UseStaticFiles(new StaticFileOptions
         {
             OnPrepareResponse = ctx =>
             {
-                if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+                var extension = Path.GetExtension(ctx.File.Name);
+                if (extension.Equals(".html", StringComparison.OrdinalIgnoreCase) ||
+                    extension.Equals(".js", StringComparison.OrdinalIgnoreCase) ||
+                    extension.Equals(".css", StringComparison.OrdinalIgnoreCase))
                 {
                     ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
                 }

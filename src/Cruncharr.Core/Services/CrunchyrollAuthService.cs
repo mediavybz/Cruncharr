@@ -36,6 +36,7 @@ public interface ICrunchyrollAuthService
     void Init();
     void LoadToken();
     void SaveToken();
+    void RefreshConfiguration() { }
     void DeleteToken();
     Task<string> GetBase64EncodedTokenAsync(CancellationToken cancellationToken = default);
 }
@@ -48,7 +49,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private bool _multiProfileUnavailableLogged;
     private readonly HttpClientWrapper _httpClient;
     private readonly CrAuthSettings _authSettings;
-    private readonly string _tokenFilePath;
+    private string _tokenFilePath;
     private readonly CruncharrConfig? _config;
     private readonly INotificationService? _notification;
     private readonly SemaphoreSlim _refreshTokenGate = new(1, 1);
@@ -132,8 +133,28 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         _authSettings = new CrAuthSettings();
         _config = config;
 
-        var streamEndpointConfig = config?.Crunchyroll?.StreamEndpoint;
-        var streamEndpointSecondaryConfig = config?.Crunchyroll?.StreamEndpointSecondary;
+        StreamEndpoint = new CrAuthSettings();
+        StreamEndpointSecondary = new CrAuthSettings();
+        ApplyStreamConfiguration();
+
+        // NOTE: the embedded TV client (DefaultAndroidTvAuthSettings) is the fresh, active
+        // ANDROIDTV 3.65.0 client which supports the password grant, so the original TV flow
+        // (password grant + tv/android_tv play URL) works directly - no client swap needed.
+        // If Crunchyroll deactivates it later, LoginAsync falls back to the SSO/mobile flow
+        // (and the alternate android client) automatically.
+
+        _tokenFilePath = !string.IsNullOrEmpty(config?.TokenFilePath) ? config!.TokenFilePath : GetDefaultTokenPath();
+
+        Init();
+        LoadToken();
+
+        // [PT] Lazy auth update - will be called on first token refresh instead of sync-over-async in constructor
+    }
+
+    private void ApplyStreamConfiguration()
+    {
+        var streamEndpointConfig = _config?.Crunchyroll?.StreamEndpoint;
+        var streamEndpointSecondaryConfig = _config?.Crunchyroll?.StreamEndpointSecondary;
 
         StreamEndpoint = new CrAuthSettings();
         StreamEndpointSecondary = new CrAuthSettings();
@@ -182,18 +203,17 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             StreamEndpointSecondary.Audio = true;
         }
 
-        // NOTE: the embedded TV client (DefaultAndroidTvAuthSettings) is the fresh, active
-        // ANDROIDTV 3.65.0 client which supports the password grant, so the original TV flow
-        // (password grant + tv/android_tv play URL) works directly - no client swap needed.
-        // If Crunchyroll deactivates it later, LoginAsync falls back to the SSO/mobile flow
-        // (and the alternate android client) automatically.
+    }
 
-        _tokenFilePath = !string.IsNullOrEmpty(config?.TokenFilePath) ? config!.TokenFilePath : GetDefaultTokenPath();
-
-        Init();
-        LoadToken();
-
-        // [PT] Lazy auth update - will be called on first token refresh instead of sync-over-async in constructor
+    public void RefreshConfiguration()
+    {
+        ApplyStreamConfiguration();
+        var tokenPath = !string.IsNullOrWhiteSpace(_config?.TokenFilePath) ? _config.TokenFilePath : GetDefaultTokenPath();
+        if (_tokenFilePath != tokenPath)
+        {
+            _tokenFilePath = tokenPath;
+            SaveToken();
+        }
     }
 
     private static string GetDefaultTokenPath()
@@ -270,6 +290,13 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         {
             var content = await File.ReadAllTextAsync(GetTokenFilePath());
             Token = JsonConvert.DeserializeObject<CrToken>(content);
+        }
+
+        // Concurrent catalog requests queue behind this gate and must reuse a fresh guest
+        // token. Account login keeps its profile/subscription refresh behavior.
+        if (!IsTokenExpiredOrNearExpiry() && string.IsNullOrEmpty(Token?.account_id))
+        {
+            return false;
         }
 
         if (Token?.refresh_token != null)
@@ -1299,14 +1326,15 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     private async Task<bool> RefreshTokenCoreAsync(bool useBetaApi, CancellationToken cancellationToken, bool force)
     {
-        if (EndpointEnum == CrunchyrollEndpoints.Guest)
+        if (EndpointEnum == CrunchyrollEndpoints.Guest ||
+            (Token?.access_token != null && string.IsNullOrEmpty(Token.account_id)))
         {
             if (!force && !IsTokenExpiredOrNearExpiry())
             {
                 return true;
             }
             await AuthAnonymousAsync(useBetaApi, cancellationToken);
-            return true;
+            return Token?.access_token != null && !IsTokenExpiredOrNearExpiry();
         }
 
         if (Token?.access_token == null && Token?.refresh_token == null ||

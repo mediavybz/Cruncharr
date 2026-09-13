@@ -80,15 +80,16 @@ public class EncodingService : IEncodingService
     // User-created presets, persisted as JSON files (mirrors upstream's
     // PathENCODING_PRESETS_DIR; loaded at startup, written on add).
     private readonly List<VideoPreset> _custom = new();
+    private readonly Dictionary<string, string> _customPaths = new();
     private readonly object _lock = new();
     private readonly string _presetsDir;
     private readonly ILogger<EncodingService>? _logger;
 
-    public EncodingService(ILogger<EncodingService>? logger = null)
+    public EncodingService(ILogger<EncodingService>? logger = null, string? presetsDirectory = null)
     {
         _logger = logger;
         var cfgPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
-        _presetsDir = Path.Combine(Path.GetDirectoryName(cfgPath) ?? ".", "encoding-presets");
+        _presetsDir = presetsDirectory ?? Path.Combine(Path.GetDirectoryName(cfgPath) ?? ".", "encoding-presets");
         LoadCustomPresets();
     }
 
@@ -106,7 +107,9 @@ public class EncodingService : IEncodingService
                         && !_builtIn.Any(b => b.PresetName == p.PresetName)
                         && !_custom.Any(c => c.PresetName == p.PresetName))
                     {
+                        EncodingCommand.Validate(p);
                         _custom.Add(p);
+                        _customPaths[p.PresetName!] = file;
                     }
                 }
                 catch (Exception ex) { _logger?.LogWarning(ex, "Skipping invalid preset file {File}", file); }
@@ -148,15 +151,16 @@ public class EncodingService : IEncodingService
     public bool AddPreset(VideoPreset preset)
     {
         if (preset == null || string.IsNullOrWhiteSpace(preset.PresetName)) return false;
+        EncodingCommand.Validate(preset);
         if (IsBuiltIn(preset.PresetName!))
         {
             _logger?.LogWarning("Cannot overwrite built-in preset {Name}", preset.PresetName);
             return false;
         }
-        var presetPath = Path.Combine(_presetsDir, SanitizeFileName(preset.PresetName!) + ".json");
-        var tmp = presetPath + ".tmp";
         lock (_lock)
         {
+            var presetPath = _customPaths.GetValueOrDefault(preset.PresetName!) ?? Path.Combine(_presetsDir, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(preset.PresetName!))) + ".json");
+            var tmp = presetPath + ".tmp";
             try
             {
                 Directory.CreateDirectory(_presetsDir);
@@ -165,6 +169,7 @@ public class EncodingService : IEncodingService
                 File.Move(tmp, presetPath, overwrite: true);
                 _custom.RemoveAll(c => c.PresetName == preset.PresetName); // upsert
                 _custom.Add(preset);
+                _customPaths[preset.PresetName!] = presetPath;
                 return true;
             }
             catch (Exception ex)
@@ -184,9 +189,10 @@ public class EncodingService : IEncodingService
             if (!_custom.Any(c => c.PresetName == presetName)) return false;
             try
             {
-                var f = Path.Combine(_presetsDir, SanitizeFileName(presetName) + ".json");
+                var f = _customPaths[presetName];
                 if (File.Exists(f)) File.Delete(f);
                 _custom.RemoveAll(c => c.PresetName == presetName);
+                _customPaths.Remove(presetName);
                 return true;
             }
             catch (Exception ex)
@@ -197,11 +203,7 @@ public class EncodingService : IEncodingService
         }
     }
 
-    private static string SanitizeFileName(string name)
-    {
-        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
-        return name;
-    }
+
 }
 
 public class VideoPreset

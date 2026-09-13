@@ -9,6 +9,142 @@ namespace Cruncharr.Core.Tests;
 
 public class HistoryServiceSonarrTests : IDisposable
 {
+    [Theory]
+    [InlineData("Shuffle!", "0")]
+    [InlineData("The Last Summoner: Season 1", "0")]
+    [InlineData("A Returner's Magic Should Be Special", "1")]
+    public async Task RegularSeasonsDoNotBecomeSpecialsFromMissingNumbersOrWordsInTheTitle(string title, string number)
+    {
+        var history=CreateTestHistory();
+        history[0].SonarrSeriesId="100";
+        var season=history[0].Seasons[0];
+        season.SeasonTitle=title; season.SeasonNum=number; season.SpecialSeason=true;
+        season.EpisodesList[0].EpisodeSeasonNum=number;
+        await SaveTestHistory(history);
+        _sonarrServiceMock.Setup(s=>s.GetCurrentEpisodesAsync(100,It.IsAny<SonarrConfig>(),true,It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrEpisode {Id=101,Title=season.EpisodesList[0].EpisodeTitle,SeasonNumber=1,EpisodeNumber=1,HasFile=true}]);
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1",true);
+        var matched=(await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList[0];
+        Assert.Equal("101",matched.SonarrEpisodeId);
+        Assert.True(matched.SonarrHasFile);
+    }
+
+    [Fact]
+    public async Task DuplicateProviderEditionsShareAnEpisodeWithoutStealingAnotherEpisodeInTheSeason()
+    {
+        var history=CreateTestHistory(); history[0].SonarrSeriesId="100";
+        history[0].Seasons.Add(new HistorySeason {SeasonId="uncut",SeasonNum="1",SeasonTitle="Uncut",
+            EpisodesList=[new HistoryEpisode {EpisodeId="uncut-1",Episode="1",EpisodeSeasonNum="1",EpisodeTitle="To You, in 2000 Years"}]});
+        await SaveTestHistory(history);
+        _sonarrServiceMock.Setup(s=>s.GetCurrentEpisodesAsync(100,It.IsAny<SonarrConfig>(),true,It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrEpisode {Id=101,Title="To You, in 2000 Years",SeasonNumber=1,EpisodeNumber=1,HasFile=true}]);
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1",true);
+        var all=(await _historyService.GetHistorySeriesAsync())[0].Seasons.SelectMany(s=>s.EpisodesList);
+        Assert.All(all,e=>Assert.Equal("101",e.SonarrEpisodeId));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DuplicateEditionCanReuseATranslatedEpisodeWithAnEstablishedNumericIdentity(bool sameTitle)
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons[0].EpisodesList = new[] { "The Arrival", "The Journey", "A Day at the Beach" }
+            .Select((title, i) => new HistoryEpisode { EpisodeId = $"ep-{i + 1}", Episode = (i + 1).ToString(),
+                EpisodeSeasonNum = "1", EpisodeTitle = title }).ToList();
+        history[0].Seasons.Add(new HistorySeason { SeasonId = "hd", SeasonNum = "0", SeasonTitle = "Special Edition HD",
+            EpisodesList = [new HistoryEpisode { EpisodeId = "hd-1", Episode = "3", EpisodeSeasonNum = "0",
+                EpisodeTitle = sameTitle ? "A Day at the Beach" : "An Unrelated Story" }] });
+        await SaveTestHistory(history);
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "The Arrival", "The Journey", "Summer Vacation" }.Select((title, i) =>
+                new SonarrEpisode { Id = 101 + i, Title = title, SeasonNumber = 1, EpisodeNumber = i + 1 }).ToList());
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
+
+        var seasons = (await _historyService.GetHistorySeriesAsync())[0].Seasons;
+        Assert.Equal("103", seasons[0].EpisodesList[2].SonarrEpisodeId);
+        Assert.Equal(sameTitle ? "103" : null, seasons[1].EpisodesList[0].SonarrEpisodeId);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TranslatedTitlesCorroborateNumbersOnlyWhenIndependentEpisodesAgree(bool numbersAgree)
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        string[] sourceTitles = ["Red Green Blue Yellow", "Bronze Silver Golden Road", "Completely Translated Finale"];
+        history[0].Seasons[0].EpisodesList = sourceTitles.Select((title, i) => new HistoryEpisode {
+            EpisodeId = $"ep-{i + 1}", Episode = (i + 1).ToString(), EpisodeSeasonNum = "1", EpisodeTitle = title
+        }).ToList();
+        await SaveTestHistory(history);
+        string[] targetTitles = ["Red Green Blue Orange", "Bronze Silver Golden Castle", "Summer Vacation"];
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(targetTitles.Select((title, i) => new SonarrEpisode {
+                Id = 101 + i, Title = title, SeasonNumber = 1, EpisodeNumber = numbersAgree || i == 2 ? i + 1 : 2 - i
+            }).ToList());
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
+
+        var matched = (await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList;
+        Assert.Equal(numbersAgree ? new[] { "101", "102", "103" } : new string?[] { null, null, null },
+            matched.Select(e => e.SonarrEpisodeId));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CorroboratedSeasonNumbersPreventSimilarTitlesFromTakingTheWrongEpisode(bool rematch)
+    {
+        var history=CreateTestHistory(); history[0].SonarrSeriesId="100";
+        string[] titles=["A New Arrival", "A Quiet Dinner", "The Battle Begins", "The Battle Begin"];
+        history[0].Seasons[0].EpisodesList=titles.Select((title,i)=>new HistoryEpisode {
+            EpisodeId=$"ep-{i+1}",Episode=(i+1).ToString(),EpisodeSeasonNum="1",EpisodeTitle=title,
+            SonarrEpisodeId=!rematch && i<3 ? (101+i).ToString() : null }).ToList();
+        await SaveTestHistory(history);
+        _sonarrServiceMock.Setup(s=>s.GetCurrentEpisodesAsync(100,It.IsAny<SonarrConfig>(),rematch,It.IsAny<CancellationToken>()))
+            .ReturnsAsync(titles.Select((title,i)=>new SonarrEpisode {Id=101+i,SeasonNumber=1,EpisodeNumber=i+1,
+                Title=i==3 ? "Uniforms are Uniforms" : title,HasFile=true}).ToList());
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1",rematch);
+        var matched=(await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList;
+        Assert.Equal(new[] {"101","102","103","104"},matched.Select(e=>e.SonarrEpisodeId));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SeasonNumberingDoesNotGiveARecapTheRegularEpisodesSlot(bool duplicateNumber)
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        string[] titles = ["A New Arrival", "A Quiet Dinner", "The Battle Begins", "The Final Journey"];
+        var sources = titles.Select((title, i) => new HistoryEpisode {
+            EpisodeId = $"ep-{i + 1}", Episode = (i + 1).ToString(), EpisodeSeasonNum = "1", EpisodeTitle = title
+        }).ToList();
+        sources.Insert(0, new HistoryEpisode {
+            EpisodeId = "recap", Episode = duplicateNumber ? "4" : "5", EpisodeSeasonNum = "1",
+            EpisodeTitle = "The Story So Far", SpecialEpisode = false
+        });
+        history[0].Seasons[0].EpisodesList = sources;
+        await SaveTestHistory(history);
+        var targets = titles.Select((title, i) => new SonarrEpisode {
+            Id = 101 + i, SeasonNumber = 1, EpisodeNumber = i + 1, Title = title
+        }).ToList();
+        targets.Add(new SonarrEpisode { Id = 200, SeasonNumber = 0, EpisodeNumber = 1, Title = "The Story So Far" });
+        targets.Add(new SonarrEpisode { Id = 105, SeasonNumber = 1, EpisodeNumber = 5, Title = "An Unrelated Episode" });
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(targets);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
+
+        var matched = (await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList;
+        Assert.Equal("200", matched.Single(e => e.EpisodeId == "recap").SonarrEpisodeId);
+        Assert.Equal(new[] { "101", "102", "103", "104" },
+            matched.Where(e => e.EpisodeId != "recap").Select(e => e.SonarrEpisodeId));
+    }
+
     private readonly string _testHistoryPath;
     private readonly Mock<ILogger<HistoryService>> _loggerMock;
     private readonly Mock<ISonarrService> _sonarrServiceMock;
@@ -62,6 +198,27 @@ public class HistoryServiceSonarrTests : IDisposable
         await _historyService.MatchHistorySeriesWithSonarrAsync();
 
         _sonarrServiceMock.Verify(s => s.GetSeriesAsync(It.IsAny<SonarrConfig>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FailedEpisodeRematch_PreservesSavedIdentityAndReportsFailure(bool requestFails)
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons[0].EpisodesList[0].SonarrEpisodeId = "1001";
+        await SaveTestHistory(history);
+        var setup = _sonarrServiceMock.Setup(service => service.GetCurrentEpisodesAsync(
+            100, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()));
+        if (requestFails) setup.ThrowsAsync(new HttpRequestException("Unavailable"));
+        else setup.ReturnsAsync([]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!, rematchAll: true));
+
+        var saved = await _historyService.GetHistorySeriesAsync();
+        Assert.Equal("1001", saved[0].Seasons[0].EpisodesList[0].SonarrEpisodeId);
     }
 
     [Fact]
@@ -289,7 +446,7 @@ public class HistoryServiceSonarrTests : IDisposable
         };
 
         _sonarrServiceMock
-            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(episodes);
 
         await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
@@ -310,7 +467,7 @@ public class HistoryServiceSonarrTests : IDisposable
 
         await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
 
-        _sonarrServiceMock.Verify(s => s.GetEpisodesAsync(It.IsAny<int>(), It.IsAny<SonarrConfig>()), Times.Never);
+        _sonarrServiceMock.Verify(s => s.GetCurrentEpisodesAsync(It.IsAny<int>(), It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -322,7 +479,7 @@ public class HistoryServiceSonarrTests : IDisposable
 
         await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
 
-        _sonarrServiceMock.Verify(s => s.GetEpisodesAsync(It.IsAny<int>(), It.IsAny<SonarrConfig>()), Times.Never);
+        _sonarrServiceMock.Verify(s => s.GetCurrentEpisodesAsync(It.IsAny<int>(), It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -348,7 +505,7 @@ public class HistoryServiceSonarrTests : IDisposable
         };
 
         _sonarrServiceMock
-            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(episodes);
 
         await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!, rematchAll: true);
@@ -359,12 +516,17 @@ public class HistoryServiceSonarrTests : IDisposable
         Assert.Equal("2001", episode.SonarrEpisodeId);
     }
 
-    [Fact]
-    public async Task MatchHistoryEpisodesWithSonarrAsync_MatchByEpisodeNumber_FallsBackToNumber()
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task NumericFallbackDoesNotIgnoreConflictingMetadataWithoutCorroboration(bool metadataAvailable, bool storedMatch)
     {
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
-        history[0].Seasons[0].EpisodesList[0].EpisodeTitle = "Completely Different Title";
+        history[0].Seasons[0].EpisodesList[0].EpisodeTitle = metadataAvailable ? "Completely Different Title" : null;
+        history[0].Seasons[0].EpisodesList[0].SonarrEpisodeId = storedMatch ? "1001" : null;
         await SaveTestHistory(history);
 
         var episodes = new List<SonarrEpisode>{
@@ -382,7 +544,7 @@ public class HistoryServiceSonarrTests : IDisposable
         };
 
         _sonarrServiceMock
-            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(episodes);
 
         await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
@@ -390,7 +552,7 @@ public class HistoryServiceSonarrTests : IDisposable
         var result = await _historyService.GetHistorySeriesAsync();
         var episode = result[0].Seasons[0].EpisodesList[0];
 
-        Assert.Equal("1001", episode.SonarrEpisodeId);
+        Assert.Equal(metadataAvailable ? null : "1001", episode.SonarrEpisodeId);
     }
 
     [Fact]
@@ -404,7 +566,7 @@ public class HistoryServiceSonarrTests : IDisposable
         await SaveTestHistory(history);
 
         _sonarrServiceMock
-            .Setup(service => service.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(service => service.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode
@@ -446,7 +608,7 @@ public class HistoryServiceSonarrTests : IDisposable
         await SaveTestHistory(history);
 
         _sonarrServiceMock
-            .Setup(service => service.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(service => service.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode
@@ -581,7 +743,7 @@ public class HistoryServiceSonarrTests : IDisposable
         };
 
         _sonarrServiceMock
-            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(episodes);
 
         await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
@@ -605,7 +767,7 @@ public class HistoryServiceSonarrTests : IDisposable
         await SaveTestHistory(history);
 
         _sonarrServiceMock
-            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode
@@ -638,7 +800,7 @@ public class HistoryServiceSonarrTests : IDisposable
         await SaveTestHistory(history);
 
         _sonarrServiceMock
-            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode
@@ -687,7 +849,7 @@ public class HistoryServiceSonarrTests : IDisposable
         await SaveTestHistory(history);
 
         _sonarrServiceMock
-            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode
@@ -741,7 +903,7 @@ public class HistoryServiceSonarrTests : IDisposable
         await SaveTestHistory(history);
 
         _sonarrServiceMock
-            .Setup(s => s.GetEpisodesAsync(100, It.IsAny<SonarrConfig>()))
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new SonarrEpisode

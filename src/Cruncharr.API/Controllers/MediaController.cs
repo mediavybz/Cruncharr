@@ -202,6 +202,13 @@ public class EncodingController : ControllerBase
         return Ok(all);
     }
 
+    [HttpPost("preview")]
+    public ActionResult Preview([FromBody] VideoPreset preset)
+    {
+        try { return Ok(new { Arguments = EncodingCommand.Build(preset, "input.mkv", "output.mkv") }); }
+        catch (ArgumentException ex) { return BadRequest(new { Error = ex.Message }); }
+    }
+
     // Create or update a custom preset (built-in names are rejected).
     [HttpPost("presets")]
     public ActionResult AddPreset([FromBody] VideoPreset preset)
@@ -210,8 +217,8 @@ public class EncodingController : ControllerBase
             return BadRequest(new { Error = "PresetName is required" });
         if (_encodingService.IsBuiltIn(preset.PresetName))
             return BadRequest(new { Error = "Cannot overwrite a built-in preset" });
-        if (preset.Crf < 0 || preset.Crf > 51)
-            return BadRequest(new { Error = "CRF must be between 0 and 51" });
+        try { EncodingCommand.Validate(preset); }
+        catch (ArgumentException ex) { return BadRequest(new { Error = ex.Message }); }
         return _encodingService.AddPreset(preset)
             ? Ok(new { Message = "Preset saved", preset.PresetName })
             : StatusCode(500, new { Error = "Failed to save preset" });
@@ -223,6 +230,9 @@ public class EncodingController : ControllerBase
     {
         if (_encodingService.IsBuiltIn(presetName))
             return BadRequest(new { Error = "Built-in presets cannot be deleted" });
+        var config = HttpContext?.RequestServices?.GetService<Cruncharr.Core.Configuration.CruncharrConfig>();
+        if (config?.Download.EncodingPreset == presetName)
+            return Conflict(new { Error = "Choose another encoding preset in Settings before deleting this one." });
         return _encodingService.RemovePreset(presetName)
             ? NoContent()
             : NotFound(new { Error = "Custom preset not found" });

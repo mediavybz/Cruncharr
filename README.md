@@ -1,6 +1,6 @@
 # Cruncharr
 
-A self-hosted companion for organizing and maintaining your personal anime media library — a headless backend with a REST API plus a single-page web interface.
+Cruncharr is a self-hosted app for organizing and maintaining your personal anime media library. It provides a headless backend, a REST API, and a single-page web interface.
 
 ## Quick Deploy
 
@@ -50,14 +50,18 @@ docker-compose up -d
 ## First Time Setup
 
 1. **Open the web interface** at `http://your-server:8585`
-2. **Sign in** with your account credentials
+2. **Browse or search** without signing in. Direct Cruncharr downloads require Premium. With Sonarr enabled, guest and free-account requests can use Sonarr instead.
 3. **Configure settings**:
    - Library directory: `/downloads` (inside container)
    - Temp directory: `/tmp/cruncharr`
    - Endpoints: use defaults (recommended)
    - Audio languages: `ja-JP` (Japanese) by default
    - Subtitles: `en-US` (English) by default
-   - Adjust these in Settings, then click Save
+   - Adjust these in Settings; changes save automatically
+
+See [Sonarr requests](docs/sonarr-requests.md) for automatic series registration, completed-file imports, and guest requests.
+
+## Stable and beta versions
 
 ## Volume Mounts
 

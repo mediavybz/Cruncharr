@@ -52,18 +52,19 @@ public class HistoryController : ControllerBase
     /// Get rich history with series/season/episode tree
     /// </summary>
     [HttpGet("rich")]
-    public async Task<ActionResult<List<HistorySeriesResponse>>> GetRichHistory()
+    public async Task<ActionResult<List<HistorySeriesResponse>>> GetRichHistory([FromQuery] bool forceRefresh = false)
     {
         try
         {
             var history = await _historyService.GetHistorySeriesAsync();
             var flatHistory = await _historyService.GetAllAsync(0, int.MaxValue);
             var localArtifacts = HistoryService.GetEpisodeIdsWithExistingArtifacts(flatHistory ?? []);
-            var sonarrArtifacts = await GetCurrentSonarrArtifactEpisodeIdsAsync(history);
+            var unavailable = new HashSet<string>();
+            var sonarrArtifacts = await GetCurrentSonarrArtifactEpisodeIdsAsync(history, unavailable, forceRefresh);
             var response = history.Select(series => MapToResponse(
                 series,
                 localArtifacts,
-                sonarrArtifacts)).ToList();
+                sonarrArtifacts, unavailable)).ToList();
             return Ok(response);
         }
         catch (Exception ex)
@@ -132,11 +133,12 @@ public class HistoryController : ControllerBase
             if (series == null) return NotFound();
             var flatHistory = await _historyService.GetAllAsync(0, int.MaxValue);
             var localArtifacts = HistoryService.GetEpisodeIdsWithExistingArtifacts(flatHistory ?? []);
-            var sonarrArtifacts = await GetCurrentSonarrArtifactEpisodeIdsAsync(history ?? []);
+            var unavailable = new HashSet<string>();
+            var sonarrArtifacts = await GetCurrentSonarrArtifactEpisodeIdsAsync([series], unavailable);
             return Ok(MapToResponse(
                 series,
                 localArtifacts,
-                sonarrArtifacts));
+                sonarrArtifacts, unavailable));
         }
         catch (Exception ex)
         {
@@ -414,7 +416,7 @@ public class HistoryController : ControllerBase
     }
 
     private async Task<HashSet<string>> GetCurrentSonarrArtifactEpisodeIdsAsync(
-        IEnumerable<HistorySeries> history)
+        IEnumerable<HistorySeries> history, ISet<string> unavailable, bool forceRefresh = false)
     {
         if (_config.Sonarr?.Enabled != true) return [];
         return await HistoryService.GetCurrentSonarrArtifactEpisodeIdsAsync(
@@ -422,13 +424,19 @@ public class HistoryController : ControllerBase
             _sonarrService,
             _config.Sonarr,
             HttpContext?.RequestAborted ?? CancellationToken.None,
-            (seriesId, ex) => _logger.LogWarning(ex, "Could not refresh Sonarr file state for history series {SeriesId}", seriesId));
+            (seriesId, ex) =>
+            {
+                unavailable.Add(seriesId);
+                if (unavailable.Count == 1)
+                    _logger.LogWarning(ex, "Could not refresh Sonarr file state for history series {SeriesId}", seriesId);
+            }, forceRefresh);
     }
 
     private static HistorySeriesResponse MapToResponse(
         HistorySeries series,
         IReadOnlySet<string> localArtifactEpisodeIds,
-        IReadOnlySet<string> currentSonarrArtifactEpisodeIds)
+        IReadOnlySet<string> currentSonarrArtifactEpisodeIds,
+        IReadOnlySet<string> unavailableSonarrSeriesIds)
     {
         return new HistorySeriesResponse
         {
@@ -440,9 +448,16 @@ public class HistoryController : ControllerBase
             DownloadedEpisodes = series.DownloadedEpisodes,
             TotalEpisodes = series.TotalEpisodes,
             SonarrSeriesId = series.SonarrSeriesId,
+            SonarrStatusUnavailable = unavailableSonarrSeriesIds.Contains(series.SonarrSeriesId ?? ""),
             SonarrTvDbId = series.SonarrTvDbId,
             SonarrSlugTitle = series.SonarrSlugTitle,
             SonarrNextAirDate = series.SonarrNextAirDate,
+            SettingsOverride = new HistorySettingsOverrideRequest
+            {
+                VideoQuality = series.HistorySeriesVideoQualityOverride,
+                DubLanguages = series.HistorySeriesDubLangOverride,
+                SoftSubs = series.HistorySeriesSoftSubsOverride
+            },
             Seasons = series.Seasons?.Select(s => new HistorySeasonResponse
             {
                 SeasonId = s.SeasonId,
@@ -450,6 +465,12 @@ public class HistoryController : ControllerBase
                 SeasonNum = s.SeasonNum,
                 SpecialSeason = s.SpecialSeason,
                 DownloadedEpisodes = s.DownloadedEpisodes,
+                SettingsOverride = new HistorySettingsOverrideRequest
+                {
+                    VideoQuality = s.HistorySeasonVideoQualityOverride,
+                    DubLanguages = s.HistorySeasonDubLangOverride,
+                    SoftSubs = s.HistorySeasonSoftSubsOverride
+                },
                 Episodes = s.EpisodesList?.Select(e => new HistoryEpisodeResponse
                 {
                     EpisodeId = e.EpisodeId,
@@ -495,6 +516,7 @@ public class HistoryCheckResponse
 
 public class HistorySeriesResponse
 {
+    public HistorySettingsOverrideRequest SettingsOverride { get; set; } = new();
     public string? SeriesId { get; set; }
     public string? SeriesTitle { get; set; }
     public string? SeriesDescription { get; set; }
@@ -505,6 +527,7 @@ public class HistorySeriesResponse
     public List<HistorySeasonResponse> Seasons { get; set; } = [];
     // Sonarr fields
     public string? SonarrSeriesId { get; set; }
+    public bool SonarrStatusUnavailable { get; set; }
     public string? SonarrTvDbId { get; set; }
     public string? SonarrSlugTitle { get; set; }
     public string? SonarrNextAirDate { get; set; }
@@ -512,6 +535,7 @@ public class HistorySeriesResponse
 
 public class HistorySeasonResponse
 {
+    public HistorySettingsOverrideRequest SettingsOverride { get; set; } = new();
     public string? SeasonId { get; set; }
     public string? SeasonTitle { get; set; }
     public string? SeasonNum { get; set; }

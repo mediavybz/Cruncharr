@@ -72,11 +72,61 @@
             };
         })();
 
+        const sonarrChoices = new Map();
+        let sonarrChoiceResolve = null;
+        function finishSonarrChoice(tvdbId) {
+            const resolve = sonarrChoiceResolve;
+            sonarrChoiceResolve = null;
+            closeModal();
+            if (resolve) resolve(tvdbId);
+        }
+
+        function chooseSonarrSeries(candidates) {
+            return new Promise(resolve => {
+                sonarrChoiceResolve = resolve;
+                document.getElementById('modal-title').textContent = 'Choose the matching series';
+                document.getElementById('modal-body').innerHTML = '<p>Confirm the series Sonarr should use. Similar titles can refer to different editions.</p>' + candidates.map(candidate =>
+                    `<p><button class="header-btn" onclick="finishSonarrChoice(${Number(candidate.tvdbId)})">${escapeHtml(candidate.title)}${candidate.year ? ' (' + Number(candidate.year) + ')' : ''} · TVDB ${Number(candidate.tvdbId)}</button></p>`).join('');
+                document.getElementById('modal-footer').innerHTML = '<button class="header-btn" onclick="finishSonarrChoice(null)">Cancel</button>';
+                document.getElementById('modal').classList.add('active');
+            });
+        }
+
+        async function sendDownloadRequest(options) {
+            let response = await fetch('/api/v1/queue', options);
+            if (response.status === 409) {
+                const error = await response.clone().json().catch(() => ({}));
+                if (Array.isArray(error.candidates) && error.candidates.length) {
+                    let choice = sonarrChoices.get(error.seriesId);
+                    if (!error.candidates.some(candidate => candidate.tvdbId === choice))
+                        choice = await chooseSonarrSeries(error.candidates);
+                    if (!choice) throw new Error('Request cancelled. No episodes were queued or searched.');
+                    sonarrChoices.set(error.seriesId, choice);
+                    response = await fetch('/api/v1/queue', { ...options,
+                        body: JSON.stringify({ ...JSON.parse(options.body), sonarrTvdbId: choice }) });
+                }
+            }
+            if (response.ok && config?.sonarr?.enabled) {
+                sonarrLibraryCheckedAt = 0;
+                void loadSonarrLibrary();
+            }
+            return response;
+        }
+
+        function downloadActionLabel() {
+            return !authStatus?.isAuthenticated || !authStatus?.hasPremium
+                ? config?.sonarr?.enabled && config?.sonarr?.searchWithoutPremium !== false ? 'Request in Sonarr' : 'Download'
+                : 'Download with Cruncharr';
+        }
+
         async function readQueueAdmission(response) {
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.message || error.error || `HTTP ${response.status}`);
+            }
             try {
                 const data = await response.json();
-                return { added: data.added !== false, data };
+                return { added: data.added !== false, destination: data.destination || 'cruncharr', data };
             } catch (e) {
                 // Compatibility with an older backend that returned no admission flag.
                 return { added: true, data: null };
@@ -113,6 +163,10 @@
         let languagePrefsEnabled = false; // adaptive default language feature (loaded from /language-prefs)
         let _langSuggestShownFor = ''; // de-dupe the suggestion prompt within a session
         let historyRichData = []; // Cache for rich history data with episodes
+        let historyRequest = null;
+        let historyLoaded = false;
+        const historyRequestGate = CruncharrCalendarRequests.createLatestRequestGate();
+        const historyDetailGate = CruncharrCalendarRequests.createLatestRequestGate();
         let historySearchQuery = '';
         let historySearchPopupOpen = false;
         let isQueueGloballyPaused = false;
@@ -120,8 +174,16 @@
         let selectBrowseResultTimeout = null;
         let selectBrowseGeneration = 0;
         let globalSearchDebounce = null; // top-bar search debounce timer
-        let globalSearchAbort = null;    // top-bar search in-flight request
+        const globalSearchGate = CruncharrCalendarRequests.createLatestRequestGate();
         let globalSearchResults = [];    // last top-bar search results
+        let sonarrLibraryIndex = null;
+        let sonarrLibraryPromise = null;
+        let sonarrLibraryCheckedAt = 0;
+        let sonarrLibraryError = false;
+        let sonarrLibraryInProgress = false;
+        let sonarrLibraryPending = new Set();
+        let sonarrLibraryRefreshTimer = null;
+        let browseHideLibrary = false;
         let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
         let browseSeriesPromise = null;  // de-duplicates background/visible catalog requests
         let browseCatalogLoaded = false;
@@ -147,7 +209,7 @@
         const HISTORY_SEARCH_DEBOUNCE_MS = 200;
         const TOAST_DISPLAY_DURATION_MS = 3000;
         const BROWSE_RENDER_BATCH_SIZE = 96;
-        const BROWSE_CACHE_KEY = 'cruncharrBrowseCatalogV1';
+        const BROWSE_CACHE_KEY = 'cruncharrBrowseCatalogV3';
         const BROWSE_CACHE_TTL_MS = 15 * 60 * 1000;
         const ACTIVE_DROPDOWN_LISTENERS = new Map(); // id -> listener function
 
@@ -244,7 +306,13 @@
             }
         }
 
-        function navigateTo(page) {
+        async function navigateTo(page) {
+            if (currentPage === 'settings') {
+                if (window._settingsSaveTimer) {
+                    clearTimeout(window._settingsSaveTimer); window._settingsSaveTimer = null;
+                    if (!await startSettingsSave()) return false;
+                } else if (window._settingsSavePromise && !await window._settingsSavePromise) return false;
+            }
             writeLocalStorage('cruncharr_current_page', page);
             loadPage(page);
             // Secondary/system pages live behind More on phones; keep the visible destination
@@ -281,6 +349,9 @@
             if (currentPage === 'history' && page !== 'history' && historyIntervalId) {
                 clearInterval(historyIntervalId);
                 historyIntervalId = null;
+                historyRequestGate.cancel();
+                historyRequest = null;
+                historyDetailGate.cancel();
             }
             if (currentPage === 'browse' && page !== 'browse') {
                 disconnectBrowseLoadMoreObserver();
@@ -406,8 +477,8 @@
                 const d = await res.json();
                 const running = d.isRunning ?? d.IsRunning ?? false;
                 const lastRun = d.lastRun ?? d.LastRun ?? null;
-                let label = running ? 'running…' : 'idle';
-                if (!running && lastRun) {
+                let label = running ? 'running…' : !d.enabled ? 'paused' : !d.subscriptions?.some(s => s.enabled) ? 'no subscriptions' : !d.canDownload ? 'Premium login needed' : 'waiting for next check';
+                if (!running && lastRun && d.enabled && d.canDownload) {
                     const dt = new Date(lastRun);
                     if (!isNaN(dt)) label = `idle (last run ${dt.toLocaleTimeString()})`;
                 }
@@ -425,12 +496,14 @@
             try {
                 const res = await fetch('/api/v1/scheduler/trigger', { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                if (typeof showToast === 'function') showToast('Auto-download check started', 'success');
+                if (typeof showToast === 'function') showToast('Scheduled release check completed', 'success');
             } catch (e) {
                 if (typeof showToast === 'function') showToast('Scheduler trigger failed', 'error');
             } finally {
                 if (btn) { btn.disabled = false; btn.innerHTML = '&#9889; Run now'; }
-                setTimeout(() => { loadSchedulerStatus(); fetchDownloads(); fetchQueueStats(); }, 1500);
+                loadSchedulerStatus(); fetchQueueStats();
+                if (currentPage === 'settings' && settingsTab === 'scheduler') await renderSchedulerSettings();
+                if (currentPage === 'downloads') fetchDownloads();
             }
         }
 
@@ -608,13 +681,14 @@
         function renderAddDownload(container) {
             container.innerHTML = `
                 <div class="page-title">Add Download</div>
-                <div class="page-subtitle">Use the search bar at the top to find a series or paste a URL</div>
+                <div class="page-subtitle">Use the search bar at the top to find a series or paste a URL. ${escapeHtml(downloadActionLabel())}: ${authStatus?.isAuthenticated && authStatus?.hasPremium ? 'selected episodes download through Cruncharr.' : 'Sonarr uses its configured sources and quality profile when enabled.'}</div>
                 <div class="season-selector">
-                    <button class="header-btn primary" id="add-btn" onclick="addSelectedToQueue()" disabled>Add</button>
+                    <button class="header-btn primary" id="add-btn" onclick="addSelectedToQueue()" disabled>${downloadActionLabel()}</button>
                     <label class="checkbox-label">
                         <input type="checkbox" id="add-all-checkbox" onchange="toggleAddAll(this.checked)">
                         All
                     </label>
+                    <button class="header-btn" id="series-schedule" style="display:none" onclick="toggleSeriesSchedule(this)">Schedule new episodes</button>
                     <button class="header-btn" id="music-btn" onclick="showFeaturedMusic()" style="display:none;">
                         <span>&#127925;</span> Music
                     </button>
@@ -636,73 +710,124 @@
         }
 
         // ===== Top-bar global search (Seerr-style) =====
-        function onGlobalSearchInput(value) {
+        function closeGlobalSearch() {
             clearTimeout(globalSearchDebounce);
+            globalSearchGate.cancel();
+            globalSearchResults = [];
             const popup = document.getElementById('global-search-popup');
-            if (!value.trim()) {
-                if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
+            if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
+        }
+
+        function localSearchResults(query) {
+            const text = query.toLowerCase();
+            const terms = text.split(/\s+/).filter(Boolean);
+            const rank = series => {
+                const title = (series.title || '').toLowerCase();
+                return title === text ? 0 : title.startsWith(text) ? 1 : title.includes(text) ? 2 : 3;
+            };
+            return allBrowseSeries
+                .filter(series => terms.every(term => (series.title || '').toLowerCase().includes(term)))
+                .sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title))
+                .slice(0, 30);
+        }
+
+        function renderGlobalSearchResults(results, emptyMessage = 'No results found') {
+            const popup = document.getElementById('global-search-popup');
+            if (!popup) return;
+            globalSearchResults = results;
+            popup.style.display = 'block';
+            if (results.length === 0) {
+                popup.innerHTML = `<div style="padding:14px; color:var(--text-muted);">${escapeHtml(emptyMessage)}</div>`;
                 return;
             }
-            globalSearchDebounce = setTimeout(() => doGlobalSearch(value.trim()), 350);
+            popup.innerHTML = globalSearchResults.map(s => `
+                <div class="search-result-item" onclick="selectGlobalResult('${escapeJsString(s.id)}')">
+                    <div class="search-result-poster">
+                        ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
+                    </div>
+                    <div class="search-result-info">
+                        <div class="search-result-title">${escapeHtml(s.title)}</div>
+                        <div class="search-result-type">${libraryIndicator(s)} ${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
+                        <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function onGlobalSearchInput(value) {
+            closeGlobalSearch();
+            const query = value.trim();
+            if (!query) return;
+            if (!browseCatalogLoaded) restoreBrowseCatalog();
+            // The prefetched catalog gives immediate matches while remote search fills gaps.
+            renderGlobalSearchResults(localSearchResults(query), 'Searching…');
+            globalSearchDebounce = setTimeout(() => doGlobalSearch(query), 200);
         }
 
         function onGlobalSearchEnter() {
+            clearTimeout(globalSearchDebounce);
             const input = document.getElementById('global-search');
             if (input && input.value.trim()) doGlobalSearch(input.value.trim());
         }
 
         async function doGlobalSearch(query) {
+            if (/^https?:\/\//i.test(query)) {
+                try {
+                    const url = new URL(query);
+                    if (!/^(www\.)?crunchyroll\.com$/i.test(url.hostname)) throw new Error('Use a Crunchyroll series or episode URL.');
+                    const match = url.pathname.match(/\/(series|watch)\/([A-Za-z0-9_-]+)/);
+                    if (!match) throw new Error('Use a Crunchyroll series or episode URL.');
+                    closeGlobalSearch();
+                    if (match[1] === 'series') { await selectBrowseResult(match[2]); return; }
+                    const response = await fetch('/api/v1/series/resolve-episode/' + encodeURIComponent(match[2]));
+                    if (!response.ok) throw new Error('Could not load this episode.');
+                    const episode = await response.json();
+                    if (config?.addDownload?.singleEpisodeInstantAdd && authStatus?.isAuthenticated && authStatus?.hasPremium) {
+                        await addEpisodeToQueue(episode.id, episode.seriesTitle, episode.episode, episode.thumbnailUrl, episode.audioLocale);
+                    } else {
+                        await selectBrowseResult(episode.seriesId, { episodeId: episode.id, audioLocale: episode.audioLocale });
+                    }
+                } catch (e) { showToast(e.message, 'error'); }
+                return;
+            }
             const popup = document.getElementById('global-search-popup');
             if (!popup) return;
-            if (globalSearchAbort) globalSearchAbort.abort();
-            const controller = new AbortController();
-            globalSearchAbort = controller;
-            popup.innerHTML = '<div style="padding:14px; color:var(--text-muted);">Searching…</div>';
-            popup.style.display = 'block';
+            const request = globalSearchGate.begin();
+            const local = localSearchResults(query);
+            renderGlobalSearchResults(local, 'Searching…');
             try {
-                const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`, { signal: controller.signal });
+                const res = await fetch(`/api/v1/series/search?query=${encodeURIComponent(query)}`, { signal: request.signal });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                globalSearchResults = (await res.json()) || [];
-                if (globalSearchResults.length === 0) {
-                    popup.innerHTML = '<div style="padding:14px; color:var(--text-muted);">No results found</div>';
-                    return;
-                }
-                popup.innerHTML = globalSearchResults.map(s => `
-                    <div class="search-result-item" onclick="selectGlobalResult('${escapeJsString(s.id)}')">
-                        <div class="search-result-poster">
-                            ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
-                        </div>
-                        <div class="search-result-info">
-                            <div class="search-result-title">${escapeHtml(s.title)}</div>
-                            <div class="search-result-type">${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
-                            <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
-                        </div>
-                    </div>
-                `).join('');
+                const results = await res.json();
+                if (!globalSearchGate.isCurrent(request)) return;
+                if (!Array.isArray(results)) throw new Error('Invalid search response');
+                const merged = [...results, ...localSearchResults(query)];
+                renderGlobalSearchResults(Array.from(new Map(merged.map(series => [series.id, series])).values()).slice(0, 50));
             } catch (e) {
-                if (e.name === 'AbortError') return;
-                popup.innerHTML = '<div style="padding:14px; color:var(--accent-red);">Search failed</div>';
+                if (!globalSearchGate.isCurrent(request) || e.name === 'AbortError') return;
+                const cached = localSearchResults(query);
+                renderGlobalSearchResults(cached, 'Search unavailable. Please try again.');
+                if (cached.length) popup.insertAdjacentHTML('beforeend', '<div class="hint" style="padding:14px;">Showing cached matches. Live search is unavailable.</div>');
             } finally {
-                if (globalSearchAbort === controller) globalSearchAbort = null;
+                globalSearchGate.finish(request);
             }
         }
 
         function selectGlobalResult(seriesId) {
-            const popup = document.getElementById('global-search-popup');
-            if (popup) { popup.style.display = 'none'; popup.innerHTML = ''; }
+            if (config?.addDownload?.searchAddToHistory && config?.history?.enabled) {
+                fetch('/api/v1/history/update-series/' + encodeURIComponent(seriesId), { method: 'POST' })
+                    .then(async r => { if (!r.ok || !(await r.json()).success) throw new Error('Could not add series to History.'); })
+                    .catch(e => showToast(e.message, 'error'));
+            }
+            closeGlobalSearch();
             const input = document.getElementById('global-search');
             if (input) input.value = '';
-            // Reuse the Browse flow: navigate to Add Download and load the series' episodes.
             selectBrowseResult(seriesId);
         }
 
-        // Close the global search dropdown when clicking outside it.
         document.addEventListener('click', (e) => {
             const wrap = document.querySelector('.global-search');
-            const popup = document.getElementById('global-search-popup');
-            if (wrap && popup && !wrap.contains(e.target)) {
-                popup.style.display = 'none';
-            }
+            if (wrap && !wrap.contains(e.target)) closeGlobalSearch();
         });
 
         async function onSeasonChange(seasonId) {
@@ -1010,13 +1135,14 @@
                     return res.json();
                 }));
                 groupedItems.forEach(items => Object.assign(queueItems, items));
+                if (!Object.keys(queueItems).length) throw new Error('No episodes matched the selection. Check the selected audio languages.');
                 
                 // Add each queue item to the queue
                 let added = 0;
                 const markAsWatched = config?.crunchyroll?.markAsWatched || false;
                 for (const [key, item] of Object.entries(queueItems)) {
                     if (item && item.episodeId) {
-                        const queueRes = await fetch('/api/v1/queue', {
+                        const queueRes = await sendDownloadRequest({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1030,7 +1156,7 @@
                                 selectedDubs: item.selectedDubs || [],
                                 selectedSubs: item.downloadSubs || [],
                                 hslang: item.hslang || 'none',
-                                videoQuality: item.videoQuality || 'best'
+                                videoQuality: item.videoQuality || null
                                 // NOTE: deliberately NOT sending `versions`. The ItemSelectMultiDub
                                 // variants carry the BASE episode guid (item.id) for every dub and
                                 // have no per-version MediaGuid, so a posted versions array made the
@@ -1058,7 +1184,7 @@
                     }
                 }
                 
-                showToast(`Added ${added} episode(s) to queue`, 'success');
+                showToast(added ? `Submitted ${added} episode request(s)` : 'Selected episodes are already available or queued.', added ? 'success' : 'info');
                 selectedEpisodes.clear();
                 selectedEpisodeDubs.clear();
                 renderAddEpisodesMultiDub();
@@ -1199,11 +1325,12 @@
         
         async function addMusicVideoToQueue(videoId, title) {
             try {
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         episodeId: videoId,
+                        isMusicVideo: true,
                         title: title || 'Music Video',
                         seriesTitle: 'Music Video',
                         episodeNumber: 1,
@@ -1214,7 +1341,7 @@
                 const admission = await readQueueAdmission(res);
                 showToast(admission.added ? 'Added music video to queue' : 'Music video is already in the queue', admission.added ? 'success' : 'info');
             } catch (e) {
-                showToast('Failed to add to queue', 'error');
+                showToast(e.message || 'Failed to submit download request', 'error');
             }
         }
 
@@ -1503,7 +1630,7 @@
                                         ${ep.isUpcoming
                                             ? '<span class="badge badge-upcoming">Upcoming</span>'
                                             : (ep.isPremiumOnly ? '<span class="badge badge-premium">Premium</span>' : '')}
-                                        ${ep.hasAired && !ep.isUpcoming ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(chosenDub)}')">Download</button>` : ''}
+                                        ${ep.hasAired && !ep.isUpcoming ? `<button class="header-btn primary" style="margin-top:6px; font-size:0.75em; padding:4px 10px;" onclick="addEpisodeToQueue('${escapeJsString(ep.id)}', '${escapeJsString(ep.seriesTitle || ep.seasonName || '')}', '${escapeJsString(ep.episodeNumber || '')}', '${escapeJsString(ep.thumbnailUrl || '')}', '${escapeJsString(chosenDub)}')">${downloadActionLabel()}</button>` : ''}
                                     </div>
                                     `;
                                 }).join('') : '<div style="color:var(--text-muted); text-align:center; padding:20px 0;">No episodes</div>'}
@@ -1544,13 +1671,13 @@
                 // As selectedDubs the backend refetches versions and resolves the real per-dub
                 // stream — same path as Add Download (add-path invariant).
                 if (audioLocale) payload.selectedDubs = [audioLocale];
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const admission = await readQueueAdmission(res);
-                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
+                showToast(admission.data?.message || (admission.added ? 'Added to queue' : 'Episode is already in the queue'), admission.added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to add', 'error');
             }
@@ -1619,6 +1746,7 @@
                         <div class="history-poster clickable" onclick="showSeriesEpisodesModal('${escapeJsString(series.seriesId)}', '${escapeJsString(series.seriesTitle)}')">
                             <div class="history-poster-img">
                                 <span class="poster-type-badge">Series</span>
+                                ${libraryIndicator(series)}
                                 ${series.thumbnailUrl && isSafeUrl(series.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(series.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                                 ${series.episodes?.some(e => e.isPremiere) ? `<div class="history-poster-badge">Premiere</div>` : ''}
                             </div>
@@ -1640,7 +1768,7 @@
                 <div class="browse-header-row" style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap;">
                     <div>
                         <div class="page-title">Browse All Series</div>
-                        <div class="page-subtitle">Explore all available series</div>
+                        <div class="page-subtitle">Crunchyroll’s catalog for your region, including titles with no episodes currently listed</div>
                     </div>
                     <div id="browse-rating-btns" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; align-items:center;"></div>
                 </div>
@@ -1650,7 +1778,9 @@
                         <option value="">All languages</option>
                         ${LANG_OPTIONS.map(o=>`<option value="${escapeHtmlAttribute(o.value)}" ${browseDubFilter===o.value?'selected':''}>${escapeHtml(o.label)}</option>`).join('')}
                     </select>
+                    <label class="browse-filter-label"><input type="checkbox" id="browse-hide-library" ${browseHideLibrary ? 'checked' : ''} onchange="browseHideLibrary=this.checked;renderBrowseFiltered()"> Hide series in Sonarr</label>
                     <span class="browse-filter-count" id="browse-count"></span>
+                    <span id="browse-library-status" role="status"></span>
                 </div>
                 <div id="browse-content">
                     <div class="loading"><div class="spinner"></div>Loading series...</div>
@@ -1658,10 +1788,11 @@
             `;
             if (browseCatalogLoaded) renderBrowseFiltered();
             else fetchAllSeries();
+            loadSonarrLibrary();
         }
 
         function scheduleBrowsePrefetch() {
-            const prefetch = () => { loadAllBrowseSeries().catch(() => {}); };
+            const prefetch = () => { loadAllBrowseSeries().catch(() => {}); loadSonarrLibrary(); };
             if (typeof window.requestIdleCallback === 'function') {
                 window.requestIdleCallback(prefetch, { timeout: 2000 });
             } else {
@@ -1669,12 +1800,74 @@
             }
         }
 
+        function libraryBadge(series) {
+            const match = CruncharrLibrary.findSeries(sonarrLibraryIndex, series);
+            if (!match && sonarrLibraryPending.has(series.id || series.seriesId))
+                return `<span class="library-badge">${sonarrLibraryInProgress ? 'Checking Sonarr…' : 'Sonarr match unverified'}</span>`;
+            if (!match) return '';
+            const files = match.episodeFileCount;
+            const detail = files == null ? 'Series is tracked in Sonarr. Open to check episodes.'
+                : files === 0 ? 'Tracked in Sonarr; no episode files yet.'
+                : `${files} episode file(s) in Sonarr. Open the series to check for missing episodes and languages.`;
+            return `<span class="library-badge" title="${escapeHtmlAttribute(detail)}">${files === 0 ? 'Tracked in Sonarr' : 'In Sonarr'}</span>`;
+        }
+
+        function libraryIndicator(series) {
+            return `<span class="library-indicator" data-library-id="${escapeHtmlAttribute(series.id || series.seriesId || '')}" data-library-title="${escapeHtmlAttribute(series.title || series.seriesTitle || '')}">${libraryBadge(series)}</span>`;
+        }
+
+        function updateLibraryIndicators() {
+            document.querySelectorAll('[data-library-id]').forEach(element => {
+                element.innerHTML = libraryBadge({id: element.dataset.libraryId, title: element.dataset.libraryTitle});
+            });
+            const status = document.getElementById('browse-library-status');
+            if (status) status.textContent = sonarrLibraryInProgress ? 'Checking alternate Sonarr titles…'
+                : sonarrLibraryError ? (sonarrLibraryIndex ? 'Some Sonarr titles could not be verified; keeping known matches' : 'Sonarr library status unavailable') : '';
+            if (status && browseHideLibrary && sonarrLibraryPending.size)
+                status.textContent += ` ${sonarrLibraryPending.size} unverified series excluded while this filter is on.`;
+            const filter = document.getElementById('browse-hide-library');
+            if (filter) filter.disabled = !sonarrLibraryIndex;
+        }
+
+        async function loadSonarrLibrary() {
+            if (sonarrLibraryCheckedAt && Date.now() - sonarrLibraryCheckedAt < 60000) { updateLibraryIndicators(); return; }
+            if (sonarrLibraryPromise) return sonarrLibraryPromise;
+            clearTimeout(sonarrLibraryRefreshTimer);
+            const libraryStatus = document.getElementById('browse-library-status');
+            if (libraryStatus) libraryStatus.textContent = 'Checking Sonarr library…';
+            sonarrLibraryPromise = (async () => {
+                try {
+                    const response = await fetch('/api/v1/library/sonarr?background=true');
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const data = await response.json();
+                    sonarrLibraryIndex = data.enabled ? CruncharrLibrary.createIndex(data.series) : null;
+                    sonarrLibraryInProgress = !!data.matchingInProgress;
+                    sonarrLibraryPending = new Set(data.pendingSeriesIds || []);
+                    sonarrLibraryError = !!data.matchingUnavailable;
+                } catch (e) {
+                    sonarrLibraryError = true;
+                } finally {
+                    sonarrLibraryCheckedAt = Date.now();
+                    sonarrLibraryPromise = null;
+                    if (currentPage === 'browse' && browseHideLibrary) renderBrowseFiltered(true);
+                    updateLibraryIndicators();
+                    if (sonarrLibraryInProgress) sonarrLibraryRefreshTimer = setTimeout(() => {
+                        sonarrLibraryCheckedAt = 0;
+                        void loadSonarrLibrary();
+                    }, 2000);
+                }
+            })();
+            return sonarrLibraryPromise;
+        }
+
         function compactBrowseSeries(data) {
             return (data || [])
-                .filter(series => series.episodeCount == null || series.episodeCount > 0)
+                .filter(series => series && series.id)
                 .map(series => ({
                     id: series.id,
                     title: series.title,
+                    description: series.description,
+                    contentType: series.contentType,
                     coverArtUrl: series.coverArtUrl,
                     thumbnailUrl: series.thumbnailUrl,
                     episodeCount: series.episodeCount,
@@ -1690,7 +1883,7 @@
                 const parsed = JSON.parse(cached);
                 const cachedAt = Number(parsed?.cachedAt);
                 if (!Number.isFinite(cachedAt) || Date.now() - cachedAt > BROWSE_CACHE_TTL_MS ||
-                    !Array.isArray(parsed?.series)) {
+                    !Array.isArray(parsed?.series) || parsed.series.length === 0) {
                     removeSessionStorage(BROWSE_CACHE_KEY);
                     return false;
                 }
@@ -1711,6 +1904,7 @@
                     const res = await fetch('/api/v1/series/all');
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
+                    if (!Array.isArray(data) || data.length === 0) throw new Error('Catalog is empty. Please retry.');
                     allBrowseSeries = compactBrowseSeries(data);
                     browseCatalogLoaded = true;
                     writeSessionStorage(BROWSE_CACHE_KEY, JSON.stringify({
@@ -1739,6 +1933,7 @@
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load series</div>
+                        <button class="header-btn" onclick="fetchAllSeries()">Retry</button>
                     </div>`;
             }
         }
@@ -1785,9 +1980,11 @@
         }
 
         // Apply the current dub-language + rating filters to the cached series list and render.
-        function renderBrowseFiltered() {
+        function renderBrowseFiltered(preservePosition = false) {
             buildRatingButtons();
             let list = allBrowseSeries;
+            if (browseHideLibrary && sonarrLibraryIndex) list = list.filter(series =>
+                !CruncharrLibrary.findSeries(sonarrLibraryIndex, series) && !sonarrLibraryPending.has(series.id));
             if (browseDubFilter) {
                 list = list.filter(s => Array.isArray(s.audioLocales) && s.audioLocales.includes(browseDubFilter));
             }
@@ -1795,12 +1992,17 @@
                 list = list.filter(s => seriesMatchesRating(s, browseRatingFilter));
             }
             const count = document.getElementById('browse-count');
-            if (count) count.textContent = `${list.length} series`;
+            if (count) count.textContent = `${list.length} of ${allBrowseSeries.length} series`;
+            if (preservePosition && list.length === browseFilteredSeries.length &&
+                list.every((series, i) => series.id === browseFilteredSeries[i].id)) return;
             const pageContent = document.getElementById('content');
-            if (pageContent) pageContent.scrollTop = 0;
+            const scrollTop = preservePosition ? (pageContent?.scrollTop || 0) : 0;
+            const initialCount = preservePosition ? Math.max(browseRenderedCount, BROWSE_RENDER_BATCH_SIZE) : BROWSE_RENDER_BATCH_SIZE;
             browseFilteredSeries = list;
             browseRenderedCount = 0;
-            renderBrowseContent(list);
+            renderBrowseContent(list, initialCount);
+            if (pageContent) pageContent.scrollTop = scrollTop;
+            updateLibraryIndicators();
         }
 
         function disconnectBrowseLoadMoreObserver() {
@@ -1815,11 +2017,12 @@
                 <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
                     <div class="history-poster-img">
                         <span class="poster-type-badge">Series</span>
+                        ${libraryIndicator(s)}
                         ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                     </div>
                     <div class="history-poster-info">
                         <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
-                        <div class="history-poster-meta">${s.episodeCount == null ? 'Episodes available' : `${s.episodeCount} episode(s)`}</div>
+                        <div class="history-poster-meta">${s.episodeCount == null ? 'Episode count unavailable' : s.episodeCount === 0 ? 'No episodes currently listed' : `${s.episodeCount} episode(s)`}</div>
                     </div>
                 </div>
             `).join('');
@@ -1867,7 +2070,7 @@
             browseLoadMoreObserver.observe(sentinel);
         }
 
-        function renderBrowseContent(series) {
+        function renderBrowseContent(series, initialCount = BROWSE_RENDER_BATCH_SIZE) {
             disconnectBrowseLoadMoreObserver();
             const content = document.getElementById('browse-content');
             if (!content) return;
@@ -1880,7 +2083,7 @@
                 return;
             }
 
-            browseRenderedCount = Math.min(BROWSE_RENDER_BATCH_SIZE, series.length);
+            browseRenderedCount = Math.min(initialCount, series.length);
             content.innerHTML = `
                 <div class="history-poster-grid">
                     ${renderBrowseCards(series.slice(0, browseRenderedCount))}
@@ -1898,7 +2101,7 @@
         }
 
         async function selectBrowseResult(seriesId, episodeSelection = null) {
-            navigateTo('add-download');
+            if (await navigateTo('add-download') === false) return;
             const loadGeneration = ++selectBrowseGeneration;
             selectedEpisodes.clear();
             selectedEpisodeDubs.clear();
@@ -1947,6 +2150,8 @@
                     const browseTitle = addDownloadEpisodeList[0]?.seasonTitle || 'Selected Series';
                     addDownloadSelectedSeries = { id: seriesId, title: browseTitle };
 
+                    const scheduleBtn = document.getElementById('series-schedule');
+                    if (scheduleBtn) { scheduleBtn.dataset.scheduleSeries = seriesId; scheduleBtn.style.display = ''; updateScheduleButtons(); }
                     const musicBtn = document.getElementById('music-btn');
                     if (musicBtn) musicBtn.style.display = 'inline-flex';
                     
@@ -2044,22 +2249,16 @@
 
         // ================== SEASONAL ==================
         let seasonalSeason = null, seasonalYear = null;
-        // Map current month to the anime season (Winter Dec-Feb, Spring Mar-May, etc.).
-        function currentAnimeSeason() {
-            const m = new Date().getMonth();
-            if (m === 11 || m <= 1) return 'winter';
-            if (m <= 4) return 'spring';
-            if (m <= 7) return 'summer';
-            return 'fall';
+        // Catalog seasons are calendar quarters: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec.
+        function currentAnimeSeason(date = new Date()) {
+            return ['winter', 'spring', 'summer', 'fall'][Math.floor(date.getMonth() / 3)];
         }
 
         function renderSeasonal(container) {
             if (!seasonalSeason) {
                 const now = new Date();
-                seasonalSeason = currentAnimeSeason();
-                // Anime Winter spans Dec-Feb but is named for Jan/Feb's year. In December,
-                // default to the upcoming Winter instead of the past January season.
-                seasonalYear = now.getFullYear() + (now.getMonth() === 11 ? 1 : 0);
+                seasonalSeason = currentAnimeSeason(now);
+                seasonalYear = now.getFullYear();
             }
             const seasons = [['winter','Winter'],['spring','Spring'],['summer','Summer'],['fall','Fall']];
             const thisYear = new Date().getFullYear();
@@ -2130,7 +2329,7 @@
                         <div class="history-poster ${clickable ? 'clickable' : ''}" ${clickable
                             ? `onclick="selectBrowseResult('${escapeJsString(s.id)}')"`
                             : `title="Not on Crunchyroll yet" style="opacity:.55;"`}>
-                            <div class="history-poster-img"><span class="poster-type-badge">Series</span>${img}</div>
+                            <div class="history-poster-img"><span class="poster-type-badge">Series</span>${libraryIndicator(s)}${img}</div>
                             <div class="history-poster-info">
                                 <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
                                 <div class="history-poster-meta">${metaMain}</div>
@@ -2346,7 +2545,7 @@
 
         async function addEpisodeToQueueWithDetails(episodeId, title, seriesTitle) {
             try {
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -2356,9 +2555,9 @@
                     })
                 });
                 const admission = await readQueueAdmission(res);
-                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
+                showToast(admission.data?.message || (admission.added ? 'Added to queue' : 'Episode is already in the queue'), admission.added ? 'success' : 'info');
             } catch (e) {
-                showToast('Failed to add to queue', 'error');
+                showToast(e.message || 'Failed to submit download request', 'error');
             }
         }
 
@@ -2412,10 +2611,12 @@
                         <span>Maintain</span>
                     </button>
                 </div>
+                <div id="history-status" class="history-status" role="status"></div>
                 <div id="history-content">
                     <div class="loading"><div class="spinner"></div>Loading history...</div>
                 </div>
             `;
+            if (historyLoaded) renderHistoryContent();
             fetchHistoryData();
             // Restart history auto-refresh interval if it was cleared
             if (!historyIntervalId) {
@@ -2425,31 +2626,66 @@
             }
         }
 
-        async function fetchHistoryData() {
-            try {
-                const res = await fetch('/api/v1/history/rich');
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                historyData = data || [];
-                // Same endpoint feeds the series-detail modal - keep its cache fresh
-                historyRichData = historyData;
-                renderHistoryContent();
-                // Existing history files may contain the first episode screenshot in the series
-                // image slot. Desktop refreshes series metadata and loads poster_tall; detect that
-                // persisted shape once per session and ask the existing refresh endpoint to repair it.
-                maybeRefreshHistoryCoverArt();
-                // Auto-match against Sonarr once per session so matches "rope in" without the
-                // user manually opening the Sonarr menu (no-op if Sonarr disabled or all matched).
-                // Fire-and-forget so history paints immediately.
-                maybeAutoMatchSonarr();
-            } catch (e) {
-                const el = document.getElementById('history-content');
-                if (el) el.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">&#10060;</div>
-                        <div class="empty-state-title">Failed to load history</div>
-                    </div>`;
-            }
+        function fetchHistoryData(forceRefresh = false) {
+            if (historyRequest && !forceRefresh) return historyRequest;
+            const request = historyRequestGate.begin();
+            historyRequest = (async () => {
+                try {
+                    const res = await fetch('/api/v1/history/rich' + (forceRefresh ? '?forceRefresh=true' : ''), { signal: request.signal });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    if (!historyRequestGate.isCurrent(request)) return;
+                    const changed = !historyLoaded || JSON.stringify(historyData) !== JSON.stringify(data || []);
+                    historyData = data || [];
+                    historyLoaded = true;
+                    // Same endpoint feeds the series-detail modal - keep its cache fresh
+                    historyRichData = historyData;
+                    if (changed) renderHistoryContent();
+                    updateHistoryStatus();
+                    // Existing history files may contain the first episode screenshot in the series
+                    // image slot. Desktop refreshes series metadata and loads poster_tall; detect that
+                    // persisted shape once per session and ask the existing refresh endpoint to repair it.
+                    maybeRefreshHistoryCoverArt();
+                    // Auto-match against Sonarr once per session so matches "rope in" without the
+                    // user manually opening the Sonarr menu (no-op if Sonarr disabled or all matched).
+                    // Fire-and-forget so history paints immediately.
+                    maybeAutoMatchSonarr();
+                } catch (e) {
+                    if (!historyRequestGate.isCurrent(request) || e.name === 'AbortError') return;
+                    if (historyLoaded) {
+                        const status = document.getElementById('history-status');
+                        if (status) status.textContent = 'History refresh failed. Showing the last loaded history; retrying automatically.';
+                        return;
+                    }
+                    const el = document.getElementById('history-content');
+                    if (el) el.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">&#10060;</div>
+                            <div class="empty-state-title">Failed to load history</div>
+                        </div>`;
+                } finally {
+                    if (historyRequestGate.isCurrent(request)) historyRequest = null;
+                }
+            })();
+            return historyRequest;
+        }
+
+        function updateHistoryStatus() {
+            const status = document.getElementById('history-status');
+            if (!status) return;
+            const unavailable = historyData.some(series => series.sonarrStatusUnavailable);
+            status.textContent = unavailable
+                ? 'Sonarr file status is temporarily unavailable. Its files cannot be counted until the connection recovers.'
+                : config?.sonarr?.enabled && config?.history?.countSonarr === false
+                    ? 'Progress counts Cruncharr files. Sonarr files are shown separately; enable Count Sonarr in Settings to include them.'
+                    : '';
+        }
+
+        function historySonarrSummary(series) {
+            if (!series.sonarrSeriesId) return '';
+            if (series.sonarrStatusUnavailable) return 'Sonarr status unavailable';
+            const count = (series.seasons || []).reduce((total, season) => total + (season.episodes || []).filter(episode => episode.sonarrHasFile).length, 0);
+            return `${count} in Sonarr`;
         }
 
         function renderHistoryContent() {
@@ -2481,6 +2717,7 @@
                             <div class="history-poster-meta">${escapeHtml(item.sonarrNextAirDate || '')}</div>
                             <div class="history-poster-meta" style="font-size:0.7em; margin-top:4px;">
                                 ${seriesHaveCount(item)} / ${seriesTotalCount(item)} available
+                                <div>${historySonarrSummary(item)}</div>
                             </div>
                         </div>
                     </div>
@@ -2508,7 +2745,7 @@
                                             <br><small style="color:var(--text-secondary);">${item.seriesDescription ? escapeHtml(item.seriesDescription.substring(0, 80)) + '...' : ''}</small>
                                         </td>
                                         <td>${getHistoryStatusBadge(item)}</td>
-                                        <td>${item.sonarrSeriesId ? `✓ ${escapeHtml(item.sonarrSlugTitle) || 'Matched'}` : '—'}</td>
+                                        <td>${item.sonarrSeriesId ? `${historySonarrSummary(item)}<br><small>${escapeHtml(item.sonarrSlugTitle) || 'Matched'}</small>` : '—'}</td>
                                         <td>${seriesHaveCount(item)} / ${seriesTotalCount(item)}</td>
                                         <td>${item.hasNewEpisodes ? '✓' : '—'}</td>
                                         <td>
@@ -2894,6 +3131,7 @@
                             <button class="settings-tab ${settingsTab === 'general' ? 'active' : ''}" onclick="setSettingsTab('general', event)">General</button>
                             <button class="settings-tab ${settingsTab === 'download' ? 'active' : ''}" onclick="setSettingsTab('download', event)">Download</button>
                             <button class="settings-tab ${settingsTab === 'queue' ? 'active' : ''}" onclick="setSettingsTab('queue', event)">Queue</button>
+                            <button class="settings-tab ${settingsTab === 'scheduler' ? 'active' : ''}" onclick="setSettingsTab('scheduler', event)">Scheduler</button>
                             <button class="settings-tab ${settingsTab === 'history' ? 'active' : ''}" onclick="setSettingsTab('history', event)">History</button>
                             <button class="settings-tab ${settingsTab === 'sonarr' ? 'active' : ''}" onclick="setSettingsTab('sonarr', event)">Sonarr</button>
                             <button class="settings-tab ${settingsTab === 'notifications' ? 'active' : ''}" onclick="setSettingsTab('notifications', event)">Notifications</button>
@@ -2931,13 +3169,15 @@
             const el = document.getElementById('settings-content');
             if (!el || el._autosaveBound) return;
             el._autosaveBound = true;
-            el.addEventListener('change', () => {
+            const scheduleSave = () => {
                 clearTimeout(window._settingsSaveTimer);
                 window._settingsSaveTimer = setTimeout(() => {
                     window._settingsSaveTimer = null;
                     startSettingsSave();
-                }, 250);
-            });
+                }, 500);
+            };
+            el.addEventListener('change', scheduleSave);
+            el.addEventListener('input', scheduleSave);
         }
 
         function startSettingsSave() {
@@ -2958,6 +3198,96 @@
             return pendingSave;
         }
 
+
+        async function schedulerRequest(path = 'status', method = 'GET', data) {
+            const res = await fetch('/api/v1/scheduler/' + path, {
+                method, headers: { 'Content-Type': 'application/json' },
+                ...(data === undefined ? {} : { body: JSON.stringify(data) })
+            });
+            const result = res.status === 204 ? {} : await res.json();
+            if (!res.ok) throw new Error(result.message || result.error || 'Scheduler request failed');
+            return result;
+        }
+
+        async function updateScheduleButtons() {
+            try {
+                const state = await schedulerRequest();
+                document.querySelectorAll('[data-schedule-series]').forEach(button => {
+                    const sub = state.subscriptions.find(s => s.seriesId === button.dataset.scheduleSeries);
+                    button.textContent = sub?.enabled ? 'Scheduled · Pause' : sub ? 'Resume schedule' : 'Schedule new episodes';
+                    button.disabled = false;
+                });
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function toggleSeriesSchedule(button) {
+            const seriesId = button.dataset.scheduleSeries;
+            if (!seriesId) return;
+            button.disabled = true;
+            try {
+                const state = await schedulerRequest();
+                const sub = state.subscriptions.find(s => s.seriesId === seriesId);
+                button.textContent = 'Saving schedule…';
+                const result = await schedulerRequest('subscriptions/' + encodeURIComponent(seriesId), 'PUT', { enabled: !sub?.enabled });
+                showToast(sub?.enabled ? 'Schedule paused' : 'New episodes scheduled. Existing episodes stay unchanged.', 'success');
+                if (!result.canDownload) showToast('The schedule is saved. Enable Sonarr requests or sign in with Premium.', 'info');
+                await updateScheduleButtons();
+                if (settingsTab === 'scheduler' && currentPage === 'settings') await renderSchedulerSettings();
+            } catch (e) { showToast(e.message, 'error'); await updateScheduleButtons(); }
+            finally { button.disabled = false; }
+        }
+
+        async function removeSeriesSchedule(seriesId) {
+            try {
+                await schedulerRequest('subscriptions/' + encodeURIComponent(seriesId), 'DELETE');
+                await renderSchedulerSettings();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        function schedulerStatusText(state) {
+            const status = !state.historyEnabled ? 'History is disabled. Enable it in Settings → History.'
+                : !state.enabled ? 'Scheduler paused.' : state.isRunning ? 'Checking releases…'
+                : state.nextRun ? 'Next check: ' + new Date(state.nextRun).toLocaleString() : 'No active subscriptions.';
+            return status + (state.canDownload ? (state.destination === 'sonarr' ? ' New episodes will be requested from Sonarr.' : '') : ' Enable Sonarr requests or sign in with Premium.')
+                + (state.destination === 'sonarr' ? '' : state.autoDownload ? ' Queued downloads start automatically.'
+                    : ' Enable Settings → Queue → Auto Download to start queued episodes automatically.');
+        }
+
+        async function renderSchedulerSettings() {
+            const content = document.getElementById('settings-content');
+            try {
+                const state = await schedulerRequest();
+                if (!content || settingsTab !== 'scheduler') return;
+                content.innerHTML = `<div class="settings-section">
+                    <div class="settings-section-header"><span class="settings-section-title">Scheduled new episodes</span></div>
+                    <div class="settings-section-body">
+                        <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added. Series and season language settings apply; existing Sonarr files are skipped.</p>
+                        <div class="setting-row"><div><div class="setting-label">Enable scheduler</div><div class="setting-desc">Pause or resume checks for all subscriptions.</div></div><label class="toggle-switch"><input id="setting-scheduler-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+                        <div class="setting-row"><div><div class="setting-label">Check every (minutes)</div><div class="setting-desc">New releases enter the queue at the next check. Default: 15 minutes.</div></div><input class="form-input w-100" id="setting-scheduler-interval" type="number" min="1" max="1440" value="${state.intervalMinutes}"></div>
+                        <p role="status" id="scheduler-summary">${escapeHtml(schedulerStatusText(state))}</p>
+                        ${state.lastRun ? `<p class="setting-desc">Last check: ${escapeHtml(new Date(state.lastRun).toLocaleString())} · ${state.lastQueuedCount} added to queue</p>` : ''}
+                        ${state.lastError ? `<p role="alert">${escapeHtml(state.lastError)}</p>` : ''}
+                        <button class="header-btn" id="btn-scheduler-run" onclick="triggerScheduler()">Run now</button>
+                        <div>${state.subscriptions.map(sub => `<div class="setting-row"><div>${escapeHtml(sub.title)}</div><div style="display:flex;gap:8px"><button class="header-btn" data-schedule-series="${escapeHtmlAttribute(sub.seriesId)}" onclick="toggleSeriesSchedule(this)">${sub.enabled ? 'Scheduled · Pause' : 'Resume schedule'}</button><button class="header-btn" onclick="removeSeriesSchedule('${escapeJsString(sub.seriesId)}')">Remove</button></div></div>`).join('') || '<p>No series scheduled yet.</p>'}</div>
+                    </div></div>`;
+            } catch (e) { if (settingsTab === 'scheduler') content.textContent = e.message; }
+        }
+
+        async function saveSchedulerSettings() {
+            const interval = document.getElementById('setting-scheduler-interval');
+            if (!interval || !interval.reportValidity()) return false;
+            try {
+                const state = await schedulerRequest('settings', 'POST', {
+                    enabled: document.getElementById('setting-scheduler-enabled').checked,
+                    intervalMinutes: Number(interval.value)
+                });
+                const summary = document.getElementById('scheduler-summary');
+                if (summary) summary.textContent = schedulerStatusText(state);
+                showToast('Scheduler settings saved', 'success');
+                return true;
+            } catch (e) { showToast(e.message, 'error'); return false; }
+        }
+
         async function loadEncodingPresets() {
             const select = document.getElementById('setting-encode-preset');
             if (!select) return;
@@ -2965,7 +3295,8 @@
                 const res = await fetch('/api/v1/encoding/presets');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const presets = await res.json();
-                const currentValue = select.value || (config?.download?.encodingPreset || '');
+                const currentValue = select.value;
+                if (currentValue && !presets.includes(currentValue)) presets.unshift(currentValue);
                 select.innerHTML = '<option value="">None</option>' +
                     (presets || []).map(p => `<option value="${escapeHtmlAttribute(p)}" ${p === currentValue ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('');
             } catch (e) {
@@ -2975,6 +3306,7 @@
 
         // ===== Encoding preset editor (ports upstream "Edit Preset" dialog) =====
         const PRESET_RESOLUTIONS = [
+            ['', 'Keep source resolution'],
             ['3840:2160','4K exact (3840:2160)'],['-2:2160','4K keep AR (-2:2160)'],
             ['3440:1440','UWQHD exact (3440:1440)'],['2560:1440','1440p exact (2560:1440)'],
             ['-2:1440','1440p keep AR (-2:1440)'],['2560:1080','UW FHD exact (2560:1080)'],
@@ -3003,7 +3335,7 @@
             body.innerHTML = `
                 <div style="display:flex; gap:18px; flex-wrap:wrap;">
                     <div style="flex:1; min-width:200px;">
-                        <div style="font-weight:600; margin-bottom:8px;">Custom Presets</div>
+                        <div style="font-weight:600; margin-bottom:8px;">Presets</div>
                         <div id="preset-list" style="display:flex; flex-direction:column; gap:6px;"><div style="color:var(--text-muted);">Loading…</div></div>
                     </div>
                     <div style="flex:2; min-width:320px; display:flex; flex-direction:column; gap:6px;">
@@ -3017,8 +3349,8 @@
                         <select class="form-select" id="pe-res" onchange="updatePresetCmd()">${resOpts}</select>
                         <label class="form-label mt-6">Enter Frame Rate</label>
                         <input class="form-input" id="pe-fps" placeholder="24000/1001" oninput="updatePresetCmd()">
-                        <label class="form-label mt-6">Enter CRF (0-51) - (cq, global_quality, qp)</label>
-                        <input class="form-input" id="pe-crf" type="number" min="0" max="51" value="28" oninput="updatePresetCmd()">
+                        <label class="form-label mt-6">Quality (CRF / CQ / QP; -1 = encoder default)</label>
+                        <input class="form-input" id="pe-crf" type="number" min="-1" max="63" value="28" oninput="updatePresetCmd()">
                         <label class="form-label mt-6">Additional Parameters</label>
                         <textarea class="form-input" id="pe-params" rows="3" placeholder="-map 0" oninput="updatePresetCmd()">-map 0</textarea>
                         <div class="setting-desc">One parameter (or flag + value) per line.</div>
@@ -3031,7 +3363,7 @@
                 <button class="header-btn primary" type="button" onclick="savePresetEditor()">Save Preset</button>
                 <button class="header-btn" type="button" onclick="closeModal()">Close</button>`;
             modal.classList.add('active');
-            document.getElementById('pe-res').value = '1920:1080';
+            document.getElementById('pe-res').value = '';
             updatePresetCmd();
             await refreshPresetList();
         }
@@ -3040,26 +3372,33 @@
             ['pe-original','pe-name','pe-codec','pe-fps'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
             const crf = document.getElementById('pe-crf'); if (crf) crf.value = '28';
             const params = document.getElementById('pe-params'); if (params) params.value = '-map 0';
-            const res = document.getElementById('pe-res'); if (res) res.value = '1920:1080';
+            const res = document.getElementById('pe-res'); if (res) res.value = '';
             updatePresetCmd();
         }
 
+        let presetPreviewGeneration = 0;
+        let presetPreviewTimer;
         function updatePresetCmd() {
-            const el = document.getElementById('pe-cmd');
-            if (!el) return;
-            const codec = document.getElementById('pe-codec')?.value.trim();
-            const res = document.getElementById('pe-res')?.value;
-            const fps = document.getElementById('pe-fps')?.value.trim();
-            const crf = document.getElementById('pe-crf')?.value.trim();
-            const params = (document.getElementById('pe-params')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
-            let parts = ['ffmpeg', '-i', '"input.mkv"'];
-            if (codec) parts.push('-c:v', codec);
-            if (crf !== '' && crf !== undefined) parts.push('-crf', crf);
-            if (res) parts.push('-vf', `scale=${res}`);
-            if (fps) parts.push('-r', fps);
-            parts.push(...params);
-            parts.push('"output.mkv"');
-            el.textContent = parts.join(' ');
+            const generation = ++presetPreviewGeneration;
+            clearTimeout(presetPreviewTimer);
+            presetPreviewTimer = setTimeout(async () => {
+                const element = document.getElementById('pe-cmd');
+                if (!element) return;
+                const preset = {
+                    presetName: document.getElementById('pe-name')?.value.trim() || 'Preview',
+                    codec: document.getElementById('pe-codec')?.value.trim() || '',
+                    resolution: document.getElementById('pe-res')?.value || '',
+                    frameRate: document.getElementById('pe-fps')?.value.trim() || '',
+                    crf: Number(document.getElementById('pe-crf')?.value),
+                    additionalParameters: (document.getElementById('pe-params')?.value || '').split('\n').map(s => s.trim()).filter(Boolean)
+                };
+                try {
+                    const res = await fetch('/api/v1/encoding/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset) });
+                    const data = await res.json();
+                    if (generation !== presetPreviewGeneration) return;
+                    element.textContent = res.ok ? 'ffmpeg ' + data.arguments.map(a => /\s/.test(a) ? JSON.stringify(a) : a).join(' ') : data.error;
+                } catch (e) { if (generation === presetPreviewGeneration) element.textContent = 'Command preview unavailable.'; }
+            }, 150);
         }
 
         async function refreshPresetList() {
@@ -3068,7 +3407,8 @@
             try {
                 const res = await fetch('/api/v1/encoding/presets/all');
                 const all = await res.json();
-                const custom = (all || []).filter(p => !p.builtIn);
+                if (!res.ok) throw new Error('Failed to load presets');
+                const custom = all || [];
                 if (custom.length === 0) { list.innerHTML = '<div style="color:var(--text-muted); font-size:0.85em;">No custom presets yet.</div>'; return; }
                 // Reference presets by index instead of serializing the object into the
                 // onclick attribute: a preset name containing a quote or angle bracket
@@ -3076,21 +3416,25 @@
                 window._customPresets = custom;
                 list.innerHTML = custom.map((p, i) => `
                     <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; background:var(--bg-tertiary); border-radius:var(--radius-sm);">
-                        <span style="cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" onclick="loadPresetIntoForm(window._customPresets[${i}])">${escapeHtml(p.presetName)}</span>
-                        <button class="btn-icon danger" title="Delete" onclick="deletePresetEditor('${escapeJsString(p.presetName)}')">&#128465;</button>
+                        <span style="cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" onclick="loadPresetIntoForm(window._customPresets[${i}])">${escapeHtml(p.presetName)}${p.builtIn ? ' (built-in)' : ''}</span>
+                        ${p.builtIn ? '' : `<button class="btn-icon danger" title="Delete" onclick="deletePresetEditor('${escapeJsString(p.presetName)}')">&#128465;</button>`}
                     </div>`).join('');
             } catch (e) { list.innerHTML = '<div style="color:var(--accent-red); font-size:0.85em;">Failed to load presets</div>'; }
         }
 
         function loadPresetIntoForm(p) {
             document.getElementById('pe-original').value = p.presetName || '';
-            document.getElementById('pe-name').value = p.presetName || '';
+            document.getElementById('pe-name').value = p.builtIn ? p.presetName + ' (custom)' : p.presetName || '';
             document.getElementById('pe-codec').value = p.codec || '';
             document.getElementById('pe-fps').value = p.frameRate || '';
             document.getElementById('pe-crf').value = (p.crf ?? 28);
             document.getElementById('pe-params').value = (p.additionalParameters || []).join('\n');
             const res = document.getElementById('pe-res');
-            if (res) res.value = p.resolution || '1920:1080';
+            if (res) {
+                const value = p.resolution || '';
+                if (!Array.from(res.options).some(o => o.value === value)) res.add(new Option(value, value));
+                res.value = value;
+            }
             updatePresetCmd();
         }
 
@@ -3098,7 +3442,7 @@
             const name = document.getElementById('pe-name')?.value.trim();
             if (!name) { showToast('Preset name required', 'error'); return; }
             const crf = parseInt(document.getElementById('pe-crf')?.value, 10);
-            if (isNaN(crf) || crf < 0 || crf > 51) { showToast('CRF must be 0–51', 'error'); return; }
+            if (isNaN(crf)) { showToast('Quality must be a number', 'error'); return; }
             const preset = {
                 presetName: name,
                 codec: document.getElementById('pe-codec')?.value.trim() || '',
@@ -3182,6 +3526,7 @@
         }
 
         function renderSettingsTab() {
+            if (settingsTab === 'scheduler') { renderSchedulerSettings(); return; }
             const content = document.getElementById('settings-content');
             if (!content) return;
             const dl = config?.download || {};
@@ -3215,7 +3560,6 @@
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Crunchyroll Settings</span><span class="settings-section-desc">Crunchyroll-specific options</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Use Beta API</div><div class="setting-desc">Use Crunchyroll's newer (beta) API endpoints</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-beta-api" ${cr.useBetaApi?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Mark as Watched</div><div class="setting-desc">Mark downloaded episodes as watched on Crunchyroll</div></div><label class="toggle-switch"><input type="checkbox" id="setting-mark-watched" ${cr.markAsWatched?'checked':''}><span class="toggle-slider"></span></label></div>
 
                             </div>
@@ -3274,7 +3618,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Delay Between Dubs</div><div class="setting-desc">Apply the delay per dub instead of per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-delay-dub-based" ${dl.downloadDelayUseDubBased?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Cooldown Between Downloads (seconds)</div><div class="setting-desc">Delay before starting next download</div></div><input type="number" class="form-input w-100" id="setting-cooldown" value="${escapeHtmlAttribute(dl.cooldownDelaySeconds||0)}" min="0"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Downloads</div></div><input type="number" class="form-input w-80" id="setting-concurrent" value="${escapeHtmlAttribute(dl.simultaneousDownloads||2)}" min="1" max="10"></div>
-                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input w-80" id="setting-proc-jobs" value="${escapeHtmlAttribute(dl.simultaneousProcessingJobs||2)}" min="1"></div>
+                                <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div></div><input type="number" class="form-input w-80" id="setting-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs ?? 2)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Speed Limit (KB/s)</div><div class="setting-desc">0 = unlimited</div></div><input type="number" class="form-input w-120" id="setting-speed-limit" value="${escapeHtmlAttribute(dl.downloadSpeedLimit||0)}" min="0"></div>
                                 <div class="setting-row"><div><div class="setting-label">Show Speed in Bits (Mbps)</div><div class="setting-desc">Display transfer speeds as Mbps instead of MB/s</div></div><label class="toggle-switch"><input type="checkbox" id="setting-speed-bits" ${dl.downloadSpeedInBits?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Retry Attempts</div></div><input type="number" class="form-input w-80" id="setting-retry" value="${escapeHtmlAttribute(dl.retryAttempts||5)}" min="1"></div>
@@ -3370,7 +3714,7 @@
                                 <div class="setting-row mt-10"><div><div class="setting-label">Additional FFMpeg Options</div></div></div>
                                 ${renderListInput('setting-ffmpeg', dl.ffmpegOptions, '-option')}
                                 <div class="setting-row mt-10"><div><div class="setting-label">Encoding: Enable</div></div><label class="toggle-switch"><input type="checkbox" id="setting-encode" ${dl.encodeEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><div style="display:flex; gap:8px; align-items:center;"><select class="form-select mw-200" id="setting-encode-preset" onfocus="loadEncodingPresets()"><option value="">${escapeHtml(dl.encodingPreset || 'None')}</option></select><button class="header-btn" type="button" onclick="openPresetEditor()">Manage Presets</button></div></div>
+                                <div class="setting-row"><div><div class="setting-label">Encoding Preset</div></div><div style="display:flex; gap:8px; align-items:center;"><select class="form-select mw-200" id="setting-encode-preset"><option value="${escapeHtmlAttribute(dl.encodingPreset || '')}">${escapeHtml(dl.encodingPreset || 'None')}</option></select><button class="header-btn" type="button" onclick="openPresetEditor()">Manage Presets</button></div></div>
                             </div>
                         </div>
                     `;
@@ -3385,7 +3729,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Persist Queue</div><div class="setting-desc">Always on — the queue is saved to /config so downloads and transcodes resume automatically after a container restart.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-persist-queue" checked disabled><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Skip Missing Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Wait for Selected Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div><div class="setting-desc">How many downloads may be in the mux/encode phase at once</div></div><input type="number" class="form-input w-80" id="setting-queue-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs||2)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Transcodes</div><div class="setting-desc">Max concurrent transcodes (the CPU-heavy encode step). Downloads/muxing stay parallel; only encoding is limited. Keep at 1 for software encoding; raise it for hardware encoders.</div></div><input type="number" class="form-input w-80" id="setting-queue-transcodes" value="${escapeHtmlAttribute(q.maxSimultaneousTranscodes||1)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Queue File Path</div></div><input type="text" class="form-input w-250" id="setting-queue-path" value="${escapeHtmlAttribute(q.queueFilePath||'Cruncharr/queue.json')}"></div>
@@ -3402,10 +3746,11 @@
                                 <div class="setting-row"><div><div class="setting-label">Include CR Artists</div></div><label class="toggle-switch"><input type="checkbox" id="setting-cr-artists" ${h.includeCrArtists?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Remove Missing Episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-remove-missing" ${h.removeMissingEpisodes?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Check Partial Downloads</div><div class="setting-desc">Track missing dubs/subs on downloaded episodes</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-partial" ${h.checkPartialDownloads!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><label class="setting-label" for="setting-count-sonarr">Count Sonarr</label><div class="setting-desc">Include episodes with files in Sonarr in History’s available counts.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-count-sonarr" ${h.countSonarr ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">History Language</div></div><select class="form-select mw-150" id="setting-history-lang">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${h.lang===o.value?'selected':''}>${o.label}</option>`).join('')}</select></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div><div class="setting-desc">Set above 0 to run the tracked-show scheduler automatically.</div></div><input type="number" class="form-input w-100" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0"></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div><div class="setting-desc">Fast New Releases checks Crunchyroll's release feed; the other modes refresh tracked History series.</div></div><select class="form-select mw-150" id="setting-history-mode"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>Default Active</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
-                                <div class="setting-row"><div><div class="setting-label">Auto-add Missing Episodes to Queue</div><div class="setting-desc">After each scheduler refresh, queue newly missing tracked episodes using season/series language overrides. Enable Queue → Auto Download if they should start without manual approval.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-auto-add" ${h.autoRefreshAddToQueue!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Interval (minutes)</div><div class="setting-desc">Legacy bulk refresh of ALL History series. 0 disables this. Use the Scheduler tab for individual show subscriptions.</div></div><input type="number" class="form-input w-100" id="setting-history-interval" value="${escapeHtmlAttribute(h.autoRefreshIntervalMinutes||0)}" min="0"></div>
+                                <div class="setting-row"><div><div class="setting-label">Auto Refresh Mode</div><div class="setting-desc">Fast New Releases checks Crunchyroll's release feed; the other modes refresh tracked History series.</div></div><select class="form-select mw-150" id="setting-history-mode"><option value="0" ${h.autoRefreshMode===0?'selected':''}>Default All</option><option value="1" ${h.autoRefreshMode===1?'selected':''}>With Missing Episodes</option><option value="50" ${h.autoRefreshMode===50?'selected':''}>Fast New Releases</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Bulk-add Missing History Episodes</div><div class="setting-desc">After each legacy bulk refresh, queue missing episodes from ALL History series using season/series language overrides. Enable Queue → Auto Download if they should start without manual approval.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-history-auto-add" ${h.autoRefreshAddToQueue!==false?'checked':''}><span class="toggle-slider"></span></label></div>
 
                             </div>
                         </div>
@@ -3425,12 +3770,20 @@
                                 <div class="setting-row"><div><div class="setting-label">API Key</div></div><input type="text" class="form-input w-250" id="setting-sonarr-apikey" value="${escapeHtmlAttribute(s.apiKey||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-ssl" ${s.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input w-200" id="setting-sonarr-urlbase" value="${escapeHtmlAttribute(s.urlBase||'')}"></div>
+                                <div class="setting-row"><div><div class="setting-label">Register Cruncharr downloads in Sonarr</div><div class="setting-desc">Add the series before downloading and submit completed files for import. Newly added series start unmonitored, with no automatic search.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-auto-add" ${s.autoAddSeries!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Use Sonarr without Premium</div><div class="setting-desc">Send selected episodes to Sonarr when Crunchyroll Premium is unavailable. Sonarr monitors and searches those episodes using its configured sources.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-guest-search" ${s.searchWithoutPremium!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Turn off Sonarr monitoring for Premium requests</div><div class="setting-desc">Also turn off monitoring for an existing show while Cruncharr supplies it. Existing downloads already queued in Sonarr are unaffected.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-unmonitor" ${s.unmonitorPremiumRequests!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Quality profile for new Sonarr series</div><div class="setting-desc">Automatic uses the most common profile in the current Sonarr library.</div></div><select class="form-select" id="setting-sonarr-profile"><option value="${Number(s.qualityProfileId)||0}">${s.qualityProfileId?'Saved profile':'Automatic'}</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Root folder for new Sonarr series</div><div class="setting-desc">Automatic uses the folder containing the most existing Sonarr series.</div></div><select class="form-select" id="setting-sonarr-root"><option value="${escapeHtmlAttribute(s.rootFolderPath||'')}">${escapeHtml(s.rootFolderPath||'Automatic')}</option></select></div>
+                                <div class="setting-row"><div><div class="setting-label">Cruncharr download folder as seen by Sonarr</div><div class="setting-desc">Leave blank when both apps see the same paths. Otherwise enter Sonarr's path to Cruncharr's download folder. Imports copy files into Sonarr's library.</div></div><input class="form-input w-300" id="setting-sonarr-download-path" value="${escapeHtmlAttribute(s.downloadPath||'')}" placeholder="Same path in both apps"></div>
+                                <div class="setting-row"><div id="sonarr-request-status" role="status">Loading Sonarr request status…</div><button class="header-btn" onclick="loadSonarrRequestSettings()">Refresh status</button></div>
                                 <div class="setting-row" id="sonarr-numbering-row"><div><div class="setting-label">Use Sonarr Naming / TVDB Numbering</div><div class="setting-desc">Use the matched Sonarr series path/title, naming replacements, season-folder format, TVDB season/episode numbers, and Sonarr episode title. If a saved Sonarr match is temporarily unavailable, the download retries instead of writing a differently named fallback. <span id="sonarr-numbering-warn" style="color:var(--accent-red); display:${s.enabled?'none':'inline'};">Requires Sonarr to be enabled and connected above.</span></div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-numbering" ${s.useSonarrNumbering?'checked':''} ${s.enabled?'':'disabled'}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Connection</div><div class="setting-desc">Verify host, port and API key against your Sonarr server</div></div><button class="header-btn" id="sonarr-test-btn" onclick="testSonarrConnection()">Test Connection</button></div>
                                 <div class="setting-row" id="sonarr-test-result" style="display:none;"><div id="sonarr-test-msg" style="font-size:0.85em;"></div></div>
                             </div>
                         </div>
                     `;
+                    void loadSonarrRequestSettings();
                     break;
                 case 'notifications':
                     content.innerHTML = `
@@ -3485,10 +3838,6 @@
                                 <div class="setting-row"><div><div class="setting-label">Host</div></div><input type="text" class="form-input w-200" id="setting-flare-host" value="${escapeHtmlAttribute(f.host||'localhost')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Port</div></div><input type="number" class="form-input w-100" id="setting-flare-port" value="${escapeHtmlAttribute(f.port||0)}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-ssl" ${f.useSsl?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-mitm" ${f.mitmEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Host</div></div><input type="text" class="form-input w-200" id="setting-flare-mitm-host" value="${escapeHtmlAttribute(f.mitmHost||'localhost')}"></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Port</div></div><input type="number" class="form-input w-100" id="setting-flare-mitm-port" value="${escapeHtmlAttribute(f.mitmPort||8080)}"></div>
-                                <div class="setting-row"><div><div class="setting-label">MITM Use SSL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-flare-mitm-ssl" ${f.mitmUseSsl?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -3509,7 +3858,6 @@
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Add Search Results to History</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-search-history" ${ad.searchAddToHistory!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Single Episode Instant Add</div><div class="setting-desc">Add single-episode URLs to the queue immediately</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-instant-add" ${ad.singleEpisodeInstantAdd!==false?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Default to Search</div><div class="setting-desc">Search by title instead of expecting a URL</div></div><label class="toggle-switch"><input type="checkbox" id="setting-ad-default-search" ${ad.defaultSearchEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
                             </div>
                         </div>
                     `;
@@ -3521,7 +3869,7 @@
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Theme</div></div><select class="form-select mw-150" id="setting-theme" onchange="if(config){config.appearance=config.appearance||{};config.appearance.theme=this.value;applyTheme();}"><option value="System" ${a.theme==='System'?'selected':''}>System</option><option value="Dark" ${a.theme==='Dark'?'selected':''}>Dark</option><option value="Light" ${a.theme==='Light'?'selected':''}>Light</option><option value="Cinematic" ${a.theme==='Cinematic'?'selected':''}>Cinematic</option><option value="AMOLED" ${a.theme==='AMOLED'?'selected':''}>AMOLED</option><option value="Nebula" ${a.theme==='Nebula'?'selected':''}>Nebula</option><option value="Seerr" ${a.theme==='Seerr'?'selected':''}>Seerr</option><option value="Sonarr" ${a.theme==='Sonarr'?'selected':''}>Sonarr</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Accent Color</div></div><input type="color" class="form-input w-80" id="setting-accent" value="${escapeHtmlAttribute(a.accentColor||'#F47521')}"></div>
-                                <div class="setting-row"><div><div class="setting-label">Background Image Path</div></div><input type="text" class="form-input w-300" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}"></div>
+                                <div class="setting-row"><div><div class="setting-label">Background Image Path</div><div class="setting-desc">JPG, PNG, WebP or GIF file inside the container (for example /config/background.jpg).</div></div><input type="text" class="form-input w-300" id="setting-bg-path" value="${escapeHtmlAttribute(a.backgroundImagePath||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Opacity</div></div><input type="number" class="form-input w-100" id="setting-bg-opacity" value="${escapeHtmlAttribute(a.backgroundImageOpacity ?? 0.5)}" min="0" max="1" step="0.1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Background Blur Radius</div></div><input type="number" class="form-input w-100" id="setting-bg-blur" value="${escapeHtmlAttribute(a.backgroundImageBlurRadius ?? 10)}" min="0"></div>
                             </div>
@@ -3579,6 +3927,29 @@
             // (Crunchyroll orange); treat that (and empty) as "no custom accent" so it does
             // NOT override a theme that defines its own accent (e.g. Seerr/Nebula's indigo).
             // Always clear first so switching back to a theme restores its accent.
+            const appearance = config?.appearance || {};
+            let background = document.getElementById('custom-background');
+            if (!background) {
+                background = document.createElement('img'); background.id = 'custom-background';
+                background.alt = ''; background.setAttribute('aria-hidden', 'true');
+                document.body.prepend(background);
+            }
+            background.style.display = appearance.backgroundImagePath ? 'block' : 'none';
+            document.body.classList.toggle('has-custom-background', !!appearance.backgroundImagePath);
+            if (appearance.backgroundImagePath) {
+                const src = '/api/v1/config/background?path=' + encodeURIComponent(appearance.backgroundImagePath);
+                if (background.dataset.source !== src) {
+                    const replacement = document.createElement('img');
+                    replacement.id = 'custom-background'; replacement.alt = '';
+                    replacement.setAttribute('aria-hidden', 'true'); replacement.dataset.source = src;
+                    if (readLocalStorage('cruncharrApiKey')) {
+                        replacement.dataset.authSrc = src; replacement.src = TRANSPARENT_IMAGE;
+                    } else replacement.src = src;
+                    background.replaceWith(replacement); background = replacement;
+                }
+                background.style.opacity = appearance.backgroundImageOpacity ?? 0.5;
+                background.style.filter = `blur(${appearance.backgroundImageBlurRadius ?? 10}px)`;
+            }
             const accentColor = config?.appearance?.accentColor;
             document.documentElement.style.removeProperty('--accent');
             if (accentColor && accentColor.toUpperCase() !== '#F47521') {
@@ -3608,6 +3979,9 @@
         }
 
         async function saveSettings() {
+            if (settingsTab === 'scheduler') return saveSchedulerSettings();
+            const invalid = document.querySelector('#settings-content input:invalid');
+            if (invalid) { invalid.reportValidity(); return false; }
             let newConfig = {};
             
             switch(settingsTab) {
@@ -3625,8 +3999,6 @@
                     
                 case 'crunchyroll': {
                     const cr = {};
-                    const useBeta = getFieldValue('setting-use-beta-api', 'bool');
-                    if (useBeta !== undefined) cr.useBetaApi = useBeta;
                     const markWatched = getFieldValue('setting-mark-watched', 'bool');
                     if (markWatched !== undefined) cr.markAsWatched = markWatched;
                     
@@ -3884,7 +4256,6 @@
                     newConfig.addDownload = {
                         searchAddToHistory: document.getElementById('setting-ad-search-history')?.checked ?? true,
                         singleEpisodeInstantAdd: document.getElementById('setting-ad-instant-add')?.checked ?? true,
-                        defaultSearchEnabled: document.getElementById('setting-ad-default-search')?.checked || false
                     };
                     break;
                     
@@ -3896,6 +4267,7 @@
                         includeCrArtists: document.getElementById('setting-cr-artists')?.checked || false,
                         removeMissingEpisodes: document.getElementById('setting-remove-missing')?.checked ?? true,
                         checkPartialDownloads: document.getElementById('setting-history-partial')?.checked ?? true,
+                        countSonarr: document.getElementById('setting-count-sonarr')?.checked ?? false,
                         lang: document.getElementById('setting-history-lang')?.value || 'en-US',
                         autoRefreshIntervalMinutes: parseInt(document.getElementById('setting-history-interval')?.value) || 0,
                         autoRefreshMode: isNaN(histMode) ? 0 : histMode,
@@ -3910,13 +4282,19 @@
                         host: document.getElementById('setting-sonarr-host')?.value || null,
                         port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
                         useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
-                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null,
-                        useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false
+                        urlBase: document.getElementById('setting-sonarr-urlbase')?.value ?? '',
+                        useSonarrNumbering: document.getElementById('setting-sonarr-numbering')?.checked || false,
+                        autoAddSeries: document.getElementById('setting-sonarr-auto-add')?.checked ?? true,
+                        searchWithoutPremium: document.getElementById('setting-sonarr-guest-search')?.checked ?? true,
+                        unmonitorPremiumRequests: document.getElementById('setting-sonarr-unmonitor')?.checked ?? true,
+                        qualityProfileId: Number(document.getElementById('setting-sonarr-profile')?.value || 0),
+                        rootFolderPath: document.getElementById('setting-sonarr-root')?.value ?? '',
+                        downloadPath: document.getElementById('setting-sonarr-download-path')?.value ?? ''
                     };
                     // GET /config returns the placeholder "[configured]" instead of the real key -
                     // only send the key if the user actually typed a new one
                     const sonarrApiKey = document.getElementById('setting-sonarr-apikey')?.value;
-                    if (sonarrApiKey && sonarrApiKey !== '[configured]') newConfig.sonarr.apiKey = sonarrApiKey;
+                    if (sonarrApiKey !== undefined && sonarrApiKey !== '[configured]') newConfig.sonarr.apiKey = sonarrApiKey;
                     break;
                 }
                     
@@ -3930,7 +4308,7 @@
                         }
                     });
                     newConfig.notifications = {
-                        webhookUrl: document.getElementById('setting-webhook-url')?.value || null,
+                        webhookUrl: document.getElementById('setting-webhook-url')?.value ?? '',
                         webhookEnabled: document.getElementById('setting-webhook-enabled')?.checked || false,
                         webhookMethod: document.getElementById('setting-webhook-method')?.value || 'POST',
                         webhookContentType: document.getElementById('setting-webhook-ct')?.value || 'application/json',
@@ -3948,14 +4326,14 @@
                         enabled: document.getElementById('setting-proxy-enabled')?.checked || false,
                         allTraffic: document.getElementById('setting-proxy-all-traffic')?.checked ?? true,
                         socks: document.getElementById('setting-proxy-socks')?.checked || false,
-                        host: document.getElementById('setting-proxy-host')?.value || null,
+                        host: document.getElementById('setting-proxy-host')?.value ?? '',
                         port: parseInt(document.getElementById('setting-proxy-port')?.value) || 0,
-                        username: document.getElementById('setting-proxy-user')?.value || null
+                        username: document.getElementById('setting-proxy-user')?.value ?? ''
                     };
                     // GET /config returns the placeholder "[configured]" instead of the real password -
                     // only send it if the user actually typed a new one
                     const proxyPassword = document.getElementById('setting-proxy-pass')?.value;
-                    if (proxyPassword && proxyPassword !== '[configured]') newConfig.proxy.password = proxyPassword;
+                    if (proxyPassword !== undefined && proxyPassword !== '[configured]') newConfig.proxy.password = proxyPassword;
                     break;
                 }
                     
@@ -3965,10 +4343,6 @@
                         host: document.getElementById('setting-flare-host')?.value || 'localhost',
                         port: parseInt(document.getElementById('setting-flare-port')?.value) || 0,
                         useSsl: document.getElementById('setting-flare-ssl')?.checked || false,
-                        mitmEnabled: document.getElementById('setting-flare-mitm')?.checked || false,
-                        mitmHost: document.getElementById('setting-flare-mitm-host')?.value || 'localhost',
-                        mitmPort: parseInt(document.getElementById('setting-flare-mitm-port')?.value) || 8080,
-                        mitmUseSsl: document.getElementById('setting-flare-mitm-ssl')?.checked || false
                     };
                     break;
                     
@@ -3978,8 +4352,8 @@
                     const bgBlur = parseFloat(document.getElementById('setting-bg-blur')?.value);
                     newConfig.appearance = {
                         theme: document.getElementById('setting-theme')?.value || 'System',
-                        accentColor: document.getElementById('setting-accent')?.value || null,
-                        backgroundImagePath: document.getElementById('setting-bg-path')?.value || null,
+                        accentColor: document.getElementById('setting-accent')?.value ?? '',
+                        backgroundImagePath: document.getElementById('setting-bg-path')?.value ?? '',
                         backgroundImageOpacity: isNaN(bgOpacity) ? 0.5 : bgOpacity,
                         backgroundImageBlurRadius: isNaN(bgBlur) ? 10 : bgBlur
                     };
@@ -3999,16 +4373,13 @@
                 });
                 if (res.ok) {
                     showToast('Settings saved', 'success');
-                    // Deep merge: merge each section's properties individually
-                    // to avoid overwriting properties from other tabs
-                    Object.keys(newConfig).forEach(section => {
-                        config[section] = config[section] || {};
-                        Object.assign(config[section], newConfig[section]);
-                    });
+                    const saved = await fetch('/api/v1/config');
+                    if (saved.ok) config = await saved.json();
                     applyTheme();
                     return true;
                 }
-                showToast('Failed to save settings', 'error');
+                const failure = await res.json().catch(() => ({}));
+                showToast(failure.message || failure.error || 'Failed to save settings', 'error');
                 return false;
             } catch (e) {
                 showToast('Error saving settings', 'error');
@@ -4021,6 +4392,7 @@
         // saveSettings() - which only collects+POSTs THIS tab's fields, so the server
         // merge leaves every other tab untouched. Finally reload the real config.
         async function resetCurrentTab() {
+            if (settingsTab === 'scheduler') { await schedulerRequest('settings', 'POST', { enabled: true, intervalMinutes: 15 }); await renderSchedulerSettings(); return; }
             const tabName = settingsTab;
             if (!confirm('Reset the "' + tabName + '" tab to default settings?')) return;
             clearTimeout(window._settingsSaveTimer);
@@ -4051,6 +4423,7 @@
                 if (window._settingsSavePromise) await window._settingsSavePromise;
                 const res = await fetch('/api/v1/config/reset', { method: 'POST' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
+                await schedulerRequest('settings', 'POST', { enabled: true, intervalMinutes: 15 });
                 await fetchConfig();
                 renderSettingsTab();
                 showToast('All settings reset to default', 'success');
@@ -4061,6 +4434,7 @@
         }
 
         async function testWebhook() {
+            if (!await startSettingsSave()) return;
             const url = document.getElementById('setting-webhook-url')?.value;
             if (!url) {
                 showToast('Webhook URL is required', 'error');
@@ -4256,9 +4630,13 @@
             if (!confirm('This will add all missing episodes across all series to the queue. Continue?')) return;
             try {
                 // Fetch rich history to find series with missing episodes
-                const res = await fetch('/api/v1/history/rich');
+                const res = await fetch('/api/v1/history/rich?forceRefresh=true');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                if ((data || []).some(series => series.sonarrStatusUnavailable)) {
+                    showToast('Sonarr status is unavailable. Retry after the connection recovers.', 'error');
+                    return;
+                }
                 let added = 0;
                 
                 // Iterate through history and add missing episodes
@@ -4267,11 +4645,12 @@
                         for (const episode of (season.episodes || [])) {
                             if (!episodeHasCompletedArtifact(episode) && episode.episodeId) {
                                 if (episode.isEpisodeAvailableOnStreamingService === false) continue;
-                                const queueRes = await fetch('/api/v1/queue', {
+                                const queueRes = await sendDownloadRequest({
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
                                         episodeId: episode.episodeId,
+                                        ...historyQueueOverrides(episode.episodeId, [series]),
                                         title: episode.episodeTitle || 'Unknown',
                                         seriesTitle: series.seriesTitle || 'Unknown',
                                         seasonNumber: season.seasonNum || 1,
@@ -4286,7 +4665,7 @@
                 }
                 
                 if (added > 0) {
-                    showToast(`Added ${added} missing episode(s) to queue`, 'success');
+                    showToast(`Submitted ${added} missing episode request(s)`, 'success');
                 } else {
                     showToast('No missing episodes found', 'info');
                 }
@@ -4305,7 +4684,10 @@
                 const res = await fetch(`/api/v1/history/update-series/${encodeURIComponent(id)}`, { method: 'POST' });
                 if (res.ok) {
                     showToast('Series refreshed', 'success');
-                    if (currentPage === 'history') fetchHistoryData();
+                    await fetchHistoryData(true);
+                    if (document.getElementById('modal')?.classList.contains('active') && document.getElementById('modal-title')?.textContent === historyData.find(series => series.seriesId === id)?.seriesTitle) {
+                        await showHistorySeriesDetail(id);
+                    }
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showToast(err.message || 'Failed to refresh series', 'error');
@@ -4529,6 +4911,7 @@
         }
         
         function getEpisodeStatusTooltip(episode, series) {
+            if (series?.sonarrStatusUnavailable && !episode.hasLocalArtifact) return 'Sonarr file status is temporarily unavailable';
             if (!episodeHasCompletedArtifact(episode)) {
                 return episode.wasDownloaded
                     ? 'Previously downloaded, but the completed file is missing — available to re-download'
@@ -4581,52 +4964,31 @@
             if (modalBody) modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Loading episodes...</div>';
             if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Close</button>
+                <button class="header-btn" onclick="refreshSeries('${escapeJsString(seriesId)}')">Refresh Series</button>
                 <button class="header-btn" onclick="showSeriesSettingsOverride('${escapeJsString(seriesId)}')">Settings</button>
                 ${series.sonarrSeriesId ? `<button class="header-btn" onclick="matchEpisodesForSeries('${escapeJsString(seriesId)}'); closeModal();">Match Episodes</button>` : ''}
                 <button class="header-btn danger" onclick="removeSeriesFromHistory('${escapeJsString(seriesId)}', '${escapeJsString(series.seriesTitle || '')}')">Remove from History</button>
             `;
             if (modalEl) modalEl.classList.add('active');
 
-            // Populate the full season (downloaded + missing) from Crunchyroll the first time this
-            // series is opened, so History shows everything for it - not only what was downloaded.
-            // Once per series per session. The backend may re-key the series to its real CR id, so
-            // afterwards we also match by title.
-            const seriesTitle = series.seriesTitle;
-            window._seriesPopulated = window._seriesPopulated || {};
-            if (!window._seriesPopulated[seriesId]) {
-                window._seriesPopulated[seriesId] = true;
-                try { await fetch(`/api/v1/history/update-series/${encodeURIComponent(seriesId)}`, { method: 'POST' }); }
-                catch (e) { /* keep whatever is already in history */ }
-                historyRichData = null;
-            }
-
-            // Fetch rich data if needed
-            let richSeries = null;
-            if (historyRichData && historyRichData.length > 0) {
-                richSeries = historyRichData.find(s => s.seriesId === seriesId) || historyRichData.find(s => s.seriesTitle === seriesTitle);
-            }
-
-            if (!richSeries) {
-                try {
-                    const res = await fetch('/api/v1/history/rich');
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    historyRichData = data || [];
-                    richSeries = historyRichData.find(s => s.seriesId === seriesId) || historyRichData.find(s => s.seriesTitle === seriesTitle);
-                } catch (e) {
-                    const modalBody = document.getElementById('modal-body');
-                    if (modalBody) modalBody.innerHTML = '<div class="empty-state"><div class="empty-state-title">Failed to load episodes</div></div>';
-                    return;
+            const request = historyDetailGate.begin();
+            renderHistorySeriesDetailContent(series);
+            try {
+                const res = await fetch(`/api/v1/history/series/${encodeURIComponent(seriesId)}`, { signal: request.signal });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const fresh = await res.json();
+                if (!historyDetailGate.isCurrent(request) || !modalEl?.classList.contains('active') || modalTitle?.textContent !== series.seriesTitle) return;
+                historyData = historyData.map(item => item.seriesId === seriesId ? fresh : item);
+                historyRichData = historyData;
+                if (JSON.stringify(series) !== JSON.stringify(fresh)) {
+                    renderHistorySeriesDetailContent(fresh);
+                    renderHistoryContent();
+                    updateHistoryStatus();
                 }
+            } catch (e) {
+                if (!historyDetailGate.isCurrent(request) || e.name === 'AbortError') return;
+                showToast('Could not refresh episode status. Showing the last loaded history.', 'warning');
             }
-            
-            if (!richSeries) {
-                const modalBody = document.getElementById('modal-body');
-                if (modalBody) modalBody.innerHTML = '<div class="empty-state"><div class="empty-state-title">No episode data found</div></div>';
-                return;
-            }
-            
-            renderHistorySeriesDetailContent(richSeries);
         }
 
         async function removeSeriesFromHistory(seriesId, seriesTitle) {
@@ -4656,6 +5018,8 @@
                     </div>
                     <div class="history-detail-info">
                         <div class="history-detail-title">${escapeHtml(series.seriesTitle || 'Unknown')}</div>
+                        <div class="history-poster-meta" role="status">${historySonarrSummary(series)}</div>
+                        <button class="header-btn" data-schedule-series="${escapeHtmlAttribute(series.seriesId)}" onclick="toggleSeriesSchedule(this)">Schedule new episodes</button>
                         <div class="history-detail-meta">${escapeHtml(series.seriesDescription || '')}</div>
                         <div class="mt-10">
                             <div style="font-size:0.8em; color:var(--text-muted); margin-bottom:4px;">Episodes:</div>
@@ -4694,11 +5058,11 @@
                     // Sonarr per-episode indicator (mirrors the desktop app): green check when Sonarr
                     // already has the file, otherwise a neutral Sonarr mark when it's tracked there.
                     const sonarrTip = ep.sonarrEpisodeId
-                        ? (ep.sonarrHasFile ? 'In Sonarr — file present' : (ep.sonarrIsMonitored ? 'In Sonarr — monitored, missing' : 'In Sonarr'))
+                        ? (series.sonarrStatusUnavailable ? 'Sonarr status unavailable' : ep.sonarrHasFile ? 'In Sonarr — file present' : (ep.sonarrIsMonitored ? 'In Sonarr — monitored, missing' : 'In Sonarr'))
                           + (ep.sonarrSeasonEpisodeText ? ` (${ep.sonarrSeasonEpisodeText})` : '')
                         : '';
                     const sonarrBadge = ep.sonarrEpisodeId
-                        ? `<span class="sonarr-ep-badge ${ep.sonarrHasFile ? 'has-file' : 'missing'}" title="${escapeHtmlAttribute(sonarrTip)}">${ep.sonarrHasFile ? '&#10004; Sonarr' : '&#9679; Sonarr'}</span>`
+                        ? `<span class="sonarr-ep-badge ${ep.sonarrHasFile ? 'has-file' : 'missing'}" title="${escapeHtmlAttribute(sonarrTip)}">${series.sonarrStatusUnavailable ? '? Sonarr' : ep.sonarrHasFile ? '&#10004; Sonarr' : '&#9679; Sonarr'}</span>`
                         : '';
 
                     return `
@@ -4715,7 +5079,7 @@
                                     <div class="tooltip-text">${escapeHtml(tooltip).replace(/\n/g, '<br>')}</div>
                                 </div>
                             </div>
-                            ${!episodeHasCompletedArtifact(ep) ? `<button class="btn-icon" onclick="event.stopPropagation(); toggleEpisodeOptions(event, '${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}', '${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Pick dubs/subs">&#9881;</button><button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Add to queue (default dubs/subs)">&#128229;</button>` : ''}
+                            ${!episodeHasCompletedArtifact(ep) && !series.sonarrStatusUnavailable ? `<button class="btn-icon" onclick="event.stopPropagation(); toggleEpisodeOptions(event, '${escapeJsString(series.seriesId)}', '${escapeJsString(season.seasonId)}', '${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Pick dubs/subs">&#9881;</button><button class="btn-icon" onclick="event.stopPropagation(); addHistoryEpisodeToQueue('${escapeJsString(ep.episodeId)}', '${escapeJsString(series.seriesTitle || '')}', '${escapeJsString(ep.episodeTitle || '')}', '${escapeJsString(ep.thumbnailImageUrl || '')}')" title="Add to queue (default dubs/subs)">&#128229;</button>` : ''}
                         </div>
                     `;
                 }).join('');
@@ -4741,6 +5105,7 @@
             }).join('');
             
             body.innerHTML = html;
+            updateScheduleButtons();
         }
         
         function toggleSeasonCollapse(header) {
@@ -4757,19 +5122,20 @@
             try {
                 const payload = {
                     episodeId: episodeId,
+                    ...historyQueueOverrides(episodeId),
                     title: episodeTitle || 'Unknown Episode',
                     seriesTitle: seriesTitle || 'Unknown'
                 };
                 if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const admission = await readQueueAdmission(res);
-                showToast(admission.added ? 'Added to queue' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
+                showToast(admission.data?.message || (admission.added ? 'Added to queue' : 'Episode is already in the queue'), admission.added ? 'success' : 'info');
             } catch (e) {
-                showToast('Failed to add to queue', 'error');
+                showToast(e.message || 'Failed to submit download request', 'error');
             }
         }
 
@@ -4817,29 +5183,30 @@
             try {
                 const payload = {
                     episodeId: episodeId,
+                    ...historyQueueOverrides(episodeId),
                     title: episodeTitle || 'Unknown Episode',
                     seriesTitle: seriesTitle || 'Unknown',
                     selectedDubs: dubs.length ? dubs : null,
                     selectedSubs: subs.length ? subs : null
                 };
                 if (thumbnailUrl) payload.thumbnailUrl = thumbnailUrl;
-                const res = await fetch('/api/v1/queue', {
+                const res = await sendDownloadRequest({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const admission = await readQueueAdmission(res);
-                showToast(admission.added ? 'Added to queue with selected dubs/subs' : 'Episode is already in the queue', admission.added ? 'success' : 'info');
+                showToast(admission.data?.message || (admission.added ? 'Added to queue with selected dubs/subs' : 'Episode is already in the queue'), admission.added ? 'success' : 'info');
                 panel.remove();
                 checkLanguageSuggestion();
             } catch (e) {
                 btn.disabled = false;
-                showToast('Failed to add to queue', 'error');
+                showToast(e.message || 'Failed to submit download request', 'error');
             }
         }
         
         async function downloadSeason(seriesId, seasonId) {
-            if (!confirm('This will add all episodes in this season to the queue. Continue?')) return;
+            if (!confirm(downloadActionLabel() + ': request all episodes in this season?')) return;
             try {
                 const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/episodes`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -4848,11 +5215,12 @@
                 
                 for (const ep of (episodes || [])) {
                     if (ep.seasonId === seasonId || ep.seasonNumber === parseInt(seasonId)) {
-                        const queueRes = await fetch('/api/v1/queue', {
+                        const queueRes = await sendDownloadRequest({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 episodeId: ep.id,
+                                ...historyQueueOverrides(ep.id),
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
@@ -4866,7 +5234,7 @@
                     }
                 }
                 
-                showToast(`Added ${added} episode(s) to queue`, 'success');
+                showToast(added ? `Submitted ${added} episode request(s)` : 'Selected episodes are already available or queued.', added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to queue season', 'error');
             }
@@ -5014,7 +5382,7 @@
                     <span>&#127758;</span> Match All Series
                 </div>
                 <div class="dropdown-divider"></div>
-                <div class="dropdown-item" onclick="fetchHistoryData(); removeDropdown('sonarr-dropdown');">
+                <div class="dropdown-item" onclick="fetchHistoryData(true); removeDropdown('sonarr-dropdown');">
                     <span>&#128260;</span> Refresh History
                 </div>
             `;
@@ -5059,10 +5427,10 @@
         async function matchEpisodesForSeries(seriesId) {
             try {
                 showToast('Matching episodes with Sonarr...', 'info');
-                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${encodeURIComponent(seriesId)}`, { method: 'POST' });
+                const res = await fetch(`/api/v1/history/sonarr/match-episodes/${encodeURIComponent(seriesId)}?rematchAll=true`, { method: 'POST' });
                 if (res.ok) {
                     showToast('Episodes matched successfully', 'success');
-                    fetchHistoryData();
+                    fetchHistoryData(true);
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showToast(err.message || 'Episode match failed', 'error');
@@ -5074,6 +5442,32 @@
         
         // Live-gate the Sonarr-dependent settings on the Enabled toggle so a checkbox never
         // sits there doing nothing. Called on render and whenever Enabled is flipped.
+        async function loadSonarrRequestSettings() {
+            const status = document.getElementById('sonarr-request-status');
+            if (!status) return;
+            try {
+                const [optionResponse, requestResponse] = await Promise.all([
+                    fetch('/api/v1/sonarr/options'), fetch('/api/v1/sonarr/requests')
+                ]);
+                if (!optionResponse.ok) throw new Error((await optionResponse.json()).message || 'Could not read Sonarr options');
+                if (!requestResponse.ok) throw new Error('Could not read Sonarr request status');
+                const options = await optionResponse.json();
+                const requests = await requestResponse.json();
+                if (!status.isConnected) return;
+                const profile = document.getElementById('setting-sonarr-profile');
+                const root = document.getElementById('setting-sonarr-root');
+                const profileValue = profile.value;
+                const rootValue = root.value;
+                profile.innerHTML = '<option value="0">Automatic</option>' + options.qualityProfiles.map(p => `<option value="${Number(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+                root.innerHTML = '<option value="">Automatic</option>' + options.rootFolders.map(r => `<option value="${escapeHtmlAttribute(r.path)}">${escapeHtml(r.path)}</option>`).join('');
+                if (![...profile.options].some(o => o.value === profileValue)) profile.add(new Option('Saved profile unavailable', profileValue));
+                if (![...root.options].some(o => o.value === rootValue)) root.add(new Option('Saved folder unavailable', rootValue));
+                profile.value = profileValue;
+                root.value = rootValue;
+                status.innerHTML = requests.length ? requests.map(r => `<p><strong>${escapeHtml(r.title)}</strong>: ${escapeHtml(r.lastError || r.status)}<br><small>${Number(r.episodeFileCount)} / ${Number(r.episodeCount)} files · ${Number(r.pendingEpisodes)} episodes pending · ${Number(r.pendingImports)} imports pending</small></p>`).join('') : 'No Sonarr requests yet.';
+            } catch (error) { if (status.isConnected) status.textContent = error.message; }
+        }
+
         function updateSonarrGating() {
             const enabled = document.getElementById('setting-sonarr-enabled')?.checked || false;
             const banner = document.getElementById('sonarr-disabled-banner');
@@ -5096,7 +5490,7 @@
                 host: document.getElementById('setting-sonarr-host')?.value || null,
                 port: parseInt(document.getElementById('setting-sonarr-port')?.value) || 0,
                 useSsl: document.getElementById('setting-sonarr-ssl')?.checked || false,
-                urlBase: document.getElementById('setting-sonarr-urlbase')?.value || null
+                urlBase: document.getElementById('setting-sonarr-urlbase')?.value ?? ''
             };
             // Only send the key if the user typed a real one; otherwise the server reuses the stored key.
             if (apiKeyVal && apiKeyVal !== '[configured]') payload.apiKey = apiKeyVal;
@@ -5128,6 +5522,33 @@
 
         // ================== SETTINGS OVERRIDE ==================
 
+        function historyOverrideForm(prefix, values = {}) {
+            const selected = (options, saved) => {
+                const all = [...options];
+                for (const value of saved || []) if (!all.some(option => option.value === value)) all.push({value, label:value});
+                return all.map(option => `<option value="${escapeHtmlAttribute(option.value)}" ${(saved || []).includes(option.value) ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('');
+            };
+            const quality = [{value:'',label:'Inherit default'}, ...['best','1080','720','480','360','240','worst'].map(value => ({value,label:value === 'best' ? 'Best available' : value}))];
+            return `
+                <div class="form-group"><label class="form-label" for="${prefix}quality-video">Video Quality</label><select class="form-select" id="${prefix}quality-video">${selected(quality, [values.videoQuality || ''])}</select></div>
+                <div class="form-group"><label class="form-label" for="${prefix}dub-langs">Dub Languages</label><select class="form-select mh-120" id="${prefix}dub-langs" multiple>${selected(LANG_OPTIONS, values.dubLanguages)}</select></div>
+                <div class="form-group"><label class="form-label" for="${prefix}soft-subs">Subtitle Languages</label><select class="form-select mh-120" id="${prefix}soft-subs" multiple>${selected(LANG_OPTIONS, values.softSubs)}</select></div>
+                <div class="hint">Empty language lists inherit defaults. Hold Ctrl or Command to select multiple languages.</div>`;
+        }
+
+        function historyQueueOverrides(episodeId, source = historyData) {
+            for (const series of source) for (const season of series.seasons || []) {
+                if (!(season.episodes || []).some(episode => episode.episodeId === episodeId)) continue;
+                const parent = series.settingsOverride || {};
+                const child = season.settingsOverride || {};
+                return {
+                    selectedDubs: child.dubLanguages?.length ? child.dubLanguages : parent.dubLanguages?.length ? parent.dubLanguages : null,
+                    selectedSubs: child.softSubs?.length ? child.softSubs : parent.softSubs?.length ? parent.softSubs : null
+                };
+            }
+            return {};
+        }
+
         function showSeriesSettingsOverride(seriesId) {
             const series = historyData.find(s => s.seriesId === seriesId);
             if (!series) return;
@@ -5137,32 +5558,8 @@
             const modalFooter = document.getElementById('modal-footer');
             const modalEl = document.getElementById('modal');
             if (modalTitle) modalTitle.textContent = 'Series Settings Override';
-            if (modalBody) modalBody.innerHTML = `
-                <div class="form-group">
-                    <label class="form-label">Video Quality</label>
-                    <select class="form-select mw-150" id="override-quality-video">
-                        <option value="best">Best Available</option>
-                        <option value="1080">1080</option>
-                        <option value="720">720</option>
-                        <option value="480">480</option>
-                        <option value="360">360</option>
-                        <option value="240">240</option>
-                        <option value="worst">Worst</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Dub Languages</label>
-                    <select class="form-select mh-120" id="override-dub-langs" multiple>
-                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Softsubs Languages</label>
-                    <select class="form-select mh-120" id="override-soft-subs" multiple>
-                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
-                    </select>
-                </div>
-            `;
+            historyDetailGate.cancel();
+            if (modalBody) modalBody.innerHTML = historyOverrideForm('override-', series.settingsOverride);
             if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Cancel</button>
                 <button class="header-btn primary" onclick="saveSeriesSettingsOverride('${escapeJsString(seriesId)}')">Save</button>
@@ -5186,8 +5583,13 @@
                     })
                 });
                 if (res.ok) {
+                    const item = historyData.find(series => series.seriesId === seriesId);
+                    if (item) item.settingsOverride = {videoQuality, dubLanguages:dubLangs, softSubs};
+                    historyRequestGate.cancel();
+                    historyRequest = null;
                     showToast('Series settings saved', 'success');
                     closeModal();
+                    await fetchHistoryData();
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showToast(err.message || 'Failed to save settings', 'error');
@@ -5198,37 +5600,15 @@
         }
         
         function showSeasonSettingsOverride(seasonId) {
+            const season = historyData.flatMap(series => series.seasons || []).find(item => item.seasonId === seasonId);
+            if (!season) return;
             const modalTitle = document.getElementById('modal-title');
             const modalBody = document.getElementById('modal-body');
             const modalFooter = document.getElementById('modal-footer');
             const modalEl = document.getElementById('modal');
             if (modalTitle) modalTitle.textContent = 'Season Settings Override';
-            if (modalBody) modalBody.innerHTML = `
-                <div class="form-group">
-                    <label class="form-label">Video Quality</label>
-                    <select class="form-select mw-150" id="override-season-quality-video">
-                        <option value="best">Best Available</option>
-                        <option value="1080">1080</option>
-                        <option value="720">720</option>
-                        <option value="480">480</option>
-                        <option value="360">360</option>
-                        <option value="240">240</option>
-                        <option value="worst">Worst</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Dub Languages</label>
-                    <select class="form-select mh-120" id="override-season-dub-langs" multiple>
-                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Softsubs Languages</label>
-                    <select class="form-select mh-120" id="override-season-soft-subs" multiple>
-                        ${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
-                    </select>
-                </div>
-            `;
+            historyDetailGate.cancel();
+            if (modalBody) modalBody.innerHTML = historyOverrideForm('override-season-', season.settingsOverride);
             if (modalFooter) modalFooter.innerHTML = `
                 <button class="header-btn" onclick="closeModal()">Cancel</button>
                 <button class="header-btn primary" onclick="saveSeasonSettingsOverride('${escapeJsString(seasonId)}')">Save</button>
@@ -5252,8 +5632,13 @@
                     })
                 });
                 if (res.ok) {
+                    const item = historyData.flatMap(series => series.seasons || []).find(season => season.seasonId === seasonId);
+                    if (item) item.settingsOverride = {videoQuality, dubLanguages:dubLangs, softSubs};
+                    historyRequestGate.cancel();
+                    historyRequest = null;
                     showToast('Season settings saved', 'success');
                     closeModal();
+                    await fetchHistoryData();
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showToast(err.message || 'Failed to save settings', 'error');
@@ -5264,7 +5649,7 @@
         }
         
         async function downloadSeries(id) {
-            if (!confirm('This will add all episodes in this series to the queue. Continue?')) return;
+            if (!confirm(downloadActionLabel() + ': request all episodes in this series?')) return;
             try {
                 // Get episodes and add all to queue
                 const res = await fetch(`/api/v1/series/${encodeURIComponent(id)}/episodes`);
@@ -5274,11 +5659,12 @@
                 
                 for (const ep of (episodes || [])) {
                     if (ep.id) {
-                        const queueRes = await fetch('/api/v1/queue', {
+                        const queueRes = await sendDownloadRequest({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 episodeId: ep.id,
+                                ...historyQueueOverrides(ep.id),
                                 title: ep.title || 'Unknown',
                                 seriesTitle: ep.seriesTitle || 'Unknown',
                                 seasonNumber: ep.seasonNumber || 1,
@@ -5292,13 +5678,15 @@
                     }
                 }
                 
-                showToast(`Added ${added} episode(s) to queue`, 'success');
+                showToast(added ? `Submitted ${added} episode request(s)` : 'Selected episodes are already available or queued.', added ? 'success' : 'info');
             } catch (e) {
                 showToast('Failed to queue series', 'error');
             }
         }
 
         function closeModal() {
+            if (sonarrChoiceResolve) { const resolve = sonarrChoiceResolve; sonarrChoiceResolve = null; resolve(null); }
+            historyDetailGate.cancel();
             const modal = document.getElementById('modal');
             if (modal) modal.classList.remove('active');
         }
@@ -5387,6 +5775,11 @@
             // Check auth status periodically
             checkAuthStatus();
             authIntervalId = setInterval(checkAuthStatus, AUTH_NOTIFICATION_THROTTLE_MS);
+            const sonarrInterval = setInterval(() => {
+                if (document.hidden) return;
+                if (['browse', 'seasonal', 'add-download', 'history'].includes(currentPage)) void loadSonarrLibrary();
+                if (currentPage === 'settings' && settingsTab === 'sonarr') void loadSonarrRequestSettings();
+            }, 60000);
             
             // Use SSE for real-time queue updates instead of polling
             startQueueSSE();
@@ -5400,6 +5793,7 @@
             
             // Clear intervals and SSE on page unload
             window.addEventListener('beforeunload', () => {
+                clearInterval(sonarrInterval);
                 if (authIntervalId) clearInterval(authIntervalId);
                 if (historyIntervalId) clearInterval(historyIntervalId);
                 if (sseReconnectTimeout) clearTimeout(sseReconnectTimeout);
@@ -5476,28 +5870,21 @@
         
         let lastAuthWarning = 0;
         async function checkAuthStatus() {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), AUTH_STATUS_TIMEOUT_MS);
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), AUTH_STATUS_TIMEOUT_MS);
                 const res = await fetch('/api/v1/auth/status', { signal: controller.signal });
-                clearTimeout(timeoutId);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const status = await res.json();
                 authStatus = status;
                 
                 const now = Date.now();
-                if (!status.isAuthenticated) {
-                    if (now - lastAuthWarning > AUTH_WARNING_THROTTLE_MS) {
-                        lastAuthWarning = now;
-                        showToast('You are not logged in. Please go to Account tab to log in.', 'warning');
-                    }
-                } else if (!status.hasPremium) {
-                    // Check if there are premium items in queue
-                    const hasPremiumItems = queueData.some(i => i.episode?.isPremium);
-                    if (hasPremiumItems && now - lastAuthWarning > AUTH_WARNING_THROTTLE_MS) {
-                        lastAuthWarning = now;
-                        showToast('No premium subscription detected. Premium content will fail to download.', 'warning');
-                    }
+                const needsDownloadAccess = queueData.some(item =>
+                    ['queued', 'downloading', 'paused'].includes(String(item.downloadProgress?.state || '').toLowerCase()));
+                if (needsDownloadAccess && (!status.isAuthenticated || !status.hasPremium) &&
+                    now - lastAuthWarning > AUTH_WARNING_THROTTLE_MS) {
+                    lastAuthWarning = now;
+                    showToast('Log in to a Crunchyroll Premium account to download queued episodes.', 'warning');
                 }
             } catch (e) {
                 // Only log once to avoid console spam
@@ -5505,6 +5892,8 @@
                     window._authCheckFailed = true;
                     console.warn('Auth status check failed (will retry silently):', e.message);
                 }
+            } finally {
+                clearTimeout(timeoutId);
             }
         }
         
@@ -5568,4 +5957,3 @@
                 }
             }, 5000);
         }
-

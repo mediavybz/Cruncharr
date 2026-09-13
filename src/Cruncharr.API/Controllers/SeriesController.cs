@@ -10,16 +10,26 @@ public class SeriesController : ControllerBase
 {
     private readonly ICrunchyrollApiService _api;
     private readonly ILogger<SeriesController> _logger;
+    private readonly ICrunchyrollAuthService _auth;
 
-    public SeriesController(ICrunchyrollApiService api, ILogger<SeriesController> logger)
+    public SeriesController(ICrunchyrollApiService api, ILogger<SeriesController> logger, ICrunchyrollAuthService auth)
     {
         _api = api;
         _logger = logger;
+        _auth = auth;
     }
 
     /// <summary>
     /// Search for series on Crunchyroll
     /// </summary>
+    [HttpGet("resolve-episode/{episodeId}")]
+    public async Task<ActionResult> ResolveEpisode(string episodeId, CancellationToken cancellationToken)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(episodeId, "^[A-Za-z0-9_-]{1,64}$")) return BadRequest();
+        var episode = await _api.GetEpisodeAsync(episodeId, true, cancellationToken);
+        return episode == null ? NotFound() : Ok(episode);
+    }
+
     [HttpGet("search")]
     public async Task<ActionResult> Search([FromQuery] string query, [FromQuery] bool premium = false, CancellationToken cancellationToken = default)
     {
@@ -89,12 +99,16 @@ public class SeriesController : ControllerBase
     /// Get all browseable series (paginated, alphabetical)
     /// </summary>
     [HttpGet("all")]
-    public async Task<ActionResult> GetAllSeries([FromQuery] string? locale = null)
+    public async Task<ActionResult> GetAllSeries([FromQuery] string? locale = null, CancellationToken cancellationToken = default)
     {
         try
         {
-            var results = await _api.GetAllSeriesAsync(locale);
+            var results = await _api.GetAllSeriesAsync(locale, cancellationToken);
             return Ok(results);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

@@ -13,11 +13,22 @@ public interface ISonarrService
     Task<bool> TestConnectionAsync(SonarrConfig config);
     Task<SonarrTestResult> TestConnectionDetailedAsync(SonarrConfig config);
     Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config);
+    Task<List<SonarrSeries>> GetCurrentSeriesAsync(SonarrConfig config, CancellationToken cancellationToken = default);
     Task<SonarrSeries?> GetSeriesByTitleAsync(string title, SonarrConfig config);
+    Task<SonarrSeries?> ResolveSeriesAsync(string seriesId, string title, SonarrConfig config, CancellationToken cancellationToken = default);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config);
     Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh);
+    Task<List<SonarrEpisode>> GetCurrentEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh = false, CancellationToken cancellationToken = default);
     Task<SonarrEpisode?> GetEpisodeAsync(int episodeId, SonarrConfig config);
     Task<SonarrNamingConfig?> GetNamingConfigAsync(SonarrConfig config);
+    Task<List<SonarrSeries>> LookupSeriesAsync(string title, SonarrConfig config);
+    Task<SonarrSetupOptions> GetSetupOptionsAsync(SonarrConfig config, CancellationToken cancellationToken = default);
+    Task<SonarrSeries> AddSeriesAsync(int tvdbId, SonarrConfig config, CancellationToken cancellationToken = default);
+    Task SetMonitoringAsync(int seriesId, bool monitored, SonarrConfig config, CancellationToken cancellationToken = default);
+    Task<int> SearchEpisodesAsync(int seriesId, IReadOnlyList<int> episodeIds, SonarrConfig config, CancellationToken cancellationToken = default);
+    Task<int> ImportFileAsync(string path, int seriesId, SonarrConfig config, CancellationToken cancellationToken = default, int? episodeId = null);
+    Task<string> GetCommandStatusAsync(int commandId, SonarrConfig config, CancellationToken cancellationToken = default);
+    void InvalidateCache();
 }
 
 /// <summary>Outcome of a Sonarr connection test, with a human-readable reason.</summary>
@@ -30,15 +41,17 @@ public record SonarrTestResult(bool Success, string Message);
 /// </summary>
 public record SonarrMatchResult(int HistoryTotal, int Matched, int SonarrSeriesCount);
 
-public class SonarrService : ISonarrService
+public partial class SonarrService : ISonarrService
 {
     private readonly ILogger<SonarrService>? _logger;
     private readonly HttpClient _httpClient;
+    private readonly ICrunchyrollApiService? _api;
 
-    public SonarrService(IHttpClientFactory httpClientFactory, ILogger<SonarrService>? logger = null)
+    public SonarrService(IHttpClientFactory httpClientFactory, ILogger<SonarrService>? logger = null, ICrunchyrollApiService? api = null)
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient();
+        _api = api;
     }
 
     private string BuildBaseUrl(SonarrConfig config)
@@ -123,6 +136,8 @@ public class SonarrService : ISonarrService
     // The request gate also coalesces concurrent batch-download cache misses instead of bursting
     // identical reads at Sonarr (the live failure was simultaneous connections reset by peer).
     private static readonly TimeSpan MetadataCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan FileStatusCacheTtl = TimeSpan.FromSeconds(15);
+    private (string Key, DateTime RetryAfterUtc)? _fileStatusFailure;
     private const int MaxTransientAttempts = 3;
     private (string Key, DateTime FetchedUtc, List<SonarrSeries> Data)? _seriesCache;
     private (string Key, DateTime FetchedUtc, SonarrNamingConfig Data)? _namingCache;
@@ -145,7 +160,8 @@ public class SonarrService : ISonarrService
     private async Task<HttpResponseMessage?> SendGetWithRetryAsync(
         string url,
         SonarrConfig config,
-        string operation)
+        string operation,
+        CancellationToken cancellationToken = default)
     {
         Exception? lastException = null;
         for (var attempt = 1; attempt <= MaxTransientAttempts; attempt++)
@@ -155,7 +171,7 @@ public class SonarrService : ISonarrService
 
             try
             {
-                var response = await _httpClient.SendAsync(request);
+                var response = await _httpClient.SendAsync(request, cancellationToken);
                 if (response.IsSuccessStatusCode ||
                     !IsTransient(response.StatusCode) ||
                     attempt == MaxTransientAttempts)
@@ -168,9 +184,9 @@ public class SonarrService : ISonarrService
                     "Sonarr {Operation} returned transient HTTP {Status}; retrying attempt {NextAttempt}/{MaxAttempts}",
                     operation, (int)response.StatusCode, attempt + 1, MaxTransientAttempts);
                 response.Dispose();
-                await Task.Delay(delay);
+                await Task.Delay(delay, cancellationToken);
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException) && !cancellationToken.IsCancellationRequested)
             {
                 lastException = ex;
                 if (attempt == MaxTransientAttempts) break;
@@ -179,7 +195,7 @@ public class SonarrService : ISonarrService
                     ex,
                     "Sonarr {Operation} transport failure; retrying attempt {NextAttempt}/{MaxAttempts}",
                     operation, attempt + 1, MaxTransientAttempts);
-                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt));
+                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), cancellationToken);
             }
         }
 
@@ -187,33 +203,44 @@ public class SonarrService : ISonarrService
         return null;
     }
 
-    public virtual async Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config)
+    public virtual Task<List<SonarrSeries>> GetSeriesAsync(SonarrConfig config) => GetSeriesCoreAsync(config, false, CancellationToken.None);
+
+    public virtual Task<List<SonarrSeries>> GetCurrentSeriesAsync(SonarrConfig config, CancellationToken cancellationToken = default) =>
+        GetSeriesCoreAsync(config, true, cancellationToken);
+
+    private async Task<List<SonarrSeries>> GetSeriesCoreAsync(SonarrConfig config, bool currentLibrary, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var cacheKey = BuildCacheKey(config);
+        bool CanReuse(DateTime fetchedUtc) => DateTime.UtcNow - fetchedUtc < (currentLibrary ? TimeSpan.FromSeconds(60) : MetadataCacheTtl);
         lock (_metadataCacheLock)
         {
-            if (_seriesCache is { } cached && cached.Key == cacheKey && IsFresh(cached.FetchedUtc))
+            if (_seriesCache is { } cached && cached.Key == cacheKey && CanReuse(cached.FetchedUtc))
             {
                 return cached.Data;
             }
         }
 
-        await _metadataRequestGate.WaitAsync();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (currentLibrary) timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        var acquired = false;
         try
         {
+            await _metadataRequestGate.WaitAsync(timeout.Token);
+            acquired = true;
             lock (_metadataCacheLock)
             {
-                if (_seriesCache is { } cached && cached.Key == cacheKey && IsFresh(cached.FetchedUtc))
+                if (_seriesCache is { } cached && cached.Key == cacheKey && CanReuse(cached.FetchedUtc))
                 {
                     return cached.Data;
                 }
             }
 
             var url = $"{BuildBaseUrl(config)}/series";
-            using var response = await SendGetWithRetryAsync(url, config, "series read");
+            using var response = await SendGetWithRetryAsync(url, config, "series read", timeout.Token);
             if (response?.IsSuccessStatusCode == true)
             {
-                var content = await response.Content.ReadAsStringAsync();
+                var content = await response.Content.ReadAsStringAsync(timeout.Token);
                 // Newtonsoft (not reflection-based System.Text.Json) so deserialization works
                 // in the trimmed published build, which disables STJ reflection.
                 var series = Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrSeries>>(content) ?? new List<SonarrSeries>();
@@ -225,14 +252,20 @@ public class SonarrService : ISonarrService
             {
                 _logger?.LogWarning("Sonarr GetSeries returned HTTP {Status} {Reason}", (int)response.StatusCode, response.ReasonPhrase);
             }
+            if (currentLibrary) throw new HttpRequestException("Sonarr library is temporarily unavailable.");
         }
+        catch (OperationCanceledException) when (currentLibrary && !cancellationToken.IsCancellationRequested)
+        {
+            throw new HttpRequestException("Sonarr library request timed out.");
+        }
+        catch (Exception) when (currentLibrary || cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to get Sonarr series");
         }
         finally
         {
-            _metadataRequestGate.Release();
+            if (acquired) _metadataRequestGate.Release();
         }
 
         lock (_metadataCacheLock)
@@ -252,85 +285,146 @@ public class SonarrService : ISonarrService
         var series = await GetSeriesAsync(config);
         if (string.IsNullOrWhiteSpace(title) || series.Count == 0) return null;
 
-        // 1) Exact (case-insensitive) on primary/clean/alternate identity after removing display
-        // punctuation. Sonarr's CleanTitle is punctuation-free, while CR commonly changes ':' to
-        // '-' or omits it entirely.
-        var normalizedTitle = NormalizeTitleForMatch(title);
-        var exact = series.FirstOrDefault(s =>
-            s.Title?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
-            s.CleanTitle?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
-            NormalizeTitleForMatch(s.Title) == normalizedTitle ||
-            NormalizeTitleForMatch(s.CleanTitle) == normalizedTitle ||
-            (s.AlternateTitles?.Any(a =>
-                a.Title?.Equals(title, StringComparison.OrdinalIgnoreCase) == true ||
-                NormalizeTitleForMatch(a.Title) == normalizedTitle) ?? false));
-        if (exact != null) return exact;
-
-        // 2) Fuzzy fallback. CR titles frequently differ from Sonarr's (romaji vs english,
-        //    punctuation, season/year suffixes). The old exact-only match silently failed for those,
-        //    so UseSonarrNumbering fell back to Crunchyroll numbers. Score against the primary +
-        //    alternate titles with the same StringSimilarity + 0.8 threshold as the history matcher.
-        var needle = title.ToLowerInvariant();
-        SonarrSeries? best = null;
-        double bestSim = 0.0;
-        foreach (var s in series)
-        {
-            double sim = s.Title != null ? StringSimilarity.CalculateSimilarity(s.Title.ToLowerInvariant(), needle) : 0.0;
-            if (s.AlternateTitles != null)
-            {
-                foreach (var alt in s.AlternateTitles)
-                {
-                    if (string.IsNullOrEmpty(alt.Title)) continue;
-                    var altSim = StringSimilarity.CalculateSimilarity(alt.Title.ToLowerInvariant(), needle);
-                    if (altSim > sim) sim = altSim;
-                }
-            }
-            if (sim > bestSim) { bestSim = sim; best = s; }
-        }
-        return bestSim >= 0.8 ? best : null;
+        var index = new SonarrTitleIndex(series);
+        if (index.Exact(title).Count > 0) return index.FindExact(title);
+        if (index.Candidates(title).Count == 0) return null;
+        var lookup = await LookupSeriesAsync(title, config);
+        return SonarrTitleIndex.ResolveLookup(title, series, lookup);
     }
 
-    private static string NormalizeTitleForMatch(string? title) =>
-        string.IsNullOrWhiteSpace(title)
-            ? string.Empty
-            : new string(title.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+    private readonly SemaphoreSlim _lookupGate = new(1, 1);
+    private readonly Dictionary<string, (DateTime Fetched, List<SonarrSeries> Series)> _lookupCache = new();
+
+    private readonly SemaphoreSlim _matchGate = new(1, 1);
+    private readonly Dictionary<string, (DateTime Expires, bool Matches)> _episodeMatchCache = new();
+
+    public async Task<SonarrSeries?> ResolveSeriesAsync(string seriesId, string title, SonarrConfig config, CancellationToken cancellationToken = default)
+    {
+        var library = await GetSeriesAsync(config);
+        var index = new SonarrTitleIndex(library);
+        if (index.FindExact(title) is { } exact) return exact;
+        if (_api == null || string.IsNullOrEmpty(seriesId)) return null;
+        var candidates = index.Candidates(title);
+        if (candidates.Count == 0) return null;
+        // A lookup can identify an unowned spin-off with reused episode titles. Respect that
+        // identity, except an unsuffixed name can also mean a year-qualified remake (Witchblade).
+        var lookup = await LookupSeriesAsync(title, config).WaitAsync(cancellationToken);
+        var lookupExact = new SonarrTitleIndex(lookup).Exact(title);
+        if (lookupExact.Count > 0)
+            candidates = candidates.Where(candidate => lookupExact.Any(item => item.TvdbId == candidate.TvdbId) ||
+                SonarrTitleIndex.IsYearQualifiedEdition(title, candidate)).ToList();
+        if (candidates.Count == 0) return null;
+        await _matchGate.WaitAsync(cancellationToken);
+        try
+        {
+            List<Cruncharr.Core.Models.EpisodeInfo>? providerEpisodes = null;
+            var confirmed = new List<SonarrSeries>();
+            foreach (var candidate in candidates)
+            {
+                var key = BuildCacheKey(config) + $"|{seriesId}|{title}|{candidate.Id}|{candidate.TvdbId}";
+                if (!_episodeMatchCache.TryGetValue(key, out var cached) || cached.Expires <= DateTime.UtcNow)
+                {
+                    providerEpisodes ??= await _api.GetEpisodesAsync(seriesId, true, cancellationToken);
+                    var sonarrEpisodes = await GetEpisodesAsync(candidate.Id, config).WaitAsync(cancellationToken);
+                    if (providerEpisodes.Count == 0 || sonarrEpisodes.Count == 0)
+                        throw new HttpRequestException("Episode metadata is unavailable; Sonarr identity could not be verified.");
+                    var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title));
+                    cached = (DateTime.UtcNow.Add(matches ? TimeSpan.FromDays(1) : TimeSpan.FromMinutes(5)), matches);
+                    _episodeMatchCache[key] = cached;
+                }
+                if (cached.Matches) confirmed.Add(candidate);
+            }
+            return confirmed.Count == 1 ? confirmed[0] : null;
+        }
+        finally { _matchGate.Release(); }
+    }
+
+    public virtual async Task<List<SonarrSeries>> LookupSeriesAsync(string title, SonarrConfig config)
+    {
+        var key = BuildCacheKey(config) + "|" + title;
+        // Coalesce catalog, History and download requests. Successful metadata is reusable for
+        // one day; failed lookups never become a cached "not in library" result.
+        await _lookupGate.WaitAsync();
+        try
+        {
+            if (_lookupCache.TryGetValue(key, out var cached) && DateTime.UtcNow - cached.Fetched < TimeSpan.FromDays(1))
+                return cached.Series;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var response = await SendGetWithRetryAsync(
+                $"{BuildBaseUrl(config)}/series/lookup?term={Uri.EscapeDataString(title)}", config, "series lookup", timeout.Token);
+            if (response == null) throw new HttpRequestException("Sonarr title lookup is unavailable.");
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadAsStringAsync(timeout.Token);
+            var result = Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrSeries>>(body)
+                ?? throw new HttpRequestException("Sonarr returned invalid title lookup data.");
+            _lookupCache[key] = (DateTime.UtcNow, result);
+            return result;
+        }
+        finally { _lookupGate.Release(); }
+    }
 
     public virtual Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config) =>
         GetEpisodesAsync(seriesId, config, forceRefresh: false);
 
-    public virtual async Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh)
+    public virtual Task<List<SonarrEpisode>> GetEpisodesAsync(int seriesId, SonarrConfig config, bool forceRefresh) =>
+        GetEpisodesCoreAsync(seriesId, config, forceRefresh, currentFileStatus: false, CancellationToken.None);
+
+    // Naming can use last-known metadata; file availability must never use an unbounded stale fallback.
+    public virtual Task<List<SonarrEpisode>> GetCurrentEpisodesAsync(
+        int seriesId, SonarrConfig config, bool forceRefresh = false, CancellationToken cancellationToken = default) =>
+        GetEpisodesCoreAsync(seriesId, config, forceRefresh, currentFileStatus: true, cancellationToken);
+
+    private async Task<List<SonarrEpisode>> GetEpisodesCoreAsync(
+        int seriesId, SonarrConfig config, bool forceRefresh, bool currentFileStatus, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var configKey = BuildCacheKey(config);
         var listKey = $"{configKey}|series:{seriesId}";
+        var startedUtc = DateTime.UtcNow;
+        var cacheTtl = currentFileStatus ? FileStatusCacheTtl : MetadataCacheTtl;
+        bool CanReuse(DateTime fetchedUtc) => forceRefresh
+            ? fetchedUtc >= startedUtc
+            : DateTime.UtcNow - fetchedUtc < cacheTtl;
         lock (_metadataCacheLock)
         {
-            if (!forceRefresh && _episodeListCache.TryGetValue(listKey, out var cached) && IsFresh(cached.FetchedUtc))
+            if (_episodeListCache.TryGetValue(listKey, out var cached) && CanReuse(cached.FetchedUtc))
             {
                 return cached.Data;
             }
         }
 
-        await _metadataRequestGate.WaitAsync();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (currentFileStatus) timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        var requestToken = timeout.Token;
+        var gateAcquired = false;
         try
         {
+            await _metadataRequestGate.WaitAsync(requestToken);
+            gateAcquired = true;
             lock (_metadataCacheLock)
             {
-                if (!forceRefresh && _episodeListCache.TryGetValue(listKey, out var cached) && IsFresh(cached.FetchedUtc))
+                if (_episodeListCache.TryGetValue(listKey, out var cached) && CanReuse(cached.FetchedUtc))
                 {
                     return cached.Data;
+                }
+                if (currentFileStatus && _fileStatusFailure is { } failure &&
+                    failure.Key == configKey && failure.RetryAfterUtc > DateTime.UtcNow)
+                {
+                    throw new HttpRequestException("Sonarr file status is temporarily unavailable.");
                 }
             }
 
             var url = $"{BuildBaseUrl(config)}/episode?seriesId={seriesId}";
-            using var response = await SendGetWithRetryAsync(url, config, $"episode-list read for series {seriesId}");
+            using var response = await SendGetWithRetryAsync(url, config, $"episode-list read for series {seriesId}", requestToken);
             if (response?.IsSuccessStatusCode == true)
             {
-                var content = await response.Content.ReadAsStringAsync();
+                var content = await response.Content.ReadAsStringAsync(requestToken);
                 var episodes = Newtonsoft.Json.JsonConvert.DeserializeObject<List<SonarrEpisode>>(content) ?? new List<SonarrEpisode>();
                 var fetchedUtc = DateTime.UtcNow;
                 lock (_metadataCacheLock)
                 {
                     _episodeListCache[listKey] = (fetchedUtc, episodes);
+                    _fileStatusFailure = null;
                     foreach (var episode in episodes)
                     {
                         _episodeCache[$"{configKey}|episode:{episode.Id}"] = (fetchedUtc, episode);
@@ -343,14 +437,27 @@ public class SonarrService : ISonarrService
             {
                 _logger?.LogWarning("Sonarr GetEpisodes returned HTTP {Status} {Reason}", (int)response.StatusCode, response.ReasonPhrase);
             }
+            if (currentFileStatus)
+            {
+                if (response == null || IsTransient(response.StatusCode) ||
+                    response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                    lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusCacheTtl); }
+                throw new HttpRequestException("Could not read current episode status from Sonarr.", null, response?.StatusCode);
+            }
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && currentFileStatus)
+        {
+            lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusCacheTtl); }
+            throw new HttpRequestException("Sonarr episode status timed out. Please try again shortly.");
+        }
+        catch (Exception) when (currentFileStatus || cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to get Sonarr episodes");
         }
         finally
         {
-            _metadataRequestGate.Release();
+            if (gateAcquired) _metadataRequestGate.Release();
         }
 
         lock (_metadataCacheLock)
@@ -526,6 +633,7 @@ public class SonarrNamingConfig
 
 public class SonarrSeries
 {
+    public SonarrSeriesStatistics? Statistics { get; set; }
     public int Id { get; set; }
     public string? Title { get; set; }
     public string? CleanTitle { get; set; }
@@ -534,11 +642,20 @@ public class SonarrSeries
     public string? Overview { get; set; }
     public List<SonarrSeason>? Seasons { get; set; }
     public int Year { get; set; }
+    public int QualityProfileId { get; set; }
+    public bool Monitored { get; set; }
     public string? Path { get; set; }
     public int TvdbId { get; set; }
     public string? TitleSlug { get; set; }
     [Newtonsoft.Json.JsonProperty("alternateTitles")]
     public List<SonarrAlternateTitle>? AlternateTitles { get; set; }
+}
+
+public class SonarrSeriesStatistics
+{
+    public int EpisodeFileCount { get; set; }
+    public int EpisodeCount { get; set; }
+    public int TotalEpisodeCount { get; set; }
 }
 
 public class SonarrAlternateTitle

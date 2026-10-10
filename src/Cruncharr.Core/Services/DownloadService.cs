@@ -3349,7 +3349,7 @@ public class DownloadService : IDownloadService
         if (keys.Count == 0) return;
 
         // Find decryptor tool (prefer shaka-packager, fallback to mp4decrypt)
-        string? decryptToolPath = null;
+        string? decryptToolPath;
         bool useShaka = false;
 
         var mp4decryptPath = FindExecutable("mp4decrypt");
@@ -3421,7 +3421,7 @@ public class DownloadService : IDownloadService
         var decryptedFiles = new List<string>();
 
         // Find decryptor tool
-        string? decryptToolPath = null;
+        string? decryptToolPath;
         bool useShaka = false;
 
         // Check for mp4decrypt first, then shaka-packager
@@ -4094,9 +4094,6 @@ public class DownloadService : IDownloadService
 
         return process.ExitCode;
     }
-
-    // Codec-aware quality option (mirrors upstream Helpers.GetQualityOption).
-    private static IEnumerable<string> SplitArguments(string commandLine) => EncodingCommand.SplitArguments(commandLine);
 
     private string? FindExecutable(string name)
     {

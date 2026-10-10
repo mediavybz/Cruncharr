@@ -1,14 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Dynamic;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
 using System.Xml.Linq;
-using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.DRM;
-using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser;
 

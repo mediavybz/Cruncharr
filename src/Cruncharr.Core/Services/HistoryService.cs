@@ -64,13 +64,12 @@ public class HistoryService : IHistoryService, IDisposable
     private readonly ILogger<HistoryService>? _logger;
     private readonly ISonarrService? _sonarrService;
     private readonly ICrunchyrollApiService? _apiService;
-    private readonly IMusicService? _musicService;
     private readonly ICrunchyrollAuthService? _authService;
     private readonly CruncharrConfig _config;
     private List<HistorySeries> _historyList = [];
     private volatile bool _loaded = false;
 
-    public HistoryService(string? historyPath = null, ILogger<HistoryService>? logger = null, ISonarrService? sonarrService = null, ICrunchyrollApiService? apiService = null, IMusicService? musicService = null, ICrunchyrollAuthService? authService = null, CruncharrConfig? config = null)
+    public HistoryService(string? historyPath = null, ILogger<HistoryService>? logger = null, ISonarrService? sonarrService = null, ICrunchyrollApiService? apiService = null, ICrunchyrollAuthService? authService = null, CruncharrConfig? config = null)
     {
         _historyPath = historyPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -84,7 +83,6 @@ public class HistoryService : IHistoryService, IDisposable
         _logger = logger;
         _sonarrService = sonarrService;
         _apiService = apiService;
-        _musicService = musicService;
         _authService = authService;
         _config = config ?? new CruncharrConfig();
         Directory.CreateDirectory(Path.GetDirectoryName(_historyPath)!);
@@ -1304,30 +1302,6 @@ public class HistoryService : IHistoryService, IDisposable
         {
             _lock.Release();
         }
-    }
-
-    private static (SonarrEpisode? Episode, double Score) FindClosestMatchEpisodeWithScore(List<SonarrEpisode> episodeList, string title)
-    {
-        if (string.IsNullOrWhiteSpace(title) || episodeList.Count == 0)
-        {
-            return (null, 0.0);
-        }
-
-        SonarrEpisode? closestMatch = null;
-        double highestSimilarity = 0.0;
-        foreach (var episode in episodeList)
-        {
-            if (!string.IsNullOrWhiteSpace(episode.Title))
-            {
-                double similarity = StringSimilarity.CalculateSimilarity(episode.Title, title);
-                if (similarity <= highestSimilarity) continue;
-
-                highestSimilarity = similarity;
-                closestMatch = episode;
-            }
-        }
-
-        return highestSimilarity < 0.8 ? (null, highestSimilarity) : (closestMatch, highestSimilarity);
     }
 
     private List<HistoryEpisode> MatchSpecialEpisodesByOrder(

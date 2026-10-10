@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using Cruncharr.Core.Services;
-
 namespace Cruncharr.Core.Models;
 
 // [PT] Ported from upstream CalendarStructs.CalendarHistoryDownloadState

@@ -1,9 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.Dynamic;
-using System.Linq;
 using System.Numerics;
-using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser.Segments;
 

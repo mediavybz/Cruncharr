@@ -161,7 +161,7 @@ public class HlsDownloader
                 Segment initSeg = new Segment();
                 initSeg.Uri = ObjectUtilities.GetMemberValue(segments[0].map, "uri");
                 initSeg.Key = ObjectUtilities.GetMemberValue(segments[0].map, "key");
-                initSeg.ByteRange = ObjectUtilities.GetMemberValue(segments[0].map, "byteRange");
+                initSeg.ByteRange = ByteRange.From((object?)ObjectUtilities.GetMemberValue(segments[0].map, "byteRange"));
 
                 if (ObjectUtilities.GetMemberValue(segments[0], "key") != null)
                 {
@@ -236,7 +236,7 @@ public class HlsDownloader
                     var segment = new Segment();
                     segment.Uri = ObjectUtilities.GetMemberValue(segments[px], "uri");
                     segment.Key = ObjectUtilities.GetMemberValue(segments[px], "key");
-                    segment.ByteRange = ObjectUtilities.GetMemberValue(segments[px], "byteRange");
+                    segment.ByteRange = ByteRange.From((object?)ObjectUtilities.GetMemberValue(segments[px], "byteRange"));
                     partTasks[px] = DownloadPart(segment, px, _data.Offset);
                 }
 
@@ -361,7 +361,7 @@ public class HlsDownloader
             {
                 Uri = ObjectUtilities.GetMemberValue(segments[index], "uri"),
                 Key = ObjectUtilities.GetMemberValue(segments[index], "key"),
-                ByteRange = ObjectUtilities.GetMemberValue(segments[index], "byteRange")
+                ByteRange = ByteRange.From((object?)ObjectUtilities.GetMemberValue(segments[index], "byteRange"))
             };
 
             var data = await DownloadPart(segment, index, _data.Offset);
@@ -922,12 +922,6 @@ public class Key
 {
     public string? Uri { get; set; }
     public List<int> Iv { get; set; } = new List<int>();
-}
-
-public class ByteRange
-{
-    public long Offset { get; set; }
-    public long Length { get; set; }
 }
 
 public class HlsOptions

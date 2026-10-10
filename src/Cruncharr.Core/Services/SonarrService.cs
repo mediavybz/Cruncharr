@@ -305,15 +305,32 @@ public partial class SonarrService : ISonarrService
         if (index.FindExact(title) is { } exact) return exact;
         if (_api == null || string.IsNullOrEmpty(seriesId)) return null;
         var candidates = index.Candidates(title);
-        if (candidates.Count == 0) return null;
+        if (candidates.Count == 0)
+        {
+            _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): no similar owned series", title, seriesId);
+            return null;
+        }
+        _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): candidates {Candidates}", title, seriesId,
+            string.Join(", ", candidates.Select(c => $"{c.Title} [sonarr {c.Id}, tvdb {c.TvdbId}]")));
         // A lookup can identify an unowned spin-off with reused episode titles. Respect that
         // identity, except an unsuffixed name can also mean a year-qualified remake (Witchblade).
         var lookup = await LookupSeriesAsync(title, config).WaitAsync(cancellationToken);
         var lookupExact = new SonarrTitleIndex(lookup).Exact(title);
         if (lookupExact.Count > 0)
+        {
+            var before = candidates;
             candidates = candidates.Where(candidate => lookupExact.Any(item => item.TvdbId == candidate.TvdbId) ||
                 SonarrTitleIndex.IsYearQualifiedEdition(title, candidate)).ToList();
-        if (candidates.Count == 0) return null;
+            if (candidates.Count != before.Count)
+                _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): lookup names {Lookup}; dropped {Dropped}", title, seriesId,
+                    string.Join(", ", lookupExact.Select(l => $"{l.Title} [tvdb {l.TvdbId}]")),
+                    string.Join(", ", before.Except(candidates).Select(c => c.Title)));
+        }
+        if (candidates.Count == 0)
+        {
+            _logger?.LogInformation("Sonarr identity {Title} ({SeriesId}): Sonarr's lookup names a series that is not in the library", title, seriesId);
+            return null;
+        }
         await _matchGate.WaitAsync(cancellationToken);
         try
         {
@@ -327,13 +344,35 @@ public partial class SonarrService : ISonarrService
                     providerEpisodes ??= await _api.GetEpisodesAsync(seriesId, true, cancellationToken);
                     var sonarrEpisodes = await GetEpisodesAsync(candidate.Id, config).WaitAsync(cancellationToken);
                     if (providerEpisodes.Count == 0 || sonarrEpisodes.Count == 0)
-                        throw new HttpRequestException("Episode metadata is unavailable; Sonarr identity could not be verified.");
+                    {
+                        var reason = providerEpisodes.Count == 0
+                            ? $"Crunchyroll lists no episodes for '{title}', so its Sonarr identity cannot be verified yet."
+                            : $"Sonarr has no episodes yet for '{candidate.Title}', so the identity of '{title}' cannot be verified yet.";
+                        // Not cached: an empty Sonarr list can also be a transient read failure,
+                        // and the next attempt must be able to succeed without a restart.
+                        _logger?.LogInformation("Sonarr identity {Title} ({SeriesId}): provider episodes {Provider}, Sonarr episodes {Sonarr} for {Candidate} [sonarr {Id}]",
+                            title, seriesId, providerEpisodes.Count, sonarrEpisodes.Count, candidate.Title, candidate.Id);
+                        throw new HttpRequestException(reason);
+                    }
                     var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title));
+                    _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): {Candidate} [sonarr {Id}] {Result} ({Provider} provider / {Sonarr} Sonarr episodes)",
+                        title, seriesId, candidate.Title, candidate.Id, matches ? "confirmed" : "rejected", providerEpisodes.Count, sonarrEpisodes.Count);
                     cached = (DateTime.UtcNow.Add(matches ? TimeSpan.FromDays(1) : TimeSpan.FromMinutes(5)), matches);
                     _episodeMatchCache[key] = cached;
                 }
                 if (cached.Matches) confirmed.Add(candidate);
             }
+            if (confirmed.Count > 1)
+            {
+                // Two owned editions sharing the same episode titles (Witchblade and its remake)
+                // cannot be told apart by name alone; leave the identity unassigned.
+                _logger?.LogInformation("Sonarr identity {Title} ({SeriesId}): ambiguous, {Count} owned series share its episodes: {Titles}",
+                    title, seriesId, confirmed.Count, string.Join(", ", confirmed.Select(c => c.Title)));
+                return null;
+            }
+            if (confirmed.Count == 0)
+                _logger?.LogInformation("Sonarr identity {Title} ({SeriesId}): no candidate's episode titles match ({Candidates})",
+                    title, seriesId, string.Join(", ", candidates.Select(c => c.Title)));
             return confirmed.Count == 1 ? confirmed[0] : null;
         }
         finally { _matchGate.Release(); }

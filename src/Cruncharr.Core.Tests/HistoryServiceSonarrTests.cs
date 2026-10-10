@@ -274,6 +274,35 @@ public class HistoryServiceSonarrTests : IDisposable
     }
 
     [Fact]
+    public async Task MatchHistorySeriesWithSonarrAsync_OneUnverifiableSeriesDoesNotBlockTheOthers()
+    {
+        var history = CreateTestHistory();
+        history.Add(new HistorySeries
+        {
+            SeriesId = "series-2", SeriesTitle = "Frieren", SeriesType = SeriesType.Series,
+            Seasons = [new HistorySeason { SeasonId = "s", SeasonNum = "1", EpisodesList = [] }]
+        });
+        await SaveTestHistory(history);
+
+        _sonarrServiceMock.Setup(s => s.GetSeriesAsync(It.IsAny<SonarrConfig>())).ReturnsAsync(
+        [
+            new SonarrSeries { Id = 100, Title = "Attack on Titan", TvdbId = 267440, TitleSlug = "attack-on-titan" },
+            new SonarrSeries { Id = 200, Title = "Frieren: Beyond Journey's End", TvdbId = 424536, TitleSlug = "frieren" }
+        ]);
+        // "Frieren" is only a candidate for the subtitled Sonarr entry; its verification fails
+        // (no episodes listed yet). The exact "Attack on Titan" link must still be saved.
+        _sonarrServiceMock.Setup(s => s.ResolveSeriesAsync("series-2", "Frieren", It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Crunchyroll lists no episodes for 'Frieren'"));
+
+        var result = await _historyService.MatchHistorySeriesWithSonarrAsync();
+
+        var saved = await _historyService.GetHistorySeriesAsync();
+        Assert.Equal("100", saved.First(s => s.SeriesTitle == "Attack on Titan").SonarrSeriesId);
+        Assert.True(string.IsNullOrEmpty(saved.First(s => s.SeriesTitle == "Frieren").SonarrSeriesId));
+        Assert.Equal(1, result.Matched);
+    }
+
+    [Fact]
     public async Task MatchHistorySeriesWithSonarrAsync_MatchesViaAlternateTitle()
     {
         // CR uses the English title; Sonarr's primary title is the romaji. The match must

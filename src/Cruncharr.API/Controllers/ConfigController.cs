@@ -1,3 +1,4 @@
+using Cruncharr.API.Security;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
@@ -68,6 +69,16 @@ public class ConfigController : ControllerBase
                     ? request.ApiKey
                     : _config.Sonarr?.ApiKey
             };
+
+            // The stored key is only ever sent to the Sonarr it was saved for. Testing a
+            // different host without typing its key would otherwise hand the saved key to
+            // whatever address was entered.
+            var usingStoredKey = string.IsNullOrEmpty(request?.ApiKey) || request!.ApiKey == "[configured]";
+            if (usingStoredKey && !string.IsNullOrEmpty(effective.ApiKey) &&
+                !string.Equals(effective.Host?.Trim(), _config.Sonarr?.Host?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return Ok(new { success = false, message = "Enter the API key for this Sonarr address before testing it." });
+            }
 
             // No SSRF/private-IP guard here: Sonarr is an admin-configured, self-hosted companion
             // service that lives on a LAN/private IP by design (192.168.x / 10.x / localhost). The
@@ -416,12 +427,32 @@ public class ConfigController : ControllerBase
             {
                 Content = new StringContent(body, System.Text.Encoding.UTF8, notifications.WebhookContentType)
             };
-            foreach (var header in notifications.WebhookHeaders)
-                message.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            // Saved headers often carry an Authorization token; only attach them when the
+            // test targets the saved webhook URL so they cannot be sent to another host.
+            var isSavedUrl = string.Equals(
+                request.Url?.Trim().TrimEnd('/'),
+                notifications.WebhookUrl?.Trim().TrimEnd('/'),
+                StringComparison.OrdinalIgnoreCase);
+            var skippedHeaders = false;
+            if (isSavedUrl)
+            {
+                foreach (var header in notifications.WebhookHeaders)
+                    message.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+            else
+            {
+                skippedHeaders = notifications.WebhookHeaders.Count > 0;
+            }
             using var response = await client.SendAsync(message, cts.Token);
             if (response.IsSuccessStatusCode)
             {
-                return Ok(new { Success = true, Message = "Webhook test sent successfully" });
+                return Ok(new
+                {
+                    Success = true,
+                    Message = skippedHeaders
+                        ? "Webhook test sent successfully (saved headers are only sent to the saved URL; save first to test with them)"
+                        : "Webhook test sent successfully"
+                });
             }
             return StatusCode((int)response.StatusCode, new { Success = false, Message = $"Webhook returned {(int)response.StatusCode}" });
         }
@@ -551,6 +582,33 @@ public class ConfigController : ControllerBase
             sanitized[pair.Key] = string.IsNullOrEmpty(pair.Value) ? "" : ConfiguredSecret;
         }
         return sanitized;
+    }
+
+    /// <summary>
+    /// Like <see cref="ValidatePath"/>, but additionally confines the path to the config,
+    /// output and temp directories. Unchanged values are accepted so existing settings
+    /// keep saving.
+    /// </summary>
+    private string ValidateConfinedPath(string? path, string fieldName, string? currentValue)
+    {
+        var validated = ValidatePath(path, fieldName);
+        if (string.IsNullOrWhiteSpace(validated)) return validated;
+        if (string.Equals(validated, currentValue, StringComparison.Ordinal)) return validated;
+
+        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+        var roots = new[]
+        {
+            Path.GetDirectoryName(configPath),
+            _config.Download.OutputDirectory,
+            _config.Download.TempDirectory,
+            Environment.GetEnvironmentVariable("CRUNCHYROLL_OUTPUT_DIR"),
+            Environment.GetEnvironmentVariable("CRUNCHYROLL_TEMP_DIR"),
+        };
+        if (!ConfigPathPolicy.IsWithinAllowedRoots(validated, roots))
+        {
+            throw new ArgumentException($"{fieldName} must be inside the config, output or temp directory");
+        }
+        return validated;
     }
 
     private static string ValidatePath(string? path, string fieldName)
@@ -689,7 +747,7 @@ public class ConfigController : ControllerBase
             {
                 _config.Queue.MaxSimultaneousTranscodes = request.Queue.MaxSimultaneousTranscodes.Value;
             }
-            if (!string.IsNullOrEmpty(request.Queue.QueueFilePath)) _config.Queue.QueueFilePath = ValidatePath(request.Queue.QueueFilePath, nameof(request.Queue.QueueFilePath));
+            if (!string.IsNullOrEmpty(request.Queue.QueueFilePath)) _config.Queue.QueueFilePath = ValidateConfinedPath(request.Queue.QueueFilePath, nameof(request.Queue.QueueFilePath), _config.Queue.QueueFilePath);
             if (request.Queue.ShutdownWhenQueueEmpty.HasValue) _config.Queue.ShutdownWhenQueueEmpty = request.Queue.ShutdownWhenQueueEmpty.Value;
         }
 
@@ -830,7 +888,7 @@ public class ConfigController : ControllerBase
                 if (ac.Length == 0 || System.Text.RegularExpressions.Regex.IsMatch(ac, "^#[0-9A-Fa-f]{3,8}$"))
                     _config.Appearance.AccentColor = ac;
             }
-            if (a.BackgroundImagePath != null) _config.Appearance.BackgroundImagePath = ValidatePath(a.BackgroundImagePath, nameof(a.BackgroundImagePath));
+            if (a.BackgroundImagePath != null) _config.Appearance.BackgroundImagePath = ValidateConfinedPath(a.BackgroundImagePath, nameof(a.BackgroundImagePath), _config.Appearance.BackgroundImagePath);
             if (a.BackgroundImageOpacity.HasValue) _config.Appearance.BackgroundImageOpacity = a.BackgroundImageOpacity.Value;
             if (a.BackgroundImageBlurRadius.HasValue) _config.Appearance.BackgroundImageBlurRadius = a.BackgroundImageBlurRadius.Value;
         }
@@ -839,7 +897,7 @@ public class ConfigController : ControllerBase
         {
             if (request.General.LogMode.HasValue) _config.LogMode = request.General.LogMode.Value;
             if (request.General.RemoveFinishedDownload.HasValue) _config.RemoveFinishedDownload = request.General.RemoveFinishedDownload.Value;
-            if (request.General.TokenFilePath != null) _config.TokenFilePath = ValidatePath(request.General.TokenFilePath, nameof(request.General.TokenFilePath));
+            if (request.General.TokenFilePath != null) _config.TokenFilePath = ValidateConfinedPath(request.General.TokenFilePath, nameof(request.General.TokenFilePath), _config.TokenFilePath);
         }
     }
 }

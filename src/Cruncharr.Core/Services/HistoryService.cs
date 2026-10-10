@@ -936,6 +936,7 @@ public class HistoryService : IHistoryService, IDisposable
         // identity as Browse and download naming. Preserve explicit saved links.
         var titleIndex = new SonarrTitleIndex(sonarrSeries);
         var resolvedTitles = new Dictionary<(string? Id, string Title), SonarrSeries?>();
+        var unverified = 0;
         foreach (var entry in await GetHistorySeriesAsync())
         {
             var title = entry.SeriesTitle ?? "";
@@ -943,12 +944,24 @@ public class HistoryService : IHistoryService, IDisposable
             var match = titleIndex.FindExact(title);
             if (match == null && titleIndex.Candidates(title).Count > 0)
             {
-                // Propagate lookup outages so a release check retries instead of treating an
-                // unverified owned series as missing and downloading duplicates.
-                match = await _sonarrService.ResolveSeriesAsync(entry.SeriesId ?? "", title, _config.Sonarr);
+                try
+                {
+                    match = await _sonarrService.ResolveSeriesAsync(entry.SeriesId ?? "", title, _config.Sonarr);
+                }
+                catch (Exception ex)
+                {
+                    // One unverifiable series (no episodes listed, lookup timeout) must not stop
+                    // every other series from being linked. Its link stays empty, which is what
+                    // makes the next run retry it; release checks keep their own retry logic.
+                    unverified++;
+                    _logger?.LogWarning("Sonarr identity for {Title} ({SeriesId}) could not be verified yet: {Reason}", title, entry.SeriesId, ex.Message);
+                }
             }
             resolvedTitles[(entry.SeriesId, title)] = match;
         }
+
+        if (unverified > 0)
+            _logger?.LogInformation("Sonarr history matching: {Count} series could not be verified this run and will be retried", unverified);
 
         var sonarrSeriesById = updateAll
             ? sonarrSeries.ToDictionary(series => series.Id.ToString())

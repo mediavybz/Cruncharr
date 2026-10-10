@@ -596,9 +596,11 @@ public class ConfigController : ControllerBase
         if (string.Equals(validated, currentValue, StringComparison.Ordinal)) return validated;
 
         var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+        var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? "";
+        validated = ConfigPathPolicy.RootRelative(validated, configDir);
         var roots = new[]
         {
-            Path.GetDirectoryName(configPath),
+            configDir,
             _config.Download.OutputDirectory,
             _config.Download.TempDirectory,
             Environment.GetEnvironmentVariable("CRUNCHYROLL_OUTPUT_DIR"),

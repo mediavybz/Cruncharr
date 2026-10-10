@@ -299,11 +299,15 @@ public class SyncingService : ISyncingService
             compareFrames.Reverse();
         }
 
-        var preprocessedCompareFrames = compareFrames.Select(f => new
-        {
-            Frame = f,
-            Pixels = GetPixelsArray(f.FilePath)
-        }).ToList();
+        // Each frame is decoded by its own short ffmpeg process; run them in parallel so the
+        // comparison window is prepared about as fast as the former in-process decoder.
+        var preprocessedCompareFrames = compareFrames.AsParallel().AsOrdered()
+            .WithDegreeOfParallelism(Math.Clamp(Environment.ProcessorCount, 2, 8))
+            .Select(f => new
+            {
+                Frame = f,
+                Pixels = GetPixelsArray(f.FilePath)
+            }).ToList();
 
         var delay = double.NaN;
 

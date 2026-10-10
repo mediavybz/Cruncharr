@@ -328,7 +328,7 @@ public partial class SonarrService : ISonarrService
         }
         if (candidates.Count == 0)
         {
-            _logger?.LogInformation("Sonarr identity {Title} ({SeriesId}): Sonarr's lookup names a series that is not in the library", title, seriesId);
+            _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): Sonarr's lookup names a series that is not in the library", title, seriesId);
             return null;
         }
         await _matchGate.WaitAsync(cancellationToken);
@@ -350,14 +350,17 @@ public partial class SonarrService : ISonarrService
                             : $"Sonarr has no episodes yet for '{candidate.Title}', so the identity of '{title}' cannot be verified yet.";
                         // Not cached: an empty Sonarr list can also be a transient read failure,
                         // and the next attempt must be able to succeed without a restart.
-                        _logger?.LogInformation("Sonarr identity {Title} ({SeriesId}): provider episodes {Provider}, Sonarr episodes {Sonarr} for {Candidate} [sonarr {Id}]",
+                        _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): provider episodes {Provider}, Sonarr episodes {Sonarr} for {Candidate} [sonarr {Id}]",
                             title, seriesId, providerEpisodes.Count, sonarrEpisodes.Count, candidate.Title, candidate.Id);
                         throw new HttpRequestException(reason);
                     }
                     var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title));
                     _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): {Candidate} [sonarr {Id}] {Result} ({Provider} provider / {Sonarr} Sonarr episodes)",
                         title, seriesId, candidate.Title, candidate.Id, matches ? "confirmed" : "rejected", providerEpisodes.Count, sonarrEpisodes.Count);
-                    cached = (DateTime.UtcNow.Add(matches ? TimeSpan.FromDays(1) : TimeSpan.FromMinutes(5)), matches);
+                    // Both outcomes hold for a day: History matching runs every minute and Browse
+                    // verification every few minutes, and refetching a rejected franchise prefix
+                    // from Crunchyroll each time was the main source of request load.
+                    cached = (DateTime.UtcNow.AddDays(1), matches);
                     _episodeMatchCache[key] = cached;
                 }
                 if (cached.Matches) confirmed.Add(candidate);
@@ -366,12 +369,12 @@ public partial class SonarrService : ISonarrService
             {
                 // Two owned editions sharing the same episode titles (Witchblade and its remake)
                 // cannot be told apart by name alone; leave the identity unassigned.
-                _logger?.LogInformation("Sonarr identity {Title} ({SeriesId}): ambiguous, {Count} owned series share its episodes: {Titles}",
+                _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): ambiguous, {Count} owned series share its episodes: {Titles}",
                     title, seriesId, confirmed.Count, string.Join(", ", confirmed.Select(c => c.Title)));
                 return null;
             }
             if (confirmed.Count == 0)
-                _logger?.LogInformation("Sonarr identity {Title} ({SeriesId}): no candidate's episode titles match ({Candidates})",
+                _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): no candidate's episode titles match ({Candidates})",
                     title, seriesId, string.Join(", ", candidates.Select(c => c.Title)));
             return confirmed.Count == 1 ? confirmed[0] : null;
         }

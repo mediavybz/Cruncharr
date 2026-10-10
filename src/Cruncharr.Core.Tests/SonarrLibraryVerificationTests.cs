@@ -100,6 +100,22 @@ public sealed class SonarrLibraryVerificationTests : IDisposable
     }
 
     [Fact]
+    public async Task VerifiedRejectionIsRememberedAcrossRunsAndRestarts()
+    {
+        _sonarr.Setup(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SonarrSeries?)null);
+        var first = await Create().GetAsync(_library, _config, true, true, Token);
+        Assert.Empty(first.Matches);
+        Assert.Empty(first.PendingSeriesIds);
+
+        // A new instance reloads the cache from disk and must not re-fetch the rejected title.
+        var second = await Create().GetAsync(_library, _config, true, true, Token);
+        Assert.Empty(second.Matches);
+        Assert.Empty(second.PendingSeriesIds);
+        _sonarr.Verify(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task ExpiredIdentityStaysVisibleWhileReVerificationIsPendingOrFailing()
     {
         await Create().GetAsync(_library, _config, true, true, Token);

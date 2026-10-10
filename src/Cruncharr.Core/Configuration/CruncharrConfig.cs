@@ -131,6 +131,9 @@ public class CruncharrConfig
                 // caller shares this lock because multiple API surfaces save to the same path.
                 string tmp = configPath + ".tmp";
                 File.WriteAllText(tmp, content);
+                // Restrict the temp file before it becomes the live config so the secrets
+                // it holds are never world-readable, even briefly.
+                Cruncharr.Core.Utils.SecureFile.Restrict(tmp);
                 File.Move(tmp, configPath, overwrite: true);
 
                 // Config holds credentials (CR password, proxy password, Sonarr API key) in

@@ -1,4 +1,5 @@
 using Cruncharr.API.Diagnostics;
+using Cruncharr.API.Security;
 using Cruncharr.API.Services;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
@@ -185,6 +186,38 @@ public class Program
         }
         app.UseCors("AllowSpecific");
 
+        // Response hardening headers. X-Frame-Options is deliberately not set so the UI can
+        // still be embedded in dashboards such as Organizr or Heimdall.
+        app.Use(async (ctx, next) =>
+        {
+            ctx.Response.OnStarting(static state =>
+            {
+                var headers = ((HttpContext)state).Response.Headers;
+                headers["X-Content-Type-Options"] = "nosniff";
+                headers["Referrer-Policy"] = "no-referrer";
+                return Task.CompletedTask;
+            }, ctx);
+            await next();
+        });
+
+        // Cross-site request guard for state-changing API calls. A page on another site can
+        // submit a plain form POST to e.g. /api/v1/config/reset without any CORS preflight;
+        // browsers label such requests with Sec-Fetch-Site. The UI's own calls are
+        // same-origin and origins listed in CORS_ORIGINS stay allowed, so nothing changes
+        // for legitimate use.
+        var allowedOrigins = RequestGuards.NormalizeOrigins(corsOrigins);
+        app.Use(async (ctx, next) =>
+        {
+            if (RequestGuards.IsCrossSiteStateChange(ctx.Request, allowedOrigins))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                ctx.Response.ContentType = "application/json; charset=utf-8";
+                await ctx.Response.WriteAsync("{\"error\":\"Forbidden\",\"message\":\"Cross-site requests are not allowed.\"}");
+                return;
+            }
+            await next();
+        });
+
         // Optional API-key gate. Off by default (no env var) so existing setups keep
         // working. When CRUNCHARR_API_KEY is set, every /api/* call must present the key
         // via the X-Api-Key header or an Authorization: Bearer <key>. The ?apiKey= query
@@ -211,7 +244,10 @@ public class Program
                         if (auth != null && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                             provided = auth.Substring("Bearer ".Length).Trim();
                     }
-                    if (string.IsNullOrEmpty(provided))
+                    // Query-string keys are honoured only for the SSE stream (EventSource cannot
+                    // set headers); everywhere else they would just leak into access logs.
+                    if (string.IsNullOrEmpty(provided) &&
+                        path.StartsWith("/api/v1/queue/sse", StringComparison.OrdinalIgnoreCase))
                         provided = ctx.Request.Query["apiKey"].FirstOrDefault();
 
                     var providedBytes = System.Text.Encoding.UTF8.GetBytes(provided ?? "");
@@ -231,6 +267,12 @@ public class Program
                 }
                 await next();
             });
+        }
+        else
+        {
+            app.Logger.LogWarning(
+                "CRUNCHARR_API_KEY is not set: anyone who can reach port 8585 can read and change settings. " +
+                "Set it (and AllowedHosts) if the container is reachable beyond a trusted network.");
         }
 
         app.UseAuthorization();

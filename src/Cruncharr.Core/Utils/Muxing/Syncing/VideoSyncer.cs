@@ -177,7 +177,11 @@ public class VideoSyncer : IVideoSyncer
         {
             using var process = new System.Diagnostics.Process();
             process.StartInfo.FileName = ffmpegPath;
-            process.StartInfo.Arguments = $"-i \"{videoPath}\" -f null -";
+            process.StartInfo.ArgumentList.Add("-i");
+            process.StartInfo.ArgumentList.Add(videoPath);
+            process.StartInfo.ArgumentList.Add("-f");
+            process.StartInfo.ArgumentList.Add("null");
+            process.StartInfo.ArgumentList.Add("-");
             process.StartInfo.RedirectStandardError = true;
             process.StartInfo.UseShellExecute = false;
             process.StartInfo.CreateNoWindow = true;

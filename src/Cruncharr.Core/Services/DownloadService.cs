@@ -3466,7 +3466,7 @@ public class DownloadService : IDownloadService
                     shakaKeys
                 };
 
-                _logger?.LogInformation("Running shaka-packager: {Args}", string.Join(" ", args));
+                _logger?.LogInformation("Running shaka-packager: {Args}", RedactContentKeys(string.Join(" ", args)));
                 await RunProcessAsync(decryptToolPath!, args, cancellationToken);
             }
             else
@@ -3698,6 +3698,17 @@ public class DownloadService : IDownloadService
         return success;
     }
 
+    private static readonly System.Text.RegularExpressions.Regex ContentKeyPattern = new(
+        @"(?<=(?:^|\s)--key\s+[0-9A-Fa-f]+:)[0-9A-Fa-f]+|(?<=\bkey=)[0-9A-Fa-f]+",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Masks DRM content keys (mp4decrypt <c>--key KID:KEY</c>, shaka <c>key=KEY</c>) before a
+    /// command line is logged. The key ID stays visible for troubleshooting.
+    /// </summary>
+    internal static string RedactContentKeys(string commandLine) =>
+        string.IsNullOrEmpty(commandLine) ? commandLine : ContentKeyPattern.Replace(commandLine, "[redacted]");
+
     private static string EscapeProcessArgument(string arg)
     {
         if (string.IsNullOrEmpty(arg)) return "";
@@ -3717,7 +3728,7 @@ public class DownloadService : IDownloadService
             CreateNoWindow = true
         };
 
-        _logger?.LogDebug("Running: {Executable} {Args}", executable, startInfo.Arguments);
+        _logger?.LogDebug("Running: {Executable} {Args}", executable, RedactContentKeys(startInfo.Arguments));
 
         using var process = Process.Start(startInfo);
         if (process == null)
@@ -3775,7 +3786,7 @@ public class DownloadService : IDownloadService
             CreateNoWindow = true
         };
 
-        _logger?.LogDebug("Running: {Executable} {Args}", executable, startInfo.Arguments);
+        _logger?.LogDebug("Running: {Executable} {Args}", executable, RedactContentKeys(startInfo.Arguments));
 
         using var process = Process.Start(startInfo);
         if (process == null)

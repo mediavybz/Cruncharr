@@ -33,14 +33,50 @@ public class SyncingService : ISyncingService
         _logger = logger;
     }
 
+    /// <summary>
+    /// ffmpeg hardware decoder names are plain identifiers (cuda, vaapi, qsv, videotoolbox, ...).
+    /// Anything else is rejected so the setting cannot smuggle extra ffmpeg options.
+    /// </summary>
+    public static bool IsValidHwAccel(string? hwAccel) =>
+        !string.IsNullOrWhiteSpace(hwAccel) &&
+        !hwAccel.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+        System.Text.RegularExpressions.Regex.IsMatch(hwAccel, "^[A-Za-z0-9_]{1,32}$");
+
+    /// <summary>
+    /// Builds the frame-extraction argument list. Each entry is one argv element, so
+    /// paths with spaces or quotes never need escaping.
+    /// </summary>
+    public static List<string> BuildExtractFramesArguments(string videoPath, string outputDir, double offset, double duration, string? hwAccel)
+    {
+        var args = new List<string>();
+        if (IsValidHwAccel(hwAccel))
+        {
+            args.Add("-hwaccel");
+            args.Add(hwAccel!);
+        }
+        args.Add("-ss");
+        args.Add(offset.ToString(CultureInfo.InvariantCulture));
+        args.Add("-t");
+        args.Add(duration.ToString(CultureInfo.InvariantCulture));
+        args.Add("-i");
+        args.Add(videoPath);
+        args.Add("-vf");
+        args.Add("select='gt(scene,0.1)',showinfo");
+        args.Add("-vsync");
+        args.Add("vfr");
+        args.Add("-frame_pts");
+        args.Add("true");
+        args.Add(Path.Combine(outputDir, "frame%05d.jpg"));
+        return args;
+    }
+
     public async Task<(bool IsOk, int ErrorCode, double frameRate)> ExtractFrames(string videoPath, string outputDir, double offset, double duration, string ffmpegPath, string? hwAccel = null)
     {
-        // Optional hardware-accelerated decode for the sync frame extraction.
-        var hw = !string.IsNullOrWhiteSpace(hwAccel) && !hwAccel.Equals("none", StringComparison.OrdinalIgnoreCase)
-            ? $"-hwaccel {hwAccel} "
-            : "";
-        var arguments =
-            $"{hw}-ss {offset} -t {duration} -i \"{videoPath}\" -vf \"select='gt(scene,0.1)',showinfo\" -vsync vfr -frame_pts true \"{outputDir}/frame%05d.jpg\"";
+        if (!string.IsNullOrWhiteSpace(hwAccel) && !hwAccel.Equals("none", StringComparison.OrdinalIgnoreCase) && !IsValidHwAccel(hwAccel))
+        {
+            _logger?.LogWarning("Ignoring invalid sync hardware accelerator setting {HwAccel}", hwAccel);
+        }
+        var arguments = BuildExtractFramesArguments(videoPath, outputDir, offset, duration, hwAccel);
 
         var output = "";
 
@@ -49,7 +85,7 @@ public class SyncingService : ISyncingService
             using (var process = new Process())
             {
                 process.StartInfo.FileName = ffmpegPath;
-                process.StartInfo.Arguments = arguments;
+                foreach (var arg in arguments) process.StartInfo.ArgumentList.Add(arg);
                 process.StartInfo.RedirectStandardOutput = true;
                 process.StartInfo.RedirectStandardError = true;
                 process.StartInfo.UseShellExecute = false;

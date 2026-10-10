@@ -1129,11 +1129,12 @@ public class DownloadService : IDownloadService
             };
         }
 
-        // Replace existing file if configured.
+        // Replace existing file if configured. It is NOT deleted here: a later download, mux,
+        // encode or cancel failure would otherwise leave nothing. MoveToFinalPath swaps it out
+        // once the replacement is complete.
         if (config.Download.ReplaceExistingFiles && File.Exists(outputPath))
         {
-            _logger?.LogInformation("Replacing existing file: {OutputPath}", outputPath);
-            File.Delete(outputPath);
+            _logger?.LogInformation("Will replace existing file: {OutputPath}", outputPath);
         }
 
         // Download streams. Always use a unique per-download working directory for the
@@ -1148,8 +1149,10 @@ public class DownloadService : IDownloadService
         // When the temp folder is enabled, also mux + encode INSIDE tempDir (which a user can
         // point at a tmpfs/RAM disk) and only move the finished file to the output volume at the
         // end. This keeps the heavy mux/transcode read-write off the output SSD. With the temp
-        // folder disabled, mux/encode write straight to the output dir as before (no extra move).
-        var transcodeInTemp = config.Download.UseTempFolder;
+        // folder disabled, mux/encode write straight to the output dir as before (no extra move) -
+        // unless existing files may be replaced: then they always stage in tempDir (which is under
+        // outputDir when the temp folder is off) so an existing file survives a failed replacement.
+        var transcodeInTemp = config.Download.UseTempFolder || config.Download.ReplaceExistingFiles;
         var preserveEncodingSource = false;
 
         try
@@ -1961,9 +1964,9 @@ public class DownloadService : IDownloadService
                         {
                             if (config.Download.ReplaceExistingFiles)
                             {
-                                // [PT] Ported from upstream c123093: respect ReplaceExistingFiles config in quality-probe rename path
-                                _logger?.LogInformation("Replacing existing file: {OutputPath}", newOutputPath);
-                                File.Delete(newOutputPath);
+                                // [PT] Ported from upstream c123093: respect ReplaceExistingFiles config in quality-probe rename path.
+                                // The existing file is swapped out by MoveToFinalPath only once the replacement is complete.
+                                _logger?.LogInformation("Will replace existing file: {OutputPath}", newOutputPath);
                             }
                             else
                             {
@@ -3864,24 +3867,34 @@ public class DownloadService : IDownloadService
 
         var destDir = Path.GetDirectoryName(destPath);
         if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
-        if (File.Exists(destPath))
+        if (File.Exists(destPath) && !replaceExisting)
         {
-            if (!replaceExisting)
-            {
-                throw new DownloadException($"Output already exists at '{destPath}'.", DownloadErrorType.OutputConflict);
-            }
-            File.Delete(destPath);
+            throw new DownloadException($"Output already exists at '{destPath}'.", DownloadErrorType.OutputConflict);
         }
 
+        // Stage the file beside the destination first (the slow, possibly cross-device step), then
+        // swap it in with a same-directory rename. An existing file is only replaced by that final
+        // rename, so a failed copy can never leave the user without the previous file.
+        var stagingPath = Path.Combine(destDir ?? string.Empty,
+            "." + Path.GetFileName(destPath) + ".crpart-" + Guid.NewGuid().ToString("N"));
         try
         {
-            File.Move(sourcePath, destPath);
+            try
+            {
+                File.Move(sourcePath, stagingPath);
+            }
+            catch (IOException)
+            {
+                // Cross-device (EXDEV) or similar: copy then remove the source.
+                File.Copy(sourcePath, stagingPath);
+                File.Delete(sourcePath);
+            }
+            File.Move(stagingPath, destPath, overwrite: replaceExisting);
         }
-        catch (IOException)
+        catch
         {
-            // Cross-device (EXDEV) or similar: copy then remove the source.
-            File.Copy(sourcePath, destPath, overwrite: replaceExisting);
-            File.Delete(sourcePath);
+            try { File.Delete(stagingPath); } catch { /* best effort */ }
+            throw;
         }
         _logger?.LogInformation("Moved output to {Dest}", destPath);
     }

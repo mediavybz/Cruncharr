@@ -212,6 +212,13 @@ public sealed class ScheduledDownloadsService
                         });
                         // AddToQueue handles exact episode/season identity and persists its queue.
                         if (result.Added) state.LastQueuedCount++;
+                        // Only a durable queue entry may mark the episode handled; otherwise a
+                        // restart before it finishes would lose it and later checks would skip it.
+                        if (!result.Persisted)
+                        {
+                            state.LastError = $"The download queue could not be saved; {subscription.Title} will be re-checked on the next run.";
+                            continue;
+                        }
                         subscription.HandledEpisodeIds.Add(episode.EpisodeId!);
                     }
                 }

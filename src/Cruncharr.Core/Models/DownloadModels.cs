@@ -73,7 +73,9 @@ public class QueueItem
     public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-public sealed record QueueAddResult(bool Added, QueueItem Item);
+// Persisted is false when the queue could not be written to disk: the item is live in memory
+// but would be lost on restart, so callers must not treat the admission as durable.
+public sealed record QueueAddResult(bool Added, QueueItem Item, bool Persisted = true);
 
 public class EpisodeInfo
 {

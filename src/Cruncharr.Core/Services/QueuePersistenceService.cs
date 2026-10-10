@@ -7,8 +7,9 @@ namespace Cruncharr.Core.Services;
 
 public interface IQueuePersistenceService : IDisposable
 {
-    void SaveQueue(List<QueueItem> queue);
-    void ScheduleSave(List<QueueItem> queue);
+    // Both return whether the queue is durably on disk; failures are logged, not thrown.
+    bool SaveQueue(List<QueueItem> queue);
+    bool ScheduleSave(List<QueueItem> queue);
     List<QueueItem>? LoadQueue();
     void DeleteQueue();
 }
@@ -46,21 +47,21 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
         }
     }
 
-    public void SaveQueue(List<QueueItem> queue)
+    public bool SaveQueue(List<QueueItem> queue)
     {
         lock (_syncLock)
         {
             _saveTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-            PersistQueueCore(queue);
+            return PersistQueueCore(queue);
         }
     }
 
-    public void ScheduleSave(List<QueueItem> queue)
+    public bool ScheduleSave(List<QueueItem> queue)
     {
         // Save immediately instead of using timer (timer may be trimmed in release builds)
         lock (_syncLock)
         {
-            PersistQueueCore(queue);
+            return PersistQueueCore(queue);
         }
     }
 
@@ -113,16 +114,15 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
         }
     }
 
-    private void PersistQueueCore(List<QueueItem> queue)
+    private bool PersistQueueCore(List<QueueItem> queue)
     {
         // PersistQueue disabled: do not write a snapshot to disk.
         if (!PersistEnabled)
-            return;
+            return true;
 
         if (queue.Count == 0)
         {
-            DeleteQueueCore();
-            return;
+            return TryDeleteQueueCore();
         }
 
         var snapshot = queue
@@ -133,8 +133,7 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
 
         if (snapshot.Count == 0)
         {
-            DeleteQueueCore();
-            return;
+            return TryDeleteQueueCore();
         }
 
         var json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
@@ -148,10 +147,26 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
             File.WriteAllText(tmp, json);
             File.Move(tmp, _queueFilePath, overwrite: true);
             _logger?.LogDebug("Queue persisted: {Count} items to {Path}", snapshot.Count, _queueFilePath);
+            return true;
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to write queue file to {Path}", _queueFilePath);
+            return false;
+        }
+    }
+
+    private bool TryDeleteQueueCore()
+    {
+        try
+        {
+            DeleteQueueCore();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to delete queue file {Path}", _queueFilePath);
+            return false;
         }
     }
 

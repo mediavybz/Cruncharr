@@ -53,6 +53,7 @@ public class QueueService : IQueueService, IDisposable
     private readonly object _queueMutationLock = new();
     private readonly IServiceProvider _serviceProvider;
     private readonly IQueuePersistenceService? _persistenceService;
+    private volatile bool _lastSaveSucceeded = true;
     private readonly ILogger<QueueService>? _logger;
     private ProcessingSlotManager? _processingSlots;
     private ProcessingSlotManager? _transcodeSlots;
@@ -202,7 +203,7 @@ public class QueueService : IQueueService, IDisposable
             if (blockingItem != null)
             {
                 _logger?.LogInformation("Episode {EpisodeId} is already queued as {QueueItemId}; duplicate admission suppressed", episode.Id, blockingItem.Id);
-                return new QueueAddResult(false, blockingItem);
+                return new QueueAddResult(false, blockingItem, _lastSaveSucceeded);
             }
 
             // Done/Error/Cancelled rows describe terminal attempts, not live work. Reuse the
@@ -221,9 +222,13 @@ public class QueueService : IQueueService, IDisposable
 
         _logger?.LogInformation("Added to queue: {EpisodeId} - {Title}", episode.Id, episode.Title);
         OnQueueStateChanged();
-        ScheduleSave();
+        var persisted = ScheduleSave();
+        if (!persisted)
+        {
+            _logger?.LogWarning("Episode {EpisodeId} was queued but the queue could not be saved; it will be lost if the app restarts before it finishes", episode.Id);
+        }
         RequestPump();
-        return new QueueAddResult(true, item);
+        return new QueueAddResult(true, item, persisted);
     }
 
     internal static bool BlocksDuplicateAdmission(DownloadProgress? progress)
@@ -1029,14 +1034,12 @@ public class QueueService : IQueueService, IDisposable
         OnQueueStateChanged();
     }
 
-    private void ScheduleSave()
+    private bool ScheduleSave()
     {
-        if (_persistenceService != null)
+        if (_persistenceService == null) return true;
+        lock (_queueMutationLock)
         {
-            lock (_queueMutationLock)
-            {
-                _persistenceService.ScheduleSave(_queue.Values.ToList());
-            }
+            return _lastSaveSucceeded = _persistenceService.ScheduleSave(_queue.Values.ToList());
         }
     }
 

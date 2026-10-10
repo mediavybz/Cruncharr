@@ -147,6 +147,28 @@ public class ScheduledDownloadsTests : IDisposable
     }
 
     [Fact]
+    public async Task UnsavedQueueAdmissionIsRetriedInsteadOfMarkedHandled()
+    {
+        var persisted = false;
+        _queue.Setup(q => q.AddToQueue(It.IsAny<EpisodeInfo>())).Returns<EpisodeInfo>(e =>
+        {
+            _queued.Add(e);
+            return new QueueAddResult(true, new QueueItem { Episode = e }, persisted);
+        });
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        Episode("NEW");
+
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Contains("could not be saved", JObject.FromObject(service.GetStatus())["LastError"]!.Value<string>());
+
+        persisted = true;
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        await Service().RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Equal(["NEW", "NEW"], _queued.Select(e => e.Id));
+    }
+
+    [Fact]
     public async Task SonarrFailureDoesNotQueueOrConsumePendingReleases()
     {
         _config.Sonarr.Enabled = true;

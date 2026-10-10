@@ -41,6 +41,76 @@ public class GuestCatalogAccessTests
         typeof(HttpClientWrapper).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(wrapper, new HttpClient(handler));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task RetiredGuestClients_FallBackWithoutSigningInOrChangingTheStreamingClient(int retiredClients)
+    {
+        var directory = Directory.CreateTempSubdirectory("cruncharr-guest-auth-");
+        try
+        {
+            var auth = new CrunchyrollAuthService(new CruncharrConfig { TokenFilePath = Path.Combine(directory.FullName, "token.json") });
+            using var transport = auth.HttpClient;
+            var originalClient = auth.StreamEndpoint.Authorization;
+            var clients = new List<string>();
+            SetTransport(transport, new Handler(async (request, cancellation) =>
+            {
+                clients.Add(request.Headers.Authorization!.ToString());
+                var form = System.Web.HttpUtility.ParseQueryString(await request.Content!.ReadAsStringAsync(cancellation));
+                Assert.Equal("client_id", form["grant_type"]);
+                Assert.Null(form["username"]);
+                Assert.False(request.Headers.Contains("Cookie"));
+                return clients.Count <= retiredClients
+                    ? new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{\"error\":\"invalid_client\"}") }
+                    : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"access_token\":\"guest\",\"expires_in\":3600,\"token_type\":\"Bearer\"}") };
+            }));
+
+            Assert.False(await auth.AuthenticateAsync(true, TestContext.Current.CancellationToken));
+            Assert.Equal("guest", auth.Token?.access_token);
+            Assert.False(auth.IsAuthenticated);
+            Assert.Equal(originalClient, auth.StreamEndpoint.Authorization);
+            Assert.Equal(retiredClients + 1, clients.Count);
+            Assert.Equal(clients.Count, clients.Distinct().Count());
+            Assert.True(await auth.RefreshTokenAsync(true, TestContext.Current.CancellationToken));
+            Assert.Equal(retiredClients + 1, clients.Count);
+        }
+        finally { directory.Delete(true); }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    public async Task GuestAuthentication_DoesNotSwitchClientsForUnrelatedFailures(HttpStatusCode status)
+    {
+        var auth = new CrunchyrollAuthService();
+        using var transport = auth.HttpClient;
+        var calls = 0;
+        SetTransport(transport, new Handler((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("{\"error\":\"unavailable\"}") });
+        }));
+        await auth.AuthAnonymousAsync(true, TestContext.Current.CancellationToken);
+        Assert.Null(auth.Token);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task GuestAuthentication_PropagatesCancellation()
+    {
+        var auth = new CrunchyrollAuthService();
+        using var transport = auth.HttpClient;
+        using var cancellation = new CancellationTokenSource();
+        SetTransport(transport, new Handler(async (_, token) =>
+        {
+            cancellation.Cancel();
+            await Task.Delay(Timeout.Infinite, token);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => auth.AuthAnonymousAsync(true, cancellation.Token));
+    }
+
     [Fact]
     public void GuestCanSelectPremiumEpisodeMetadataForSonarrRequests()
     {

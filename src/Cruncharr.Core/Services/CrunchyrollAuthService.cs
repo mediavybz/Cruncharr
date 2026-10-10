@@ -315,44 +315,48 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
         Subscription = new Subscription();
 
-        var formData = new Dictionary<string, string>{
-            { "grant_type", "client_id" },
-            { "scope", "offline_access" },
-            { "device_id", uuid },
-            { "device_type", StreamEndpoint.Device_type },
-        };
-
-        if (!string.IsNullOrEmpty(StreamEndpoint.Device_name))
+        // A retired device client must not prevent signed-out catalog access. Keep the
+        // configured streaming client unchanged; this fallback obtains a guest token only.
+        var clients = new[] { StreamEndpoint, StreamEndpointSecondary, MaintainedFallbackAuthSettings }
+            .Where(client => !string.IsNullOrEmpty(client.Authorization))
+            .DistinctBy(client => client.Authorization)
+            .ToArray();
+        for (var index = 0; index < clients.Length; index++)
         {
-            formData.Add("device_name", StreamEndpoint.Device_name);
-        }
+            cancellationToken.ThrowIfCancellationRequested();
+            var client = clients[index];
+            var formData = new Dictionary<string, string>
+            {
+                { "grant_type", "client_id" },
+                { "scope", "offline_access" },
+                { "device_id", uuid },
+                { "device_type", client.Device_type }
+            };
+            if (!string.IsNullOrEmpty(client.Device_name))
+                formData.Add("device_name", client.Device_name);
 
-        var requestContent = new FormUrlEncodedContent(formData);
+            using var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
+            {
+                Content = new FormUrlEncodedContent(formData)
+            };
+            request.Headers.Add("Authorization", client.Authorization);
+            request.Headers.Add("User-Agent", client.UserAgent);
+            var (isOk, content, error) = await _httpClient.SendRequestAsync(request,
+                suppressError: true, attachCookies: false, cancellationToken: cancellationToken);
+            if (isOk)
+            {
+                JsonTokenToFileAndVariable(content, uuid);
+                break;
+            }
 
-        var crunchyAuthHeaders = new Dictionary<string, string>{
-            { "Authorization", StreamEndpoint.Authorization },
-            { "User-Agent", StreamEndpoint.UserAgent }
-        };
-
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
-        {
-            Content = requestContent
-        };
-
-        foreach (var header in crunchyAuthHeaders)
-        {
-            request.Headers.Add(header.Key, header.Value);
-        }
-
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
-
-        if (isOk)
-        {
-            JsonTokenToFileAndVariable(content, uuid);
-        }
-        else
-        {
-            _logger?.LogError("Anonymous login failed: {Error}", error);
+            var retiredClient = content.Contains("client_inactive", StringComparison.Ordinal)
+                || content.Contains("invalid_client", StringComparison.Ordinal);
+            if (!retiredClient || index == clients.Length - 1)
+            {
+                _logger?.LogError("Anonymous login failed: {Error}", error);
+                break;
+            }
+            _logger?.LogWarning("Guest authentication client is unavailable; trying another configured client");
         }
 
         Profile = new CrProfile

@@ -223,12 +223,12 @@ public static class MpdParser
             number = segment.number,
             presentationTime = segment.presentationTime,
             uri = segment.resolvedUri,
-            byteRange = ObjectUtilities.GetMemberValue(segment, "byterange"),
+            byteRange = ByteRange.From((object?)ObjectUtilities.GetMemberValue(segment, "byterange")),
 
             map = new Map
             {
                 uri = segment.map.resolvedUri,
-                byteRange = ObjectUtilities.GetMemberValue(segment.map, "byterange")
+                byteRange = ByteRange.From((object?)ObjectUtilities.GetMemberValue(segment.map, "byterange"))
             }
         }).ToList() ?? [];
     }

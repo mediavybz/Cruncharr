@@ -885,7 +885,8 @@ public class QueueService : IQueueService, IDisposable
         {
             _logger?.LogError(ex, "Download failed: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
 
-            if (item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 5))
+            if (!IsDeterministicFailure(ex) &&
+                item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 5))
             {
                 var delay = TimeSpan.FromSeconds(Math.Max(1, (_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount)));
                 ScheduleRetry(item.Id, delay, $"Error: {ex.Message}");
@@ -913,6 +914,14 @@ public class QueueService : IQueueService, IDisposable
         DownloadErrorType.MaturityRating or
         DownloadErrorType.MissingLanguage or
         DownloadErrorType.OutputConflict);
+
+    // Programming/type errors fail the same way on every attempt; retrying them only delays the
+    // error and hides it behind "retrying" (e.g. the ByteRange binder crash on every segment).
+    internal static bool IsDeterministicFailure(Exception ex) => ex is
+        Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or
+        InvalidCastException or
+        MissingMemberException or
+        NotImplementedException;
 
     private bool IsCurrentQueueItem(QueueItem item)
     {

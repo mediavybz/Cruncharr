@@ -1,13 +1,8 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
@@ -28,7 +23,6 @@ public class CalendarService : ICalendarService
 {
     private readonly ILogger<CalendarService>? _logger;
     private readonly ICrunchyrollApiService _apiService;
-    private readonly ICrunchyrollAuthService _authService;
     private readonly HttpClientWrapper _httpClient;
 
     // Singleton service hit by concurrent requests -> caches must be thread-safe. A plain Dictionary
@@ -76,11 +70,10 @@ public class CalendarService : ICalendarService
     private readonly IHistoryService? _historyService;
     private readonly CruncharrConfig? _config;
 
-    public CalendarService(ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, ILogger<CalendarService>? logger = null,
+    public CalendarService(ICrunchyrollApiService apiService, ILogger<CalendarService>? logger = null,
         IHistoryService? historyService = null, CruncharrConfig? config = null)
     {
         _apiService = apiService;
-        _authService = authService;
         _logger = logger;
         _historyService = historyService;
         _config = config;

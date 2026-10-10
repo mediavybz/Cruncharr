@@ -5,7 +5,6 @@ using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using System.Linq;
 
 namespace Cruncharr.Core.Services;
 
@@ -1593,36 +1592,6 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     /// <summary>Crunchyroll's raw error from the most recent failed profile switch (for diagnostics/UI).</summary>
     public string? LastProfileSwitchError { get; private set; }
 
-    private async Task GetProfileAsync(bool useBetaApi, CancellationToken cancellationToken = default)
-    {
-        if (Token?.access_token == null)
-        {
-            _logger?.LogWarning("Missing Access Token");
-            return;
-        }
-
-        var request = HttpClientWrapper.CreateRequest(ApiUrls.Profile, HttpMethod.Get, true, Token.access_token);
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
-
-        if (isOk)
-        {
-            var profileTemp = JsonConvert.DeserializeObject<CrProfile>(content);
-            if (profileTemp != null)
-            {
-                Profile = profileTemp;
-                _logger?.LogInformation("Logged in as {Username}", Profile.Username);
-                await GetSubscriptionAsync(useBetaApi, cancellationToken);
-                // Fallback sync for accounts where the multi-profile endpoint is unavailable; no-ops
-                // if GetMultiProfileAsync already synced this profile (same key).
-                SyncDefaultLanguagesFromProfile();
-            }
-        }
-        else
-        {
-            _logger?.LogError("Failed to get profile: {Error}", error);
-        }
-    }
-
     // The factory "select everything" language lists. A config still holding the full set was never
     // customised by the user, so the profile sync may narrow it to the profile's language.
     private static readonly List<string> _factoryDubLanguages = new DownloadConfig().DubLanguages;
@@ -1679,7 +1648,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             var key = !string.IsNullOrWhiteSpace(Profile.ProfileId) ? Profile.ProfileId : Profile.Username;
             if (ApplyProfileLanguageDefaults(_config, key, Profile.PreferredContentAudioLanguage, Profile.PreferredContentSubtitleLanguage))
             {
-                var path = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+                var path = CruncharrConfig.ConfigFilePath;
                 _config.Save(path);
                 _logger?.LogInformation("Synced default languages from profile {Key}: audio={Audio} sub={Sub}",
                     key, _config.Download.DefaultAudio, _config.Download.DefaultSub);

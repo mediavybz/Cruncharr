@@ -1,11 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
-using System.Linq;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.IO;
 using Microsoft.Extensions.Logging;
 
 namespace Cruncharr.Core.Utils.Muxing.Syncing;
@@ -299,11 +294,15 @@ public class SyncingService : ISyncingService
             compareFrames.Reverse();
         }
 
-        var preprocessedCompareFrames = compareFrames.Select(f => new
-        {
-            Frame = f,
-            Pixels = GetPixelsArray(f.FilePath)
-        }).ToList();
+        // Each frame is decoded by its own short ffmpeg process; run them in parallel so the
+        // comparison window is prepared about as fast as the former in-process decoder.
+        var preprocessedCompareFrames = compareFrames.AsParallel().AsOrdered()
+            .WithDegreeOfParallelism(Math.Clamp(Environment.ProcessorCount, 2, 8))
+            .Select(f => new
+            {
+                Frame = f,
+                Pixels = GetPixelsArray(f.FilePath)
+            }).ToList();
 
         var delay = double.NaN;
 

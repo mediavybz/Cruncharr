@@ -10,13 +10,11 @@ public class SeriesController : ControllerBase
 {
     private readonly ICrunchyrollApiService _api;
     private readonly ILogger<SeriesController> _logger;
-    private readonly ICrunchyrollAuthService _auth;
 
-    public SeriesController(ICrunchyrollApiService api, ILogger<SeriesController> logger, ICrunchyrollAuthService auth)
+    public SeriesController(ICrunchyrollApiService api, ILogger<SeriesController> logger)
     {
         _api = api;
         _logger = logger;
-        _auth = auth;
     }
 
     /// <summary>

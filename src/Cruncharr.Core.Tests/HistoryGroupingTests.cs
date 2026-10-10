@@ -1,6 +1,5 @@
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
-using Xunit;
 
 namespace Cruncharr.Core.Tests;
 

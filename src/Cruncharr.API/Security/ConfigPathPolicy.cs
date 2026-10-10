@@ -8,6 +8,17 @@ namespace Cruncharr.API.Security;
 public static class ConfigPathPolicy
 {
     /// <summary>
+    /// Anchors a relative path under the config directory. The process works from /app,
+    /// which is read-only for the service user, so a bare "Cruncharr/queue.json" must
+    /// never be stored as-is.
+    /// </summary>
+    public static string RootRelative(string path, string configDir)
+    {
+        if (string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path) || string.IsNullOrWhiteSpace(configDir)) return path;
+        return Path.GetFullPath(Path.Combine(configDir, path));
+    }
+
+    /// <summary>
     /// True when <paramref name="path"/> is relative, or is located inside one of
     /// <paramref name="allowedRoots"/>. Roots that are null or blank are ignored.
     /// </summary>

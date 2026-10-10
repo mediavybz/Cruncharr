@@ -2,7 +2,6 @@ using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Newtonsoft.Json;
-using Xunit;
 
 namespace Cruncharr.Core.Tests;
 

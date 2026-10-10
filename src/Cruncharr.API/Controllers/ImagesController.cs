@@ -1,3 +1,4 @@
+using Cruncharr.Core.Configuration;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
@@ -38,7 +39,7 @@ public class ImagesController : ControllerBase
 
     private static string ResolveCacheDir()
     {
-        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+        var configPath = CruncharrConfig.ConfigFilePath;
         var baseDir = Path.GetDirectoryName(configPath);
         var dir = string.IsNullOrEmpty(baseDir)
             ? Path.Combine(Path.GetTempPath(), "cruncharr-imgcache")

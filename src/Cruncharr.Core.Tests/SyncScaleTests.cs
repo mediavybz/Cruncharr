@@ -69,6 +69,43 @@ public class SyncScaleTests : IDisposable
     }
 
     [Fact]
+    public async Task ExtractFrames_WithInstalledFfmpeg_ProducesSceneFramesAndFrameRate()
+    {
+        var svc = CreateService();
+        var directory = Directory.CreateTempSubdirectory("cruncharr-sync-extraction-");
+        try
+        {
+            var video = Path.Combine(directory.FullName, "scene clip.mkv");
+            using var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo(svc.FfmpegPath)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardError = true
+                }
+            };
+            foreach (var argument in new[] { "-v", "error", "-f", "lavfi", "-i",
+                "nullsrc=s=160x90:r=25:d=2,geq=lum='if(mod(N,25),20,220)':cb=128:cr=128",
+                "-c:v", "ffv1", video })
+                process.StartInfo.ArgumentList.Add(argument);
+            process.Start();
+            var errors = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+            await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+            Assert.True(process.ExitCode == 0, errors);
+
+            var result = await svc.ExtractFrames(video, directory.FullName, 0, 2, svc.FfmpegPath);
+
+            Assert.True(result.IsOk, $"FFmpeg exited with {result.ErrorCode}");
+            Assert.Equal(25, result.frameRate);
+            Assert.NotEmpty(Directory.GetFiles(directory.FullName, "frame*.jpg"));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void GetPixelsArray_ReturnsOneNormalizedSamplePerTargetPixel()
     {
         var svc = CreateService();

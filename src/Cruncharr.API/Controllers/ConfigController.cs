@@ -169,7 +169,7 @@ public class ConfigController : ControllerBase
                 {
                     Endpoint = "tv/android_tv",
                     Authorization = "", // Server-managed, not exposed to client
-                    UserAgent = "ANDROIDTV/3.66.0_22348 Android/16",
+                    UserAgent = "ANDROIDTV/3.75.0_22365 Android/16",
                     DeviceType = "Android TV",
                     DeviceName = "Android TV",
                     Video = true,

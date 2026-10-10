@@ -2901,7 +2901,7 @@ public class DownloadService : IDownloadService
         // instead of a hardcoded (and quickly stale) TV UA. Falls back to the current TV default.
         var manifestUserAgent = !string.IsNullOrEmpty(_auth.StreamEndpoint?.UserAgent)
             ? _auth.StreamEndpoint.UserAgent
-            : "ANDROIDTV/3.66.0_22348 Android/16";
+            : "ANDROIDTV/3.75.0_22365 Android/16";
         manifestRequest.Headers.Add("User-Agent", manifestUserAgent);
         if (!string.IsNullOrEmpty(videoToken))
         {

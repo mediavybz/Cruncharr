@@ -27,12 +27,22 @@ public sealed class SonarrLibraryVerificationService(
         public DateTime ExpiresUtc { get; set; }
     }
 
+    private sealed class Rejection
+    {
+        public string Title { get; set; } = "";
+        public DateTime ExpiresUtc { get; set; }
+    }
+
     private sealed class State
     {
         public string Scope { get; set; } = "";
         // Connection half of Scope; a library-only change carries verified identities over.
         public string ConnectionScope { get; set; } = "";
         public Dictionary<string, Match> Matches { get; set; } = [];
+        // Titles whose episode evidence rejected every candidate. Remembered for a day so a
+        // nominated-but-unrelated title (a franchise prefix) is not re-fetched from
+        // Crunchyroll and Sonarr on every verification run.
+        public Dictionary<string, Rejection> Rejected { get; set; } = [];
         [JsonIgnore] public HashSet<string> Pending { get; } = [];
         [JsonIgnore] public List<LibraryTitleFailure> Failures { get; } = [];
         [JsonIgnore] public bool Unavailable { get; set; }
@@ -106,7 +116,7 @@ public sealed class SonarrLibraryVerificationService(
             return state;
         }
 
-        var bySonarrId = library.ToDictionary(s => s.Id);
+        var bySonarrId = library.DistinctBy(s => s.Id).ToDictionary(s => s.Id);
         foreach (var (id, match) in saved.Matches)
         {
             if (!bySonarrId.TryGetValue(match.SonarrId, out var series)) continue;
@@ -114,6 +124,10 @@ public sealed class SonarrLibraryVerificationService(
             state.Matches[id] = new Match { Title = match.Title, SonarrId = match.SonarrId, TvdbId = series.TvdbId, ExpiresUtc = DateTime.MinValue };
             state.Pending.Add(id);
         }
+        // Rejections expire within a day on their own; exact-title matches for a newly added
+        // series are found immediately regardless, so carrying them over is safe.
+        foreach (var (id, rejection) in saved.Rejected ?? [])
+            if (rejection.ExpiresUtc > DateTime.UtcNow) state.Rejected[id] = rejection;
         logger?.LogInformation("Sonarr library changed; {Kept} of {Total} verified identities carried over pending re-verification",
             state.Matches.Count, saved.Matches.Count);
         return state;
@@ -135,19 +149,25 @@ public sealed class SonarrLibraryVerificationService(
                 state.Pending.Clear();
                 state.Failures.Clear();
                 state.Unavailable = false;
-                var current = catalog.Where(s => !string.IsNullOrEmpty(s.Id)).ToDictionary(s => s.Id!);
+                var now = DateTime.UtcNow;
+                var current = catalog.Where(s => !string.IsNullOrEmpty(s.Id)).DistinctBy(s => s.Id).ToDictionary(s => s.Id!);
                 foreach (var id in state.Matches.Keys.ToArray())
                     if (!current.TryGetValue(id, out var entry) || entry.Title != state.Matches[id].Title)
                         state.Matches.Remove(id);
+                foreach (var id in state.Rejected.Keys.ToArray())
+                    if (state.Rejected[id].ExpiresUtc <= now || !current.TryGetValue(id, out var entry) || entry.Title != state.Rejected[id].Title)
+                        state.Rejected.Remove(id);
                 foreach (var entry in catalog)
                 {
                     if (string.IsNullOrWhiteSpace(entry.Title) || string.IsNullOrEmpty(entry.Id)) continue;
                     if (index.FindExact(entry.Title) is { } exact)
                     {
-                        state.Matches[entry.Id] = new Match { Title = entry.Title, SonarrId = exact.Id, TvdbId = exact.TvdbId, ExpiresUtc = DateTime.UtcNow.AddDays(1) };
+                        state.Matches[entry.Id] = new Match { Title = entry.Title, SonarrId = exact.Id, TvdbId = exact.TvdbId, ExpiresUtc = now.AddDays(1) };
+                        state.Rejected.Remove(entry.Id);
                         exactCount++;
                     }
-                    else if ((!state.Matches.TryGetValue(entry.Id, out var saved) || saved.ExpiresUtc <= DateTime.UtcNow)
+                    else if ((!state.Matches.TryGetValue(entry.Id, out var saved) || saved.ExpiresUtc <= now)
+                             && !state.Rejected.ContainsKey(entry.Id)
                              && entry.EpisodeCount != 0 && index.Candidates(entry.Title).Count > 0)
                     {
                         candidates.Add(entry);
@@ -156,20 +176,31 @@ public sealed class SonarrLibraryVerificationService(
                 }
                 // Re-verify carried-over and expired identities first so stale badges clear quickly.
                 candidates = candidates.OrderByDescending(entry => state.Matches.ContainsKey(entry.Id!)).ToList();
-                logger?.LogInformation("Sonarr library verification: {Exact} exact titles, {Candidates} to verify by episodes ({Kept} previously verified)",
-                    exactCount, candidates.Count, candidates.Count(entry => state.Matches.ContainsKey(entry.Id!)));
+                logger?.LogInformation("Sonarr library verification: {Exact} exact titles, {Candidates} to verify by episodes ({Kept} previously verified, {Rejected} remembered rejections skipped)",
+                    exactCount, candidates.Count, candidates.Count(entry => state.Matches.ContainsKey(entry.Id!)), state.Rejected.Count);
             }
             foreach (var entry in candidates)
             {
                 stoppingToken.ThrowIfCancellationRequested();
+                // A changed library started a fresh run on a new state; let that one do the work.
+                lock (_gate) { if (!ReferenceEquals(state, _state)) break; }
                 try
                 {
                     var match = await sonarr.ResolveSeriesAsync(entry.Id!, entry.Title!, config, stoppingToken);
                     lock (_gate)
                     {
-                        if (match != null) state.Matches[entry.Id!] = new Match
-                        { Title = entry.Title!, SonarrId = match.Id, TvdbId = match.TvdbId, ExpiresUtc = DateTime.UtcNow.AddDays(1) };
-                        else state.Matches.Remove(entry.Id!); // a verified rejection, not an outage
+                        if (match != null)
+                        {
+                            state.Matches[entry.Id!] = new Match
+                            { Title = entry.Title!, SonarrId = match.Id, TvdbId = match.TvdbId, ExpiresUtc = DateTime.UtcNow.AddDays(1) };
+                            state.Rejected.Remove(entry.Id!);
+                        }
+                        else
+                        {
+                            // A verified rejection, not an outage: remember it for a day.
+                            state.Matches.Remove(entry.Id!);
+                            state.Rejected[entry.Id!] = new Rejection { Title = entry.Title!, ExpiresUtc = DateTime.UtcNow.AddDays(1) };
+                        }
                         state.Pending.Remove(entry.Id!);
                         if (++resolved % 25 == 0) Save(state);
                     }

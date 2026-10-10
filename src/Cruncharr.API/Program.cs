@@ -90,6 +90,12 @@ public class Program
         {
             config.TokenFilePath = Path.Combine(configDir, "token.json");
         }
+        // The legacy UI default "Cruncharr/queue.json" is relative too. /app is read-only for
+        // the service user, so creating that directory at startup would abort the whole app.
+        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(config.Queue.QueueFilePath))
+        {
+            config.Queue.QueueFilePath = Path.Combine(configDir, "queue.json");
+        }
 
         builder.Services.AddSingleton(config);
 
@@ -175,6 +181,13 @@ public class Program
         builder.Services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = async (context, token) =>
+            {
+                context.HttpContext.Response.Headers.RetryAfter = "60";
+                context.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+                await context.HttpContext.Response.WriteAsync(
+                    "{\"success\":false,\"message\":\"Too many login attempts; wait a minute and try again.\"}", token);
+            };
             options.AddPolicy("login", ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                 ClientKey(ctx), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                 {
@@ -277,16 +290,21 @@ public class Program
                              System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(providedBytes, requiredKeyBytes);
                     if (!ok)
                     {
-                        if (keyFailures.IsBlocked(client))
+                        // Only wrong keys count as guesses. Requests with no key at all are the
+                        // UI before its key is entered (and <img> loads, which cannot send one).
+                        var guessed = !string.IsNullOrEmpty(provided);
+                        if (guessed && keyFailures.IsBlocked(client))
                         {
-                            await Task.Delay(TimeSpan.FromSeconds(1), ctx.RequestAborted);
+                            try { await Task.Delay(TimeSpan.FromSeconds(1), ctx.RequestAborted); }
+                            catch (OperationCanceledException) { return; }
                             ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                             ctx.Response.Headers.RetryAfter = "60";
+                            ctx.Response.Headers["WWW-Authenticate"] = "ApiKey";
                             ctx.Response.ContentType = "application/json; charset=utf-8";
                             await ctx.Response.WriteAsync("{\"error\":\"TooManyRequests\",\"message\":\"Too many failed API key attempts; try again in a minute.\"}");
                             return;
                         }
-                        keyFailures.RecordFailure(client);
+                        if (guessed) keyFailures.RecordFailure(client);
                         ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                         ctx.Response.Headers["WWW-Authenticate"] = "ApiKey";
                         // Write the fixed contract directly: WriteAsJsonAsync needs generated

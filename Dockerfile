@@ -111,7 +111,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -u 1000 -m -s /bin/sh cruncharr \
     && mkdir -p /downloads /config /tools /widevine /tmp/cruncharr /app/fonts \
-    && chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app
+    && chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app/fonts
 
 WORKDIR /app
 COPY --from=dotnet-build --chmod=0755 /out/api/Cruncharr.API ./cruncharr-api
@@ -135,5 +135,7 @@ VOLUME ["/downloads", "/config", "/tools", "/widevine"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
     CMD grep -q ':2189 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null || exit 1
 
+# /app itself stays root-owned (only /app/fonts is user-writable) so the unprivileged
+# process cannot replace the binaries or UI that the next start would run.
 # Starts as root only to align bind-mount ownership, then execs the API through gosu.
 ENTRYPOINT ["./docker-entrypoint.sh"]

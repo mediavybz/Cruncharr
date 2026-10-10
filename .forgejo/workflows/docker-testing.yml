@@ -75,6 +75,7 @@ jobs:
           set -euo pipefail
 
           cleanup() {
+            docker logout ghcr.io >/dev/null 2>&1 || true
             docker rm --force "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
             docker image rm --force "$SMOKE_IMAGE" >/dev/null 2>&1 || true
             docker buildx prune --force --max-used-space 20gb >/dev/null 2>&1 || true

@@ -219,6 +219,12 @@ proxy). Before exposing it more widely:
   <key>`, or (only for the browser Server-Sent-Events stream, which cannot send
   headers) the `?apiKey=` query param. The web interface prompts for the key once and
   stores it locally. Health checks stay exempt.
+- **Allowed hosts.** Set the `AllowedHosts` env var (semicolon-separated, e.g.
+  `192.168.1.10;cruncharr.lan;localhost`) so the server only answers requests addressed
+  to it. This stops DNS-rebinding, where a web page you visit points its own hostname
+  at your LAN address to reach the API from your browser. State-changing API calls
+  issued by other sites' pages are also refused outright (`403`); your own UI and any
+  `CORS_ORIGINS` entries are unaffected.
 - **TLS.** The container serves plain HTTP. Terminate HTTPS at a reverse proxy
   (Caddy / nginx / Traefik) if it leaves your host.
 - **Credentials at rest.** Your account login and any Sonarr/proxy keys live in

@@ -1628,43 +1628,9 @@ public class HistoryService : IHistoryService, IDisposable
 
         await EnsureLoadedAsync();
 
-        // Mark episodes unavailable under lock
-        await _lock.WaitAsync();
-        try
-        {
-            var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
-
-            if (historySeries != null)
-            {
-                if (string.IsNullOrEmpty(seasonId))
-                {
-                    foreach (var historySeriesSeason in historySeries.Seasons)
-                    {
-                        foreach (var historyEpisode in historySeriesSeason.EpisodesList)
-                        {
-                            historyEpisode.IsEpisodeAvailableOnStreamingService = false;
-                        }
-                    }
-                }
-                else
-                {
-                    var matchingSeason = historySeries.Seasons.FirstOrDefault(historySeason => historySeason.SeasonId == seasonId);
-
-                    if (matchingSeason != null)
-                    {
-                        foreach (var historyEpisode in matchingSeason.EpisodesList)
-                        {
-                            historyEpisode.IsEpisodeAvailableOnStreamingService = false;
-                        }
-                    }
-                }
-            }
-        }
-        finally
-        {
-            _lock.Release();
-        }
-
+        // Fetch everything BEFORE touching availability: episodes are only marked unavailable
+        // (and then removed) for seasons whose data was actually retrieved. Marking first used to
+        // let a failed season fetch delete the series from History.
         // Perform API calls OUTSIDE the lock
         List<SeasonInfo>? seasons = null;
         try
@@ -1720,34 +1686,62 @@ public class HistoryService : IHistoryService, IDisposable
             _logger?.LogWarning(ex, "Failed to refresh series metadata for {SeriesId}", seriesId);
         }
 
+        var fetchedSeasons = new List<(string SeasonId, List<EpisodeInfo> Episodes)>();
+        var complete = true;
         foreach (var season in seasons)
         {
-            var candidateIds = new List<string>();
-            candidateIds.Add(season.Id);
-
             if (!string.IsNullOrEmpty(seasonId) &&
-                !candidateIds.Contains(seasonId, StringComparer.OrdinalIgnoreCase))
+                !string.Equals(season.Id, seasonId, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            foreach (var candidateId in candidateIds)
+            try
             {
-                try
-                {
-                    var seasonEpisodes = await _apiService.GetSeasonDataByIdAsync(candidateId, lang, true);
+                var seasonEpisodes = await _apiService.GetSeasonDataByIdAsync(season.Id, lang, true);
 
-                    if (seasonEpisodes != null && seasonEpisodes.Count > 0)
-                    {
-                        await UpdateWithSeasonDataAsync(seasonEpisodes);
-                        break;
-                    }
-                }
-                catch (Exception ex)
+                if (seasonEpisodes != null && seasonEpisodes.Count > 0)
                 {
-                    _logger?.LogWarning(ex, "Failed to refresh series data for candidate {CandidateId}", candidateId);
+                    fetchedSeasons.Add((season.Id, seasonEpisodes));
+                    continue;
+                }
+                _logger?.LogWarning("Season {SeasonId} returned no episodes", season.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to refresh series data for candidate {CandidateId}", season.Id);
+            }
+            complete = false;
+        }
+
+        // Mark the verified scope unavailable, then let the fetched data mark what still exists.
+        // A complete refresh verifies the whole requested scope (so episodes and seasons that
+        // Crunchyroll removed are dropped); a partial one only the seasons it fetched.
+        await _lock.WaitAsync();
+        try
+        {
+            var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+            var fetchedIds = fetchedSeasons.Select(season => season.SeasonId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var historySeason in historySeries?.Seasons ?? [])
+            {
+                var inScope = complete
+                    ? string.IsNullOrEmpty(seasonId) || historySeason.SeasonId == seasonId
+                    : historySeason.SeasonId != null && fetchedIds.Contains(historySeason.SeasonId);
+                if (!inScope) continue;
+                foreach (var historyEpisode in historySeason.EpisodesList)
+                {
+                    historyEpisode.IsEpisodeAvailableOnStreamingService = false;
                 }
             }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        foreach (var (_, seasonEpisodes) in fetchedSeasons)
+        {
+            await UpdateWithSeasonDataAsync(seasonEpisodes);
         }
 
         // Final update under lock
@@ -1790,7 +1784,9 @@ public class HistoryService : IHistoryService, IDisposable
         await MatchHistorySeriesWithSonarrAsync(false);
         await MatchHistoryEpisodesWithSonarrAsync(seriesId, false);
 
-        return true;
+        // A partial refresh kept the seasons it could not verify; report it so callers retry
+        // instead of acting on incomplete data.
+        return complete;
     }
 
     // Recover the real Crunchyroll series id from a downloaded episode of a history series whose id

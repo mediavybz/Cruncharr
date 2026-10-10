@@ -60,7 +60,7 @@ public class SyncingService : ISyncingService
         args.Add(videoPath);
         args.Add("-vf");
         args.Add("select='gt(scene,0.1)',showinfo");
-        args.Add("-vsync");
+        args.Add("-fps_mode");
         args.Add("vfr");
         args.Add("-frame_pts");
         args.Add("true");

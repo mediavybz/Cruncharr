@@ -25,6 +25,7 @@ _ReSharper*/
 *.DotSettings.user
 
 # Sensitive files - NEVER commit these
+/.secrets/
 widevine/*.pem
 widevine/*.bin
 test-data/widevine/*.pem

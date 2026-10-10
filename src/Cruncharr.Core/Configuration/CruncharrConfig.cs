@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using System.Linq;
 using Cruncharr.Core.Models;
 using YamlDotNet.Serialization;
 
@@ -8,6 +7,13 @@ namespace Cruncharr.Core.Configuration;
 public class CruncharrConfig
 {
     private static readonly object _saveLock = new();
+
+    /// <summary>
+    /// The config file location: CRUNCHYROLL_CONFIG_PATH, or /config/cruncharr.yaml. Read on each
+    /// access so tests and tools that change the variable see the new value.
+    /// </summary>
+    public static string ConfigFilePath =>
+        Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
 
     [JsonPropertyName("crunchyroll")]
     [YamlMember(Alias = "crunchyroll", ApplyNamingConventions = false)]

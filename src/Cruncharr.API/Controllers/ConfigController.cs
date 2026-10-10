@@ -133,7 +133,7 @@ public class ConfigController : ControllerBase
                 fresh.Queue.QueueFilePath = _config.Queue.QueueFilePath;
                 fresh.Download.OutputDirectory = _config.Download.OutputDirectory;
                 fresh.Download.TempDirectory = _config.Download.TempDirectory;
-                var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+                var configPath = CruncharrConfig.ConfigFilePath;
                 configPath = ValidatePath(configPath, "ConfigPath");
                 fresh.Save(configPath);
                 ApplySavedConfig(fresh, configPath);
@@ -479,7 +479,7 @@ public class ConfigController : ControllerBase
                 UpdateConfigFromRequest(request, candidate);
                 ValidateSettings(candidate);
 
-                var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+                var configPath = CruncharrConfig.ConfigFilePath;
                 configPath = ValidatePath(configPath, "ConfigPath");
                 candidate.Save(configPath);
                 ApplySavedConfig(candidate, configPath);
@@ -595,10 +595,12 @@ public class ConfigController : ControllerBase
         if (string.IsNullOrWhiteSpace(validated)) return validated;
         if (string.Equals(validated, currentValue, StringComparison.Ordinal)) return validated;
 
-        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+        var configPath = CruncharrConfig.ConfigFilePath;
+        var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? "";
+        validated = ConfigPathPolicy.RootRelative(validated, configDir);
         var roots = new[]
         {
-            Path.GetDirectoryName(configPath),
+            configDir,
             _config.Download.OutputDirectory,
             _config.Download.TempDirectory,
             Environment.GetEnvironmentVariable("CRUNCHYROLL_OUTPUT_DIR"),

@@ -3,7 +3,6 @@ using Cruncharr.Core.Services;
 using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.Muxing.Commands;
 using Cruncharr.Core.Utils.Muxing.Structs;
-using Xunit;
 
 namespace Cruncharr.Core.Tests;
 

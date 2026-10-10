@@ -82,6 +82,18 @@ public class SecurityHardeningTests
     }
 
     [Theory]
+    [InlineData("Cruncharr/queue.json", "/config/Cruncharr/queue.json")]
+    [InlineData("token.json", "/config/token.json")]
+    [InlineData("/downloads/bg.png", "/downloads/bg.png")]
+    [InlineData("", "")]
+    public void RelativeConfigPaths_AreAnchoredUnderTheConfigDirectory(string input, string expected)
+    {
+        // Newly anchored paths use the host's drive and directory separators on Windows.
+        if (input is "Cruncharr/queue.json" or "token.json") expected = Path.GetFullPath(expected);
+        Assert.Equal(expected, ConfigPathPolicy.RootRelative(input, "/config"));
+    }
+
+    [Theory]
     [InlineData("cuda", true)]
     [InlineData("vaapi", true)]
     [InlineData("videotoolbox", true)]

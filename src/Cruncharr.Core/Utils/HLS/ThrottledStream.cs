@@ -1,7 +1,3 @@
-using System;
-using System.IO;
-using System.Threading;
-
 namespace Cruncharr.Core.Utils.HLS;
 
 public class GlobalThrottler
@@ -159,7 +155,7 @@ public class ThrottledStream : Stream
 
     public override int Read(byte[] buffer, int offset, int count)
     {
-        int bytesRead = 0;
+        int bytesRead;
         if (_downloadSpeedLimit != 0)
         {
             int bytesToRead = Math.Min(count, (_downloadSpeedLimit * 1024) / 10);
@@ -175,7 +171,7 @@ public class ThrottledStream : Stream
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        int bytesRead = 0;
+        int bytesRead;
         if (_downloadSpeedLimit != 0)
         {
             int bytesToRead = Math.Min(buffer.Length, (_downloadSpeedLimit * 1024) / 10);

@@ -174,7 +174,6 @@ public class HistoryServiceSonarrTests : IDisposable
             _sonarrServiceMock.Object,
             _apiServiceMock.Object,
             null,
-            null,
             _config
         );
     }
@@ -229,7 +228,6 @@ public class HistoryServiceSonarrTests : IDisposable
             _loggerMock.Object,
             null, // No Sonarr service
             _apiServiceMock.Object,
-            null,
             null,
             _config
         );

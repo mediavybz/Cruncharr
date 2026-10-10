@@ -36,7 +36,13 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
         var dir = Path.GetDirectoryName(_queueFilePath);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
         {
-            Directory.CreateDirectory(dir);
+            // Never let an unwritable queue location abort startup; SaveQueue reports the
+            // failure on the first save instead and downloads still run.
+            try { Directory.CreateDirectory(dir); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger?.LogWarning(ex, "Queue directory {Dir} could not be created; the queue will not persist until the path is fixed", dir);
+            }
         }
     }
 

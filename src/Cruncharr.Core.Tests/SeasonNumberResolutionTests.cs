@@ -1,5 +1,4 @@
 using Cruncharr.Core.Utils;
-using Xunit;
 
 namespace Cruncharr.Core.Tests;
 

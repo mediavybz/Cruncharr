@@ -100,6 +100,39 @@ public sealed class SonarrLibraryVerificationTests : IDisposable
     }
 
     [Fact]
+    public async Task VerifiedRejectionIsRememberedAcrossRunsAndRestarts()
+    {
+        _sonarr.Setup(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SonarrSeries?)null);
+        var first = await Create().GetAsync(_library, _config, true, true, Token);
+        Assert.Empty(first.Matches);
+        Assert.Empty(first.PendingSeriesIds);
+
+        // A new instance reloads the cache from disk and must not re-fetch the rejected title.
+        var second = await Create().GetAsync(_library, _config, true, true, Token);
+        Assert.Empty(second.Matches);
+        Assert.Empty(second.PendingSeriesIds);
+        _sonarr.Verify(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ChangedLibraryRechecksPreviouslyRejectedAlias()
+    {
+        _sonarr.Setup(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SonarrSeries?)null);
+        await Create().GetAsync(_library, _config, true, true, Token);
+
+        var added = new SonarrSeries { Id = 859, TvdbId = 99999, Title = "We Without Wings (2026)" };
+        _library.Add(added);
+        _sonarr.Setup(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(added);
+
+        var result = await Create().GetAsync(_library, _config, true, true, Token);
+        Assert.Equal(859, result.Matches["G6759W00R"]);
+        _sonarr.Verify(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
     public async Task ExpiredIdentityStaysVisibleWhileReVerificationIsPendingOrFailing()
     {
         await Create().GetAsync(_library, _config, true, true, Token);

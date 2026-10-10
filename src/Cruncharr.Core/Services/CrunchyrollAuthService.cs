@@ -68,10 +68,10 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private static readonly CrAuthSettings DefaultAndroidTvAuthSettings = new()
     {
         Endpoint = "tv/android_tv",
-        // Fresh TV client (ANDROIDTV 3.66.0) - from upstream CRD Codeberg data.json, verified active
-        // and password-grant capable. Crunchyroll deactivated the older 3.59/3.61/3.65 TV clients.
-        Authorization = "Basic bGFzcnF6eGJlbXZvcWlveTU2bTA6ZHlodDVSWVYyXzIyUm4xaWF0X29YV0c2ejBUWUswazE=",
-        UserAgent = "ANDROIDTV/3.66.0_22348 Android/16",
+        // Fresh TV client (ANDROIDTV 3.75.0) - from upstream CRD Codeberg data.json, verified active
+        // 2026-10-10. Crunchyroll deactivated the older 3.59/3.61/3.65/3.66 TV clients.
+        Authorization = "Basic bWhkc2Z0eWdudXp5eGhwM3dkZnk6dnNkVUctV0NDSGpkREhYMG9XZGpPTDc1VzFOelRkQnU=",
+        UserAgent = "ANDROIDTV/3.75.0_22365 Android/16",
         Device_name = "Android TV",
         Device_type = "Android TV",
         Video = true,
@@ -122,7 +122,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         Audio = true
     };
 
-    private const string EmbeddedAuthData = @"[{""type"":""tv"",""Authorization"":""Basic bGFzcnF6eGJlbXZvcWlveTU2bTA6ZHlodDVSWVYyXzIyUm4xaWF0X29YV0c2ejBUWUswazE="",""version_name"":""3.66.0"",""version_code"":""22348""},{""type"":""mobile"",""Authorization"":""Basic YnFjaGljMmc3aTJzcnQ5cXU1c2I6NkVKT0tQLXNxU3hEb3RXdVgwZmVnV3pNX2FiTWRNWUo="",""version_name"":""3.110.0"",""version_code"":""101143""}]";
+    private const string EmbeddedAuthData = @"[{""type"":""tv"",""Authorization"":""Basic bWhkc2Z0eWdudXp5eGhwM3dkZnk6dnNkVUctV0NDSGpkREhYMG9XZGpPTDc1VzFOelRkQnU="",""version_name"":""3.75.0"",""version_code"":""22365""},{""type"":""mobile"",""Authorization"":""Basic YnFjaGljMmc3aTJzcnQ5cXU1c2I6NkVKT0tQLXNxU3hEb3RXdVgwZmVnV3pNX2FiTWRNWUo="",""version_name"":""3.110.0"",""version_code"":""101143""}]";
 
     public CrunchyrollAuthService(CruncharrConfig? config = null, ILogger<CrunchyrollAuthService>? logger = null, INotificationService? notification = null)
     {
@@ -285,7 +285,9 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         // Prefer the in-memory session: it is always at least as fresh as the token file
         // (every rotation saves both), while re-reading the file can pick up a refresh token
         // that has already been rotated and invalidated.
-        if (Token?.refresh_token == null && File.Exists(GetTokenFilePath()))
+        // A token without an access token is not a session (e.g. left by an interrupted login),
+        // so the saved file is the better source then too.
+        if ((Token?.refresh_token == null || Token.access_token == null) && File.Exists(GetTokenFilePath()))
         {
             var content = await File.ReadAllTextAsync(GetTokenFilePath());
             Token = JsonConvert.DeserializeObject<CrToken>(content);
@@ -517,7 +519,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 {
                     _logger?.LogInformation("Updating TV auth from version {Old} to {New}", currentVersion, ghAuthTv.VersionName);
                     StreamEndpoint.Authorization = ghAuthTv.Authorization;
-                    // Real Android TV UA carries the build code: "ANDROIDTV/3.66.0_22348 Android/16".
+                    // Real Android TV UA carries the build code: "ANDROIDTV/3.75.0_22365 Android/16".
                     var tvVersion = !string.IsNullOrEmpty(ghAuthTv.VersionCode)
                         ? $"{ghAuthTv.VersionName}_{ghAuthTv.VersionCode}"
                         : ghAuthTv.VersionName;
@@ -715,10 +717,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             throw new Exception("SSO login did not return a refresh token cookie");
         }
 
-        Token = new CrToken { refresh_token = refreshToken, device_id = uuid };
-
+        // Keep the SSO cookie local until the code exchange succeeds. Publishing a partial token
+        // (no access token, unset expiry) left it in memory after a failed login, where every
+        // later request reused it instead of the saved session or a guest token.
         await GetCodeAuthAsync(cancellationToken);
-        return await LoginWithCodeAsync(useBetaApi, uuid, cancellationToken);
+        return await LoginWithCodeAsync(useBetaApi, uuid, refreshToken, cancellationToken);
     }
 
     private async Task GetCodeAuthAsync(CancellationToken cancellationToken)
@@ -758,7 +761,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         }
     }
 
-    private async Task<bool> LoginWithCodeAsync(bool useBetaApi, string uuid, CancellationToken cancellationToken)
+    private async Task<bool> LoginWithCodeAsync(bool useBetaApi, string uuid, string ssoRefreshToken, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(_authCode))
         {
@@ -787,7 +790,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         request.Headers.Add("Authorization", StreamEndpoint.Authorization);
         request.Headers.Add("User-Agent", StreamEndpoint.UserAgent);
 
-        SetETPCookie(Token?.refresh_token ?? string.Empty);
+        SetETPCookie(ssoRefreshToken);
 
         var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
 
@@ -1011,6 +1014,14 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         return $"Login failed: {responsePreview}";
     }
 
+    // Failures another client cannot fix; retrying them only adds rate-limit pressure.
+    internal static bool IsTerminalLoginFailure(string? content)
+    {
+        return content != null &&
+               (content.Contains("invalid_credentials", StringComparison.Ordinal) ||
+                content.Contains("too_many_requests", StringComparison.Ordinal));
+    }
+
     private async Task<bool> LoginPasswordGrantAsync(string email, string password, bool useBetaApi, CancellationToken cancellationToken = default)
     {
         _logger?.LogInformation("Logging in (BetaAPI: {UseBeta})", useBetaApi); // email omitted: logs are diagnostics-readable
@@ -1071,14 +1082,43 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             if (content?.Contains("client_inactive") == true || content?.Contains("invalid_client") == true)
             {
                 _logger?.LogWarning("Primary (TV) auth client inactive; attempting credential update + secondary-client fallback...");
+                var retiredPrimaryAuthorization = StreamEndpoint.Authorization;
                 await UpdateAuthCredentialsAsync(cancellationToken);
+
+                // The update can replace the retired TV client with a newer one. Retry that first:
+                // it is the only refreshed client that supports the password grant.
+                if (!string.IsNullOrEmpty(StreamEndpoint.Authorization) &&
+                    StreamEndpoint.Authorization != retiredPrimaryAuthorization)
+                {
+                    var updatedFormData = new Dictionary<string, string>(formData);
+                    var updatedRequest = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
+                    {
+                        Content = new FormUrlEncodedContent(updatedFormData)
+                    };
+                    updatedRequest.Headers.Add("Authorization", StreamEndpoint.Authorization);
+                    updatedRequest.Headers.Add("User-Agent", StreamEndpoint.UserAgent);
+
+                    _logger?.LogInformation("Retrying login with updated primary (TV) client...");
+                    var (updatedOk, updatedContent, updatedError) = await _httpClient.SendRequestAsync(updatedRequest, suppressError: false, attachCookies: false);
+                    if (updatedOk)
+                    {
+                        JsonTokenToFileAndVariable(updatedContent, uuid);
+                        _logger?.LogInformation("Login successful with updated primary (TV) client");
+                        isOk = true;
+                    }
+                    else
+                    {
+                        content = updatedContent;
+                        error = updatedError;
+                    }
+                }
 
                 // Use the secondary (mobile) client token if it differs from the dead primary.
                 var fallbackAuth = !string.IsNullOrEmpty(StreamEndpointSecondary.Authorization)
                     ? StreamEndpointSecondary.Authorization
                     : StreamEndpoint.Authorization;
 
-                if (!string.IsNullOrEmpty(fallbackAuth))
+                if (!isOk && !IsTerminalLoginFailure(content) && !string.IsNullOrEmpty(fallbackAuth))
                 {
                     // IMPORTANT: build a NEW request body. FormUrlEncodedContent is consumed
                     // by the first SendAsync and cannot be reused - reusing it throws
@@ -1127,9 +1167,11 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 }
 
                 // Tier-2 fallback: the maintained crunchy-cli client (t-kdgp...). Reached ONLY when
-                // BOTH the primary (TV) and secondary (mobile) clients are inactive — login is
+                // the primary (TV) and secondary (mobile) clients have both failed — login is
                 // already broken at this point — so this can only help, never regress a working login.
-                if (!isOk && (content?.Contains("client_inactive") == true || content?.Contains("invalid_client") == true))
+                // Mobile clients answer the password grant with unsupported_grant_type rather than
+                // client_inactive, so any non-terminal failure continues here.
+                if (!isOk && !IsTerminalLoginFailure(content))
                 {
                     var maintainedForm = new Dictionary<string, string>
                     {
@@ -1746,7 +1788,9 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
     private bool IsTokenExpiredOrNearExpiry()
     {
-        return Token == null || DateTime.Now >= Token.expires - TokenRefreshBuffer;
+        // Add the buffer to "now" instead of subtracting it from expires: an unset expiry
+        // (DateTime.MinValue) underflowed and threw on every catalog request.
+        return Token?.access_token == null || DateTime.Now + TokenRefreshBuffer >= Token.expires;
     }
 
     public void LoadToken()

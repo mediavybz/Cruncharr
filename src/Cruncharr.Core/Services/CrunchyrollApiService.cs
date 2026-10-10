@@ -1754,14 +1754,22 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             _logger?.LogWarning(ex, "AniList seasonal fetch failed for {Season} {Year}", season, year);
         }
 
-        // 2) Crunchyroll seasonal_tag browse - add CR titles AniList didn't link.
-        foreach (var cr in await GetSeasonalFromCrunchyrollAsync(season, year, crLocale, cancellationToken))
+        // 2) Crunchyroll seasonal_tag browse - add CR titles AniList didn't link. An auth or
+        //    network failure here must not discard the AniList lineup already collected.
+        try
         {
-            if (!bySeries.ContainsKey(cr.Id))
+            foreach (var cr in await GetSeasonalFromCrunchyrollAsync(season, year, crLocale, cancellationToken))
             {
-                cr.OnCrunchyroll = true;
-                bySeries[cr.Id] = cr;
+                if (!bySeries.ContainsKey(cr.Id))
+                {
+                    cr.OnCrunchyroll = true;
+                    bySeries[cr.Id] = cr;
+                }
             }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex, "Crunchyroll seasonal fetch failed for {Season} {Year}", season, year);
         }
 
         return bySeries.Values.OrderBy(s => s.Title, StringComparer.OrdinalIgnoreCase).ToList();

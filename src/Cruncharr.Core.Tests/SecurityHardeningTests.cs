@@ -24,6 +24,8 @@ public class SecurityHardeningTests
     [InlineData("POST", "/api/v1/config/reset", "cross-site")]
     [InlineData("POST", "/api/v1/queue/pause", "same-site")]
     [InlineData("DELETE", "/api/v1/diagnostics/logs", "cross-site")]
+    [InlineData("GET", "/api/v1/diagnostics/logs", "cross-site")]
+    [InlineData("GET", "/api/v1/diagnostics/logs/errors", "same-site")]
     public void CrossSiteStateChanges_AreBlocked(string method, string path, string site)
     {
         Assert.True(RequestGuards.IsCrossSiteStateChange(Request(method, path, site, "https://evil.example"), Allowed));
@@ -34,12 +36,34 @@ public class SecurityHardeningTests
     [InlineData("POST", "/api/v1/config/reset", "none", null)]
     [InlineData("POST", "/api/v1/config/reset", null, null)]              // curl / scripts
     [InlineData("GET", "/api/v1/config", "cross-site", "https://evil.example")]
+    [InlineData("GET", "/api/v1/diagnostics/logs", "same-origin", null)]
+    [InlineData("GET", "/api/v1/diagnostics/logs", null, null)]
     [InlineData("OPTIONS", "/api/v1/config", "cross-site", "https://evil.example")]
     [InlineData("POST", "/api/v1/config", "cross-site", "https://dash.example")] // CORS_ORIGINS entry
     [InlineData("POST", "/index.html", "cross-site", "https://evil.example")]   // not an API path
     public void LegitimateRequests_AreAllowed(string method, string path, string? site, string? origin)
     {
         Assert.False(RequestGuards.IsCrossSiteStateChange(Request(method, path, site, origin), Allowed));
+    }
+
+    [Fact]
+    public void FailureThrottle_BlocksAfterLimitWithinWindowAndRecoversAfterIt()
+    {
+        var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var throttle = new FailureThrottle(3, TimeSpan.FromMinutes(1), () => now);
+
+        Assert.False(throttle.IsBlocked("10.0.0.5"));
+        throttle.RecordFailure("10.0.0.5");
+        throttle.RecordFailure("10.0.0.5");
+        Assert.False(throttle.IsBlocked("10.0.0.5"));
+        throttle.RecordFailure("10.0.0.5");
+        Assert.True(throttle.IsBlocked("10.0.0.5"));
+        Assert.False(throttle.IsBlocked("10.0.0.6"));
+
+        now = now.AddSeconds(61);
+        Assert.False(throttle.IsBlocked("10.0.0.5"));
+        throttle.RecordFailure("10.0.0.5");
+        Assert.False(throttle.IsBlocked("10.0.0.5"));
     }
 
     [Theory]

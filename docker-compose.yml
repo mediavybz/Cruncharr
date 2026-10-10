@@ -8,9 +8,15 @@ services:
     # etc.). gosu drops privileges with plain syscalls, so startup is unaffected.
     security_opt:
       - no-new-privileges:true
-    # Optional further hardening, all verified against the entrypoint's needs:
-    # cap_drop: [ALL]
-    # cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER]
+    # Only the capabilities the entrypoint needs: chown the mounts, then drop to PUID:PGID.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
     ports:
       # Bind to 127.0.0.1:8585:8585 instead when a reverse proxy sits in front.
       - "8585:8585"

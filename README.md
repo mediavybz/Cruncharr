@@ -211,6 +211,9 @@ proxy). Before exposing it more widely:
   at your LAN address to reach the API from your browser. State-changing API calls
   issued by other sites' pages are also refused outright (`403`); your own UI and any
   `CORS_ORIGINS` entries are unaffected.
+- **Brute-force limits.** `POST /api/v1/auth/login` allows 10 attempts per minute per
+  client address, and after 30 wrong API keys in a minute further wrong keys from that
+  address are delayed and answered `429`. A correct key is never blocked.
 - **TLS.** The container serves plain HTTP. Terminate HTTPS at a reverse proxy
   (Caddy / nginx / Traefik) if it leaves your host.
 - **Credentials at rest.** Your account login and any Sonarr/proxy keys live in

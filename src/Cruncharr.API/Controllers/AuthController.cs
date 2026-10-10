@@ -152,6 +152,7 @@ public class AuthController : ControllerBase
     /// Login with email and password
     /// </summary>
     [HttpPost("login")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("login")]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
     {
         if (request == null)

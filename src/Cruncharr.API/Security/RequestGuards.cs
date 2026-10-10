@@ -16,11 +16,16 @@ public static class RequestGuards
     public static bool IsCrossSiteStateChange(HttpRequest request, IReadOnlySet<string> allowedOrigins)
     {
         var method = request.Method;
-        if (HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method))
-            return false;
-
         var path = request.Path.Value ?? "";
         if (!path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (HttpMethods.IsOptions(method))
+            return false;
+        // Diagnostics logs expose stack traces and file paths, so even reads of them are
+        // limited to the UI's own origin.
+        var sensitiveRead = path.StartsWith("/api/v1/diagnostics", StringComparison.OrdinalIgnoreCase);
+        if ((HttpMethods.IsGet(method) || HttpMethods.IsHead(method)) && !sensitiveRead)
             return false;
 
         var site = request.Headers["Sec-Fetch-Site"].FirstOrDefault();

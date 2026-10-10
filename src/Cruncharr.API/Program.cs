@@ -13,6 +13,9 @@ namespace Cruncharr.API;
 
 public class Program
 {
+    /// <summary>Per-client partition key for throttles: the remote address, or "unknown".</summary>
+    private static string ClientKey(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
     public static async Task Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
@@ -167,6 +170,20 @@ public class Program
             });
         });
 
+        // Crunchyroll logins are proxied through this endpoint; a fixed window per client keeps
+        // password guessing (and accidental retry storms) off the upstream account.
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy("login", ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                ClientKey(ctx), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0
+                }));
+        });
+
         var app = builder.Build();
 
         // Compress responses before anything writes the body.
@@ -230,6 +247,10 @@ public class Program
         if (!string.IsNullOrWhiteSpace(requiredApiKey))
         {
             var requiredKeyBytes = System.Text.Encoding.UTF8.GetBytes(requiredApiKey);
+            // After 30 wrong keys in a minute a client's further wrong keys are delayed and
+            // answered 429. A correct key always passes, so one guesser behind a shared
+            // reverse-proxy address cannot lock out the real users.
+            var keyFailures = new FailureThrottle(30, TimeSpan.FromMinutes(1));
             app.Use(async (ctx, next) =>
             {
                 var path = ctx.Request.Path.Value ?? "";
@@ -237,6 +258,7 @@ public class Program
                 var isHealth = path.StartsWith("/api/v1/health", StringComparison.OrdinalIgnoreCase);
                 if (isApi && !isHealth && !HttpMethods.IsOptions(ctx.Request.Method))
                 {
+                    var client = ClientKey(ctx);
                     var provided = ctx.Request.Headers["X-Api-Key"].FirstOrDefault();
                     if (string.IsNullOrEmpty(provided))
                     {
@@ -255,6 +277,16 @@ public class Program
                              System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(providedBytes, requiredKeyBytes);
                     if (!ok)
                     {
+                        if (keyFailures.IsBlocked(client))
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(1), ctx.RequestAborted);
+                            ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                            ctx.Response.Headers.RetryAfter = "60";
+                            ctx.Response.ContentType = "application/json; charset=utf-8";
+                            await ctx.Response.WriteAsync("{\"error\":\"TooManyRequests\",\"message\":\"Too many failed API key attempts; try again in a minute.\"}");
+                            return;
+                        }
+                        keyFailures.RecordFailure(client);
                         ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                         ctx.Response.Headers["WWW-Authenticate"] = "ApiKey";
                         // Write the fixed contract directly: WriteAsJsonAsync needs generated
@@ -275,6 +307,7 @@ public class Program
                 "Set it (and AllowedHosts) if the container is reachable beyond a trusted network.");
         }
 
+        app.UseRateLimiter();
         app.UseAuthorization();
         app.MapControllers();
 

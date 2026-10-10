@@ -5,11 +5,8 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.IO;
 using Microsoft.Extensions.Logging;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
-using Image = SixLabors.ImageSharp.Image;
 
 namespace Cruncharr.Core.Utils.Muxing.Syncing;
 
@@ -32,6 +29,12 @@ public class SyncingService : ISyncingService
     {
         _logger = logger;
     }
+
+    /// <summary>
+    /// ffmpeg used to decode extracted frames. Set by <see cref="ExtractFrames"/> so the same
+    /// binary that wrote the frames reads them back; defaults to ffmpeg on PATH.
+    /// </summary>
+    public string FfmpegPath { get; set; } = "ffmpeg";
 
     /// <summary>
     /// ffmpeg hardware decoder names are plain identifiers (cuda, vaapi, qsv, videotoolbox, ...).
@@ -77,6 +80,7 @@ public class SyncingService : ISyncingService
             _logger?.LogWarning("Ignoring invalid sync hardware accelerator setting {HwAccel}", hwAccel);
         }
         var arguments = BuildExtractFramesArguments(videoPath, outputDir, offset, duration, hwAccel);
+        if (!string.IsNullOrWhiteSpace(ffmpegPath)) FfmpegPath = ffmpegPath;
 
         var output = "";
 
@@ -166,59 +170,67 @@ public class SyncingService : ISyncingService
         return ssim;
     }
 
-    private static float[] ExtractPixels(Image<Rgba32> image, int width, int height)
+    /// <summary>
+    /// Builds the ffmpeg arguments that decode one frame file to a WxH 8-bit grayscale raw
+    /// buffer on stdout. Stretching (not aspect-preserving) keeps every frame on the same grid.
+    /// </summary>
+    public static List<string> BuildDecodeArguments(string imagePath, int width, int height) =>
+    [
+        "-v", "error", "-nostdin",
+        "-i", imagePath,
+        "-vf", $"scale={width.ToString(CultureInfo.InvariantCulture)}:{height.ToString(CultureInfo.InvariantCulture)}:flags=bilinear,format=gray",
+        "-frames:v", "1",
+        "-f", "rawvideo",
+        "-"
+    ];
+
+    /// <summary>
+    /// Decodes a frame through ffmpeg into normalized grayscale samples (0..1), one per pixel,
+    /// row-major. ffmpeg already produced these JPEGs, so no managed image decoder is needed.
+    /// </summary>
+    private float[] DecodeGrayscale(string imagePath, int width, int height)
     {
-        float[] pixels = new float[width * height];
-        int index = 0;
-
-        image.ProcessPixelRows(accessor =>
+        var expected = checked(width * height);
+        using var process = new Process();
+        process.StartInfo.FileName = FfmpegPath;
+        foreach (var arg in BuildDecodeArguments(imagePath, width, height)) process.StartInfo.ArgumentList.Add(arg);
+        process.StartInfo.RedirectStandardOutput = true;
+        process.StartInfo.RedirectStandardError = true;
+        process.StartInfo.UseShellExecute = false;
+        process.StartInfo.CreateNoWindow = true;
+        process.Start();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var buffer = new MemoryStream(expected);
+        process.StandardOutput.BaseStream.CopyTo(buffer);
+        process.WaitForExit();
+        if (process.ExitCode != 0 || buffer.Length < expected)
         {
-            for (int y = 0; y < accessor.Height; y++)
-            {
-                Span<Rgba32> row = accessor.GetRowSpan(y);
-                // Bound by pixels.Length so a dimension mismatch can never overflow the buffer.
-                for (int x = 0; x < row.Length && index < pixels.Length; x++)
-                {
-                    pixels[index++] = row[x].R / 255f;
-                }
-            }
-        });
-
+            var detail = stderr.GetAwaiter().GetResult().Trim();
+            throw new InvalidOperationException(
+                $"ffmpeg could not decode {imagePath} (exit {process.ExitCode}, {buffer.Length} of {expected} bytes){(detail.Length > 0 ? ": " + detail : "")}");
+        }
+        var bytes = buffer.GetBuffer();
+        var pixels = new float[expected];
+        for (var i = 0; i < expected; i++) pixels[i] = bytes[i] / 255f;
         return pixels;
     }
 
     public (double ssim, double pixelDiff) ComputeSSIM(string imagePath1, string imagePath2, int targetWidth, int targetHeight)
     {
-        using (var image1 = Image.Load<Rgba32>(imagePath1))
-        using (var image2 = Image.Load<Rgba32>(imagePath2))
+        // Stretch (not Max) so both frames normalize to the exact same target grid regardless of
+        // source scale/aspect. Max preserves aspect ratio, so videos of different scales produced
+        // different actual dimensions and the two pixel arrays misaligned -> SSIM could not match
+        // frames and syncing failed ("unable to sync"). Grayscale thumbnails don't need aspect.
+        float[] pixels1 = DecodeGrayscale(imagePath1, targetWidth, targetHeight);
+        float[] pixels2 = DecodeGrayscale(imagePath2, targetWidth, targetHeight);
+
+        if (IsBlackFrame(pixels1) || IsBlackFrame(pixels2) ||
+            IsMonochromaticFrame(pixels1) || IsMonochromaticFrame(pixels2))
         {
-            // Stretch (not Max) so both frames normalize to the exact same target grid regardless of
-            // source scale/aspect. Max preserves aspect ratio, so videos of different scales produced
-            // different actual dimensions and the two pixel arrays misaligned -> SSIM could not match
-            // frames and syncing failed ("unable to sync"). Grayscale thumbnails don't need aspect.
-            image1.Mutate(x => x.Resize(new ResizeOptions
-            {
-                Size = new Size(targetWidth, targetHeight),
-                Mode = ResizeMode.Stretch
-            }).Grayscale());
-
-            image2.Mutate(x => x.Resize(new ResizeOptions
-            {
-                Size = new Size(targetWidth, targetHeight),
-                Mode = ResizeMode.Stretch
-            }).Grayscale());
-
-            float[] pixels1 = ExtractPixels(image1, targetWidth, targetHeight);
-            float[] pixels2 = ExtractPixels(image2, targetWidth, targetHeight);
-
-            if (IsBlackFrame(pixels1) || IsBlackFrame(pixels2) ||
-                IsMonochromaticFrame(pixels1) || IsMonochromaticFrame(pixels2))
-            {
-                return (-1.0, 99);
-            }
-
-            return (CalculateSSIM(pixels1, pixels2), CalculatePixelDifference(pixels1, pixels2));
+            return (-1.0, 99);
         }
+
+        return (CalculateSSIM(pixels1, pixels2), CalculatePixelDifference(pixels1, pixels2));
     }
 
     private static double CalculatePixelDifference(float[] pixels1, float[] pixels2)
@@ -255,14 +267,8 @@ public class SyncingService : ISyncingService
 
     public float[] GetPixelsArray(string imagePath, int targetWidth = 256, int targetHeight = 144)
     {
-        using var image = Image.Load<Rgba32>(imagePath);
         // Stretch to the exact grid (see ComputeSSIM) so frames from different-scale videos align.
-        image.Mutate(x => x.Resize(new ResizeOptions
-        {
-            Size = new Size(targetWidth, targetHeight),
-            Mode = ResizeMode.Stretch
-        }).Grayscale());
-        return ExtractPixels(image, targetWidth, targetHeight);
+        return DecodeGrayscale(imagePath, targetWidth, targetHeight);
     }
 
     public bool AreFramesSimilarPreprocessed(float[] image1, float[] image2, double ssimThreshold)

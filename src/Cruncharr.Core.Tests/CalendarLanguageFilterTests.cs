@@ -6,7 +6,6 @@ using Cruncharr.Core.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Xunit;
 
 namespace Cruncharr.Core.Tests;
 

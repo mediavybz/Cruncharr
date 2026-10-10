@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+using Cruncharr.Core.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -88,7 +85,7 @@ public class EncodingService : IEncodingService
     public EncodingService(ILogger<EncodingService>? logger = null, string? presetsDirectory = null)
     {
         _logger = logger;
-        var cfgPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+        var cfgPath = CruncharrConfig.ConfigFilePath;
         _presetsDir = presetsDirectory ?? Path.Combine(Path.GetDirectoryName(cfgPath) ?? ".", "encoding-presets");
         LoadCustomPresets();
     }

@@ -1,6 +1,5 @@
 using System.Reflection;
 using Cruncharr.Core.Configuration;
-using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 namespace Cruncharr.API.Services;

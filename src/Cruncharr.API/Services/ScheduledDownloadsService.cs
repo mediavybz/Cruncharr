@@ -26,7 +26,7 @@ public sealed class ScheduledDownloadsService
     {
         (_history, _queue, _auth, _sonarr, _config) = (history, queue, auth, sonarr, config);
         _sonarrRequests = sonarrRequests;
-        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+        var configPath = CruncharrConfig.ConfigFilePath;
         _path = statePath ?? Path.Combine(Path.GetDirectoryName(configPath) ?? ".", "subscriptions.json");
         // A corrupt subscription file must not reset the baseline and enqueue old episodes.
         try

@@ -1,7 +1,5 @@
 #pragma warning disable IL2026 // Using dynamic types might cause types or members to be removed by trimmer
-using System;
 using System.Dynamic;
-using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser.Segments;
 

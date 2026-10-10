@@ -2,12 +2,10 @@ using Cruncharr.API.Diagnostics;
 using Cruncharr.API.Security;
 using Cruncharr.API.Services;
 using Cruncharr.Core.Configuration;
-using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.Muxing.Syncing;
 using Newtonsoft.Json.Converters;
-using Newtonsoft.Json.Serialization;
 
 namespace Cruncharr.API;
 
@@ -68,7 +66,7 @@ public class Program
         builder.Services.AddSwaggerGenNewtonsoftSupport();
 
         // Load configuration
-        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+        var configPath = CruncharrConfig.ConfigFilePath;
         var config = File.Exists(configPath) ? CruncharrConfig.Load(configPath) : new CruncharrConfig();
         config.ApplyEnvironmentVariables();
 
@@ -117,7 +115,6 @@ public class Program
                 sp.GetService<ILogger<HistoryService>>(),
                 sp.GetService<ISonarrService>(),
                 sp.GetService<ICrunchyrollApiService>(),
-                sp.GetService<IMusicService>(),
                 sp.GetService<ICrunchyrollAuthService>(),
                 config));
         builder.Services.AddSingleton<IQueuePersistenceService>(sp =>

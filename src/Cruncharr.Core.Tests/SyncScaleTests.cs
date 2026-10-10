@@ -1,5 +1,4 @@
 using Cruncharr.Core.Utils.Muxing.Syncing;
-using Xunit;
 
 namespace Cruncharr.Core.Tests;
 

@@ -229,7 +229,7 @@ public class GuestCatalogAccessTests
         Assert.Equal(403, response.StatusCode);
         queue.Verify(value => value.AddToQueue(It.IsAny<EpisodeInfo>()), Times.Never);
         var api = new Mock<ICrunchyrollApiService>();
-        var series = new SeriesController(api.Object, NullLogger<SeriesController>.Instance, auth.Object);
+        var series = new SeriesController(api.Object, NullLogger<SeriesController>.Instance);
         Assert.IsType<BadRequestObjectResult>(series.ItemSelectMultiDub(new ItemSelectMultiDubRequest()));
         var download = new DownloadService(auth.Object, api.Object);
         var result = await download.DownloadEpisodeAsync(new EpisodeInfo { Id = "GEPISODE1" }, new CruncharrConfig(), cancellationToken: TestContext.Current.CancellationToken);

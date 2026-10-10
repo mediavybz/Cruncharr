@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text.Json;
 using Cruncharr.Core.Configuration;
-using Cruncharr.Core.Utils;
 using Microsoft.Extensions.Logging;
 
 #pragma warning disable IL2026

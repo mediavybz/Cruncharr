@@ -5,7 +5,6 @@ using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.DRM;
 using Cruncharr.Core.Utils.Parser;
 using Cruncharr.Core.Utils.Parser.Segments;
-using Cruncharr.Core.Utils.Parser.Utils;
 using Newtonsoft.Json;
 
 namespace Cruncharr.Core.Tests;

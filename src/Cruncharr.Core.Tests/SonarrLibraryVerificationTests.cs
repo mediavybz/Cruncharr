@@ -67,8 +67,7 @@ public sealed class SonarrLibraryVerificationTests : IDisposable
     [InlineData("credential")]
     [InlineData("removed")]
     [InlineData("identity")]
-    [InlineData("ambiguous")]
-    public async Task ChangedSonarrLibraryOrConnectionInvalidatesSavedIdentities(string change)
+    public async Task ChangedSonarrConnectionOrIdentityInvalidatesSavedIdentities(string change)
     {
         await Create().GetAsync(_library, _config, true, true, Token);
         switch (change)
@@ -77,9 +76,46 @@ public sealed class SonarrLibraryVerificationTests : IDisposable
             case "credential": _config.ApiKey = "different-key"; break;
             case "removed": _library.Clear(); break;
             case "identity": _library[0].TvdbId++; break;
-            case "ambiguous": _library.Add(new() { Id = 859, TvdbId = 99999, Title = "We Without Wings (2026)" }); break;
         }
         Assert.Empty((await Create().GetAsync(_library, _config, false, false, Token)).Matches);
+    }
+
+    [Fact]
+    public async Task LibraryChangeKeepsVerifiedIdentityVisibleUntilReVerified()
+    {
+        await Create().GetAsync(_library, _config, true, true, Token);
+        // A newly added remake makes the bare title ambiguous: the saved identity must be
+        // re-checked, but the badge stays up meanwhile instead of every match vanishing.
+        _library.Add(new() { Id = 859, TvdbId = 99999, Title = "We Without Wings (2026)" });
+        var carried = await Create().GetAsync(_library, _config, false, false, Token);
+        Assert.Equal(858, carried.Matches["G6759W00R"]);
+        Assert.Contains("G6759W00R", carried.PendingSeriesIds);
+
+        // Re-verification rejects it (episodes belong to the remake): a verified rejection removes it.
+        _sonarr.Setup(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SonarrSeries?)null);
+        var verified = await Create().GetAsync(_library, _config, true, true, Token);
+        Assert.Empty(verified.Matches);
+        Assert.Empty(verified.PendingSeriesIds);
+    }
+
+    [Fact]
+    public async Task ExpiredIdentityStaysVisibleWhileReVerificationIsPendingOrFailing()
+    {
+        await Create().GetAsync(_library, _config, true, true, Token);
+        var json = await File.ReadAllTextAsync(CachePath, Token);
+        var expired = System.Text.RegularExpressions.Regex.Replace(json, "\"ExpiresUtc\":\"[^\"]+\"", "\"ExpiresUtc\":\"2000-01-01T00:00:00Z\"");
+        Assert.NotEqual(json, expired);
+        await File.WriteAllTextAsync(CachePath, expired, Token);
+
+        Assert.Equal(858, (await Create().GetAsync(_library, _config, false, false, Token)).Matches["G6759W00R"]);
+
+        _sonarr.Setup(s => s.ResolveSeriesAsync("G6759W00R", It.IsAny<string>(), It.IsAny<SonarrConfig>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Crunchyroll lists no episodes"));
+        var failing = await Create().GetAsync(_library, _config, true, true, Token);
+        Assert.Equal(858, failing.Matches["G6759W00R"]);
+        Assert.Contains("G6759W00R", failing.PendingSeriesIds);
+        Assert.Equal("Crunchyroll lists no episodes", Assert.Single(failing.Failures).Reason);
     }
 
     [Fact]

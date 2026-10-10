@@ -126,6 +126,8 @@
             }
             try {
                 const data = await response.json();
+                // The item is queued but would not survive a restart; tell the user why.
+                if (data.persisted === false) showToast(data.message || 'The download queue could not be saved.', 'warning');
                 return { added: data.added !== false, destination: data.destination || 'cruncharr', data };
             } catch (e) {
                 // Compatibility with an older backend that returned no admission flag.

@@ -10,6 +10,13 @@ name: FFmpeg pin update
 # commit is pushed with the Actions token, and Forgejo does not trigger
 # on.push workflows for Actions-token pushes, so the in-job validation is
 # also the only validation this rotation gets.)
+#
+# testing receives the rotation directly: it is the validation channel and
+# the published testing image is smoke-tested before anyone depends on it.
+# master is the stable channel, so its rotation is pushed to the
+# ci/ffmpeg-pin-master branch and opened as a pull request for a human to
+# merge; the checksum is computed from the same download it pins, so a
+# compromised upstream build must never reach master without review.
 
 on:
   schedule:
@@ -33,6 +40,7 @@ jobs:
     timeout-minutes: 150
     permissions:
       contents: write
+      pull-requests: write
     env:
       FORCE_INPUT: ${{ inputs.force }}
     steps:
@@ -67,7 +75,10 @@ jobs:
           ref: master
           persist-credentials: true
 
-      - name: Rotate master pin
+      - name: Rotate master pin on a review branch
+        env:
+          PIN_BRANCH: ci/ffmpeg-pin-master
+          API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           force_flag=''
@@ -77,11 +88,26 @@ jobs:
           bash scripts/update-ffmpeg-pin.sh --apply $force_flag
           if git diff --quiet Dockerfile; then
             echo "master pin already current"
-          else
-            echo "Validating rotated pin with a full cache-only build ..."
-            bash scripts/publish-docker.sh
-            git config user.name "Cruncharr Deploy"
-            git config user.email "deploy@cruncharr.local"
-            git commit -am "build(docker): rotate pinned BtbN ffmpeg autobuild"
-            git push
+            exit 0
           fi
+          echo "Validating rotated pin with a full cache-only build ..."
+          bash scripts/publish-docker.sh
+          release=$(sed -n 's/^ARG FFMPEG_RELEASE=//p' Dockerfile | head -1 | tr -d '[:space:]')
+          git config user.name "Cruncharr Deploy"
+          git config user.email "deploy@cruncharr.local"
+          git checkout -B "$PIN_BRANCH"
+          git commit -am "build(docker): rotate pinned BtbN ffmpeg autobuild"
+          git push --force origin "$PIN_BRANCH"
+
+          # Open the pull request unless one from this branch is already waiting.
+          api="${GITHUB_API_URL:-${GITHUB_SERVER_URL}/api/v1}/repos/${GITHUB_REPOSITORY}"
+          open_prs=$(curl -fsSL -H "Authorization: token ${API_TOKEN}" "${api}/pulls?state=open&limit=50")
+          if printf '%s' "$open_prs" | grep -q "\"ref\": *\"${PIN_BRANCH}\""; then
+            echo "A pull request for ${PIN_BRANCH} is already open; updated its branch."
+            exit 0
+          fi
+          body="Automated BtbN ffmpeg pin rotation to ${release}. The Dockerfile was validated with a full cache-only build for both architectures before this branch was pushed. Review and merge to keep stable image builds working before the previous release is pruned upstream."
+          payload=$(printf '{"title":"build(docker): rotate pinned BtbN ffmpeg autobuild to %s","head":"%s","base":"master","body":"%s"}' "$release" "$PIN_BRANCH" "$body")
+          curl -fsSL -X POST -H "Authorization: token ${API_TOKEN}" -H "Content-Type: application/json" \
+            -d "$payload" "${api}/pulls" >/dev/null
+          echo "Opened a pull request for ${PIN_BRANCH}"

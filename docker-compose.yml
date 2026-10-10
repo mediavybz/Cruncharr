@@ -4,7 +4,21 @@ services:
     image: cruncharr:latest
     container_name: cruncharr
     restart: unless-stopped
+    # Prevents any process in the container from gaining privileges (setuid binaries
+    # etc.). gosu drops privileges with plain syscalls, so startup is unaffected.
+    security_opt:
+      - no-new-privileges:true
+    # Only the capabilities the entrypoint needs: chown the mounts, then drop to PUID:PGID.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
     ports:
+      # Bind to 127.0.0.1:8585:8585 instead when a reverse proxy sits in front.
       - "8585:8585"
     volumes:
       # USER-FACING DIRECTORIES (mounted from host):
@@ -46,7 +60,14 @@ services:
       # when it shares PGID with Cruncharr but runs under a different PUID.
       - UMASK=${UMASK:-002}
 
-      # Crunchyroll credentials (optional - can also be in config file)
+      # Recommended when anything beyond your own LAN can reach port 8585:
+      # every /api request must then carry the key (X-Api-Key header).
+      # - CRUNCHARR_API_KEY=${CRUNCHARR_API_KEY:-}
+      # Host names/IPs the server answers to; blocks DNS-rebinding from other sites.
+      # - AllowedHosts=192.168.1.10;cruncharr.lan;localhost
+
+      # Crunchyroll credentials (optional - can also be in config file; the file is
+      # mode 600 while environment variables are visible to every process)
       - CRUNCHYROLL_EMAIL=${CRUNCHYROLL_EMAIL:-}
       - CRUNCHYROLL_PASSWORD=${CRUNCHYROLL_PASSWORD:-}
       

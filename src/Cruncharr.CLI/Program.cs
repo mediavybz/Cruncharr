@@ -26,7 +26,10 @@ class Program
         rootCommand.AddCommand(CreateConfigCommand());
         rootCommand.AddCommand(DaemonCommand.Create(provider));
 
-        return await rootCommand.InvokeAsync(args);
+        // Handlers report failure through Environment.ExitCode; returning InvokeAsync's 0 from
+        // Main would overwrite it, so every failed command used to exit with 0.
+        var exitCode = await rootCommand.InvokeAsync(args);
+        return exitCode != 0 ? exitCode : Environment.ExitCode;
     }
 
     static Command CreateLoginCommand(IServiceProvider provider)
@@ -246,29 +249,17 @@ class Program
         getCommand.Add(getKeyArg);
         getCommand.SetHandler((string key) =>
         {
-            var config = LoadConfig();
-            var prop = typeof(CruncharrConfig).GetProperty(key);
-            if (prop != null)
-            {
-                Console.WriteLine(prop.GetValue(config));
-            }
+            Environment.ExitCode = ConfigEditor.Get(GetConfigPath(), key, Console.Out, Console.Error);
         }, getKeyArg);
 
-        var setCommand = new Command("set", "Set configuration value");
-        var setKeyArg = new Argument<string>("key", "Configuration key");
-        var setValueArg = new Argument<string>("value", "Configuration value");
+        var setCommand = new Command("set", "Set configuration value (e.g. download.output_dir /media or LogMode true)");
+        var setKeyArg = new Argument<string>("key", "Configuration key: a dotted path such as Download.OutputDirectory");
+        var setValueArg = new Argument<string>("value", "Configuration value; lists are comma-separated");
         setCommand.Add(setKeyArg);
         setCommand.Add(setValueArg);
         setCommand.SetHandler((string key, string value) =>
         {
-            var config = LoadConfig();
-            var prop = typeof(CruncharrConfig).GetProperty(key);
-            if (prop != null)
-            {
-                prop.SetValue(config, value);
-                SaveConfig(config);
-                Console.WriteLine($"Set {key} = {value}");
-            }
+            Environment.ExitCode = ConfigEditor.Set(GetConfigPath(), key, value, Console.Out, Console.Error);
         }, setKeyArg, setValueArg);
 
         command.AddCommand(getCommand);

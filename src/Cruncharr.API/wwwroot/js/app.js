@@ -197,6 +197,7 @@
         let historyFilterText = '';
         const calendarSeriesTitleCache = new Map(); // seriesId -> canonical title from /series/{id}/list
         const calendarRequestGate = CruncharrCalendarRequests.createLatestRequestGate();
+        const seasonalRequestGate = CruncharrCalendarRequests.createLatestRequestGate();
 
         // Constants
         const AUTH_NOTIFICATION_THROTTLE_MS = 30000;
@@ -360,6 +361,9 @@
             }
             if (currentPage === 'calendar' && page !== 'calendar') {
                 calendarRequestGate.cancel();
+            }
+            if (currentPage === 'seasonal' && page !== 'seasonal') {
+                seasonalRequestGate.cancel();
             }
             // Clear any pending browse result timeout
             if (selectBrowseResultTimeout) {
@@ -2291,17 +2295,23 @@
             if (!content || !seasonalSeason || !seasonalYear) return;
             content.innerHTML = '<div class="loading"><div class="spinner"></div>Loading seasonal anime...</div>';
 
+            // Only the latest season/year selection may render; switching aborts the older request.
+            const request = seasonalRequestGate.begin();
             try {
-                const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(seasonalSeason)}&year=${encodeURIComponent(seasonalYear)}`);
+                const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(seasonalSeason)}&year=${encodeURIComponent(seasonalYear)}`, { signal: request.signal });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                if (!seasonalRequestGate.isCurrent(request)) return;
                 renderSeasonalContent(data || []);
             } catch (e) {
+                if (e?.name === 'AbortError' || !seasonalRequestGate.isCurrent(request)) return;
                 content.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load seasonal anime</div>
                     </div>`;
+            } finally {
+                seasonalRequestGate.finish(request);
             }
         }
 

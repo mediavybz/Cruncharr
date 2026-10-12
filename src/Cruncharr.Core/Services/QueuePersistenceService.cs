@@ -22,6 +22,8 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
     private Timer? _saveTimer;
     private readonly ILogger<QueuePersistenceService>? _logger;
     private readonly CruncharrConfig? _config;
+    // Set when the existing queue file could not be read or set aside; saves are refused while set.
+    private string? _loadError;
 
     // Queue persistence is always on: a downloader that loses its queue on every container
     // restart (backup jobs, updates) is worse than a small queue.json in /config. This
@@ -73,12 +75,23 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
         if (!File.Exists(_queueFilePath))
             return null;
 
+        string json;
         try
         {
-            var json = File.ReadAllText(_queueFilePath);
-            if (string.IsNullOrWhiteSpace(json))
-                return null;
+            json = File.ReadAllText(_queueFilePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _loadError = $"Could not read the queue file {_queueFilePath}: {ex.Message} " +
+                         "The queue will not be saved over it until the file can be read and Cruncharr is restarted.";
+            _logger?.LogError(ex, "{Error}", _loadError);
+            return null;
+        }
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
 
+        try
+        {
             var queue = JsonConvert.DeserializeObject<List<QueueItem>>(json);
 
             if (queue != null)
@@ -93,7 +106,19 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to load queue from {Path}", _queueFilePath);
+            // Keep the damaged file aside so the next save cannot replace the only copy.
+            var damaged = $"{_queueFilePath}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+            try
+            {
+                File.Move(_queueFilePath, damaged);
+                _logger?.LogError(ex, "Queue file {Path} could not be read and was kept as {Damaged}; starting with an empty queue", _queueFilePath, damaged);
+            }
+            catch (Exception moveEx)
+            {
+                _loadError = $"Could not load the queue file {_queueFilePath}: {ex.Message} " +
+                             "The queue will not be saved over it until the file is fixed and Cruncharr is restarted.";
+                _logger?.LogError(moveEx, "{Error}", _loadError);
+            }
             return null;
         }
     }
@@ -102,6 +127,7 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
     {
         lock (_syncLock)
         {
+            if (_loadError != null) return;
             DeleteQueueCore();
         }
     }
@@ -119,6 +145,14 @@ public class QueuePersistenceService : IQueuePersistenceService, IDisposable
         // PersistQueue disabled: do not write a snapshot to disk.
         if (!PersistEnabled)
             return true;
+
+        // The saved queue could not be loaded, so this in-memory queue is incomplete: writing or
+        // deleting the file would lose the saved items. Report every save as not durable.
+        if (_loadError != null)
+        {
+            _logger?.LogError("Queue not saved: {Error}", _loadError);
+            return false;
+        }
 
         if (queue.Count == 0)
         {

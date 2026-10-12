@@ -2814,7 +2814,7 @@
 
                 if (authStatus.isAuthenticated) {
                     if (nameEl) nameEl.textContent = authStatus.username || 'User';
-                    if (subEl) subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free';
+                    if (subEl) { subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free'; subEl.title = ''; }
                     if (avatarEl) { const au = resolveAvatarUrl(authStatus.avatar); avatarEl.innerHTML = au && isSafeUrl(au) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(au)} alt="" onerror="this.outerHTML='<span>&#128100;</span>'">` : '<span>&#128100;</span>'; }
                     if (loginBtn) loginBtn.style.display = 'none';
                     if (logoutBtn) logoutBtn.style.display = 'inline-block';
@@ -2843,9 +2843,18 @@
                     } else if (profileSection) {
                         profileSection.style.display = 'none';
                     }
+                } else if (authStatus.sessionError) {
+                    // Saved login whose refresh is failing: it is kept and retried, browsing
+                    // uses a guest session meanwhile. Logging in again or out both stay available.
+                    if (nameEl) nameEl.textContent = (authStatus.username && authStatus.username !== '???') ? authStatus.username : 'Saved login';
+                    if (subEl) { subEl.textContent = 'Login not refreshing - retrying'; subEl.title = authStatus.sessionError; }
+                    if (avatarEl) avatarEl.innerHTML = '<span>&#128100;</span>';
+                    if (loginBtn) loginBtn.style.display = 'inline-block';
+                    if (logoutBtn) logoutBtn.style.display = 'inline-block';
+                    if (profileSection) profileSection.style.display = 'none';
                 } else {
                     if (nameEl) nameEl.textContent = 'Not logged in';
-                    if (subEl) subEl.textContent = 'Anonymous mode';
+                    if (subEl) { subEl.textContent = 'Anonymous mode'; subEl.title = ''; }
                     if (avatarEl) avatarEl.innerHTML = '<span>&#128100;</span>';
                     if (loginBtn) loginBtn.style.display = 'inline-block';
                     if (logoutBtn) logoutBtn.style.display = 'none';

@@ -66,7 +66,7 @@ public class SearchResultParsingTests
 
         var authenticated = await api.EnsureTokenAsync(CancellationToken.None);
 
-        Assert.True(authenticated);
+        Assert.Equal("stale", authenticated);
         auth.Verify(service => service.RefreshTokenAsync(true, It.IsAny<CancellationToken>(), false), Times.Once);
         auth.Verify(service => service.AuthenticateAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -83,7 +83,7 @@ public class SearchResultParsingTests
 
         var authenticated = await api.EnsureTokenAsync(CancellationToken.None);
 
-        Assert.True(authenticated);
+        Assert.Equal("fresh", authenticated);
         auth.Verify(service => service.AuthenticateAsync(true, It.IsAny<CancellationToken>()), Times.Once);
         auth.Verify(service => service.RefreshTokenAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
     }

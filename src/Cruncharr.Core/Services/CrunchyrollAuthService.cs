@@ -15,6 +15,12 @@ public interface ICrunchyrollAuthService
     CrMultiProfile MultiProfile { get; }
     Subscription? Subscription { get; }
     bool IsAuthenticated { get; }
+    // Why the saved login cannot be used right now: its last refresh failed without Crunchyroll
+    // rejecting it, so the refresh token is kept and retried. Null while the session works.
+    string? SessionError => null;
+    // A guest access token for catalog requests while the saved login cannot be refreshed. It is
+    // kept apart from Token so the account session (and its file) stay intact for the retry.
+    Task<string?> GetGuestAccessTokenAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
     HttpClientWrapper HttpClient { get; }
     CrAuthSettings AuthSettings { get; }
     CrAuthSettings StreamEndpoint { get; }
@@ -58,7 +64,12 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     public CrProfile Profile { get; private set; } = new();
     public CrMultiProfile MultiProfile { get; private set; } = new();
     public Subscription? Subscription { get; private set; }
-    public bool IsAuthenticated => Token?.access_token != null && Profile.Username != "???";
+    // A saved account with a usable session. A login whose refresh is failing still has its
+    // Token and Profile (for the retry) but is not authenticated until a refresh succeeds.
+    public bool IsAuthenticated => Token?.access_token != null && Profile.Username != "???" && SessionError == null;
+    public string? SessionError { get; private set; }
+    private readonly SemaphoreSlim _guestTokenGate = new(1, 1);
+    private CrToken? _guestToken;
     public HttpClientWrapper HttpClient => _httpClient;
     public CrAuthSettings AuthSettings => _authSettings;
     public CrAuthSettings StreamEndpoint { get; private set; }
@@ -316,6 +327,43 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
         Subscription = new Subscription();
 
+        var content = await RequestGuestTokenAsync(uuid, cancellationToken);
+        if (content != null)
+            JsonTokenToFileAndVariable(content, uuid);
+
+        Profile = new CrProfile
+        {
+            Username = "???",
+            Avatar = "crbrand_avatars_logo_marks_mangagirl_taupe.png",
+            PreferredContentAudioLanguage = "ja-JP",
+            PreferredContentSubtitleLanguage = "de-DE"
+        };
+    }
+
+    public async Task<string?> GetGuestAccessTokenAsync(CancellationToken cancellationToken = default)
+    {
+        await _guestTokenGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_guestToken?.access_token != null && DateTime.Now + TokenRefreshBuffer < _guestToken.expires)
+                return _guestToken.access_token;
+
+            var content = await RequestGuestTokenAsync(Guid.NewGuid().ToString(), cancellationToken);
+            var token = content == null ? null : JsonConvert.DeserializeObject<CrToken>(content);
+            if (token?.access_token == null || token.expires_in == null) return null;
+            token.expires = DateTime.Now.AddSeconds((double)token.expires_in);
+            _guestToken = token;
+            return token.access_token;
+        }
+        finally
+        {
+            _guestTokenGate.Release();
+        }
+    }
+
+    // Requests a guest token and returns the token response, or null. Touches no session state.
+    private async Task<string?> RequestGuestTokenAsync(string uuid, CancellationToken cancellationToken)
+    {
         // A retired device client must not prevent signed-out catalog access. Keep the
         // configured streaming client unchanged; this fallback obtains a guest token only.
         var clients = new[] { StreamEndpoint, StreamEndpointSecondary, MaintainedFallbackAuthSettings }
@@ -345,10 +393,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             var (isOk, content, error) = await _httpClient.SendRequestAsync(request,
                 suppressError: true, attachCookies: false, cancellationToken: cancellationToken);
             if (isOk)
-            {
-                JsonTokenToFileAndVariable(content, uuid);
-                break;
-            }
+                return content;
 
             var retiredClient = content.Contains("client_inactive", StringComparison.Ordinal)
                 || content.Contains("invalid_client", StringComparison.Ordinal);
@@ -359,14 +404,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             }
             _logger?.LogWarning("Guest authentication client is unavailable; trying another configured client");
         }
-
-        Profile = new CrProfile
-        {
-            Username = "???",
-            Avatar = "crbrand_avatars_logo_marks_mangagirl_taupe.png",
-            PreferredContentAudioLanguage = "ja-JP",
-            PreferredContentSubtitleLanguage = "de-DE"
-        };
+        return null;
     }
 
     // Alternative anonymous auth using Foxy endpoint (guest auth variation)
@@ -1336,6 +1374,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             // a guest token - one transient error logged the account out permanently. The
             // refresh token stays valid for a later retry (RefreshTokenAsync preflights).
             _logger?.LogError("Token Auth Failed: {Error}", error);
+            SessionError = TransientRefreshError(error);
         }
 
         return false;
@@ -1347,6 +1386,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         try
         {
             Token = null;
+            SessionError = null;
             Init();
             DeleteToken();
         }
@@ -1458,6 +1498,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
                 Init();
                 DeleteToken();
             }
+            SessionError = Token == null ? null : TransientRefreshError(error);
 
             if (hadUserSession)
             {
@@ -1768,9 +1809,13 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         _httpClient.AddCookie(".crunchyroll.com", new Cookie("c_locale", "en-US"));
     }
 
+    private static string TransientRefreshError(string? error) =>
+        $"Crunchyroll did not refresh the saved login ({error ?? "no response"}). It is kept and retried on the next request.";
+
     private void JsonTokenToFileAndVariable(string content, string deviceId)
     {
         Token = JsonConvert.DeserializeObject<CrToken>(content);
+        SessionError = null;
 
         if (Token is { expires_in: not null })
         {

@@ -73,30 +73,8 @@ public class Program
         if (configLoadError != null) Console.Error.WriteLine(configLoadError);
         config.ApplyEnvironmentVariables();
 
-        // Persistence hardening: keep ALL per-user state on the mounted config volume (next to the
-        // config file) so it survives container/app UPDATES. Some defaults pointed at ApplicationData
-        // (~/.config INSIDE the container = ephemeral, wiped on every image update -> history/token
-        // reset each update). Redirect those ephemeral defaults to the config dir; respect any
-        // explicit user-set path.
+        config.KeepStateNextToConfig(configPath);
         var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? "";
-        var appDataDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        // Relative paths count as ephemeral too: when ApplicationData resolves empty (root
-        // with no HOME) the legacy default persisted literally as "Cruncharr/token.json",
-        // which lands in the read-only /app workdir and every token save fails with
-        // UnauthorizedAccessException (seen live) — token then can't survive a restart.
-        bool IsEphemeralPath(string? p) => string.IsNullOrEmpty(p) ||
-            !Path.IsPathRooted(p) ||
-            (!string.IsNullOrEmpty(appDataDir) && p.StartsWith(appDataDir, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(config.TokenFilePath))
-        {
-            config.TokenFilePath = Path.Combine(configDir, "token.json");
-        }
-        // The legacy UI default "Cruncharr/queue.json" is relative too. /app is read-only for
-        // the service user, so creating that directory at startup would abort the whole app.
-        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(config.Queue.QueueFilePath))
-        {
-            config.Queue.QueueFilePath = Path.Combine(configDir, "queue.json");
-        }
 
         builder.Services.AddSingleton(config);
 

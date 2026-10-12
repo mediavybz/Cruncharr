@@ -255,6 +255,36 @@ public class CruncharrConfig
         // Example: if (Notifications.LegacyField != default) Notifications.NewField = Notifications.LegacyField;
     }
 
+    /// <summary>
+    /// Persistence hardening: keep ALL per-user state on the mounted config volume (next to the
+    /// config file) so it survives container/app UPDATES. Some defaults pointed at ApplicationData
+    /// (~/.config INSIDE the container = ephemeral, wiped on every image update -> history/token
+    /// reset each update). Redirect those ephemeral defaults to the config dir; respect any
+    /// explicit user-set path. Used by both the API and the CLI so they share one token and queue.
+    /// </summary>
+    public void KeepStateNextToConfig(string configPath)
+    {
+        var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? "";
+        var appDataDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        // Relative paths count as ephemeral too: when ApplicationData resolves empty (root
+        // with no HOME) the legacy default persisted literally as "Cruncharr/token.json",
+        // which lands in the read-only /app workdir and every token save fails with
+        // UnauthorizedAccessException (seen live) — token then can't survive a restart.
+        bool IsEphemeralPath(string? p) => string.IsNullOrEmpty(p) ||
+            !Path.IsPathRooted(p) ||
+            (!string.IsNullOrEmpty(appDataDir) && p.StartsWith(appDataDir, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(TokenFilePath))
+        {
+            TokenFilePath = Path.Combine(configDir, "token.json");
+        }
+        // The legacy UI default "Cruncharr/queue.json" is relative too. /app is read-only for
+        // the service user, so creating that directory at startup would abort the whole app.
+        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(Queue.QueueFilePath))
+        {
+            Queue.QueueFilePath = Path.Combine(configDir, "queue.json");
+        }
+    }
+
     public void ApplyEnvironmentVariables()
     {
         // Apply common environment variables for Docker deployment

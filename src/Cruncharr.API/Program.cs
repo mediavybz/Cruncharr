@@ -67,7 +67,10 @@ public class Program
 
         // Load configuration
         var configPath = CruncharrConfig.ConfigFilePath;
-        var config = File.Exists(configPath) ? CruncharrConfig.Load(configPath) : new CruncharrConfig();
+        // An unreadable existing config starts the app on defaults with saves to it refused, so
+        // the user's real settings are never overwritten. The reason is logged and shown in the UI.
+        var config = CruncharrConfig.LoadOrRecover(configPath, out var configLoadError);
+        if (configLoadError != null) Console.Error.WriteLine(configLoadError);
         config.ApplyEnvironmentVariables();
 
         // Persistence hardening: keep ALL per-user state on the mounted config volume (next to the

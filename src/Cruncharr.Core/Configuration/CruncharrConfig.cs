@@ -85,31 +85,85 @@ public class CruncharrConfig
     [YamlMember(Alias = "tracked_series_release_last_check_utc", ApplyNamingConventions = false)]
     public DateTime? TrackedSeriesReleaseLastCheckUtc { get; set; }
 
+    // Config paths whose existing file could not be loaded, with the reason. Saving to one of
+    // them is refused for the rest of the process: the in-memory settings are only defaults, and
+    // writing them would replace the user's real (but unreadable) configuration.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _loadErrors = new();
+
+    private static string LoadErrorKey(string configPath) => Path.GetFullPath(configPath);
+
+    /// <summary>
+    /// Loads the config file. A missing file gives the defaults. An existing file that cannot be
+    /// read or parsed throws <see cref="ConfigLoadException"/> instead of looking like a fresh install.
+    /// </summary>
     public static CruncharrConfig Load(string configPath)
     {
-        if (File.Exists(configPath))
+        if (!File.Exists(configPath)) return new CruncharrConfig();
+
+        CruncharrConfig? config;
+        try
         {
-            try
+            var content = File.ReadAllText(configPath);
+
+            if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml"))
             {
-                var content = File.ReadAllText(configPath);
-
-                if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml"))
-                {
-                    var deserializer = new DeserializerBuilder()
-                        .IgnoreUnmatchedProperties()
-                        .Build();
-                    return deserializer.Deserialize<CruncharrConfig>(content) ?? new CruncharrConfig();
-                }
-
-                return Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(content) ?? new CruncharrConfig();
+                var deserializer = new DeserializerBuilder()
+                    .IgnoreUnmatchedProperties()
+                    .Build();
+                config = deserializer.Deserialize<CruncharrConfig>(content);
             }
-            catch
+            else
             {
-                return new CruncharrConfig();
+                config = Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(content);
             }
         }
-        return new CruncharrConfig();
+        catch (Exception ex)
+        {
+            throw new ConfigLoadException(configPath, ex);
+        }
+
+        // An empty file holds no settings, and an empty section ("download:") holds none either,
+        // so both can take defaults without losing anything.
+        config ??= new CruncharrConfig();
+        config.Crunchyroll ??= new();
+        config.Download ??= new();
+        config.History ??= new();
+        config.HistoryPageProperties ??= new();
+        config.SeasonsPageProperties ??= new();
+        config.Queue ??= new();
+        config.Notifications ??= new();
+        config.Sonarr ??= new();
+        config.Proxy ??= new();
+        config.FlareSolverr ??= new();
+        config.Calendar ??= new();
+        config.Appearance ??= new();
+        config.AddDownload ??= new();
+        return config;
     }
+
+    /// <summary>
+    /// Loads the config for a long-running host. If the existing file cannot be loaded, returns the
+    /// defaults so the app can still start, reports the reason in <paramref name="error"/>, and
+    /// refuses every later save to that path so the original file stays untouched.
+    /// </summary>
+    public static CruncharrConfig LoadOrRecover(string configPath, out string? error)
+    {
+        try
+        {
+            error = null;
+            return Load(configPath);
+        }
+        catch (ConfigLoadException ex)
+        {
+            error = ex.Message;
+            _loadErrors[LoadErrorKey(configPath)] = ex.Message;
+            return new CruncharrConfig();
+        }
+    }
+
+    /// <summary>The reason the config at this path could not be loaded at startup, or null.</summary>
+    public static string? GetLoadError(string configPath) =>
+        _loadErrors.TryGetValue(LoadErrorKey(configPath), out var error) ? error : null;
 
     public CruncharrConfig Clone() => Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(
         Newtonsoft.Json.JsonConvert.SerializeObject(this),
@@ -117,6 +171,9 @@ public class CruncharrConfig
 
     public bool Save(string configPath)
     {
+        if (GetLoadError(configPath) is { } loadError)
+            throw new InvalidOperationException(loadError);
+
         lock (_saveLock)
         {
             try
@@ -221,6 +278,16 @@ public class CruncharrConfig
 
         var sonarrApiKey = Environment.GetEnvironmentVariable("SONARR_API_KEY");
         if (!string.IsNullOrEmpty(sonarrApiKey)) Sonarr.ApiKey = sonarrApiKey;
+    }
+}
+
+/// <summary>An existing config file could not be read or parsed.</summary>
+public class ConfigLoadException : Exception
+{
+    public ConfigLoadException(string configPath, Exception inner)
+        : base($"Could not load the configuration file {configPath}: {inner.Message} " +
+               "Settings will not be saved, so the file is not overwritten. Fix the file, or move it aside to start over, then restart Cruncharr.", inner)
+    {
     }
 }
 

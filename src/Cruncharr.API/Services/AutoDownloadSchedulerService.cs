@@ -12,7 +12,9 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
     private Task? _executeTask;
     private DateTimeOffset? _lastRun;
     private volatile bool _isRunning;
-    private DateTimeOffset? _lastNotifyCheck;
+    // Tracked releases already announced by this process (see NotifyTrackedSeriesReleasesAsync).
+    private readonly HashSet<string> _notifiedReleaseIds = new(StringComparer.Ordinal);
+    private static readonly TimeSpan MaxReleaseCatchUp = TimeSpan.FromDays(3);
     private readonly SemaphoreSlim _runGate = new(1, 1);
     private readonly object _stateLock = new();
 
@@ -207,6 +209,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                 return;
             }
 
+            var checkStarted = DateTimeOffset.UtcNow;
             var lang = authService.Profile?.PreferredContentAudioLanguage ?? "ja-JP";
             var newEpisodesBase = await apiService.GetNewEpisodesAsync(lang, 1000, true, cancellationToken);
             if (newEpisodesBase?.Data == null || newEpisodesBase.Data.Count == 0) return;
@@ -214,7 +217,7 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
             _logger.LogInformation("Found {Count} new episodes", newEpisodesBase.Data.Count);
             await historyService.UpdateWithEpisodeAsync(newEpisodesBase.Data);
 
-            await NotifyTrackedSeriesReleasesAsync(historyService, notification, config, newEpisodesBase.Data);
+            await NotifyTrackedSeriesReleasesAsync(historyService, notification, config, newEpisodesBase.Data, checkStarted);
         }
         catch (Exception ex)
         {
@@ -222,20 +225,30 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
         }
     }
 
-    // Notify newly released episodes of series the user tracks (anything in history). Gated on the
-    // toggle; in-memory dedup by release date - the first run seeds the baseline and notifies nothing,
-    // so historical episodes never spam. Baseline seeds from the persisted config field if present.
-    private async Task NotifyTrackedSeriesReleasesAsync(IHistoryService historyService, INotificationService? notification, CruncharrConfig config, List<Cruncharr.Core.Services.CrBrowseEpisode> newEpisodes)
+    // Notify newly released episodes of series the user tracks (anything in history). The persisted
+    // TrackedSeriesReleaseLastCheckUtc is the checkpoint: releases after it (at most
+    // MaxReleaseCatchUp back, so a long downtime cannot flood) are announced once each, and it
+    // moves to the start of this check only after the whole step succeeded, so a failed check is
+    // retried and releases during a restart are not lost. Without a checkpoint (first install, or
+    // the toggle was off) it is seeded and nothing is announced, so old episodes never spam.
+    private async Task NotifyTrackedSeriesReleasesAsync(IHistoryService historyService, INotificationService? notification, CruncharrConfig config, List<Cruncharr.Core.Services.CrBrowseEpisode> newEpisodes, DateTimeOffset checkStarted)
     {
-        if (notification == null || config.Notifications?.NotifyTrackedSeriesReleased != true) return;
+        if (notification == null) return;
+        if (config.Notifications?.NotifyTrackedSeriesReleased != true)
+        {
+            // Turning the toggle back on later starts fresh instead of announcing a backlog.
+            if (config.TrackedSeriesReleaseLastCheckUtc != null) SaveReleaseCheckpoint(config, null);
+            return;
+        }
         try
         {
-            var baseline = (_lastNotifyCheck ?? (config.TrackedSeriesReleaseLastCheckUtc.HasValue
-                ? new DateTimeOffset(DateTime.SpecifyKind(config.TrackedSeriesReleaseLastCheckUtc.Value, DateTimeKind.Utc))
-                : DateTimeOffset.UtcNow)).UtcDateTime;
-            bool firstRun = _lastNotifyCheck == null;
-            _lastNotifyCheck = DateTimeOffset.UtcNow;
-            if (firstRun) return; // seed baseline only; don't notify pre-existing releases
+            if (config.TrackedSeriesReleaseLastCheckUtc is not { } stored)
+            {
+                SaveReleaseCheckpoint(config, checkStarted);
+                return;
+            }
+            var since = new DateTimeOffset(AsUtc(stored));
+            if (since < checkStarted - MaxReleaseCatchUp) since = checkStarted - MaxReleaseCatchUp;
 
             var seriesList = await historyService.GetHistorySeriesAsync();
             var trackedById = (seriesList ?? new List<HistorySeries>())
@@ -243,19 +256,43 @@ public class AutoDownloadSchedulerService : IHostedService, IDisposable
                 .GroupBy(s => s.SeriesId!)
                 .ToDictionary(g => g.Key, g => g.First().SeriesTitle ?? string.Empty);
 
-            foreach (var ep in newEpisodes)
+            foreach (var ep in newEpisodes.Where(e => !string.IsNullOrEmpty(e.Id)).DistinctBy(e => e.Id))
             {
                 var sid = ep.EpisodeMetadata?.SeriesId;
                 if (string.IsNullOrEmpty(sid) || !trackedById.TryGetValue(sid, out var seriesTitle)) continue;
-                if (ep.EpisodeMetadata!.PremiumAvailableDate <= baseline) continue;
-                await notification.NotifyTrackedSeriesReleasedAsync(seriesTitle, ep.Title ?? string.Empty, ep.Id ?? string.Empty, config);
+                // Releases after the check started belong to the next checkpoint window.
+                var released = new DateTimeOffset(AsUtc(ep.EpisodeMetadata!.PremiumAvailableDate));
+                if (released <= since || released > checkStarted) continue;
+                // A retry after a partly failed check must not repeat what was already sent.
+                if (_notifiedReleaseIds.Contains(ep.Id!)) continue;
+                await notification.NotifyTrackedSeriesReleasedAsync(seriesTitle, ep.Title ?? string.Empty, ep.Id!, config);
+                _notifiedReleaseIds.Add(ep.Id!);
             }
+            SaveReleaseCheckpoint(config, checkStarted);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Tracked-series-released notification step failed");
+            _logger.LogWarning(ex, "Tracked-series-released notification step failed; it retries from the last checkpoint");
         }
     }
+
+    private void SaveReleaseCheckpoint(CruncharrConfig config, DateTimeOffset? checkpoint)
+    {
+        config.TrackedSeriesReleaseLastCheckUtc = checkpoint?.UtcDateTime;
+        try
+        {
+            config.Save(CruncharrConfig.ConfigFilePath);
+        }
+        catch (Exception ex)
+        {
+            // Kept in memory; it reaches disk with the next successful config save.
+            _logger.LogWarning(ex, "Could not save the tracked-release checkpoint");
+        }
+    }
+
+    private static DateTime AsUtc(DateTime value) => value.Kind == DateTimeKind.Local
+        ? value.ToUniversalTime()
+        : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
     private async Task AddNewMissingToQueueAsync(
         IHistoryService historyService,

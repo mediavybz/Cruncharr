@@ -384,7 +384,10 @@ public class ConfigController : ControllerBase
                 LogMode = _config.LogMode,
                 RemoveFinishedDownload = _config.RemoveFinishedDownload,
                 TokenFilePath = _config.TokenFilePath ?? ""
-            }
+            },
+            // Set when the config file on disk could not be loaded; these are then only defaults
+            // and saving is refused. Null (omitted) for the defaults endpoint.
+            LoadError = ReferenceEquals(_config, this._config) ? CruncharrConfig.GetLoadError(CruncharrConfig.ConfigFilePath) : null
         };
     }
 

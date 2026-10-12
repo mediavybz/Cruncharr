@@ -3929,6 +3929,7 @@
 
         // ================== API / ACTIONS ==================
         let fetchConfigRetryCount = 0;
+        let configLoadErrorShown = false;
         const MAX_FETCH_CONFIG_RETRIES = 5;
         
         async function fetchConfig() {
@@ -3943,6 +3944,11 @@
                 applyTheme();
                 updateConnectionStatus(true);
                 fetchConfigRetryCount = 0;
+                // The saved config could not be loaded: these are defaults and saving is refused.
+                if (config.loadError && !configLoadErrorShown) {
+                    configLoadErrorShown = true;
+                    showToast(config.loadError, 'error');
+                }
                 if (wasEmpty && ['downloads', 'add-download', 'calendar'].includes(currentPage)) {
                     loadPage(currentPage);
                 }

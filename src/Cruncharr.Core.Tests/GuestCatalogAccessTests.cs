@@ -248,7 +248,7 @@ public class GuestCatalogAccessTests
         var auth = Guest();
         auth.Setup(value => value.RefreshTokenAsync(true, It.IsAny<CancellationToken>(), false)).ReturnsAsync(false);
         using var api = new CrunchyrollApiService(auth.Object);
-        Assert.False(await api.EnsureTokenAsync(CancellationToken.None));
+        Assert.Null(await api.EnsureTokenAsync(CancellationToken.None));
     }
 
     [Fact]

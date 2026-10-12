@@ -35,7 +35,7 @@ public class HealthController : ControllerBase
                 Timestamp = DateTimeOffset.UtcNow,
                 ActiveDownloads = _queueService.ActiveDownloads,
                 HasActiveDownloads = _queueService.HasActiveDownloads,
-                AuthStatus = _auth.IsAuthenticated ? "authenticated" : "anonymous"
+                AuthStatus = _auth.IsAuthenticated ? "authenticated" : _auth.SessionError != null ? "refresh_failed" : "anonymous"
             });
         }
         catch (Exception ex)

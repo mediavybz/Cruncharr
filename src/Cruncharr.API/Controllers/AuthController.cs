@@ -69,8 +69,11 @@ public class AuthController : ControllerBase
             return Ok(new AuthStatusResponse
             {
                 IsAuthenticated = _auth.IsAuthenticated,
+                // A saved login whose refresh is failing is reported as such, not as a working
+                // (Premium) session: it is kept and retried, and browsing uses a guest token.
+                SessionError = _auth.SessionError,
                 Username = profile?.Username ?? "",
-                HasPremium = profile?.HasPremium ?? false,
+                HasPremium = _auth.IsAuthenticated && (profile?.HasPremium ?? false),
                 PreferredAudioLanguage = _auth.IsAuthenticated ? profile?.PreferredContentAudioLanguage ?? "" : "",
                 PreferredSubtitleLanguage = _auth.IsAuthenticated ? profile?.PreferredContentSubtitleLanguage ?? "" : "",
                 Avatar = profile?.Avatar,
@@ -259,6 +262,7 @@ public class AuthController : ControllerBase
 public class AuthStatusResponse
 {
     public bool IsAuthenticated { get; set; }
+    public string? SessionError { get; set; }
     public string Username { get; set; } = "";
     public bool HasPremium { get; set; }
     public string PreferredAudioLanguage { get; set; } = "";

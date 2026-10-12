@@ -229,5 +229,58 @@ public class ScheduledDownloadsTests : IDisposable
         Assert.Equal("broken", File.ReadAllText(path));
     }
 
+    [Fact]
+    public async Task RunSummaryExplainsEveryEpisodeThatWasNotAdded()
+    {
+        Episode("OLD"); // released before subscribing, no file anywhere
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        Episode("NEW");
+        Episode("DUB-LATER", "en-US"); // default audio is ja-JP; only English is out so far
+        Episode("FUTURE").EpisodeCrPremiumAirDate = DateTime.UtcNow.AddDays(1);
+
+        var summary = await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+
+        var show = Assert.Single(summary!.Shows);
+        Assert.Equal((1, 1, 1, 1, 0), (show.Added, show.MissingFromBaseline, show.WaitingForLanguage, show.NotReleased, summary.Failed));
+        Assert.Null(show.Error);
+        // The same summary survives for the Settings page.
+        Assert.Equal(1, JObject.FromObject(service.GetStatus())["LastRunSummary"]!["Shows"]![0]!["MissingFromBaseline"]!.Value<int>());
+    }
+
+    [Fact]
+    public async Task RunSummaryReportsAPartialFailure()
+    {
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        _history.Setup(h => h.CrUpdateSeriesAsync("SERIES", "")).ReturnsAsync(false);
+
+        var summary = await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, summary!.Failed);
+        Assert.Contains("Could not refresh", summary.Shows[0].Error);
+    }
+
+    [Fact]
+    public async Task BackfillQueuesEpisodesMissingSinceSubscribingExactlyOnce()
+    {
+        Episode("OLD");
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Empty(_queued);
+
+        var summary = await service.BackfillAsync("SERIES", TestContext.Current.CancellationToken);
+        Assert.True(summary.Backfill);
+        Assert.Equal(1, summary.Added);
+        Assert.Equal("OLD", Assert.Single(_queued).Id);
+
+        // Scheduled checks, including after a restart, do not queue it again.
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        await Service().RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Single(_queued);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.BackfillAsync("OTHER", TestContext.Current.CancellationToken));
+    }
+
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

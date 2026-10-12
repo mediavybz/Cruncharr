@@ -498,7 +498,8 @@
             try {
                 const res = await fetch('/api/v1/scheduler/trigger', { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                if (typeof showToast === 'function') showToast('Scheduled release check completed', 'success');
+                const result = await res.json().catch(() => ({}));
+                showSchedulerRunToast(result.summary);
             } catch (e) {
                 if (typeof showToast === 'function') showToast('Scheduler trigger failed', 'error');
             } finally {
@@ -3246,6 +3247,50 @@
             } catch (e) { showToast(e.message, 'error'); }
         }
 
+        // One line per show: every episode that was not added is counted under its reason.
+        function schedulerShowLine(show) {
+            if (show.error) return show.error;
+            const parts = [];
+            if (show.added) parts.push(`${show.added} added`);
+            if (show.alreadyQueued) parts.push(`${show.alreadyQueued} already queued`);
+            if (show.haveFile) parts.push(`${show.haveFile} already downloaded`);
+            if (show.missingFromBaseline) parts.push(`${show.missingFromBaseline} missing from before you subscribed`);
+            if (show.waitingForLanguage) parts.push(`${show.waitingForLanguage} waiting for your languages`);
+            if (show.notReleased) parts.push(`${show.notReleased} not released yet`);
+            if (show.excluded) parts.push(`${show.excluded} skipped (specials or unmonitored)`);
+            return parts.join(' · ') || 'No episodes in History';
+        }
+
+        function showSchedulerRunToast(summary) {
+            if (typeof showToast !== 'function') return;
+            if (!summary) { showToast('Scheduler check finished', 'success'); return; }
+            const shows = summary.shows || [];
+            const missing = shows.reduce((total, show) => total + (show.missingFromBaseline || 0), 0);
+            const noun = count => count === 1 ? 'episode' : 'episodes';
+            if (summary.failed) {
+                showToast(`${summary.added} ${noun(summary.added)} added, but ${summary.failed} of ${shows.length} shows could not be checked. See Settings → Scheduler.`, 'error');
+            } else if (summary.added) {
+                showToast(`${summary.added} ${noun(summary.added)} ${summary.backfill ? 'queued from the back catalog' : 'added'}`, 'success');
+            } else if (summary.backfill) {
+                showToast('Nothing missing: every released episode is downloaded, queued, or waiting for your languages.', 'info');
+            } else {
+                showToast('No new episodes.' + (missing ? ` ${missing} older ${noun(missing)} without a file came out before you subscribed. Use Download missing in Settings → Scheduler.` : ''), 'info');
+            }
+        }
+
+        async function backfillSeriesSchedule(button) {
+            const seriesId = button.dataset.backfillSeries;
+            if (!seriesId || !confirm(`Queue every released episode of ${button.dataset.title} that has no file yet? New releases are still added automatically.`)) return;
+            button.disabled = true;
+            button.textContent = 'Checking…';
+            try {
+                const result = await schedulerRequest('subscriptions/' + encodeURIComponent(seriesId) + '/backfill', 'POST');
+                showSchedulerRunToast(result.summary);
+                fetchQueueStats();
+            } catch (e) { showToast(e.message, 'error'); }
+            finally { if (settingsTab === 'scheduler' && currentPage === 'settings') await renderSchedulerSettings(); }
+        }
+
         function schedulerStatusText(state) {
             const status = !state.historyEnabled ? 'History is disabled. Enable it in Settings → History.'
                 : !state.enabled ? 'Scheduler paused.' : state.isRunning ? 'Checking releases…'
@@ -3263,14 +3308,15 @@
                 content.innerHTML = `<div class="settings-section">
                     <div class="settings-section-header"><span class="settings-section-title">Scheduled new episodes</span></div>
                     <div class="settings-section-body">
-                        <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added. Series and season language settings apply; existing Sonarr files are skipped.</p>
+                        <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added; use <strong>Download missing</strong> to also queue older episodes that have no file. Series and season language settings apply; existing Sonarr files are skipped.</p>
                         <div class="setting-row"><div><div class="setting-label">Enable scheduler</div><div class="setting-desc">Pause or resume checks for all subscriptions.</div></div><label class="toggle-switch"><input id="setting-scheduler-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                         <div class="setting-row"><div><div class="setting-label">Check every (minutes)</div><div class="setting-desc">New releases enter the queue at the next check. Default: 15 minutes.</div></div><input class="form-input w-100" id="setting-scheduler-interval" type="number" min="1" max="1440" value="${state.intervalMinutes}"></div>
                         <p role="status" id="scheduler-summary">${escapeHtml(schedulerStatusText(state))}</p>
                         ${state.lastRun ? `<p class="setting-desc">Last check: ${escapeHtml(new Date(state.lastRun).toLocaleString())} · ${state.lastQueuedCount} added to queue</p>` : ''}
+                        ${state.lastRunSummary?.shows?.length ? `<ul class="setting-desc">${state.lastRunSummary.shows.map(show => `<li${show.error ? ' role="alert"' : ''}><strong>${escapeHtml(show.title)}</strong>: ${escapeHtml(schedulerShowLine(show))}</li>`).join('')}</ul>` : ''}
                         ${state.lastError ? `<p role="alert">${escapeHtml(state.lastError)}</p>` : ''}
                         <button class="header-btn" id="btn-scheduler-run" onclick="triggerScheduler()">Run now</button>
-                        <div>${state.subscriptions.map(sub => `<div class="setting-row"><div>${escapeHtml(sub.title)}</div><div style="display:flex;gap:8px"><button class="header-btn" data-schedule-series="${escapeHtmlAttribute(sub.seriesId)}" onclick="toggleSeriesSchedule(this)">${sub.enabled ? 'Scheduled · Pause' : 'Resume schedule'}</button><button class="header-btn" onclick="removeSeriesSchedule('${escapeJsString(sub.seriesId)}')">Remove</button></div></div>`).join('') || '<p>No series scheduled yet.</p>'}</div>
+                        <div>${state.subscriptions.map(sub => `<div class="setting-row"><div>${escapeHtml(sub.title)}</div><div style="display:flex;gap:8px"><button class="header-btn" data-schedule-series="${escapeHtmlAttribute(sub.seriesId)}" onclick="toggleSeriesSchedule(this)">${sub.enabled ? 'Scheduled · Pause' : 'Resume schedule'}</button><button class="header-btn" data-backfill-series="${escapeHtmlAttribute(sub.seriesId)}" data-title="${escapeHtmlAttribute(sub.title)}" onclick="backfillSeriesSchedule(this)" title="Queue released episodes that have no file yet">Download missing</button><button class="header-btn" onclick="removeSeriesSchedule('${escapeJsString(sub.seriesId)}')">Remove</button></div></div>`).join('') || '<p>No series scheduled yet.</p>'}</div>
                     </div></div>`;
             } catch (e) { if (settingsTab === 'scheduler') content.textContent = e.message; }
         }

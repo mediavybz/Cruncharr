@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
@@ -646,30 +647,69 @@ public class HistoryService : IHistoryService, IDisposable
             episode.EpisodeNumber > 0 ? episode.EpisodeNumber : null);
 
     // Persistence
+    // A failed load throws and leaves _loaded false, so no caller can save an empty History
+    // over the file; the next call tries again.
     private async Task LoadRichHistoryAsync()
     {
-        if (!File.Exists(_historyPath))
-        {
-            _historyList = [];
-            return;
-        }
+        _historyList = await LoadHistoryFileAsync(_historyPath, HistoryJsonContext.Default.ListHistorySeries);
+        SanitizeHistoryCollections();
+    }
+
+    // Loads a History file; a missing file is an empty History. A damaged file is replaced by its
+    // newest readable daily backup and kept beside it as "<name>.corrupt-<time>". Without a usable
+    // backup, or when the file cannot be read at all, this throws instead of returning an empty
+    // list that the next write would save over the user's History.
+    private async Task<T> LoadHistoryFileAsync<T>(string path, JsonTypeInfo<T> typeInfo) where T : new()
+    {
+        if (!File.Exists(path)) return new T();
 
         try
         {
-            var content = await DecompressJsonFileAsync(_historyPath);
-            if (string.IsNullOrEmpty(content))
+            return await ReadHistoryFileAsync(path, typeInfo);
+        }
+        catch (Exception ex) when (ex is not IOException and not UnauthorizedAccessException)
+        {
+            foreach (var backup in GetDatedBackups(path).OrderByDescending(b => b.Date))
             {
-                // Fallback to uncompressed
-                content = await File.ReadAllTextAsync(_historyPath);
+                T restored;
+                try { restored = await ReadHistoryFileAsync(backup.Path, typeInfo); }
+                catch (Exception) { continue; }
+
+                try
+                {
+                    var damaged = $"{path}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+                    File.Move(path, damaged);
+                    File.Copy(backup.Path, path);
+                    _logger?.LogError(ex, "History file {Path} was damaged. Restored it from {Backup}; the damaged file was kept as {Damaged}",
+                        path, backup.Path, damaged);
+                    return restored;
+                }
+                catch (Exception restoreEx)
+                {
+                    _logger?.LogError(restoreEx, "Could not restore History file {Path} from {Backup}", path, backup.Path);
+                    break;
+                }
             }
-            _historyList = JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListHistorySeries) ?? [];
-            SanitizeHistoryCollections();
+            throw new InvalidDataException(
+                $"Could not load History file {path}: {ex.Message} History is left unchanged until the file is fixed or restored from a backup.", ex);
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to load rich history");
-            _historyList = [];
+            throw new IOException(
+                $"Could not read History file {path}: {ex.Message} History is left unchanged until the file can be read.", ex);
         }
+    }
+
+    private static async Task<T> ReadHistoryFileAsync<T>(string path, JsonTypeInfo<T> typeInfo)
+    {
+        var content = await DecompressJsonFileAsync(path);
+        if (string.IsNullOrEmpty(content))
+        {
+            // Fallback to uncompressed
+            content = await File.ReadAllTextAsync(path);
+        }
+        return JsonSerializer.Deserialize(content, typeInfo)
+            ?? throw new InvalidDataException("The file does not contain a History list.");
     }
 
     private void SanitizeHistoryCollections()
@@ -699,6 +739,8 @@ public class HistoryService : IHistoryService, IDisposable
     {
         try
         {
+            // Never write the placeholder list that stands in until History has loaded.
+            if (!_loaded) throw new InvalidOperationException("History has not been loaded; it was not saved.");
             await WriteJsonToFileCompressedAsync(_historyPath, _historyList, keepBackups: 5);
         }
         catch (Exception ex)
@@ -708,27 +750,8 @@ public class HistoryService : IHistoryService, IDisposable
         }
     }
 
-    private async Task<List<DownloadHistory>> LoadHistoryAsync()
-    {
-        if (!File.Exists(_flatHistoryPath)) return new List<DownloadHistory>();
-
-        try
-        {
-            var content = await DecompressJsonFileAsync(_flatHistoryPath);
-            if (string.IsNullOrEmpty(content))
-            {
-                // Fallback to uncompressed
-                content = await File.ReadAllTextAsync(_flatHistoryPath);
-            }
-            var flatHistory = JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListDownloadHistory) ?? new List<DownloadHistory>();
-            return flatHistory;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to load flat history");
-            return new List<DownloadHistory>();
-        }
-    }
+    private Task<List<DownloadHistory>> LoadHistoryAsync() =>
+        LoadHistoryFileAsync(_flatHistoryPath, HistoryJsonContext.Default.ListDownloadHistory);
 
     private async Task SaveHistoryAsync(List<DownloadHistory> flatHistory)
     {
@@ -827,25 +850,31 @@ public class HistoryService : IHistoryService, IDisposable
         return Path.Combine(dir, backupName);
     }
 
+    private static List<(string Path, DateTime Date)> GetDatedBackups(string pathToFile)
+    {
+        string dir = Path.GetDirectoryName(pathToFile)!;
+        string name = Path.GetFileName(pathToFile);
+        string glob = $".{name}.*.bak";
+        var rx = new System.Text.RegularExpressions.Regex(@"^\." + System.Text.RegularExpressions.Regex.Escape(name) + @"\.(\d{4}-\d{2}-\d{2})\.bak$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        var datedBackups = new List<(string Path, DateTime Date)>();
+        foreach (var path in Directory.EnumerateFiles(dir, glob, SearchOption.TopDirectoryOnly))
+        {
+            string file = Path.GetFileName(path);
+            var match = rx.Match(file);
+            if (match.Success && DateTime.TryParseExact(match.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            {
+                datedBackups.Add((path, date));
+            }
+        }
+        return datedBackups;
+    }
+
     private static void PruneBackups(string pathToFile, int keep)
     {
         try
         {
-            string dir = Path.GetDirectoryName(pathToFile)!;
-            string name = Path.GetFileName(pathToFile);
-            string glob = $".{name}.*.bak";
-            var rx = new System.Text.RegularExpressions.Regex(@"^\." + System.Text.RegularExpressions.Regex.Escape(name) + @"\.(\d{4}-\d{2}-\d{2})\.bak$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-
-            var datedBackups = new List<(string Path, DateTime Date)>();
-            foreach (var path in Directory.EnumerateFiles(dir, glob, SearchOption.TopDirectoryOnly))
-            {
-                string file = Path.GetFileName(path);
-                var match = rx.Match(file);
-                if (match.Success && DateTime.TryParseExact(match.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
-                {
-                    datedBackups.Add((path, date));
-                }
-            }
+            var datedBackups = GetDatedBackups(pathToFile);
 
             // Sort by date descending and delete oldest
             foreach (var backup in datedBackups.OrderByDescending(b => b.Date).Skip(keep))

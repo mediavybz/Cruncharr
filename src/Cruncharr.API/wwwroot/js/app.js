@@ -3651,8 +3651,7 @@
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Softsubs</span><span class="settings-section-desc">Subtitle download options</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Softsubs Languages</div></div></div>
-                                <select class="form-select" id="setting-soft-subs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.softSubs||['en-US']).includes(o.value)?'selected':''}>${o.label}</option>`).join('')}</select>
+                                <div class="setting-row"><div><div class="setting-label">Softsubs Languages</div></div><select class="form-select" id="setting-soft-subs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.softSubs||['en-US']).includes(o.value)?'selected':''}>${o.label}</option>`).join('')}</select></div>
 
                                 <div class="setting-row"><div><div class="setting-label">Add ScaledBorderAndShadow</div></div><select class="form-select mw-150" id="setting-scaled-border"><option value="DontAdd" ${dl.subsAddScaledBorder==='DontAdd'?'selected':''}>Don't Add</option><option value="ScaledBorderAndShadowYes" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowYes'?'selected':''}>yes</option><option value="ScaledBorderAndShadowNo" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowNo'?'selected':''}>no</option></select></div>
 
@@ -3861,8 +3860,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Webhook Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-webhook-enabled" ${n.webhookEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Method</div></div><select class="form-select mw-100" id="setting-webhook-method"><option value="POST" ${n.webhookMethod==='POST'?'selected':''}>POST</option><option value="GET" ${n.webhookMethod==='GET'?'selected':''}>GET</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Content-Type</div></div><input type="text" class="form-input w-200" id="setting-webhook-ct" value="${escapeHtmlAttribute(n.webhookContentType||'application/json')}"></div>
-                                <div class="setting-row"><div><div class="setting-label">Webhook Headers</div><div class="setting-desc">One header per line (Key: Value)</div></div></div>
-                                <textarea class="form-input w-300" id="setting-webhook-headers" rows="3">${escapeHtml(n.webhookHeaders?Object.entries(n.webhookHeaders).map(([k,v])=>k+': '+v).join('\n'):'')}</textarea>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Headers</div><div class="setting-desc">One header per line (Key: Value)</div></div><textarea class="form-input w-300" id="setting-webhook-headers" rows="3">${escapeHtml(n.webhookHeaders?Object.entries(n.webhookHeaders).map(([k,v])=>k+': '+v).join('\n'):'')}</textarea></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Body Template</div></div><textarea class="form-input w-300" id="setting-webhook-body" rows="3">${escapeHtml(n.webhookBodyTemplate||'')}</textarea></div>
                                 <div class="mt-10">
                                     <button class="header-btn" onclick="testWebhook()">Test Webhook</button>

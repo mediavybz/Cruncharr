@@ -1375,6 +1375,16 @@
 
         .setting-control { display: flex; align-items: center; gap: 10px; }
 
+        /* Settings read as label-left / control-right. Unbounded, a wide monitor put a screen of
+           empty space between them, so the settings column is capped like other *arr apps. */
+        #settings-content, .settings-footer { max-width: 960px; }
+        .setting-row { gap: 16px; }
+        /* .form-select is width:100% for forms; inside a row that filled the row and squashed the
+           label onto two lines. Controls keep their size and the label wraps if it has to. */
+        .setting-row .form-select { width: auto; }
+        .setting-row > .form-input, .setting-row > .form-select, .setting-row > .toggle-switch,
+        .setting-row > .setting-control, .setting-row > .header-btn { flex-shrink: 0; }
+
         /* Form Elements */
         .form-group { margin-bottom: 15px; }
         .form-label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 0.9em; }

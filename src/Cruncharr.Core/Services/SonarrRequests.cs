@@ -118,12 +118,22 @@ public partial class SonarrService
         var recent = await RequestJsonAsync(HttpMethod.Get, "command", config, cancellationToken: cancellationToken);
         var existing = recent.FirstOrDefault(c => (string?)c["name"] == "EpisodeSearch" &&
             c["body"]?["episodeIds"] is JArray ids && ids.Values<int>().Order().SequenceEqual(episodeIds.Order()) &&
-            (string?)c["status"] != "failed" && DateTime.TryParse((string?)c["queued"], out var queued) &&
-            DateTime.UtcNow - queued.ToUniversalTime() < TimeSpan.FromMinutes(30));
+            (string?)c["status"] != "failed" && QueuedUtc(c["queued"]) is { } queued &&
+            DateTime.UtcNow - queued < TimeSpan.FromMinutes(30));
         if (existing != null) return (int)existing["id"]!;
         var command = await RequestJsonAsync(HttpMethod.Post, "command", config, new { name = "EpisodeSearch", episodeIds }, cancellationToken);
         return (int)command["id"]!;
     }
+
+    // Sonarr's ISO timestamp is already parsed into a date token. Converting it to text and parsing
+    // it back used the machine's date format, which swaps day and month outside the US.
+    internal static DateTime? QueuedUtc(JToken? value) => value?.Type switch
+    {
+        JTokenType.Date => value.Value<DateTime>().ToUniversalTime(),
+        JTokenType.String when DateTime.TryParse((string?)value, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) => parsed,
+        _ => null
+    };
 
     public async Task<int> ImportFileAsync(string path, int seriesId, SonarrConfig config, CancellationToken cancellationToken = default, int? episodeId = null)
     {

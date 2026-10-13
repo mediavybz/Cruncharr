@@ -457,6 +457,8 @@ public class DownloadConfig
     [YamlMember(Alias = "dl_video_once", ApplyNamingConventions = false)]
     public bool DlVideoOnce { get; set; } = true;
 
+    // No longer used: a finished download always hands its slot to the next one while it
+    // muxes/transcodes. Kept so existing config files and API clients still load.
     [YamlMember(Alias = "download_allow_early_start", ApplyNamingConventions = false)]
     public bool DownloadAllowEarlyStart { get; set; } = false;
 

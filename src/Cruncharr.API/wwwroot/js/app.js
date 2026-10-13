@@ -1095,6 +1095,18 @@
             renderAddEpisodesMultiDub();
         }
 
+        // Release order for queue submissions: season, then episode number. Non-numeric
+        // values (specials) go after the numbered ones; ties keep their original order.
+        function compareReleaseOrder(a, b) {
+            for (const field of ['season', 'episodeNumber']) {
+                const x = Number.parseFloat(a?.[field]), y = Number.parseFloat(b?.[field]);
+                const xNumber = Number.isFinite(x), yNumber = Number.isFinite(y);
+                if (xNumber && yNumber && x !== y) return x - y;
+                if (xNumber !== yNumber) return xNumber ? -1 : 1;
+            }
+            return 0;
+        }
+
         let isAddingToQueue = false;
         async function addSelectedToQueue() {
             if (isAddingToQueue) return;
@@ -1147,7 +1159,13 @@
                 // Add each queue item to the queue
                 let added = 0;
                 const markAsWatched = config?.crunchyroll?.markAsWatched || false;
-                for (const [key, item] of Object.entries(queueItems)) {
+                // Episodes are grouped by dub selection above, so submit them in release order;
+                // the queue starts downloads in submission order.
+                const orderedItems = Object.entries(queueItems)
+                    .map((entry, index) => ({ entry, index }))
+                    .sort((a, b) => compareReleaseOrder(a.entry[1], b.entry[1]) || a.index - b.index)
+                    .map(({ entry }) => entry);
+                for (const [key, item] of orderedItems) {
                     if (item && item.episodeId) {
                         const queueRes = await sendDownloadRequest({
                             method: 'POST',
@@ -3794,7 +3812,6 @@
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Persist Queue</div><div class="setting-desc">Always on — the queue is saved to /config so downloads and transcodes resume automatically after a container restart.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-persist-queue" checked disabled><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Wait for Selected Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div><div class="setting-desc">How many downloads may be in the mux/encode phase at once</div></div><input type="number" class="form-input w-80" id="setting-queue-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs||2)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Transcodes</div><div class="setting-desc">Max concurrent transcodes (the CPU-heavy encode step). Downloads/muxing stay parallel; only encoding is limited. Keep at 1 for software encoding; raise it for hardware encoders.</div></div><input type="number" class="form-input w-80" id="setting-queue-transcodes" value="${escapeHtmlAttribute(q.maxSimultaneousTranscodes||1)}" min="1"></div>
@@ -4170,8 +4187,7 @@
                     if (downloadAudio !== undefined) dl.noAudio = !downloadAudio;
                     const chapters = getFieldValue('setting-chapters', 'bool');
                     if (chapters !== undefined) dl.includeChapters = chapters;
-                    // (Allow Early Start / Skip Missing Languages live on the Queue tab as
-                    // setting-queue-early-start / setting-queue-skip-missing.)
+                    // (Skip Missing Languages lives on the Queue tab as setting-queue-skip-missing.)
                     const defaultVideo = getFieldValue('setting-default-video');
                     if (defaultVideo !== undefined) dl.defaultVideo = defaultVideo;
                     
@@ -4309,8 +4325,6 @@
                     // These two belong to the download section of the backend config,
                     // even though they're shown on the Queue tab
                     const dlq = {};
-                    const earlyStart = getFieldValue('setting-queue-early-start', 'bool');
-                    if (earlyStart !== undefined) dlq.downloadAllowEarlyStart = earlyStart;
                     const skipMissing = getFieldValue('setting-queue-skip-missing', 'bool');
                     if (skipMissing !== undefined) dlq.downloadOnlyWithAllSelectedDubSub = skipMissing;
                     if (Object.keys(dlq).length) newConfig.download = dlq;

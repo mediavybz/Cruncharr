@@ -32,6 +32,8 @@
             --accent-softer: rgba(244, 117, 33, 0.08);
             --accent-glow: rgba(244, 117, 33, 0.40);
             --accent-grad: linear-gradient(135deg, var(--accent), var(--accent-bright));
+            /* Text on accent fills: black reads on Crunchyroll orange; blue/indigo themes use white. */
+            --on-accent: #0a0a0a;
 
             /* --- Surfaces (#0A0A0A–#1F1F23) — warm-neutral near-black --- */
             --bg-primary: #0a0a0c;
@@ -246,7 +248,7 @@
         }
         [data-theme="cinematic"] .content { background: transparent; }
 
-        /* ── Seerr (Nebula): indigo→purple aurora on a mid-slate dashboard.
+        /* ── Nebula: indigo→purple aurora on a mid-slate dashboard.
               Distinct from Dark: lighter slate surfaces, vivid purple aurora,
               lavender-tinted text highlights, signature gradient active nav. ── */
         [data-theme="nebula"] {
@@ -258,6 +260,7 @@
             --accent-softer: rgba(168, 85, 247, 0.12);
             --accent-glow: rgba(99, 102, 241, 0.45);
             --accent-grad: linear-gradient(135deg, #6366f1, #a855f7);
+            --on-accent: #ffffff;
 
             --bg-primary: #1a1d29;        /* slate-900-ish, lifted from near-black */
             --bg-secondary: #232736;      /* slate-800 */
@@ -292,7 +295,7 @@
             --scrollbar-thumb-sidebar: rgba(199, 203, 223, 0.18);
             --scrollbar-thumb-sidebar-hover: var(--accent-bright);
         }
-        /* Seerr signature: active nav uses the full vivid indigo→purple gradient. */
+        /* Nebula: active nav uses the full vivid indigo→purple gradient. */
         [data-theme="nebula"] .nav-item.active {
             background: var(--accent-grad);
             color: #fff;
@@ -315,6 +318,7 @@
             --accent-softer: rgba(168, 85, 247, 0.12);
             --accent-glow: rgba(99, 102, 241, 0.40);
             --accent-grad: linear-gradient(to bottom right, #4f46e5, #9333ea);  /* seerr from-indigo-600 to-purple-600 (bg-gradient-to-br) */
+            --on-accent: #ffffff;
 
             --bg-primary: #111827;        /* gray-900 content */
             --bg-secondary: #1f2937;      /* gray-800 cards / header */
@@ -340,9 +344,8 @@
             --glass-blur: 14px;
             --card-blur: 0px;
 
-            --bloom:
-                radial-gradient(1200px 640px at 84% -10%, rgba(168, 85, 247, 0.16), transparent 58%),
-                radial-gradient(1100px 760px at -12% 116%, rgba(99, 102, 241, 0.16), transparent 58%);
+            /* Seerr's pages are flat gray-900; the purple haze made it read as Nebula. */
+            --bloom: none;
             --shadow-glow: 0 8px 30px rgba(99, 102, 241, 0.40);
             --scrollbar-thumb: rgba(209, 213, 219, 0.22);
             --scrollbar-thumb-hover: rgba(168, 85, 247, 0.65);
@@ -357,74 +360,99 @@
         }
         [data-theme="seerr"] .nav-item.active .nav-icon { color: #fff; }
         [data-theme="seerr"] .nav-item.active::before { background: #fff; }
+        /* Seerr headings: indigo-400 -> purple-400 gradient text. */
+        [data-theme="seerr"] .page-title {
+            background: linear-gradient(to bottom right, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
 
-        /* ── Sonarr: signature cyan top bar, dark slate sidebar, light content.
-              Mixed theme: content tokens are light; sidebar + header re-skinned. ── */
+        /* ── Sonarr: Sonarr's light theme — brand-blue top bar, neutral #595959 sidebar with a
+              dark active row and blue edge, #f5f7fa pages, white cards, Sonarr's status colours.
+              The accent is a deeper Sonarr blue so text and controls stay readable on white. ── */
         [data-theme="sonarr"] {
-            --accent: #35c5f0;
-            --accent-bright: #1aa9da;
+            --sonarr-blue: #35c5f4;
+            --accent: #2b7bc9;
+            --accent-bright: #5d9cec;
             --accent-orange: var(--accent);
             --accent-orange-bright: var(--accent-bright);
-            --accent-soft: rgba(53, 197, 240, 0.14);
-            --accent-softer: rgba(53, 197, 240, 0.07);
-            --accent-glow: rgba(53, 197, 240, 0.28);
+            --accent-soft: rgba(93, 156, 236, 0.16);
+            --accent-softer: rgba(93, 156, 236, 0.08);
+            --accent-glow: rgba(93, 156, 236, 0.30);
+            --accent-grad: linear-gradient(135deg, #2b7bc9, #5d9cec);
+            --on-accent: #ffffff;
 
-            --bg-primary: #f5f6f8;
+            --bg-primary: #f5f7fa;
             --bg-secondary: #ffffff;
-            --bg-tertiary: #eceef1;
-            --bg-hover: #e6e9ee;
+            --bg-tertiary: #eef0f3;
+            --bg-hover: #e8ebef;
             --bg-card: #ffffff;
-            --text-primary: #1b1f24;
-            --text-secondary: #5c636e;
-            --text-muted: #767d88;
+            --text-primary: #515253;
+            --text-secondary: #636466;
+            --text-muted: #757779;
 
-            --accent-blue: #1899c4;   --info-soft: rgba(24, 153, 196, 0.14);
+            --accent-blue: #5d9cec;   --info-soft: rgba(93, 156, 236, 0.16);
             --accent-green: #27c24c;  --success-soft: rgba(39, 194, 76, 0.14);
-            --accent-red: #e6312f;    --error-soft: rgba(230, 49, 47, 0.14);
-            --accent-yellow: #e0a800; --warning-soft: rgba(224, 168, 0, 0.16);
+            --accent-red: #f05050;    --error-soft: rgba(240, 80, 80, 0.14);
+            --accent-yellow: #ffa500; --warning-soft: rgba(255, 165, 0, 0.16);
             --premium-soft: var(--accent-soft);
 
-            --border-color: #e3e6ea;
-            --surface-border: #e7eaee;
-            --glass-bg: rgba(255, 255, 255, 0.80);
-            --glass-border: rgba(16, 24, 40, 0.08);
-            --sidebar-bg: linear-gradient(180deg, #4a515f, #3f4654);
+            --border-color: #e5e5e5;
+            --surface-border: #e5e5e5;
+            --glass-bg: rgba(255, 255, 255, 0.86);
+            --glass-border: rgba(0, 0, 0, 0.08);
+            --sidebar-bg: #595959;
 
-            --shadow-sm: 0 1px 2px rgba(16,24,40,0.06);
-            --shadow-md: 0 8px 24px rgba(16,24,40,0.10);
-            --shadow-lg: 0 20px 48px rgba(16,24,40,0.14);
-            --shadow-glow: 0 8px 24px rgba(53, 197, 240, 0.22);
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.10);
+            --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.14);
+            --shadow-glow: 0 6px 18px rgba(93, 156, 236, 0.25);
             --bloom: none;
             --card-blur: 0px;
-            --scrollbar-thumb: rgba(16,24,40,0.22);
-            --scrollbar-thumb-hover: rgba(53,197,240,0.55);
-            --scrollbar-thumb-sidebar: rgba(255,255,255,0.18);
-            --scrollbar-thumb-sidebar-hover: #ffffff;
+            --scrollbar-thumb: rgba(0, 0, 0, 0.22);
+            --scrollbar-thumb-hover: rgba(53, 197, 244, 0.65);
+            --scrollbar-thumb-sidebar: rgba(255, 255, 255, 0.20);
+            --scrollbar-thumb-sidebar-hover: var(--sonarr-blue);
         }
         /* Dark sidebar needs light text — re-scope tokens just for it. */
         [data-theme="sonarr"] .sidebar {
-            color: #e7eaf0;
-            --text-primary: #ffffff;
-            --text-secondary: #c3c9d4;
-            --text-muted: #99a1ae;
-            --bg-hover: rgba(255, 255, 255, 0.08);
-            --bg-tertiary: rgba(255, 255, 255, 0.08);
+            color: #e1e2e3;
+            --text-primary: #e1e2e3;
+            --text-secondary: #c9cacb;
+            --text-muted: #b0b1b2;
+            --bg-hover: rgba(0, 0, 0, 0.18);
+            --bg-tertiary: rgba(0, 0, 0, 0.18);
             --border-color: rgba(255, 255, 255, 0.14);
             --surface-border: rgba(255, 255, 255, 0.10);
         }
-        [data-theme="sonarr"] .nav-item.active { background: var(--accent); color: #06303d; }
-        [data-theme="sonarr"] .nav-item.active .nav-icon { color: #06303d; }
-        [data-theme="sonarr"] .nav-item.active::before { background: #06303d; }
+        [data-theme="sonarr"] .sidebar-title {
+            background: none;
+            -webkit-text-fill-color: var(--sonarr-blue);
+            color: var(--sonarr-blue);
+        }
+        [data-theme="sonarr"] .nav-item:hover { color: #ffffff; }
+        [data-theme="sonarr"] .nav-item:hover .nav-icon { color: var(--sonarr-blue); }
+        /* Sonarr's active link: dark row, brand-blue edge and text. */
+        [data-theme="sonarr"] .nav-item.active {
+            background: #333333;
+            color: var(--sonarr-blue);
+            box-shadow: inset 3px 0 0 var(--sonarr-blue);
+        }
+        [data-theme="sonarr"] .nav-item.active .nav-icon { color: var(--sonarr-blue); }
+        [data-theme="sonarr"] .nav-item.active::before { background: var(--sonarr-blue); }
         [data-theme="sonarr"] .header {
-            background: var(--accent);
+            background: var(--sonarr-blue);
             border-bottom: 1px solid rgba(0, 0, 0, 0.12);
         }
         [data-theme="sonarr"] .header-search {
-            background: rgba(255, 255, 255, 0.18);
-            border-color: rgba(255, 255, 255, 0.32);
+            background: rgba(255, 255, 255, 0.20);
+            border-color: rgba(255, 255, 255, 0.45);
         }
         [data-theme="sonarr"] .header-search input { color: #ffffff; }
-        [data-theme="sonarr"] .header-search input::placeholder { color: rgba(255, 255, 255, 0.82); }
+        [data-theme="sonarr"] .header-search input::placeholder { color: rgba(255, 255, 255, 0.88); }
+        /* Sonarr pages carry dark headings, not brand-coloured ones. */
+        [data-theme="sonarr"] .page-title { color: var(--text-primary); }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -719,7 +747,7 @@
         }
 
         .header-btn:hover { background: var(--bg-hover); }
-        .header-btn.primary { background: var(--accent-orange); color: #000; border: none; font-weight: 600; }
+        .header-btn.primary { background: var(--accent-orange); color: var(--on-accent); border: none; font-weight: 600; }
         .header-btn.primary:hover { background: var(--accent-bright); }
         .header-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -1100,7 +1128,7 @@
             top: 0;
             right: 0;
             background: var(--accent-orange);
-            color: #000;
+            color: var(--on-accent);
             width: 26px;
             height: 26px;
             display: flex;
@@ -1197,7 +1225,7 @@
             top: 0;
             right: 0;
             background: var(--accent-orange);
-            color: #000;
+            color: var(--on-accent);
             width: 28px;
             height: 28px;
             display: flex;
@@ -1425,7 +1453,7 @@
             background: var(--bg-primary);
         }
         select[multiple].form-select option:checked { 
-            background: rgba(244,117,33,0.15); 
+            background: var(--accent-soft); 
             color: var(--accent-orange); 
         }
         select[multiple].form-select option:checked::before {
@@ -1743,7 +1771,7 @@
             font-weight: bold;
         }
         .status-full { background: var(--accent-green); color: #000; }
-        .status-partial { background: var(--accent-orange); color: #000; }
+        .status-partial { background: var(--accent-orange); color: var(--on-accent); }
         .status-none { background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border-color); }
 
         /* Search popup active indicator */
@@ -1788,7 +1816,7 @@
         }
         .mode-btn.active {
             background: var(--accent-orange);
-            color: #000;
+            color: var(--on-accent);
             font-weight: 600;
         }
 
@@ -1958,7 +1986,7 @@
         .header-btn:active, .btn-icon:active, .toolbar-btn:active { transform: scale(0.97); }
         .header-btn.primary {
             background: var(--accent-grad);
-            color: #0a0a0a; font-weight: 700; border: none;
+            color: var(--on-accent); font-weight: 700; border: none;
             box-shadow: var(--shadow-glow);
         }
         .header-btn.primary:hover { box-shadow: 0 12px 34px var(--accent-glow); transform: translateY(-1px); }
@@ -2643,6 +2671,11 @@
   .nav-item span{font-size:.7rem;line-height:1.15}
   .nav-item[data-page="add-download"]>span:last-child::after{font-size:.7rem}
   .nav-icon,.nav-icon svg{width:23px;height:23px}
+  /* Sonarr: the bottom bar keeps Sonarr's grey sidebar. On the white glass its light labels
+     were nearly invisible. */
+  [data-theme="sonarr"] .sidebar{background:rgba(89,89,89,.97)}
+  [data-theme="sonarr"] .nav-item.active{background:rgba(0,0,0,.22)!important;color:var(--sonarr-blue)!important;border-top-color:var(--sonarr-blue)!important}
+  [data-theme="sonarr"] .nav-item.active .nav-icon{color:var(--sonarr-blue)!important}
 
   /* More uses a roomy, labelled bottom sheet instead of an unlabeled list. */
   .more-sheet-overlay{z-index:1300;padding-top:20dvh}

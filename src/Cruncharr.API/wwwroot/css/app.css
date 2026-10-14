@@ -1453,7 +1453,7 @@
             background: var(--bg-primary);
         }
         select[multiple].form-select option:checked { 
-            background: var(--accent-soft); 
+            background: var(--accent-soft);
             color: var(--accent-orange); 
         }
         select[multiple].form-select option:checked::before {

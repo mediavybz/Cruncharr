@@ -854,7 +854,8 @@
             const episodes = episodesToRender || (seasonId ? addDownloadEpisodeList.filter(ep => ep.id === seasonId) : addDownloadEpisodeList);
             const allChecked = selectedEpisodes.size === episodes.length && episodes.length > 0;
             if (allCheckbox) allCheckbox.checked = allChecked;
-            if (addBtn) addBtn.disabled = selectedEpisodes.size === 0;
+            // Stays disabled while a submission is running (see addSelectedToQueue).
+            if (addBtn) addBtn.disabled = isAddingToQueue || selectedEpisodes.size === 0;
 
             if (episodes.length === 0) {
                 list.innerHTML = `
@@ -1108,12 +1109,25 @@
         }
 
         let isAddingToQueue = false;
+        // Each episode is submitted on its own, and with Sonarr enabled each one is registered
+        // there first, so a full season takes a while. The button shows the progress and stays
+        // disabled meanwhile; it used to look idle, and the extra clicks were silently ignored.
+        function setAddButtonProgress(text) {
+            const addBtn = document.getElementById('add-btn');
+            if (!addBtn) return;
+            addBtn.disabled = isAddingToQueue || selectedEpisodes.size === 0;
+            addBtn.textContent = text || downloadActionLabel();
+            if (isAddingToQueue) addBtn.setAttribute('aria-busy', 'true');
+            else addBtn.removeAttribute('aria-busy');
+        }
+
         async function addSelectedToQueue() {
             if (isAddingToQueue) return;
             const epKeys = Array.from(selectedEpisodes);
             if (epKeys.length === 0) return;
             
             isAddingToQueue = true;
+            setAddButtonProgress('Preparing…');
             try {
                 // ItemSelectMultiDub applies one dub list to every episode in a request. Group
                 // episodes by their own selected dub set so per-episode choices stay isolated.
@@ -1165,8 +1179,9 @@
                     .map((entry, index) => ({ entry, index }))
                     .sort((a, b) => compareReleaseOrder(a.entry[1], b.entry[1]) || a.index - b.index)
                     .map(({ entry }) => entry);
-                for (const [key, item] of orderedItems) {
+                for (const [index, [key, item]] of orderedItems.entries()) {
                     if (item && item.episodeId) {
+                        setAddButtonProgress(`Adding ${index + 1} of ${orderedItems.length}…`);
                         const queueRes = await sendDownloadRequest({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1219,6 +1234,7 @@
                 showToast('Failed to add to queue: ' + e.message, 'error');
             } finally {
                 isAddingToQueue = false;
+                setAddButtonProgress();
             }
         }
 

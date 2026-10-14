@@ -2852,7 +2852,7 @@
                     if (profiles.length > 1 && profileSection && profileList) {
                         profileSection.style.display = 'block';
                         profileList.innerHTML = profiles.map(p => `
-                            <div style="display:flex; align-items:center; justify-content:space-between; padding:10px; border-bottom:1px solid var(--border-color); ${p.isSelected ? 'background:rgba(244,117,33,0.1);' : ''}">
+                            <div style="display:flex; align-items:center; justify-content:space-between; padding:10px; border-bottom:1px solid var(--border-color); ${p.isSelected ? 'background:var(--accent-softer);' : ''}">
                                 <div style="display:flex; align-items:center; gap:10px;">
                                     <div style="width:32px; height:32px; border-radius:50%; background:var(--bg-tertiary); display:flex; align-items:center; justify-content:center; font-size:0.8em;">
                                         ${p.profileName ? escapeHtml(p.profileName.charAt(0).toUpperCase()) : '?'}
@@ -4002,6 +4002,7 @@
         // Named themes -> data-theme attribute. "Dark" is the default :root (no attr).
         // "System" sets data-theme="system" and lets CSS follow prefers-color-scheme.
         const THEME_ATTR = { 'System': 'system', 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'seerr', 'Sonarr': 'sonarr' };
+        const CUSTOM_ACCENT_TOKENS = ['--accent', '--accent-bright', '--accent-soft', '--accent-softer', '--accent-glow', '--accent-grad', '--shadow-glow', '--on-accent'];
         function applyTheme() {
             const theme = config?.appearance?.theme || 'System';
             const attr = THEME_ATTR[theme];
@@ -4038,10 +4039,25 @@
                 background.style.opacity = appearance.backgroundImageOpacity ?? 0.5;
                 background.style.filter = `blur(${appearance.backgroundImageBlurRadius ?? 10}px)`;
             }
+            // A custom accent also recolours the tokens derived from it (fills, glows, gradient);
+            // setting only --accent left them in the theme's own colour.
             const accentColor = config?.appearance?.accentColor;
-            document.documentElement.style.removeProperty('--accent');
-            if (accentColor && accentColor.toUpperCase() !== '#F47521') {
-                document.documentElement.style.setProperty('--accent', accentColor);
+            const rootStyle = document.documentElement.style;
+            for (const name of CUSTOM_ACCENT_TOKENS) rootStyle.removeProperty(name);
+            const rgb = /^#([0-9a-f]{6})$/i.test(accentColor || '') && accentColor.toUpperCase() !== '#F47521'
+                ? [0, 2, 4].map(i => parseInt(accentColor.slice(1 + i, 3 + i), 16)) : null;
+            if (rgb) {
+                const alpha = a => `rgba(${rgb.join(', ')}, ${a})`;
+                rootStyle.setProperty('--accent', accentColor);
+                rootStyle.setProperty('--accent-bright', accentColor);
+                rootStyle.setProperty('--accent-soft', alpha(0.16));
+                rootStyle.setProperty('--accent-softer', alpha(0.08));
+                rootStyle.setProperty('--accent-glow', alpha(0.40));
+                rootStyle.setProperty('--accent-grad', `linear-gradient(135deg, ${accentColor}, ${alpha(0.78)})`);
+                rootStyle.setProperty('--shadow-glow', `0 8px 30px ${alpha(0.30)}`);
+                // Black or white text on the accent, whichever reads better (WCAG relative luminance).
+                const [r, g, b] = rgb.map(c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+                rootStyle.setProperty('--on-accent', 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.179 ? '#0a0a0a' : '#ffffff');
             }
         }
         

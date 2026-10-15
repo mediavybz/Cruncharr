@@ -107,6 +107,7 @@ public class SyncingService : ISyncingService
                 };
 
                 process.Start();
+                ProcessPriority.Lower(process);
 
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
@@ -194,6 +195,7 @@ public class SyncingService : ISyncingService
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.CreateNoWindow = true;
         process.Start();
+        ProcessPriority.Lower(process);
         var stderr = process.StandardError.ReadToEndAsync();
         using var buffer = new MemoryStream(expected);
         process.StandardOutput.BaseStream.CopyTo(buffer);

@@ -49,6 +49,7 @@ public static class MuxingHelpers
                 };
 
                 process.Start();
+                ProcessPriority.Lower(process);
 
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();

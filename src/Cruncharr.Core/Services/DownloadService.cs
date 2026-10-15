@@ -3739,6 +3739,7 @@ public class DownloadService : IDownloadService
             _logger?.LogError("Failed to start process: {Executable}", executable);
             return;
         }
+        ProcessPriority.Lower(process);
 
         // Read stdout/stderr concurrently to avoid deadlocks on full buffers
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -3797,6 +3798,7 @@ public class DownloadService : IDownloadService
             _logger?.LogError("Failed to start process: {Executable}", executable);
             return "";
         }
+        ProcessPriority.Lower(process);
 
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -4030,6 +4032,8 @@ public class DownloadService : IDownloadService
             _logger?.LogError("Failed to start process: {Executable}", ffmpegPath);
             return -1;
         }
+        // Encodes run on idle CPU only, so the web UI and other services stay responsive.
+        ProcessPriority.Idle(process);
 
         await using var killRegistration = cancellationToken.Register(() =>
         {

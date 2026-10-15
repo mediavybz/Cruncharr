@@ -29,6 +29,8 @@ public class SonarrAcquisitionState
     public DateTime ProviderUpdatedUtc { get; set; }
     public DateTime UpdatedUtc { get; set; }
     public DateTime RetryAfterUtc { get; set; }
+    // Consecutive failed sync attempts; sets how long the next retry waits.
+    public int ConsecutiveFailures { get; set; }
     public string Status { get; set; } = "Waiting for Sonarr";
     public string? LastError { get; set; }
     public int EpisodeCount { get; set; }
@@ -41,6 +43,8 @@ public interface ISonarrAcquisitionService
     Task RegisterImportAsync(EpisodeInfo episode, string outputPath, CancellationToken cancellationToken = default);
     Task SynchronizeAsync(CancellationToken cancellationToken = default);
     Task<List<SonarrAcquisitionState>> GetStatusAsync();
+    // Retry every waiting request on the next sync (e.g. after the Sonarr settings changed).
+    void RetryNow() { }
 }
 
 public sealed class SonarrAcquisitionService(
@@ -48,6 +52,7 @@ public sealed class SonarrAcquisitionService(
     ILogger<SonarrAcquisitionService>? logger = null, string? statePath = null) : ISonarrAcquisitionService
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private volatile bool _retryNow;
     private readonly string _path = statePath ?? Path.Combine(AppContext.BaseDirectory, "sonarr-requests.json");
     private List<SonarrAcquisitionState>? _state;
     private DateTime _lastLibrarySync;
@@ -137,6 +142,8 @@ public sealed class SonarrAcquisitionService(
             link.EpisodeCount = match.Statistics?.TotalEpisodeCount ?? 0;
             link.EpisodeFileCount = match.Statistics?.EpisodeFileCount ?? 0;
             link.LastError = null;
+            link.ConsecutiveFailures = 0;
+            link.RetryAfterUtc = default;
             link.UpdatedUtc = DateTime.UtcNow;
             if (DateTime.UtcNow - link.ProviderUpdatedUtc > TimeSpan.FromMinutes(10))
             {
@@ -196,10 +203,18 @@ public sealed class SonarrAcquisitionService(
             link.ImportEpisodeIds[localPath] = episode.Id;
             link.NeedsEpisodeMatch = true;
             link.Status = "Waiting for Sonarr import";
+            link.ConsecutiveFailures = 0;
+            link.RetryAfterUtc = default;
             await SaveAsync();
         }
         finally { _gate.Release(); }
     }
+
+    // 1, 2, 4, 8, 16, 32, then 60 minutes.
+    internal static TimeSpan RetryDelay(int consecutiveFailures) =>
+        TimeSpan.FromMinutes(Math.Min(60, Math.Pow(2, Math.Clamp(consecutiveFailures, 1, 7) - 1)));
+
+    public void RetryNow() => _retryNow = true;
 
     internal static string MapImportPath(string path, string outputDirectory, string sonarrDirectory)
     {
@@ -216,6 +231,11 @@ public sealed class SonarrAcquisitionService(
         try
         {
             await LoadAsync();
+            if (_retryNow)
+            {
+                _retryNow = false;
+                foreach (var waiting in _state!) { waiting.RetryAfterUtc = default; waiting.ConsecutiveFailures = 0; }
+            }
             var library = await sonarr.GetCurrentSeriesAsync(config.Sonarr, cancellationToken);
             foreach (var link in _state!.Where(s => s.Server == Server))
             {
@@ -305,14 +325,20 @@ public sealed class SonarrAcquisitionService(
                         }
                     }
                     link.LastError = null;
+                    link.ConsecutiveFailures = 0;
                     link.UpdatedUtc = DateTime.UtcNow;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
+                    // Back off while the same request keeps failing (e.g. Sonarr cannot see the
+                    // download folder). Retrying every minute made Sonarr re-scan every pending
+                    // video each minute and slowed the whole host.
                     link.LastError = ex.Message;
-                    link.RetryAfterUtc = DateTime.UtcNow.AddMinutes(1);
-                    logger?.LogWarning(ex, "Sonarr request for {Title} is pending", link.Title);
+                    link.ConsecutiveFailures++;
+                    var retryIn = RetryDelay(link.ConsecutiveFailures);
+                    link.RetryAfterUtc = DateTime.UtcNow + retryIn;
+                    logger?.LogWarning(ex, "Sonarr request for {Title} is pending; retrying in {Minutes} min", link.Title, (int)retryIn.TotalMinutes);
                 }
                 await SaveAsync();
             }

@@ -238,6 +238,56 @@ public sealed class SonarrAcquisitionTests : IDisposable
         Assert.Equal(0, saved.EpisodeFileCount);
     }
 
+    // A request that keeps failing (here Sonarr rejects the import) used to be retried every
+    // minute forever, so Sonarr re-scanned every pending video each minute and slowed the host.
+    [Fact]
+    public async Task FailingImportBacksOffAndRetriesNowAfterSettingsChange()
+    {
+        _server.RejectImport = true;
+        await _requests.PrepareAsync(_episodes[0], true, cancellationToken: Token);
+        await _requests.RegisterImportAsync(_episodes[0], Path.Combine(_directory, "episode.mkv"), Token);
+
+        var delays = new List<double>();
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            await _requests.SynchronizeAsync(Token);
+            var link = Assert.Single(await _requests.GetStatusAsync());
+            Assert.Contains("No audio tracks detected", link.LastError);
+            delays.Add(Math.Round((link.RetryAfterUtc - DateTime.UtcNow).TotalMinutes));
+            LiveState().Single().RetryAfterUtc = default; // pretend the wait has passed
+        }
+        Assert.Equal([1d, 2d, 4d, 8d], delays);
+
+        // Waiting requests are skipped until their retry time...
+        await _requests.SynchronizeAsync(Token);
+        var waiting = Assert.Single(await _requests.GetStatusAsync());
+        Assert.Equal(5, waiting.ConsecutiveFailures);
+        var importsBefore = _server.Writes.Count(w => w.Path == "manualimport");
+        await _requests.SynchronizeAsync(Token);
+        Assert.Equal(importsBefore, _server.Writes.Count(w => w.Path == "manualimport"));
+
+        // ...unless the Sonarr settings change, and success resets the counter.
+        _server.RejectImport = false;
+        _requests.RetryNow();
+        await _requests.SynchronizeAsync(Token);
+        var retried = Assert.Single(await _requests.GetStatusAsync());
+        Assert.Null(retried.LastError);
+        Assert.Equal(0, retried.ConsecutiveFailures);
+    }
+
+    // GetStatusAsync returns copies; tests that fast-forward a retry edit the live state.
+    private List<SonarrAcquisitionState> LiveState() =>
+        (List<SonarrAcquisitionState>)typeof(SonarrAcquisitionService)
+            .GetField("_state", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(_requests)!;
+
+    [Fact]
+    public void RetryDelayDoublesUpToAnHour()
+    {
+        Assert.Equal([1d, 2d, 4d, 8d, 16d, 32d, 60d, 60d],
+            Enumerable.Range(1, 8).Select(n => SonarrAcquisitionService.RetryDelay(n).TotalMinutes));
+    }
+
     [Fact]
     public async Task SonarrOutagePreservesPreviouslyConfirmedFiles()
     {

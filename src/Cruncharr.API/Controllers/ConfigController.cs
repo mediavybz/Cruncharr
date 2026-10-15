@@ -488,6 +488,10 @@ public class ConfigController : ControllerBase
                 ApplySavedConfig(candidate, configPath);
                 if (request.Crunchyroll?.StreamEndpoint != null || request.Crunchyroll?.StreamEndpointSecondary != null || request.General?.TokenFilePath != null)
                     HttpContext?.RequestServices?.GetService<ICrunchyrollAuthService>()?.RefreshConfiguration();
+                // Changed Sonarr settings (often the download-folder mapping) apply to waiting
+                // imports on the next sync instead of after their retry backoff.
+                if (request.Sonarr != null)
+                    HttpContext?.RequestServices?.GetService<ISonarrAcquisitionService>()?.RetryNow();
                 _logger.LogInformation("Configuration saved to {Path}", configPath);
             }
             return Ok(new { Success = true, Message = "Configuration saved" });

@@ -135,7 +135,12 @@ public partial class SonarrService : ISonarrService
     // The request gate also coalesces concurrent batch-download cache misses instead of bursting
     // identical reads at Sonarr (the live failure was simultaneous connections reset by peer).
     private static readonly TimeSpan MetadataCacheTtl = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan FileStatusCacheTtl = TimeSpan.FromSeconds(15);
+    // How long a non-forced read (e.g. opening History) may reuse a series' file status. It was
+    // 15 s, so nearly every History visit re-read all matched series one after another through
+    // the request gate. Forced reads (scheduler, Refresh, imports) always fetch.
+    private static readonly TimeSpan FileStatusCacheTtl = TimeSpan.FromMinutes(2);
+    // After Sonarr fails to answer, skip it this long instead of retrying every series.
+    private static readonly TimeSpan FileStatusFailureBackoff = TimeSpan.FromSeconds(15);
     private (string Key, DateTime RetryAfterUtc)? _fileStatusFailure;
     private const int MaxTransientAttempts = 3;
     private (string Key, DateTime FetchedUtc, List<SonarrSeries> Data)? _seriesCache;
@@ -221,12 +226,13 @@ public partial class SonarrService : ISonarrService
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (currentLibrary) timeout.CancelAfter(TimeSpan.FromSeconds(8));
         var acquired = false;
         try
         {
-            await _metadataRequestGate.WaitAsync(timeout.Token);
+            // Waiting for the gate is not Sonarr being slow; only the request itself is timed.
+            await _metadataRequestGate.WaitAsync(cancellationToken);
             acquired = true;
+            if (currentLibrary) timeout.CancelAfter(TimeSpan.FromSeconds(8));
             lock (_metadataCacheLock)
             {
                 if (_seriesCache is { } cached && cached.Key == cacheKey && CanReuse(cached.FetchedUtc))
@@ -435,13 +441,15 @@ public partial class SonarrService : ISonarrService
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (currentFileStatus) timeout.CancelAfter(TimeSpan.FromSeconds(8));
         var requestToken = timeout.Token;
         var gateAcquired = false;
         try
         {
-            await _metadataRequestGate.WaitAsync(requestToken);
+            // Queueing behind other Sonarr reads used to count toward the 8 s timeout, so a
+            // History load timed out series that Sonarr would have answered quickly.
+            await _metadataRequestGate.WaitAsync(cancellationToken);
             gateAcquired = true;
+            if (currentFileStatus) timeout.CancelAfter(TimeSpan.FromSeconds(8));
             lock (_metadataCacheLock)
             {
                 if (_episodeListCache.TryGetValue(listKey, out var cached) && CanReuse(cached.FetchedUtc))
@@ -482,13 +490,13 @@ public partial class SonarrService : ISonarrService
             {
                 if (response == null || IsTransient(response.StatusCode) ||
                     response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                    lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusCacheTtl); }
+                    lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusFailureBackoff); }
                 throw new HttpRequestException("Could not read current episode status from Sonarr.", null, response?.StatusCode);
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && currentFileStatus)
         {
-            lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusCacheTtl); }
+            lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusFailureBackoff); }
             throw new HttpRequestException("Sonarr episode status timed out. Please try again shortly.");
         }
         catch (Exception) when (currentFileStatus || cancellationToken.IsCancellationRequested) { throw; }

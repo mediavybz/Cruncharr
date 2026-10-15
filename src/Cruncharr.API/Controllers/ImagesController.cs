@@ -62,9 +62,14 @@ public class ImagesController : ControllerBase
             return BadRequest(new { Error = "Only Crunchyroll image URLs are allowed" });
         }
 
-        var ext = NormalizeExtension(uri.AbsolutePath);
+        // Catalog thumbnails come as full-quality PNGs (~400 KB for a 480x720 poster; one Browse
+        // screen was ~20 MB). Crunchyroll's resizing CDN serves the same image as WebP at a
+        // fraction of the size; it is cached under its own key so old PNG cache entries are not
+        // reused, and the original is fetched if the CDN refuses.
+        var optimized = OptimizedThumbnailUri(uri);
+        var ext = optimized != null ? ".webp" : NormalizeExtension(uri.AbsolutePath);
         var contentType = ContentTypeForExtension(ext);
-        var hash = Sha256Hex(url);
+        var hash = Sha256Hex(optimized != null ? "webp-v1|" + url : url);
         var cachePath = Path.Combine(_cacheDir, hash + ext);
 
         // Cache hit: serve from disk.
@@ -78,7 +83,30 @@ public class ImagesController : ControllerBase
         try
         {
             using var http = _httpClientFactory.CreateClient("CruncharrImages");
-            using var resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            HttpResponseMessage resp;
+            if (optimized != null)
+            {
+                // The CDN picks the format from Accept; without it, it sends JPEG.
+                using var webpRequest = new HttpRequestMessage(HttpMethod.Get, optimized);
+                webpRequest.Headers.Accept.ParseAdd("image/webp");
+                resp = await http.SendAsync(webpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            }
+            else
+            {
+                resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            }
+            // Anything but WebP from the CDN: use the original, so the .webp cache entry always is WebP.
+            if (optimized != null && (!resp.IsSuccessStatusCode ||
+                !string.Equals(resp.Content.Headers.ContentType?.MediaType, "image/webp", StringComparison.OrdinalIgnoreCase)))
+            {
+                resp.Dispose();
+                ext = NormalizeExtension(uri.AbsolutePath);
+                contentType = ContentTypeForExtension(ext);
+                hash = Sha256Hex(url);
+                cachePath = Path.Combine(_cacheDir, hash + ext);
+                resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            }
+            using var response = resp;
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Image fetch {Url} returned {Status}", url, (int)resp.StatusCode);
@@ -138,6 +166,17 @@ public class ImagesController : ControllerBase
         // Content-addressed URL -> content never changes -> cache for a year, immutable.
         Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
         Response.Headers["ETag"] = "\"" + etag + "\"";
+    }
+
+    // https://www.crunchyroll.com/imgsrv/display/thumbnail/480x720/catalog/crunchyroll/<hash>.png
+    //   -> https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=webp,quality=85,width=480/catalog/crunchyroll/<hash>.png
+    internal static Uri? OptimizedThumbnailUri(Uri uri)
+    {
+        if (!string.Equals(uri.Host, "www.crunchyroll.com", StringComparison.OrdinalIgnoreCase)) return null;
+        var match = System.Text.RegularExpressions.Regex.Match(uri.AbsolutePath,
+            @"^/imgsrv/display/thumbnail/(\d{2,4})x\d{2,4}/(.+)$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (!match.Success) return null;
+        return new Uri($"https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=webp,quality=85,width={match.Groups[1].Value}/{match.Groups[2].Value}");
     }
 
     private static bool IsAllowedImageHost(Uri uri)

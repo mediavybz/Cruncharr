@@ -83,29 +83,43 @@ public class ImagesController : ControllerBase
         try
         {
             using var http = _httpClientFactory.CreateClient("CruncharrImages");
-            HttpResponseMessage resp;
+            HttpResponseMessage? resp = null;
             if (optimized != null)
             {
                 // The CDN picks the format from Accept; without it, it sends JPEG.
                 using var webpRequest = new HttpRequestMessage(HttpMethod.Get, optimized);
                 webpRequest.Headers.Accept.ParseAdd("image/webp");
-                resp = await http.SendAsync(webpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                try
+                {
+                    resp = await http.SendAsync(webpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested &&
+                    ex is HttpRequestException or OperationCanceledException)
+                {
+                    _logger.LogDebug(ex, "Thumbnail CDN unavailable; using original image");
+                }
             }
             else
             {
                 resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             }
             // Anything but WebP from the CDN: use the original, so the .webp cache entry always is WebP.
-            if (optimized != null && (!resp.IsSuccessStatusCode ||
+            if (optimized != null && (resp == null || !resp.IsSuccessStatusCode ||
                 !string.Equals(resp.Content.Headers.ContentType?.MediaType, "image/webp", StringComparison.OrdinalIgnoreCase)))
             {
-                resp.Dispose();
+                resp?.Dispose();
                 ext = NormalizeExtension(uri.AbsolutePath);
                 contentType = ContentTypeForExtension(ext);
                 hash = Sha256Hex(url);
                 cachePath = Path.Combine(_cacheDir, hash + ext);
+                if (System.IO.File.Exists(cachePath))
+                {
+                    SetCacheHeaders(hash);
+                    return PhysicalFile(cachePath, contentType);
+                }
                 resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             }
+            if (resp == null) throw new HttpRequestException("No image response received");
             using var response = resp;
             if (!resp.IsSuccessStatusCode)
             {

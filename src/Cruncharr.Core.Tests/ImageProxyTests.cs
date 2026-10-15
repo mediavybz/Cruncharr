@@ -49,6 +49,30 @@ public class ImageProxyTests : IDisposable
     }
 
     [Fact]
+    public async Task CdnNetworkFailure_FallsBackToTheOriginalImage()
+    {
+        var url = Thumbnail();
+        var result = await Controller(cdnWorks: false, cdnThrows: true).Get(url, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/png", Assert.IsType<FileContentResult>(result).ContentType);
+        Assert.Equal(2, _requested.Count);
+        Assert.Equal(url, _requested[1]);
+    }
+
+    [Fact]
+    public async Task CdnFailure_ReusesTheCachedOriginal()
+    {
+        var url = Thumbnail();
+        await Controller(cdnWorks: false).Get(url, TestContext.Current.CancellationToken);
+        _requested.Clear();
+
+        var result = await Controller(cdnWorks: false).Get(url, TestContext.Current.CancellationToken);
+
+        Assert.Equal("image/png", Assert.IsType<PhysicalFileResult>(result).ContentType);
+        Assert.Contains("/cdn-cgi/image/", Assert.Single(_requested));
+    }
+
+    [Fact]
     public async Task OtherImages_AreFetchedUnchanged()
     {
         var url = $"https://static.crunchyroll.com/assets/avatar/170x170/{Guid.NewGuid():N}.png";
@@ -61,13 +85,14 @@ public class ImageProxyTests : IDisposable
     private static string Thumbnail() =>
         $"https://www.crunchyroll.com/imgsrv/display/thumbnail/480x720/catalog/crunchyroll/{Guid.NewGuid():N}.png";
 
-    private ImagesController Controller(bool cdnWorks) =>
+    private ImagesController Controller(bool cdnWorks, bool cdnThrows = false) =>
         new(NullLogger<ImagesController>.Instance, new TestHttpClientFactory(new HttpClient(new Handler(request =>
         {
             var target = request.RequestUri!.AbsoluteUri;
             _requested.Add(target);
             if (target.Contains("/cdn-cgi/image/"))
             {
+                if (cdnThrows) throw new HttpRequestException("CDN unavailable");
                 // Like the real CDN: WebP only when the request accepts it, otherwise JPEG.
                 if (!cdnWorks) return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("<html/>") };
                 return Image(request.Headers.Accept.Any(a => a.MediaType == "image/webp") ? "image/webp" : "image/jpeg");

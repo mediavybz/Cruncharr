@@ -87,7 +87,6 @@ imgcache/
 status.md
 *.resume
 
-# Local agent/instruction material (not part of the application)
 examples/
 
 # Local-only workflow documentation

@@ -227,6 +227,8 @@ proxy). Before exposing it more widely:
   private/loopback/link-local addresses (SSRF protection); catalog images are proxied
   and cached server-side only from the source's own image host over HTTPS.
 
+## Development checks
+
 ## Credits
 
 This project is based on the original **Crunchy-Downloader** desktop application by [Crunchy-DL](https://github.com/Crunchy-DL/Crunchy-Downloader). All core logic and media processing is ported from the upstream source, as required by its license.

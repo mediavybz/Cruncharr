@@ -13,3 +13,5 @@ src/Cruncharr.API/wwwroot/*.png -filter -diff -merge -text
 # (a CRLF shebang becomes "#!/bin/sh\r" -> bad interpreter).
 *.sh text eol=lf
 docker/entrypoint.sh text eol=lf
+
+scripts/*.cjs text eol=lf

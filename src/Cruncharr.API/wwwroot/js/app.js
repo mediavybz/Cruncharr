@@ -189,6 +189,7 @@
         let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
         let browseSeriesPromise = null;  // de-duplicates background/visible catalog requests
         let browseCatalogLoaded = false;
+        let browseCatalogFetchedAt = 0;
         let browseFilteredSeries = [];
         let browseRenderedCount = 0;
         let browseLoadMoreObserver = null;
@@ -1433,7 +1434,7 @@
             return findMatchingLocale(episodeLocales, preferredAudio) || episodeLocales[0] || '';
         }
 
-        async function resolveCalendarSeriesTitle(seriesId, audioLocale) {
+        async function resolveCalendarSeriesTitle(seriesId, audioLocale, signal) {
             if (!seriesId) return '';
             if (calendarSeriesTitleCache.has(seriesId)) {
                 return calendarSeriesTitleCache.get(seriesId);
@@ -1441,7 +1442,7 @@
 
             try {
                 const dubQuery = audioLocale ? `?dubLang=${encodeURIComponent(audioLocale)}` : '';
-                const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/list${dubQuery}`);
+                const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/list${dubQuery}`, { signal });
                 if (!res.ok) return '';
                 const data = await res.json();
                 const title = (data?.list || []).find(item => item?.seriesTitle)?.seriesTitle || '';
@@ -1452,7 +1453,7 @@
             }
         }
 
-        async function enrichCalendarSeriesTitles(days) {
+        async function enrichCalendarSeriesTitles(days, signal) {
             const episodes = (days || []).flatMap(day => day.episodes || []);
             const candidates = new Map();
 
@@ -1465,16 +1466,11 @@
             const resolvedTitles = new Map(await Promise.all(
                 Array.from(candidates, async ([seriesId, ep]) => [
                     seriesId,
-                    await resolveCalendarSeriesTitle(seriesId, ep.audioLocale)
+                    await resolveCalendarSeriesTitle(seriesId, ep.audioLocale, signal)
                 ])
             ));
 
-            for (const ep of episodes) {
-                const resolvedTitle = resolvedTitles.get(ep.seriesId);
-                if (!resolvedTitle || !isGenericCalendarSeriesLabel(ep.seriesTitle)) continue;
-                ep.seasonName = ep.seriesTitle;
-                ep.seriesTitle = resolvedTitle;
-            }
+            return resolvedTitles;
         }
 
         function consolidateCalendarEpisodes(episodes) {
@@ -1589,12 +1585,10 @@
                 const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
 
                 const res = await fetch(`/api/v1/calendar/custom?date=${sundayStr}&language=${encodeURIComponent(metaLang)}&dubFilter=${encodeURIComponent(dubFilter)}${forceUpdate ? '&forceUpdate=true' : ''}`, {
-                    signal: calendarRequest.signal
+                    signal: AbortSignal.any([calendarRequest.signal, AbortSignal.timeout(35000)])
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                if (!calendarRequestGate.isCurrent(calendarRequest)) return;
-                await enrichCalendarSeriesTitles(data.days);
                 if (!calendarRequestGate.isCurrent(calendarRequest)) return;
                 const grid = document.getElementById('calendar-grid');
                 if (!grid) return;
@@ -1661,7 +1655,7 @@
                                         ${historyMark}
                                         <div class="calendar-episode-time">${timeDisplay}</div>
                                         ${episodeThumb}
-                                        <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
+                                        <div class="calendar-episode-title" data-series-id="${escapeHtml(ep.seriesId || '')}">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
                                         ${ep.seasonName && ep.seasonName !== ep.seriesTitle
                                             ? `<div class="calendar-episode-season">${escapeHtml(ep.seasonName)}</div>`
                                             : ''}
@@ -1679,6 +1673,15 @@
                         </div>
                     `;
                 }).join('');
+
+                // Optional title lookups must not delay the usable calendar or replace its cards.
+                const titles = await enrichCalendarSeriesTitles(data.days,
+                    AbortSignal.any([calendarRequest.signal, AbortSignal.timeout(10000)]));
+                if (!calendarRequestGate.isCurrent(calendarRequest)) return;
+                for (const label of grid.querySelectorAll('.calendar-episode-title[data-series-id]')) {
+                    const title = titles.get(label.dataset.seriesId);
+                    if (title) label.textContent = title;
+                }
             } catch (e) {
                 if (e?.name === 'AbortError' || !calendarRequestGate.isCurrent(calendarRequest)) return;
                 const grid = document.getElementById('calendar-grid');
@@ -1688,6 +1691,7 @@
                         <div class="empty-state">
                             <div class="empty-state-icon">&#10060;</div>
                             <div class="empty-state-title">Failed to load calendar</div>
+                            <button class="header-btn" onclick="fetchCalendar()">Retry</button>
                         </div>`;
                 }
             } finally {
@@ -1828,7 +1832,7 @@
                 </div>
             `;
             if (browseCatalogLoaded) renderBrowseFiltered();
-            else fetchAllSeries();
+            fetchAllSeries();
             loadSonarrLibrary();
         }
 
@@ -1930,6 +1934,7 @@
                 }
                 allBrowseSeries = compactBrowseSeries(parsed.series);
                 browseCatalogLoaded = true;
+                browseCatalogFetchedAt = cachedAt;
                 return true;
             } catch (e) {
                 removeSessionStorage(BROWSE_CACHE_KEY);
@@ -1938,18 +1943,19 @@
         }
 
         async function loadAllBrowseSeries() {
-            if (browseCatalogLoaded) return allBrowseSeries;
+            if (browseCatalogLoaded && Date.now() - browseCatalogFetchedAt < BROWSE_CACHE_TTL_MS) return allBrowseSeries;
             if (restoreBrowseCatalog()) return allBrowseSeries;
             if (!browseSeriesPromise) {
                 browseSeriesPromise = (async () => {
-                    const res = await fetch('/api/v1/series/all');
+                    const res = await fetch('/api/v1/series/all', { signal: AbortSignal.timeout(50000) });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     if (!Array.isArray(data) || data.length === 0) throw new Error('Catalog is empty. Please retry.');
                     allBrowseSeries = compactBrowseSeries(data);
                     browseCatalogLoaded = true;
+                    browseCatalogFetchedAt = Date.now();
                     writeSessionStorage(BROWSE_CACHE_KEY, JSON.stringify({
-                        cachedAt: Date.now(),
+                        cachedAt: browseCatalogFetchedAt,
                         series: allBrowseSeries
                     }));
                     return allBrowseSeries;
@@ -2332,7 +2338,7 @@
             // Only the latest season/year selection may render; switching aborts the older request.
             const request = seasonalRequestGate.begin();
             try {
-                const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(seasonalSeason)}&year=${encodeURIComponent(seasonalYear)}`, { signal: request.signal });
+                const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(seasonalSeason)}&year=${encodeURIComponent(seasonalYear)}`, { signal: AbortSignal.any([request.signal, AbortSignal.timeout(40000)]) });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 if (!seasonalRequestGate.isCurrent(request)) return;
@@ -2343,6 +2349,7 @@
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load seasonal anime</div>
+                        <button class="header-btn" onclick="fetchSeasonalSeries()">Retry</button>
                     </div>`;
             } finally {
                 seasonalRequestGate.finish(request);

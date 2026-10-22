@@ -10,7 +10,7 @@ function app() {
     const content = { innerHTML: '' };
     const pending = [];
     const context = vm.createContext({
-        URL, Headers, AbortController, console,
+        URL, Headers, AbortController, AbortSignal, console,
         CruncharrLibrary: require('../src/Cruncharr.API/wwwroot/js/library-state.js'),
         CruncharrCalendarRequests: requests,
         document: {

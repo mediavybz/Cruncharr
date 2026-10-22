@@ -13,7 +13,7 @@ function app() {
     const storage = new Map();
     let nextTimer = 0;
     const context = vm.createContext({
-        URL, Headers, AbortController, console,
+        URL, Headers, AbortController, AbortSignal, console,
         CruncharrLibrary: require('../src/Cruncharr.API/wwwroot/js/library-state.js'),
         CruncharrCalendarRequests: requests,
         document: {
@@ -53,6 +53,22 @@ test('browse keeps every provider title including zero-episode entries', () => {
     const ui = app();
     assert.equal(ui.run('compactBrowseSeries([{id:"ZERO",title:"Death Parade",episodeCount:0},{id:"READY",episodeCount:12}]).length'), 2);
     assert.match(ui.run('renderBrowseCards([{id:"ZERO",title:"Death Parade",episodeCount:0}])'), /No episodes currently listed/);
+});
+
+test('the in-memory browse catalog expires while the page stays open', async () => {
+    const ui = app();
+    const initial = ui.run('loadAllBrowseSeries()');
+    ui.reply(0, [{ id: 'OLD', title: 'Existing show' }]);
+    await initial;
+    await ui.run('loadAllBrowseSeries()');
+    assert.equal(ui.pending.length, 1);
+
+    ui.run('browseCatalogFetchedAt = 0; sessionStorage.removeItem(BROWSE_CACHE_KEY)');
+    const refresh = ui.run('loadAllBrowseSeries()');
+    assert.equal(ui.pending.length, 2);
+    ui.reply(1, [{ id: 'NEW', title: 'New show' }]);
+    await refresh;
+    assert.equal(ui.run('allBrowseSeries[0].id'), 'NEW');
 });
 
 test('a new query cancels and ignores the older response even before its debounce runs', async () => {

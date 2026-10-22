@@ -29,8 +29,10 @@ public class CalendarController : ControllerBase
     public async Task<ActionResult<CalendarWeekResponse>> GetCalendar(
         [FromQuery] string? date = null,
         [FromQuery] string language = "en-us",
-        [FromQuery] bool forceUpdate = false)
+        [FromQuery] bool forceUpdate = false, CancellationToken cancellationToken = default)
     {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(TimeSpan.FromSeconds(30));
         try
         {
             DateTime targetDate;
@@ -50,10 +52,18 @@ public class CalendarController : ControllerBase
             var week = await _calendarService.GetCalendarForDateAsync(
                 monday.ToString("yyyy-MM-dd"),
                 language,
-                forceUpdate);
+                forceUpdate, budget.Token);
 
             var response = MapToResponse(week, language);
             return Ok(response);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(504, new { Error = "Calendar request timed out. Please try again." });
         }
         catch (Exception ex)
         {
@@ -70,8 +80,10 @@ public class CalendarController : ControllerBase
         [FromQuery] string? date = null,
         [FromQuery] string language = "en-us",
         [FromQuery] bool forceUpdate = false,
-        [FromQuery] string? dubFilter = null)
+        [FromQuery] string? dubFilter = null, CancellationToken cancellationToken = default)
     {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(TimeSpan.FromSeconds(30));
         try
         {
             DateTime targetDate;
@@ -84,11 +96,19 @@ public class CalendarController : ControllerBase
                 return BadRequest(new { Error = "Invalid date format", Message = "Date must be in yyyy-MM-dd format" });
             }
 
-            var week = await _calendarService.GetCustomCalendarAsync(targetDate, language, forceUpdate);
+            var week = await _calendarService.GetCustomCalendarAsync(targetDate, language, forceUpdate, budget.Token);
             // Query param overrides the configured calendar dub filter
             var effectiveDubFilter = dubFilter ?? _config.Calendar?.DubFilter;
             var response = MapCustomToResponse(week, effectiveDubFilter, _config.Calendar?.HideDubs ?? false);
             return Ok(response);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(504, new { Error = "Calendar request timed out. Please try again." });
         }
         catch (Exception ex)
         {
@@ -101,13 +121,23 @@ public class CalendarController : ControllerBase
     /// Get upcoming episodes for the next 7 days
     /// </summary>
     [HttpGet("upcoming")]
-    public async Task<ActionResult<List<CalendarEpisodeResponse>>> GetUpcoming([FromQuery] string language = "en-us")
+    public async Task<ActionResult<List<CalendarEpisodeResponse>>> GetUpcoming([FromQuery] string language = "en-us", CancellationToken cancellationToken = default)
     {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(TimeSpan.FromSeconds(30));
         try
         {
-            var upcoming = await _calendarService.GetUpcomingEpisodesAsync(language);
+            var upcoming = await _calendarService.GetUpcomingEpisodesAsync(language, budget.Token);
             var response = upcoming.Select(MapEpisodeToResponse).ToList();
             return Ok(response);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(504, new { Error = "Calendar request timed out. Please try again." });
         }
         catch (Exception ex)
         {

@@ -108,6 +108,10 @@ public class SeriesController : ControllerBase
         {
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(504, new { Error = "Catalog request timed out. Please try again." });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get all series");
@@ -119,7 +123,7 @@ public class SeriesController : ControllerBase
     /// Get seasonal series by tag (e.g., winter-2024)
     /// </summary>
     [HttpGet("seasonal")]
-    public async Task<ActionResult> GetSeasonalSeries([FromQuery] string season, [FromQuery] string year, [FromQuery] string? locale = null)
+    public async Task<ActionResult> GetSeasonalSeries([FromQuery] string season, [FromQuery] string year, [FromQuery] string? locale = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(season) || string.IsNullOrWhiteSpace(year))
         {
@@ -128,8 +132,18 @@ public class SeriesController : ControllerBase
 
         try
         {
-            var results = await _api.GetSeasonalSeriesAsync(season, year, locale);
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(TimeSpan.FromSeconds(35));
+            var results = await _api.GetSeasonalSeriesAsync(season, year, locale, budget.Token);
             return Ok(results);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(504, new { Error = "Seasonal request timed out. Please try again." });
         }
         catch (Exception ex)
         {
@@ -142,18 +156,22 @@ public class SeriesController : ControllerBase
     /// Get grouped episode list with versions for a series (ported from upstream ListSeriesId)
     /// </summary>
     [HttpGet("{seriesId}/list")]
-    public async Task<ActionResult> ListSeriesId(string seriesId, [FromQuery] string? locale = null, [FromQuery] bool forcedLocale = false, [FromQuery] string? seasonId = null, [FromQuery] List<string>? dubLang = null, [FromQuery] bool? all = null, [FromQuery] List<string>? e = null)
+    public async Task<ActionResult> ListSeriesId(string seriesId, [FromQuery] string? locale = null, [FromQuery] bool forcedLocale = false, [FromQuery] string? seasonId = null, [FromQuery] List<string>? dubLang = null, [FromQuery] bool? all = null, [FromQuery] List<string>? e = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesId)) return BadRequest(new { Error = "SeriesId is required" });
         try
         {
             var data = new CrunchyMultiDownload(dubLang ?? new List<string>(), all, e: e, s: seasonId);
-            var result = await _api.ListSeriesIdAsync(seriesId, locale ?? "", data, forcedLocale);
+            var result = await _api.ListSeriesIdAsync(seriesId, locale ?? "", data, forcedLocale, cancellationToken);
             if (result == null)
             {
                 return NotFound(new { Error = "Series not found or no episodes available" });
             }
             return Ok(result);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

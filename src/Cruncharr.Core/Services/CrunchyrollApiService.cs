@@ -48,11 +48,16 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     private readonly ILogger<CrunchyrollApiService>? _logger;
     private readonly ICrunchyrollAuthService _authService;
     private readonly HttpClientWrapper _httpClient;
+    private readonly TimeProvider _timeProvider;
+    private readonly SemaphoreSlim _browseLoadLock = new(1, 1);
+    private BrowseCatalog? _browseCatalog;
+    private sealed record BrowseCatalog(string Key, DateTime ExpiresUtc, List<SeriesInfo> Series);
 
-    public CrunchyrollApiService(ICrunchyrollAuthService authService, CruncharrConfig? config = null, ILogger<CrunchyrollApiService>? logger = null)
+    public CrunchyrollApiService(ICrunchyrollAuthService authService, CruncharrConfig? config = null, ILogger<CrunchyrollApiService>? logger = null, TimeProvider? timeProvider = null)
     {
         _authService = authService;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         // Pass config so a configured proxy / FlareSolverr covers the Crunchyroll browse/episode
         // API calls, not just login. Without it these fetches went direct and bypassed the proxy.
         _httpClient = new HttpClientWrapper(config);
@@ -1585,13 +1590,36 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     // Ported from upstream CrSeries.GetAllSeries
     public async Task<List<SeriesInfo>> GetAllSeriesAsync(string? crLocale = null, CancellationToken cancellationToken = default)
     {
-        _logger?.LogInformation("Getting all series");
-
-        var accessToken = await EnsureTokenAsync(cancellationToken);
-        if (accessToken == null)
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(TimeSpan.FromSeconds(45));
+        await _browseLoadLock.WaitAsync(budget.Token);
+        try
         {
-            throw new HttpRequestException("Crunchyroll catalog is unavailable. Please try again.");
+            var accessToken = await EnsureTokenAsync(budget.Token);
+            if (accessToken == null)
+                throw new HttpRequestException("Crunchyroll catalog is unavailable. Please try again.");
+
+            // Catalog availability can differ by account, profile and region. Token refreshes
+            // alone do not change it; a guest fallback must not populate the account's cache.
+            var token = _authService.Token;
+            var account = accessToken == token?.access_token ? token?.account_id : null;
+            var key = $"{crLocale}|{account}|{token?.profile_id}|{_authService.Profile.ProfileId}|{token?.country}";
+            if (_browseCatalog is { } cached && cached.Key == key && cached.ExpiresUtc > _timeProvider.GetUtcNow().UtcDateTime)
+                return cached.Series;
+
+            var series = await FetchAllSeriesAsync(accessToken, crLocale, budget.Token);
+            _browseCatalog = new BrowseCatalog(key, _timeProvider.GetUtcNow().UtcDateTime.AddMinutes(15), series);
+            return series;
         }
+        finally
+        {
+            _browseLoadLock.Release();
+        }
+    }
+
+    private async Task<List<SeriesInfo>> FetchAllSeriesAsync(string accessToken, string? crLocale, CancellationToken cancellationToken)
+    {
+        _logger?.LogInformation("Getting all series");
 
         var complete = new List<SeriesInfo>();
         var seenIds = new HashSet<string>(StringComparer.Ordinal);
@@ -1667,7 +1695,6 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     }
 
     // Ported from upstream CrSeries.GetSeasonalSeries
-    private static readonly HttpClient _anilistClient = new HttpClient();
     private const string AnilistSeasonQuery =
         "query($season: MediaSeason, $year: Int, $page: Int){ Page(page:$page){ pageInfo{ hasNextPage } " +
         "media(season:$season, seasonYear:$year, type:ANIME, isAdult:false, sort:TITLE_ENGLISH){ " +
@@ -1691,6 +1718,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         // 1) AniList - complete seasonal lineup with high-res covers, CR-linked only.
         try
         {
+            using var anilistBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            anilistBudget.CancelAfter(TimeSpan.FromSeconds(5));
             int page = 1;
             bool hasNext;
             do
@@ -1704,13 +1733,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 {
                     Content = new StringContent(payload, Encoding.UTF8, "application/json")
                 };
-                using var resp = await _anilistClient.SendAsync(req, cancellationToken);
+                using var resp = await _httpClient.Client.SendAsync(req, anilistBudget.Token);
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger?.LogWarning("AniList seasonal request failed: {Status}", resp.StatusCode);
                     break;
                 }
-                var body = await resp.Content.ReadAsStringAsync(cancellationToken);
+                var body = await resp.Content.ReadAsStringAsync(anilistBudget.Token);
                 var pageNode = JObject.Parse(body)["data"]?["Page"];
                 hasNext = pageNode?["pageInfo"]?["hasNextPage"]?.ToObject<bool>() ?? false;
                 foreach (var m in pageNode?["media"] as JArray ?? new JArray())
@@ -1724,7 +1753,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     // link isn't a clean /series/<id> URL (upstream does the same HEAD hop).
                     // Titles whose id can't be resolved are STILL listed (just not clickable)
                     // so the lineup matches upstream's count.
-                    var crId = await ResolveCrunchyrollSeriesIdAsync(url, cancellationToken);
+                    var crId = await ResolveCrunchyrollSeriesIdAsync(url, anilistBudget.Token);
 
                     var title = m["title"]?["english"]?.ToString();
                     if (string.IsNullOrEmpty(title)) title = m["title"]?["romaji"]?.ToString();
@@ -1766,6 +1795,10 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 page++;
             } while (hasNext && page <= 10);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "AniList seasonal fetch failed for {Season} {Year}", season, year);
@@ -1787,6 +1820,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger?.LogWarning(ex, "Crunchyroll seasonal fetch failed for {Season} {Year}", season, year);
+            if (bySeries.Count == 0) throw;
         }
 
         return bySeries.Values.OrderBy(s => s.Title, StringComparer.OrdinalIgnoreCase).ToList();
@@ -1807,12 +1841,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Head, url);
-            using var resp = await _anilistClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var resp = await _httpClient.Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var finalUrl = resp.RequestMessage?.RequestUri?.ToString() ?? "";
             var m2 = Regex.Match(finalUrl, @"series/([^/?#]+)");
             if (m2.Success) return m2.Groups[1].Value;
         }
-        catch { /* unresolved - title still listed, just not clickable */ }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (HttpRequestException) { /* unresolved - title still listed, just not clickable */ }
         return null;
     }
 
@@ -1821,7 +1856,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         var accessToken = await EnsureTokenAsync(cancellationToken);
         if (accessToken == null)
         {
-            return new List<SeriesInfo>();
+            throw new HttpRequestException("Seasonal catalog is unavailable. Please try again.");
         }
 
         var queryParams = new NameValueCollection{
@@ -1846,13 +1881,13 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         if (!isOk)
         {
             _logger?.LogError("GetSeasonalSeries (CR) request failed: {Error}", error);
-            return new List<SeriesInfo>();
+            throw new HttpRequestException("Seasonal catalog is unavailable. Please try again.");
         }
 
         try
         {
             var result = JsonConvert.DeserializeObject<CrBrowseSeriesBase>(content);
-            if (result?.Data == null) return new List<SeriesInfo>();
+            if (result?.Data == null) throw new JsonException("Invalid seasonal catalog response.");
 
             return result.Data.Select(item => new SeriesInfo
             {
@@ -1867,7 +1902,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to parse GetSeasonalSeries (CR) results");
-            return new List<SeriesInfo>();
+            throw;
         }
     }
 

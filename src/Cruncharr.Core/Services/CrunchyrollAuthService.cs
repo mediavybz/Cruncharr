@@ -1472,7 +1472,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
         SetETPCookie(Token?.refresh_token ?? string.Empty);
 
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false, cancellationToken: cancellationToken);
 
         if (isOk)
         {

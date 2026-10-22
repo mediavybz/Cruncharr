@@ -115,11 +115,15 @@ public class GuestCatalogAccessTests
     public void GuestCanSelectPremiumEpisodeMetadataForSonarrRequests()
     {
         using var api = new CrunchyrollApiService(Guest().Object);
-        var selected = api.ItemSelectMultiDub(new Dictionary<string, EpisodeAndLanguage> {
-            ["1"] = new() { Variants = [new EpisodeVariant(new CrEpisodeDetail {
+        var selected = api.ItemSelectMultiDub(new Dictionary<string, EpisodeAndLanguage>
+        {
+            ["1"] = new()
+            {
+                Variants = [new EpisodeVariant(new CrEpisodeDetail {
                 Id = "GEPISODE1", Episode = "1", Title = "Example", SeriesTitle = "Example", SeriesId = "GSERIES01",
                 SeasonId = "GSEASON01", IsPremiumOnly = true
-            }, new LanguageItem { CrLocale = "ja-JP" })] }
+            }, new LanguageItem { CrLocale = "ja-JP" })]
+            }
         }, ["ja-JP"], false, ["1"]);
         Assert.Equal("GEPISODE1", Assert.Single(selected).Value.EpisodeId);
     }
@@ -177,6 +181,122 @@ public class GuestCatalogAccessTests
         using var api = new CrunchyrollApiService(Guest().Object);
         SetTransport(ApiTransport(api), new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))));
         await Assert.ThrowsAsync<HttpRequestException>(() => browse ? api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken) : api.SearchAsync("Naruto", true, cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SlowSeasonalEnrichment_FallsBackToCrunchyrollWithinItsBudget()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        var anilistCancelled = false;
+        SetTransport(ApiTransport(api), new Handler(async (request, token) =>
+        {
+            if (request.RequestUri!.Host == "graphql.anilist.co")
+            {
+                try { await Task.Delay(Timeout.Infinite, token); }
+                catch (OperationCanceledException) { anilistCancelled = true; throw; }
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series) };
+        }));
+        var result = await api.GetSeasonalSeriesAsync("fall", "2026", cancellationToken: TestContext.Current.CancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.Equal("GSERIES01", Assert.Single(result).Id);
+        Assert.True(anilistCancelled);
+    }
+
+    [Fact]
+    public async Task SeasonalFailure_IsNotReportedAsAnEmptySuccessfulSeason()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        SetTransport(ApiTransport(api), new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))));
+        await Assert.ThrowsAsync<HttpRequestException>(() => api.GetSeasonalSeriesAsync("fall", "2026", cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task LeavingSeasonal_CancelsEnrichmentAndDoesNotStartFallbackRequests()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var calls = 0;
+        SetTransport(ApiTransport(api), new Handler(async (_, token) =>
+        {
+            calls++;
+            cancellation.Cancel();
+            await Task.Delay(Timeout.Infinite, token);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }));
+        var controller = new SeriesController(api, NullLogger<SeriesController>.Instance);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.GetSeasonalSeries("fall", "2026", cancellationToken: cancellation.Token));
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task BrowseCache_CoalescesConcurrentLoadsAndExpires()
+    {
+        var clock = new Clock();
+        using var api = new CrunchyrollApiService(Guest().Object, timeProvider: clock);
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        SetTransport(ApiTransport(api), new Handler(async (_, token) =>
+        {
+            calls++;
+            await pending.Task.WaitAsync(token);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series) };
+        }));
+        var first = api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var second = api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken);
+        pending.SetResult();
+        Assert.All(await Task.WhenAll(first, second), result => Assert.Single(result));
+        Assert.Equal(1, calls);
+        clock.Now += TimeSpan.FromMinutes(16);
+        Assert.Single(await api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task BrowseCache_IsScopedToLocaleAccountProfileAndRegion()
+    {
+        var auth = Guest();
+        using var api = new CrunchyrollApiService(auth.Object);
+        var calls = 0;
+        SetTransport(ApiTransport(api), new Handler((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series) });
+        }));
+        await api.GetAllSeriesAsync("en-US", TestContext.Current.CancellationToken);
+        await api.GetAllSeriesAsync("fr-FR", TestContext.Current.CancellationToken);
+        auth.Object.Token!.account_id = "account";
+        await api.GetAllSeriesAsync("fr-FR", TestContext.Current.CancellationToken);
+        auth.Object.Profile.ProfileId = "profile";
+        await api.GetAllSeriesAsync("fr-FR", TestContext.Current.CancellationToken);
+        auth.Object.Token.country = "FR";
+        await api.GetAllSeriesAsync("fr-FR", TestContext.Current.CancellationToken);
+        Assert.Equal(5, calls);
+        auth.Object.Token.access_token = "refreshed";
+        await api.GetAllSeriesAsync("fr-FR", TestContext.Current.CancellationToken);
+        Assert.Equal(5, calls);
+    }
+
+    [Fact]
+    public async Task CancelledBrowse_DoesNotPoisonTheCacheOrBlockRetry()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        SetTransport(ApiTransport(api), new Handler(async (_, token) =>
+        {
+            cancellation.Cancel();
+            await Task.Delay(Timeout.Infinite, token);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => api.GetAllSeriesAsync(cancellationToken: cancellation.Token));
+        SetTransport(ApiTransport(api), new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series) })));
+        Assert.Single(await api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    private sealed class Clock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 
     [Fact]

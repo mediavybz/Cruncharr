@@ -116,6 +116,24 @@ public class CalendarLoadingTests
     }
 
     [Fact]
+    public async Task CachedWeek_DoesNotWaitForAnotherWeeksSlowFetch()
+    {
+        var api = Api();
+        var service = new CalendarService(api.Object);
+        await service.GetCustomCalendarAsync(Date, "en-US", cancellationToken: TestContext.Current.CancellationToken);
+        var pending = new TaskCompletionSource<CrBrowseEpisodeBase?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        api.Setup(value => value.GetNewEpisodesAsync("en-US", 2000, It.IsAny<DateTime?>(), true, It.IsAny<CancellationToken>()))
+            .Returns(pending.Task);
+        var coldWeek = service.GetCustomCalendarAsync(Date.AddDays(7), "en-US", cancellationToken: TestContext.Current.CancellationToken);
+        var warmWeek = service.GetCustomCalendarAsync(Date, "en-US", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(warmWeek.IsCompletedSuccessfully);
+        Assert.False(coldWeek.IsCompleted);
+        pending.SetResult(Episodes());
+        await coldWeek;
+        Assert.Single((await warmWeek).CalendarDays!.SelectMany(day => day.CalendarEpisodes));
+    }
+
+    [Fact]
     public async Task FailedFetch_IsRetryableAndDoesNotCacheAnEmptyWeek()
     {
         var api = Api();

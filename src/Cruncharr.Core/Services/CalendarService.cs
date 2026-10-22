@@ -228,32 +228,41 @@ public class CalendarService : ICalendarService
 
     public async Task<CalendarWeek> GetCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate = false, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        var showUpcoming = _config?.Calendar?.ShowUpcomingEpisodes == true;
+        var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}_{showUpcoming}";
+        var week = forceUpdate ? null : GetCachedCustomCalendar(cacheKey);
         // Only the fetch is shared. History marks belong to this response, not the cached week.
-        await _customCalendarLoadLock.WaitAsync(cancellationToken);
-        CalendarWeek week;
-        try
+        if (week == null)
         {
-            week = (await BuildCustomCalendarAsync(targetDate, language, forceUpdate, cancellationToken)).Copy();
+            await _customCalendarLoadLock.WaitAsync(cancellationToken);
+            try
+            {
+                week = await BuildCustomCalendarAsync(targetDate, language, forceUpdate, showUpcoming, cancellationToken);
+            }
+            finally
+            {
+                _customCalendarLoadLock.Release();
+            }
         }
-        finally
-        {
-            _customCalendarLoadLock.Release();
-        }
+        week = week.Copy();
         await RefreshHistoryStatusesAsync(week);
         return week;
     }
 
-    private async Task<CalendarWeek> BuildCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate, CancellationToken cancellationToken)
+    private CalendarWeek? GetCachedCustomCalendar(string cacheKey)
     {
-        var showUpcoming = _config?.Calendar?.ShowUpcomingEpisodes == true;
-        var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}_{showUpcoming}";
-
-        if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek) &&
+        return _calendarCache.TryGetValue(cacheKey, out var cachedWeek) &&
             _calendarCacheFetchedUtc.TryGetValue(cacheKey, out var fetchedUtc) &&
-            DateTime.UtcNow - fetchedUtc < CustomCalendarTtl)
-        {
+            DateTime.UtcNow - fetchedUtc < CustomCalendarTtl
+            ? cachedWeek : null;
+    }
+
+    private async Task<CalendarWeek> BuildCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate, bool showUpcoming, CancellationToken cancellationToken)
+    {
+        var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}_{showUpcoming}";
+        if (!forceUpdate && GetCachedCustomCalendar(cacheKey) is { } cachedWeek)
             return cachedWeek;
-        }
 
         var week = new CalendarWeek
         {

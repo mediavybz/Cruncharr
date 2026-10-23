@@ -63,6 +63,11 @@ See [Sonarr requests](docs/sonarr-requests.md) for automatic series registration
 
 ## Stable and beta versions
 
+`master` contains the stable release; [testing](https://github.com/mediavybz/Cruncharr/tree/testing)
+contains beta changes. Compare matching branches when checking repository sync.
+Use `ghcr.io/mediavybz/cruncharr:testing` to test beta fixes. The `latest` image follows
+the stable release.
+
 ## Volume Mounts
 
 | Path | Purpose | Required |
@@ -147,6 +152,11 @@ history:
 
 ## Building Images
 
+The Dockerfile supports Linux AMD64 and ARM64. The published images include the
+application and its media-processing tools. Use `latest` for stable releases or
+`testing` for beta changes. See `scripts/publish-docker.sh` for the build command
+and supported arguments.
+
 ## API Endpoints
 
 The backend exposes a REST API at `http://localhost:8585/api/v1/`:
@@ -228,6 +238,9 @@ proxy). Before exposing it more widely:
   and cached server-side only from the source's own image host over HTTPS.
 
 ## Development checks
+
+See [development checks](docs/development.md) for build and test prerequisites
+and validation commands.
 
 ## Credits
 

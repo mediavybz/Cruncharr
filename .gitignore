@@ -73,6 +73,7 @@ logs/
 *.tmp
 *.temp
 .cache/
+__pycache__/
 
 # Test output files
 test_output*.txt

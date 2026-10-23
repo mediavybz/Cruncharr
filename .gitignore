@@ -26,6 +26,7 @@ _ReSharper*/
 
 # Sensitive files - NEVER commit these
 /.secrets/
+/.local/
 widevine/*.pem
 widevine/*.bin
 test-data/widevine/*.pem

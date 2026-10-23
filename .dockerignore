@@ -4,6 +4,7 @@
 _builds
 .env
 .secrets/
+.local/
 
 # Build outputs (the image restores/builds fresh)
 **/bin/

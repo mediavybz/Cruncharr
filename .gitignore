@@ -115,3 +115,6 @@ CRD.exe
 Updater.exe
 *.dll
 *.exe
+
+# Private local deployment instructions
+.local/

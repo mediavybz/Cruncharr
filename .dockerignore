@@ -29,3 +29,6 @@ src/publish/
 
 # Upstream source kept for reference only — not needed in the image
 CRD/
+
+# Private local deployment instructions
+.local/

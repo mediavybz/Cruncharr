@@ -1338,6 +1338,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             };
         }).ToList();
 
+        ContentEditions.Apply(id, parsedSeries, crunchySeriesList.List);
         return crunchySeriesList;
     }
 

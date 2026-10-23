@@ -700,12 +700,13 @@
                     <button class="header-btn" id="music-btn" onclick="showFeaturedMusic()" style="display:none;">
                         <span>&#127925;</span> Music
                     </button>
-                    <div style="margin-left:auto;">
-                        <select class="form-select mw-200" id="season-dropdown" onchange="onSeasonChange(this.value)">
+                    <div class="season-picker">
+                        <select class="form-select" id="season-dropdown" aria-label="Season and edition" onchange="onSeasonChange(this.value)">
                             <option>Select Season</option>
                         </select>
                     </div>
                 </div>
+                <div id="add-edition-note" class="edition-note" hidden aria-live="polite"></div>
                 <div id="add-default-hint" class="hint" style="display:none; margin:6px 2px 0; font-size:0.82em; opacity:0.8;"></div>
                 <div id="add-episodes-list">
                     <div class="empty-state">
@@ -842,8 +843,21 @@
             if (!seasonId || !addDownloadSelectedSeries) return;
             // Filter episodes by selected season
             const filtered = addDownloadEpisodeList.filter(ep => ep.id === seasonId);
+            const note = document.getElementById('add-edition-note');
+            if (note) {
+                const edition = filtered[0]?.edition;
+                note.hidden = !edition;
+                note.innerHTML = edition
+                    ? `${renderEditionBadge(edition)} <span>${escapeHtml(edition.explanation)}</span>${edition.sourceUrl && isSafeUrl(edition.sourceUrl) ? ` <a href="${escapeHtmlAttribute(edition.sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : ''}`
+                    : '';
+            }
             selectedEpisodes.clear();
             renderAddEpisodesMultiDub(filtered);
+        }
+
+        function renderEditionBadge(edition) {
+            if (!edition) return '';
+            return `<span class="edition-badge${edition.label === 'Edition unknown' ? ' edition-unknown' : ''}" title="${escapeHtmlAttribute(edition.explanation)}">${escapeHtml(edition.label)}</span>`;
         }
 
         function renderAddEpisodesMultiDub(episodesToRender) {
@@ -933,7 +947,7 @@
                         </div>
                         <div class="episode-info">
                             <div class="episode-title">${escapeHtml(ep.name) || 'Unknown Episode'}</div>
-                            <div class="episode-meta">${escapeHtml(ep.seasonTitle || '')}${ep.time ? ' - ' + escapeHtml(ep.time) : ''}</div>
+                            <div class="episode-meta">${escapeHtml(ep.seasonTitle || '')}${ep.time ? ' - ' + escapeHtml(ep.time) : ''} ${renderEditionBadge(ep.edition)}</div>
                             ${ep.description ? `<div class="episode-desc" style="font-size:0.85em; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(ep.description)}</div>` : ''}
                             <div class="dub-section-label">Select Dubs:</div>
                             <div class="dub-selector">
@@ -2208,7 +2222,9 @@
                         if (seasonId && !seasonMap.has(seasonId)) {
                             seasonMap.set(seasonId, {
                                 id: seasonId,
-                                title: ep.seasonTitle || `Season ${ep.season}`
+                                title: ep.seasonTitle || 'Untitled season',
+                                number: ep.season,
+                                edition: ep.edition
                             });
                         }
                     });
@@ -2241,7 +2257,7 @@
 
                     const dropdown = document.getElementById('season-dropdown');
                     if (dropdown) {
-                        dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
+                        dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(`Season ${season.number} · ${season.title}${season.edition ? ` — ${season.edition.label}` : ''}`)}</option>`).join('');
                         if (seasons.length > 0) {
                             const initialSeasonId = calendarTarget?.seasonId || seasons[0].id;
                             dropdown.value = initialSeasonId;

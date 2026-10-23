@@ -184,6 +184,27 @@ public class GuestCatalogAccessTests
     }
 
     [Fact]
+    public async Task SeriesList_PreservesSeasonEditionAndEpisodeIdentityForGuests()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        SetTransport(ApiTransport(api), new Handler((request, _) =>
+        {
+            var body = request.RequestUri!.AbsolutePath.EndsWith("/seasons")
+                ? Seasons.Replace("Season 1", "Season 1 (Uncut)")
+                : Episodes;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+        }));
+
+        var listing = await api.ListSeriesIdAsync("GSERIES01", "en-US", null, cancellationToken: TestContext.Current.CancellationToken);
+        var episode = Assert.Single(listing!.List);
+        Assert.Equal("Uncut", episode.Edition?.Label);
+        Assert.Equal("Season 1", episode.SeasonTitle);
+        Assert.Equal("GSEASON01", episode.Id);
+        var selected = api.ItemSelectMultiDub(listing.Data, ["ja-JP"], true, null);
+        Assert.Equal("GEPISODE1", Assert.Single(selected).Value.EpisodeId);
+    }
+
+    [Fact]
     public async Task SlowSeasonalEnrichment_FallsBackToCrunchyrollWithinItsBudget()
     {
         using var api = new CrunchyrollApiService(Guest().Object);

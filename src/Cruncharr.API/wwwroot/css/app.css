@@ -1608,7 +1608,14 @@
         .changelog-item { font-size: 0.9em; color: var(--text-secondary); padding: 3px 0; }
 
         /* Season dropdown container */
-        .season-selector { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; }
+        .season-selector { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 15px; }
+        .season-picker { margin-left: auto; flex: 1 1 300px; max-width: 100%; }
+        .season-picker select { width: 100%; }
+        .edition-badge { display: inline-block; padding: 3px 8px; border-radius: 4px; background: var(--info-soft); color: var(--accent-blue); font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+        .edition-unknown { background: var(--warning-soft); color: var(--accent-yellow); }
+        .edition-note { margin-bottom: 14px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; }
+        .edition-note .edition-badge { margin-right: 6px; }
+        .edition-note a { color: var(--accent-blue); }
 
         /* Sonarr icon placeholder */
         .sonarr-icon { width: 24px; height: 24px; background: var(--accent-green); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7em; color: #fff; }

@@ -51,8 +51,8 @@ public class HistorySeries
             // Episode downloaded but selected dubs/subs may be missing
             // Check if any selected dubs are newly available but not downloaded
             var missingDubs = selectedDubs?
-                .Where(dub => HistoryEpisode.ContainsNormalized(e.HistoryEpisodeAvailableDubLang, dub) &&
-                              !HistoryEpisode.ContainsNormalized(e.DownloadedDubLang, dub))
+                .Where(dub => HistoryEpisode.ContainsLanguage(e.HistoryEpisodeAvailableDubLang, dub) &&
+                              !HistoryEpisode.ContainsLanguage(e.DownloadedDubLang, dub))
                 .Any() ?? false;
 
             var missingSubs = selectedSubs?
@@ -149,14 +149,10 @@ public class HistoryEpisode
         if (episode.SeasonNumber == 0) SpecialEpisode = true;
     }
 
-    public static bool ContainsNormalized(IEnumerable<string> values, string requested)
-    {
-        var normalized = HistoryEpisode.RemoveAudioDescriptionMarker(requested);
-        return values.Any(value => string.Equals(
-            HistoryEpisode.RemoveAudioDescriptionMarker(value),
-            normalized,
-            StringComparison.OrdinalIgnoreCase));
-    }
+    // Language keys distinguish a dub ("en-US") from its audio-description version ("en-US*");
+    // see EpisodeVersion.LanguageKey. Neither one satisfies a request for the other.
+    public static bool ContainsLanguage(IEnumerable<string> values, string requested) =>
+        values.Contains(requested, StringComparer.OrdinalIgnoreCase);
 
     public void ClearSonarrEpisodeData()
     {
@@ -213,27 +209,24 @@ public class HistoryEpisode
 
     private static bool IsMissingAny(IEnumerable<string> requested, List<string> downloaded)
     {
-        var downloadedSet = downloaded
-            .Select(RemoveAudioDescriptionMarker)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return requested.Select(RemoveAudioDescriptionMarker).Any(r => !downloadedSet.Contains(r));
+        var downloadedSet = downloaded.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return requested.Any(r => !IsRecordedAsDownloaded(downloadedSet, r));
     }
 
     private static bool HasMissingAvailableItem(IEnumerable<string> requested, List<string> downloaded, List<string> available)
     {
-        var downloadedSet = downloaded
-            .Select(RemoveAudioDescriptionMarker)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var availableSet = available
-            .Select(RemoveAudioDescriptionMarker)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return requested
-            .Select(RemoveAudioDescriptionMarker)
-            .Any(r => availableSet.Contains(r) && !downloadedSet.Contains(r));
+        var downloadedSet = downloaded.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var availableSet = available.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return requested.Any(r => availableSet.Contains(r) && !IsRecordedAsDownloaded(downloadedSet, r));
     }
 
-    internal static string RemoveAudioDescriptionMarker(string? locale) =>
-        !string.IsNullOrEmpty(locale) && locale.EndsWith('*') ? locale[..^1] : locale ?? string.Empty;
+    // Records written before downloads kept the audio-description marker stored a described
+    // track as its plain locale, so a plain record still counts for a described request. The
+    // reverse never holds: described audio does not satisfy a request for the dub.
+    private static bool IsRecordedAsDownloaded(HashSet<string> downloaded, string requested) =>
+        downloaded.Contains(requested) ||
+        (EpisodeVersion.IsAudioDescriptionKey(requested) &&
+         downloaded.Contains(requested[..^EpisodeVersion.AudioDescriptionMarker.Length]));
 }
 
 public enum EpisodeType

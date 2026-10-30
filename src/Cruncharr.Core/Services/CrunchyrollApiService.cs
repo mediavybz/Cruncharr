@@ -1014,7 +1014,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 // history override could be added here if HistoryService is injected
                 var effectiveDubs = dubLang ?? new List<string>();
 
-                if (string.IsNullOrEmpty(lang.CrLocale) || !effectiveDubs.Contains(lang.CrLocale))
+                if (string.IsNullOrEmpty(lang.CrLocale) || !effectiveDubs.Contains(v.LanguageKey, StringComparer.OrdinalIgnoreCase))
                     continue;
 
                 // season title fallbacks
@@ -1050,7 +1050,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     var selectedDubs = effectiveDubs
                         .Where(d => episode.Variants.Any(x =>
                             !string.IsNullOrEmpty(x.Lang.CrLocale) &&
-                            string.Equals(x.Lang.CrLocale, d, StringComparison.OrdinalIgnoreCase)))
+                            string.Equals(x.LanguageKey, d, StringComparison.OrdinalIgnoreCase)))
                         .ToList();
 
                     qItem = DownloadQueueItemFactory.CreateShell(
@@ -1157,7 +1157,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     {
                         var lang = Array.Find(Languages.languages, a =>
                             string.Equals(a.CrLocale, version.AudioLocale, StringComparison.OrdinalIgnoreCase)) ?? Languages.DEFAULT_lang;
-                        item.AddUnique(episode, lang);
+                        item.AddUnique(episode, lang, version.IsAudioDescription);
                     }
                 }
                 else
@@ -1313,7 +1313,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             var seconds = (int)Math.Floor((baseEp.DurationMs) / 1000.0);
 
             var langList = value.Variants
-                .Select(v => v.Lang.CrLocale)
+                .Select(v => v.LanguageKey)
                 .Distinct()
                 .ToList();
 
@@ -1936,7 +1936,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 var lang = Array.Find(Languages.languages, a =>
                     string.Equals(a.CrLocale, version.AudioLocale, StringComparison.OrdinalIgnoreCase))
                            ?? Languages.DEFAULT_lang;
-                data.EpisodeAndLanguages.AddUnique(detail, lang);
+                data.EpisodeAndLanguages.AddUnique(detail, lang, version.IsAudioDescription);
             }
         }
         else
@@ -2007,7 +2007,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         var selectedDubs = dubLang
             .Where(d => episodeP.EpisodeAndLanguages.Variants.Any(v =>
-                string.Equals(v.Lang.CrLocale, d, StringComparison.OrdinalIgnoreCase)))
+                string.Equals(v.LanguageKey, d, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         foreach (var v in episodeP.EpisodeAndLanguages.Variants)
@@ -2015,7 +2015,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             var item = v.Item;
             var lang = v.Lang;
 
-            if (!dubLang.Contains(lang.CrLocale))
+            if (!dubLang.Contains(v.LanguageKey, StringComparer.OrdinalIgnoreCase))
                 continue;
 
             item.HideSeasonTitle = true;
@@ -2247,6 +2247,9 @@ public class CrEpisodeVersion
     [JsonProperty("season_guid")]
     public string SeasonGuid { get; set; } = "";
     public List<string>? Roles { get; set; }
+
+    public bool IsAudioDescription =>
+        Roles?.Any(role => string.Equals(role, "description", StringComparison.OrdinalIgnoreCase)) == true;
 }
 
 [JsonObject(ItemNullValueHandling = NullValueHandling.Ignore)]

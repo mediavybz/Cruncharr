@@ -40,8 +40,8 @@ public class PortedGapTests
 
         Assert.Contains("-metadata:s:a:1 title=\"English [AD]\"", ffmpeg);
         Assert.Contains("-disposition:a:0 default", ffmpeg);
-        Assert.Contains("-disposition:a:1 0", ffmpeg);
-        Assert.Contains("--track-name 0:\"English [AD]\" --language 0:eng --default-track 0:0", mkvmerge);
+        Assert.Contains("-disposition:a:1 visual_impaired+descriptions", ffmpeg);
+        Assert.Contains("--track-name 0:\"English [AD]\" --language 0:eng --default-track 0:0 --visual-impaired-flag 0:1", mkvmerge);
     }
 
     [Fact]

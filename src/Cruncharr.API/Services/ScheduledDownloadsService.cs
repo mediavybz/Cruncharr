@@ -243,7 +243,7 @@ public sealed class ScheduledDownloadsService
                     // Wait for all requested dubs, including delayed releases, rather than
                     // permanently marking an episode handled after downloading another language.
                     var waitingForLanguage = dubs.Count == 0 ||
-                        dubs.Any(d => !HistoryEpisode.ContainsNormalized(episode.HistoryEpisodeAvailableDubLang, d)) ||
+                        dubs.Any(d => !HistoryEpisode.ContainsLanguage(episode.HistoryEpisodeAvailableDubLang, d)) ||
                         !_config.Download.SkipSubs && _config.Download.DownloadOnlyWithAllSelectedDubSub && subs.Any(s => s is not ("all" or "none") &&
                             !episode.HistoryEpisodeAvailableSoftSubs.Contains(s, StringComparer.OrdinalIgnoreCase));
                     if (premium && waitingForLanguage)

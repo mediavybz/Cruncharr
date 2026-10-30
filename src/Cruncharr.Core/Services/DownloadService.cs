@@ -136,7 +136,7 @@ public class DownloadService : IDownloadService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
 
-        var availableDubs = Normalize(episode.Versions?.Select(version => version.AudioLocale));
+        var availableDubs = Normalize(episode.Versions?.Select(version => version.LanguageKey));
         var selectedDubs = Normalize(episode.SelectedDubs);
         var requiredDubs = selectedDubs.Count > 0 ? selectedDubs : Normalize(config.Download.DubLanguages);
         var missingDubs = config.Download.DownloadFirstAvailableDub
@@ -302,9 +302,24 @@ public class DownloadService : IDownloadService
                episode.Versions is { Count: > 1 };
     }
 
-    internal static EpisodeVersion? FindAudioDescriptionVersion(EpisodeInfo episode) =>
-        episode.Versions?.FirstOrDefault(version =>
-            version.Roles?.Any(role => string.Equals(role, "description", StringComparison.OrdinalIgnoreCase)) == true);
+    // Prefers the described version of a requested language ("en-US*", or "en-US" when the
+    // download-AD setting adds description tracks for the selected dubs).
+    internal static EpisodeVersion? FindAudioDescriptionVersion(EpisodeInfo episode, IEnumerable<string>? requestedDubs = null)
+    {
+        var described = episode.Versions?.Where(version => version.IsAudioDescription).ToList() ?? [];
+        var requestedLocales = (requestedDubs ?? [])
+            .Select(dub => dub.TrimEnd(EpisodeVersion.AudioDescriptionMarker[0]))
+            .ToList();
+        return requestedLocales
+            .Select(locale => described.FirstOrDefault(version =>
+                string.Equals(version.AudioLocale, locale, StringComparison.OrdinalIgnoreCase)))
+            .FirstOrDefault(version => version != null) ?? described.FirstOrDefault();
+    }
+
+    // An explicitly requested described language ("en-US*") is added as a separate,
+    // description-tagged track; it is never used as the main audio.
+    internal static bool RequestsAudioDescription(EpisodeInfo episode) =>
+        episode.SelectedDubs?.Any(EpisodeVersion.IsAudioDescriptionKey) == true;
 
     internal static bool IsAudioDescriptionFile(string path)
     {
@@ -666,9 +681,13 @@ public class DownloadService : IDownloadService
                         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                         catch (Exception ex)
                         {
-                            return new DownloadResult { Success = false, OutputPath = existing.OutputPath,
+                            return new DownloadResult
+                            {
+                                Success = false,
+                                OutputPath = existing.OutputPath,
                                 ErrorMessage = $"The download already exists, but Sonarr import registration failed: {ex.Message}",
-                                ErrorType = DownloadErrorType.Unknown };
+                                ErrorType = DownloadErrorType.Unknown
+                            };
                         }
                     }
                     progress?.Report(new DownloadProgress { State = DownloadState.Done, Percent = 100, Doing = "Already downloaded" });
@@ -796,7 +815,7 @@ public class DownloadService : IDownloadService
             if (!string.IsNullOrEmpty(episode.AudioLocale))
             {
                 currentVersion = episode.Versions.FirstOrDefault(v =>
-                    string.Equals(v.AudioLocale, episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(v.LanguageKey, episode.AudioLocale, StringComparison.OrdinalIgnoreCase));
             }
 
             // Use episode's SelectedDubs if set (from queue item), otherwise fall back to config
@@ -812,10 +831,10 @@ public class DownloadService : IDownloadService
             {
 
                 // Try each DubLanguage in order
-                foreach (var dubLang in dubLangs)
+                foreach (var dubLang in dubLangs.Where(dub => !EpisodeVersion.IsAudioDescriptionKey(dub)))
                 {
                     var matchingVersion = episode.Versions.FirstOrDefault(v =>
-                        string.Equals(v.AudioLocale, dubLang, StringComparison.OrdinalIgnoreCase));
+                        string.Equals(v.LanguageKey, dubLang, StringComparison.OrdinalIgnoreCase));
                     if (matchingVersion != null)
                     {
                         currentVersion = matchingVersion;
@@ -830,7 +849,7 @@ public class DownloadService : IDownloadService
             if (currentVersion == null && !string.IsNullOrEmpty(config.Download.DefaultAudio))
             {
                 currentVersion = episode.Versions.FirstOrDefault(v =>
-                    string.Equals(v.AudioLocale, config.Download.DefaultAudio, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(v.LanguageKey, config.Download.DefaultAudio, StringComparison.OrdinalIgnoreCase));
             }
 
             // Fallback: if only one version, use it
@@ -1200,8 +1219,9 @@ public class DownloadService : IDownloadService
 
                     foreach (var dub in extraDubs)
                     {
+                        if (EpisodeVersion.IsAudioDescriptionKey(dub)) continue; // added by the AD track step
                         var dubVersion = episode.Versions!.FirstOrDefault(v =>
-                            string.Equals(v.AudioLocale, dub, StringComparison.OrdinalIgnoreCase));
+                            string.Equals(v.LanguageKey, dub, StringComparison.OrdinalIgnoreCase));
                         if (dubVersion == null) continue;
 
                         var dubGuid = dubVersion.Guid;
@@ -1312,9 +1332,9 @@ public class DownloadService : IDownloadService
 
                 // Desktop fetches AD as a separate playback role. A DASH primary therefore needs
                 // a second, audio-only DASH download with a distinct filename and track role.
-                if (!config.Download.NoAudio && config.Download.DownloadDescriptionAudio)
+                if (!config.Download.NoAudio && (config.Download.DownloadDescriptionAudio || RequestsAudioDescription(episode)))
                 {
-                    var adVersion = FindAudioDescriptionVersion(episode);
+                    var adVersion = FindAudioDescriptionVersion(episode, episode.SelectedDubs?.Count > 0 ? episode.SelectedDubs : config.Download.DubLanguages);
                     if (adVersion != null && !string.IsNullOrEmpty(adVersion.Guid))
                     {
                         var adGuid = adVersion.Guid.Contains(':') ? adVersion.Guid.Split(':')[1] : adVersion.Guid;
@@ -1430,8 +1450,9 @@ public class DownloadService : IDownloadService
 
                     foreach (var dub in selectedDubs)
                     {
+                        if (EpisodeVersion.IsAudioDescriptionKey(dub)) continue; // added by the AD track step
                         var dubVersion = episode.Versions!.FirstOrDefault(v =>
-                            string.Equals(v.AudioLocale, dub, StringComparison.OrdinalIgnoreCase));
+                            string.Equals(v.LanguageKey, dub, StringComparison.OrdinalIgnoreCase));
 
                         if (dubVersion == null) continue;
 
@@ -1524,9 +1545,9 @@ public class DownloadService : IDownloadService
                     episode, playbackData, mediaGuid, config, cancellationToken);
 
                 // Download Audio Description (AD) track if configured (skip if NoAudio is enabled)
-                if (!config.Download.NoAudio && config.Download.DownloadDescriptionAudio && episode.Versions != null)
+                if (!config.Download.NoAudio && (config.Download.DownloadDescriptionAudio || RequestsAudioDescription(episode)) && episode.Versions != null)
                 {
-                    var adVersion = FindAudioDescriptionVersion(episode);
+                    var adVersion = FindAudioDescriptionVersion(episode, episode.SelectedDubs?.Count > 0 ? episode.SelectedDubs : config.Download.DubLanguages);
 
                     if (adVersion != null)
                     {
@@ -2079,7 +2100,7 @@ public class DownloadService : IDownloadService
                         // Default audio = the user's FIRST chosen dub for this download (e.g. "en-US"
                         // when they picked English in Add Download), so the player auto-plays it
                         // instead of the global ja-JP default. Bare adds (no selection) fall back.
-                        var primaryDub = episode.SelectedDubs?.FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
+                        var primaryDub = episode.SelectedDubs?.FirstOrDefault(l => !string.IsNullOrWhiteSpace(l) && !EpisodeVersion.IsAudioDescriptionKey(l));
                         var muxed = await MuxFilesAsync(downloadedFiles, audioTrackLanguages, subtitleFiles, chapterFile, fontAttachments, coverPath, workPath, config, cancellationToken, audioDelays, videoLocales, descriptionPath, preferredAudioLang: primaryDub);
                         if (!muxed)
                         {
@@ -2153,7 +2174,9 @@ public class DownloadService : IDownloadService
                 try
                 {
                     var fileInfo = new FileInfo(outputPath);
-                    var downloadedDubs = audioTrackLanguages.Select(a => a.Lang).Distinct().ToList();
+                    var downloadedDubs = audioTrackLanguages
+                        .Select(a => IsAudioDescriptionFile(a.Path) ? a.Lang + EpisodeVersion.AudioDescriptionMarker : a.Lang)
+                        .Distinct().ToList();
                     var downloadedSubs = subtitleFiles.Select(s => s.Lang).Distinct().ToList();
 
                     // Series id used to group + mark this download (see ResolveRichSeriesId).
@@ -4262,7 +4285,7 @@ public class DownloadService : IDownloadService
         {
             // Find version for this locale
             var version = episode.Versions?.FirstOrDefault(v =>
-                string.Equals(v.AudioLocale, locale, StringComparison.OrdinalIgnoreCase));
+                string.Equals(v.LanguageKey, locale, StringComparison.OrdinalIgnoreCase));
 
             if (version == null)
             {

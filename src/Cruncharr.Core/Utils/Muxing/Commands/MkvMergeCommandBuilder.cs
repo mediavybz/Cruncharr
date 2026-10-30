@@ -161,6 +161,8 @@ public class MkvMergeCommandBuilder(MergerOptions options) : CommandBuilder(opti
         Add($"--language {trackNum}:{track.Language.Code}");
 
         AddDefaultAudio(trackNum, track);
+        // Standard Matroska flag so players list it as described audio, not a dub.
+        if (track.IsAudioRoleDescription) Add($"--visual-impaired-flag {trackNum}:1");
     }
 
     private void AddDefaultAudio(string trackNum, MergerInput track)

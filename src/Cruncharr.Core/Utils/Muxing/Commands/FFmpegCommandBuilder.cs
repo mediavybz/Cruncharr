@@ -114,6 +114,11 @@ public class FFmpegCommandBuilder : CommandBuilder
         {
             metaData.Add($"-disposition:a:{audioIndex} default");
         }
+        else if (aud.IsAudioRoleDescription)
+        {
+            // Standard audio-description flags so players list it as described audio, not a dub.
+            metaData.Add($"-disposition:a:{audioIndex} visual_impaired+descriptions");
+        }
         else
         {
             metaData.Add($"-disposition:a:{audioIndex} 0");

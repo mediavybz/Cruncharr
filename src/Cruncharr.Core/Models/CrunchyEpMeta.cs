@@ -105,17 +105,24 @@ public class EpisodeAndLanguage
 {
     public List<EpisodeVariant> Variants { get; set; } = new();
 
-    public bool AddUnique(CrEpisodeDetail item, LanguageItem lang)
+    // A dub and its audio-description version share a locale but are separate variants, so
+    // neither can hide the other.
+    public bool AddUnique(CrEpisodeDetail item, LanguageItem lang, bool isAudioDescription = false)
     {
-        if (Variants.Any(v => v.Lang.CrLocale == lang.CrLocale))
+        var variant = new EpisodeVariant(item, lang, isAudioDescription);
+        if (Variants.Any(v => v.LanguageKey == variant.LanguageKey))
             return false;
 
-        Variants.Add(new EpisodeVariant(item, lang));
+        Variants.Add(variant);
         return true;
     }
 }
 
-public readonly record struct EpisodeVariant(CrEpisodeDetail Item, LanguageItem Lang);
+public readonly record struct EpisodeVariant(CrEpisodeDetail Item, LanguageItem Lang, bool IsAudioDescription = false)
+{
+    // Same keys as EpisodeVersion.LanguageKey: "en-US" for the dub, "en-US*" for audio description.
+    public string LanguageKey => IsAudioDescription ? Lang.CrLocale + EpisodeVersion.AudioDescriptionMarker : Lang.CrLocale;
+}
 
 public class CrunchyMultiDownload
 {

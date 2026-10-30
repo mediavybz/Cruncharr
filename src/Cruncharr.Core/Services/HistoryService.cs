@@ -608,10 +608,7 @@ public class HistoryService : IHistoryService, IDisposable
         {
             return episode.Versions
                 .Where(version => !string.IsNullOrWhiteSpace(version.AudioLocale))
-                .Select(version => version.Roles?.Any(role =>
-                    string.Equals(role, "description", StringComparison.OrdinalIgnoreCase)) == true
-                    ? version.AudioLocale + "*"
-                    : version.AudioLocale)
+                .Select(version => version.LanguageKey)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }

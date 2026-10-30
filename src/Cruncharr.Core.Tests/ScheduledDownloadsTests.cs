@@ -259,24 +259,6 @@ public class ScheduledDownloadsTests : IDisposable
         Assert.Equal(["en-US"], _queued[0].SelectedDubs);
     }
 
-    // Live 2026-10-30: English existed only as audio description ("en-US*") and was queued as the dub.
-    [Fact]
-    public async Task AudioDescriptionAloneDoesNotReleaseTheSelectedDub()
-    {
-        _config.Download.DefaultAudio = "en-US";
-        var service = Service();
-        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
-        var episode = Episode("NEW", "ja-JP", "en-US*");
-
-        var summary = await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
-        Assert.Empty(_queued);
-        Assert.Equal(1, summary!.Shows[0].WaitingForLanguage);
-
-        episode.HistoryEpisodeAvailableDubLang.Add("en-US");
-        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
-        Assert.Equal(["en-US"], Assert.Single(_queued).SelectedDubs);
-    }
-
     [Fact]
     public async Task RunSummaryExplainsEveryEpisodeThatWasNotAdded()
     {

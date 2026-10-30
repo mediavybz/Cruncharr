@@ -150,6 +150,26 @@ public class DownloadVersionResolutionTests
         Assert.Empty(missing.MissingSubs);
     }
 
+    // Crunchyroll marks the English DUB itself as ["description", "dub"] when it also offers an
+    // audio-description option (live: Black Clover, Agents of the Four Seasons). That version is
+    // the English dub and must satisfy a plain "en-US" request.
+    [Fact]
+    public void RequiredLanguageCheck_DubWithAudioDescriptionRoleIsStillTheDub()
+    {
+        var english = V("en-US", "GE00375500ENUS");
+        english.Roles = ["description", "dub"];
+        var episode = new EpisodeInfo
+        {
+            SelectedDubs = ["en-US"],
+            Versions = [V("ja-JP", "GE00375500JAJP", original: true), english]
+        };
+
+        var missing = DownloadService.FindMissingSelectedLanguages(episode, new CruncharrConfig { Download = { SkipSubs = true } });
+
+        Assert.Empty(missing.MissingDubs);
+        Assert.True(HistoryEpisode.ContainsNormalized(["ja-JP", "en-US*"], "en-US"));
+    }
+
     [Theory]
     [InlineData("all")]
     [InlineData("none")]

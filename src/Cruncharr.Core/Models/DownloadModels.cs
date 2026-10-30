@@ -173,19 +173,6 @@ public class EpisodeVersion
     public bool Original { get; set; }
     public string SeasonGuid { get; set; } = "";
     public List<string>? Roles { get; set; }
-
-    public bool IsAudioDescription =>
-        Roles?.Any(role => string.Equals(role, "description", StringComparison.OrdinalIgnoreCase)) == true;
-
-    // Crunchyroll lists an audio-description version under the same locale as the normal dub.
-    // They are different audio, so languages are keyed "en-US" (dub) and "en-US*" (audio
-    // description); a request for "en-US" must never resolve to the described version.
-    public string LanguageKey => IsAudioDescription ? AudioLocale + AudioDescriptionMarker : AudioLocale;
-
-    public const string AudioDescriptionMarker = "*";
-
-    public static bool IsAudioDescriptionKey(string? languageKey) =>
-        languageKey?.EndsWith(AudioDescriptionMarker, StringComparison.Ordinal) == true;
 }
 
 public class CrBrowseEpisodeBase

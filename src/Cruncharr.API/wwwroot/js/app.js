@@ -889,9 +889,9 @@
                 const d = addDownloadSeriesData[ep.e];
                 if (!d || !d.variants) return;
                 d.variants.forEach(v => {
-                    const loc = variantLanguageKey(v);
+                    const loc = v.lang?.crLocale || v.item?.audioLocale;
                     if (!loc) return;
-                    if (!seasonLocaleNames.has(loc)) seasonLocaleNames.set(loc, languageKeyLabel(loc, v.lang?.name));
+                    if (!seasonLocaleNames.has(loc)) seasonLocaleNames.set(loc, v.lang?.name || loc);
                     if (!seasonLocaleEps.has(loc)) seasonLocaleEps.set(loc, new Set());
                     seasonLocaleEps.get(loc).add(ep.e);
                 });
@@ -921,8 +921,8 @@
                 if (epData && epData.variants && epData.variants.length > 0) {
                     const dubMap = new Map();
                     epData.variants.forEach(v => {
-                        const locale = variantLanguageKey(v) || 'unknown';
-                        const name = languageKeyLabel(locale, v.lang?.name);
+                        const locale = v.lang?.crLocale || v.item?.audioLocale || 'unknown';
+                        const name = v.lang?.name || locale;
                         const isPremium = v.item?.isPremiumOnly || false;
                         if (!dubMap.has(locale)) {
                             dubMap.set(locale, { name, isPremium });
@@ -973,7 +973,7 @@
                 if (!selectedEpisodeDubs.has(epKey)) {
                     const epData = addDownloadSeriesData[epKey];
                     if (epData && epData.variants) {
-                        const availableDubs = epData.variants.map(variantLanguageKey).filter(Boolean);
+                        const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
                         const preferredAudio = addDownloadPreferredAudio || authStatus?.preferredAudioLanguage || config?.download?.defaultAudio || 'ja-JP';
                         const selected = new Set();
                         const availablePreferred = findMatchingLocale(availableDubs, preferredAudio);
@@ -1049,7 +1049,7 @@
                 : addDownloadEpisodeList;
             const epsWith = episodes.filter(ep => {
                 const d = addDownloadSeriesData[ep.e];
-                return d?.variants?.some(v => variantLanguageKey(v) === locale);
+                return d?.variants?.some(v => (v.lang?.crLocale || v.item?.audioLocale) === locale);
             });
             if (epsWith.length === 0) return;
             const allOn = epsWith.every(ep => selectedEpisodeDubs.get(ep.e)?.has(locale));
@@ -1085,7 +1085,7 @@
                     // user already chose dubs for it - keep their explicit picks.
                     const epData = addDownloadSeriesData[epKey];
                     if (epData && epData.variants && !selectedEpisodeDubs.has(epKey)) {
-                        const availableDubs = epData.variants.map(variantLanguageKey).filter(Boolean);
+                        const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
                         const selected = new Set();
                         const availablePreferred = findMatchingLocale(availableDubs, preferredAudio);
                         if (availablePreferred) selected.add(availablePreferred);
@@ -1436,22 +1436,6 @@
             return CAL_GENERIC_SERIES_LABEL.test((value || '').trim());
         }
 
-        // A dub ("en-US") and its audio-description version ("en-US*") share a locale but are
-        // different audio. The API keys them apart (languageKey) and they are labelled apart here,
-        // so nobody downloads described audio thinking it is the English dub.
-        function variantLanguageKey(variant) {
-            return variant?.languageKey || variant?.lang?.crLocale || variant?.item?.audioLocale || variant?.item?.audio_locale || '';
-        }
-
-        function isAudioDescriptionKey(key) {
-            return typeof key === 'string' && key.endsWith('*');
-        }
-
-        function languageKeyLabel(key, name) {
-            const base = name || (isAudioDescriptionKey(key) ? key.slice(0, -1) : key);
-            return isAudioDescriptionKey(key) ? `${base} (Audio Description)` : base;
-        }
-
         function findMatchingLocale(locales, requested) {
             const normalized = String(requested || '').toLowerCase();
             return (locales || []).find(locale => String(locale || '').toLowerCase() === normalized) || '';
@@ -1690,7 +1674,7 @@
                                             ? `<div class="calendar-episode-season">${escapeHtml(ep.seasonName)}</div>`
                                             : ''}
                                         ${(ep.audioLocales && ep.audioLocales.length > 0)
-                                            ? `<div class="calendar-episode-langs">${ep.audioLocales.map(l => `<span class="cal-lang">${escapeHtml(languageKeyLabel(l))}</span>`).join('')}</div>`
+                                            ? `<div class="calendar-episode-langs">${ep.audioLocales.map(l => `<span class="cal-lang">${escapeHtml(l)}</span>`).join('')}</div>`
                                             : (ep.audioLocale ? `<div class="calendar-episode-locale">${escapeHtml(ep.audioLocale)}</div>` : '')}
                                         ${ep.isUpcoming
                                             ? '<span class="badge badge-upcoming">Upcoming</span>'
@@ -2259,7 +2243,7 @@
                         const epKey = ep.e;
                         const epData = addDownloadSeriesData[epKey];
                         if (epData && epData.variants) {
-                            const availableDubs = epData.variants.map(variantLanguageKey).filter(Boolean);
+                            const availableDubs = epData.variants.map(v => v.lang?.crLocale || v.item?.audioLocale).filter(Boolean);
                             const selected = new Set();
                             const availablePreferred = findMatchingLocale(availableDubs, preferredAudio);
                             if (availablePreferred) selected.add(availablePreferred);
@@ -2282,7 +2266,7 @@
                                 selectedEpisodes.add(calendarTarget.episodeKey);
                                 const targetData = addDownloadSeriesData[calendarTarget.episodeKey];
                                 const availableDubs = (targetData?.variants || [])
-                                    .map(variantLanguageKey)
+                                    .map(v => v.lang?.crLocale || v.item?.audioLocale || v.item?.audio_locale)
                                     .filter(Boolean);
                                 const requestedLocale = findMatchingLocale(availableDubs, episodeSelection.audioLocale);
                                 if (requestedLocale) {
@@ -5010,12 +4994,19 @@
         
         // ================== HISTORY DETAIL & PARTIAL DOWNLOAD ==================
         
+        // History keeps Crunchyroll's audio-description hint as a trailing "*" ("en-US*" = the English
+        // dub, which also offers an audio-description option). It is the same dub, so show and
+        // compare plain language codes.
+        function plainDubLanguages(languages) {
+            return [...new Set((languages || []).map(code => String(code).replace(/\*$/, '')))];
+        }
+
         function isEpisodePartiallyDownloaded(episode) {
             // Upstream parity: partial download tracking can be disabled in History settings
             if (config?.history?.checkPartialDownloads === false) return false;
-            const downloadedDubs = episode.downloadedDubLang || [];
+            const downloadedDubs = plainDubLanguages(episode.downloadedDubLang);
             const downloadedSubs = episode.downloadedSoftSubs || [];
-            const availableDubs = episode.availableDubLang || [];
+            const availableDubs = plainDubLanguages(episode.availableDubLang);
             const availableSubs = episode.availableSoftSubs || [];
             const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];
             const requestedSubs = episode.requestedSoftSubs || config?.download?.softSubs || [];
@@ -5073,16 +5064,16 @@
                     ? 'Previously downloaded, but the completed file is missing — available to re-download'
                     : 'Not downloaded';
             }
-            const downloadedDubs = episode.downloadedDubLang || [];
+            const downloadedDubs = plainDubLanguages(episode.downloadedDubLang);
             const downloadedSubs = episode.downloadedSoftSubs || [];
-            const availableDubs = episode.availableDubLang || [];
+            const availableDubs = plainDubLanguages(episode.availableDubLang);
             const availableSubs = episode.availableSoftSubs || [];
             const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];
             const requestedSubs = episode.requestedSoftSubs || config?.download?.softSubs || [];
 
             let tooltip = '';
             if (downloadedDubs.length > 0) {
-                tooltip += `Downloaded dubs: ${downloadedDubs.map(d => languageKeyLabel(d)).join(', ')}\n`;
+                tooltip += `Downloaded dubs: ${downloadedDubs.join(', ')}\n`;
             }
             if (downloadedSubs.length > 0) {
                 tooltip += `Downloaded subs: ${downloadedSubs.join(', ')}\n`;
@@ -5097,7 +5088,7 @@
             const missing = [...missingDubs, ...missingSubs];
 
             if (missing.length > 0) {
-                tooltip += `Available but missing: ${missing.map(d => languageKeyLabel(d)).join(', ')}`;
+                tooltip += `Available but missing: ${missing.join(', ')}`;
             }
 
             const tip = tooltip.trim();
@@ -5227,7 +5218,7 @@
                             <div class="history-episode-title">${escapeHtml(ep.episodeTitle || 'Unknown Episode')}${airStr ? `<span class="history-episode-airdate"> · ${escapeHtml(airStr)}</span>` : ''}</div>
                             <div class="history-episode-langs">
                                 ${sonarrBadge}
-                                ${(ep.downloadedDubLang || []).map(d => `<span class="lang-badge downloaded">${escapeHtml(languageKeyLabel(d))}</span>`).join('')}
+                                ${plainDubLanguages(ep.downloadedDubLang).map(d => `<span class="lang-badge downloaded">${escapeHtml(d)}</span>`).join('')}
                             </div>
                             <div class="history-episode-status">
                                 <div class="tooltip-container" tabindex="0" aria-label="${escapeHtmlAttribute(tooltip)}">
@@ -5311,14 +5302,14 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const d = await res.json();
                 const episode = d.episode || d.Episode || {};
-                const dubs = episode.historyEpisodeAvailableDubLang || episode.HistoryEpisodeAvailableDubLang || episode.availableDubLang || episode.AvailableDubLang || [];
+                const dubs = plainDubLanguages(episode.historyEpisodeAvailableDubLang || episode.HistoryEpisodeAvailableDubLang || episode.availableDubLang || episode.AvailableDubLang);
                 const subs = episode.historyEpisodeAvailableSoftSubs || episode.HistoryEpisodeAvailableSoftSubs || episode.availableSoftSubs || episode.AvailableSoftSubs || [];
                 const overrideDubs = d.dubList || d.DubList || [];
                 const overrideSubs = d.subList || d.SubList || [];
                 const defDubs = overrideDubs.length ? overrideDubs : (config?.download?.dubLanguages || ['ja-JP']);
                 const defSubs = overrideSubs.length ? overrideSubs : (config?.download?.softSubs || ['en-US']);
                 const cbs = (arr, defs, name) => arr.length
-                    ? arr.map(x => `<label style="margin:0 10px 4px 0; white-space:nowrap; display:inline-block;"><input type="checkbox" data-${name}="${escapeHtmlAttribute(x)}" ${defs.includes(x) ? 'checked' : ''}> ${escapeHtml(languageKeyLabel(x))}</label>`).join('')
+                    ? arr.map(x => `<label style="margin:0 10px 4px 0; white-space:nowrap; display:inline-block;"><input type="checkbox" data-${name}="${escapeHtmlAttribute(x)}" ${defs.includes(x) ? 'checked' : ''}> ${escapeHtml(x)}</label>`).join('')
                     : '<span class="hint">none available</span>';
                 panel.innerHTML = `
                     <div style="margin-bottom:6px;"><strong>Dubs</strong><br>${cbs(dubs, defDubs, 'dub')}</div>

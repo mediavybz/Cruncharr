@@ -125,6 +125,33 @@ public class CalendarLoadingTests
         Assert.Equal(expected, episode.HistoryDownloadState);
     }
 
+    // Live 2026-10-30: The Exiled Heavy Knight is not subscribed, so nothing added its new episode
+    // to History and the dot stayed grey although Sonarr had the file.
+    [Fact]
+    public async Task AiredGreyEpisode_RefreshesItsHistorySeriesAtMostOncePerInterval()
+    {
+        var config = new CruncharrConfig();
+        config.History.Enabled = true;
+        config.History.CountSonarr = true;
+        config.Sonarr.Enabled = true;
+        var refreshed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var history = new Mock<IHistoryService>();
+        history.Setup(value => value.GetHistorySeriesAsync()).ReturnsAsync([new HistorySeries { SeriesId = "SERIES1" }]);
+        history.Setup(value => value.CrUpdateSeriesAsync("SERIES1", ""))
+            .Callback(() => refreshed.TrySetResult())
+            .ReturnsAsync(true);
+        var service = new CalendarService(Api().Object, null, history.Object, config);
+
+        var week = await service.GetCustomCalendarAsync(Date, "en-US", cancellationToken: TestContext.Current.CancellationToken);
+        var episode = Assert.Single(week.CalendarDays!.SelectMany(day => day.CalendarEpisodes));
+        Assert.Equal(CalendarHistoryDownloadState.NotDownloaded, episode.HistoryDownloadState);
+        await refreshed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        await service.GetCustomCalendarAsync(Date, "en-US", cancellationToken: TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        history.Verify(value => value.CrUpdateSeriesAsync("SERIES1", ""), Times.Once);
+    }
+
     [Fact]
     public async Task ConcurrentLoads_ShareFetchButNotMutableResponseData()
     {

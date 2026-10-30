@@ -70,6 +70,8 @@ public class CalendarService : ICalendarService
 
     private readonly IHistoryService? _historyService;
     private readonly CruncharrConfig? _config;
+    private static readonly TimeSpan HistoryRefreshInterval = TimeSpan.FromHours(1);
+    private readonly ConcurrentDictionary<string, DateTime> _lastHistoryRefresh = new(StringComparer.OrdinalIgnoreCase);
 
     public CalendarService(ICrunchyrollApiService apiService, ILogger<CalendarService>? logger = null,
         IHistoryService? historyService = null, CruncharrConfig? config = null)
@@ -622,6 +624,53 @@ public class CalendarService : ICalendarService
         {
             RefreshHistoryStatus(calendarEpisode, historyBySeriesId);
         }
+
+        RefreshStaleHistorySeries(week);
+    }
+
+    // History only refreshes by itself for subscribed shows. For any other show, an aired episode
+    // stays grey even when Sonarr has it: the episode is missing from History or its Sonarr status
+    // is old. Refresh those shows in the background so the next Calendar load is correct.
+    private void RefreshStaleHistorySeries(CalendarWeek week)
+    {
+        if (_config?.Sonarr?.Enabled != true || _config.History?.CountSonarr != true)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var staleSeriesIds = week.CalendarDays!
+            .SelectMany(day => day.CalendarEpisodes)
+            .Where(episode => episode.IsInHistory && episode.HasPassed == true && !episode.AnilistEpisode &&
+                              episode.HistoryDownloadState == CalendarHistoryDownloadState.NotDownloaded)
+            .Select(episode => episode.CrSeriesID!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(seriesId => !_lastHistoryRefresh.TryGetValue(seriesId, out var last) || now - last >= HistoryRefreshInterval)
+            .ToList();
+        if (staleSeriesIds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var seriesId in staleSeriesIds)
+        {
+            _lastHistoryRefresh[seriesId] = now;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            foreach (var seriesId in staleSeriesIds)
+            {
+                try
+                {
+                    await _historyService!.CrUpdateSeriesAsync(seriesId, "");
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to refresh History for calendar series {SeriesId}", seriesId);
+                }
+            }
+        });
     }
 
     private void RefreshHistoryStatus(CalendarEpisode calendarEpisode, IReadOnlyDictionary<string, HistorySeries> historyBySeriesId)

@@ -1199,10 +1199,15 @@ public class HistoryService : IHistoryService, IDisposable
                     var target = episodes.FirstOrDefault(target => target.SeasonNumber == alignment.Key.SeasonNumber &&
                         target.EpisodeNumber == int.Parse(source.Episode!) + alignment.Key.Offset);
                     if (target == null || assignedInSeason.Contains(target.Id.ToString())) continue;
-                    // A decisive conflicting title still overrides the majority numbering.
+                    // A decisive conflicting title still overrides the majority numbering: either a
+                    // near-exact title, or a strong one (Glass Fleet "Like Flight" vs Sonarr "Like
+                    // Flights...") when the numbered slot's own title clearly disagrees. A recap that
+                    // Sonarr files as a special shifts every later number by one.
                     var best = identityCandidates.FirstOrDefault(candidate => candidate.HistoryEpisode == source);
-                    if (best != null && best.Episode.Id != target.Id && best.Score >= 0.95 &&
-                        CalculateEpisodeEvidenceScore(source, target) + 0.15 < best.Score) continue;
+                    var targetScore = CalculateEpisodeEvidenceScore(source, target);
+                    if (best != null && best.Episode.Id != target.Id &&
+                        (best.Score >= 0.95 && targetScore + 0.15 < best.Score ||
+                         best.Score >= 0.8 && targetScore + 0.3 < best.Score)) continue;
                     assignedInSeason.Add(target.Id.ToString());
                     source.AssignSonarrEpisodeData(target);
                     usedSonarrEpisodeIds.Add(target.Id);
@@ -1514,8 +1519,8 @@ public class HistoryService : IHistoryService, IDisposable
             IsGenericEpisodeTitle(sonarrEpisode.Title)
                 ? 0.0
                 : StringSimilarity.CalculateSimilarity(
-                    historyEpisode.EpisodeTitle.ToLowerInvariant(),
-                    sonarrEpisode.Title.ToLowerInvariant());
+                    TitleForComparison(historyEpisode.EpisodeTitle),
+                    TitleForComparison(sonarrEpisode.Title));
         var titleTokenSimilarity = titleSimilarity == 0.0
             ? 0.0
             : CalculateNormalizedTokenCosine(
@@ -1542,7 +1547,9 @@ public class HistoryService : IHistoryService, IDisposable
     }
 
     // True when the shorter title (at least three words) appears as a contiguous word sequence
-    // inside the longer one. Short phrases such as "Part 1" are too common to count.
+    // inside the longer one. Short phrases such as "Part 1" are too common to count anywhere, but a
+    // short title that the longer one starts with and then subtitles ("HLB" -> "HLB - Hero League
+    // of Baseball") still names the same episode.
     internal static bool ContainsTitlePhrase(string? first, string? second)
     {
         static string[] Words(string? value) => string.IsNullOrWhiteSpace(value) ? [] :
@@ -1551,13 +1558,24 @@ public class HistoryService : IHistoryService, IDisposable
         var firstWords = Words(first);
         var secondWords = Words(second);
         var (shorter, longer) = firstWords.Length <= secondWords.Length ? (firstWords, secondWords) : (secondWords, firstWords);
-        if (shorter.Length < 3) return false;
+        if (shorter.Length == 0 || shorter.Length == longer.Length) return false;
+        if (shorter.Length < 3)
+        {
+            var (shortTitle, longTitle) = firstWords.Length <= secondWords.Length ? (first!, second!) : (second!, first!);
+            return System.Text.RegularExpressions.Regex.IsMatch(longTitle.Trim(),
+                $@"^{System.Text.RegularExpressions.Regex.Escape(shortTitle.Trim())}\s*[-–—:]\s*\S",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        }
         for (var start = 0; start + shorter.Length <= longer.Length; start++)
         {
             if (longer.AsSpan(start, shorter.Length).SequenceEqual(shorter)) return true;
         }
         return false;
     }
+
+    // Trailing ellipses/periods are styling ("Like Flights..." on TVDB), not part of the title.
+    private static string TitleForComparison(string title) =>
+        title.Trim().TrimEnd('.', '…', ' ').ToLowerInvariant();
 
     private static bool IsGenericEpisodeTitle(string? title) =>
         !string.IsNullOrWhiteSpace(title) &&

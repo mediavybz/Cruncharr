@@ -954,7 +954,50 @@ public class HistoryServiceSonarrTests : IDisposable
         Assert.Equal([null], ids["unrelated"]);
     }
 
+    // Live 2026-10-30 (Glass Fleet): a recap Sonarr files in season 0 shifts every later number by
+    // one. Numbering gave "Like Flight" the slot of "Like a Lion...", leaving "Like a Lion" grey.
+    [Fact]
+    public async Task StrongTitleOverridesNumberingShiftedByARecapSpecial()
+    {
+        string[] before = ["Like Majesty", "Like an Epoch", "Like a Storm", "Like a Banner", "Like a Gale", "Like a Crown"];
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons[0].EpisodesList = before.Concat(["Like an Embrace", "Like Flight", "Like a Lion", "Like a Royal Road"])
+            .Select((title, i) => new HistoryEpisode { EpisodeId = $"ep-{i + 1}", Episode = (i + 1).ToString(), EpisodeSeasonNum = "1", EpisodeTitle = title })
+            .ToList();
+        await SaveTestHistory(history);
+        var sonarr = before.Concat(["Like Flights...", "Like a Lion...", "Like a Royal Road..."])
+            .Select((title, i) => new SonarrEpisode { Id = 101 + i, SeriesId = 100, SeasonNumber = 1, EpisodeNumber = i + 1, Title = title, HasFile = true })
+            .Append(new SonarrEpisode { Id = 201, SeriesId = 100, SeasonNumber = 0, EpisodeNumber = 1, Title = "Like an Embrace...", HasFile = true })
+            .ToList();
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(sonarr);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
+
+        var ids = (await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList.Select(e => e.SonarrEpisodeId).ToList();
+        Assert.Equal(["101", "102", "103", "104", "105", "106", "201", "107", "108", "109"], ids);
+    }
+
+    // Live 2026-10-30 (My Hero Academia): Crunchyroll "HLB" is Sonarr S00E13 "HLB - Hero League of Baseball".
+    [Fact]
+    public async Task ShortTitleMatchesSonarrTitleThatSubtitlesIt()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons[0].EpisodesList = [new HistoryEpisode { EpisodeId = "hlb", Episode = "7", EpisodeSeasonNum = "5", EpisodeTitle = "HLB" }];
+        await SaveTestHistory(history);
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrEpisode { Id = 213, SeriesId = 100, SeasonNumber = 0, EpisodeNumber = 13, Title = "HLB - Hero League of Baseball", HasFile = true }]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
+
+        Assert.Equal("213", (await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList[0].SonarrEpisodeId);
+    }
+
     [Theory]
+    [InlineData("HLB", "HLB - Hero League of Baseball", true)]
+    [InlineData("HLB", "The HLB Finals", false)]
     [InlineData("Crime and Punishment", "Psycho-Pass: Sinners of the System - Case.1 Crime and Punishment", true)]
     [InlineData("Saga of Tanya the Evil: Operation Desert Pasta", "Operation Desert Pasta", true)]
     [InlineData("Part 1", "Ziggurat Capture Part 1", false)]

@@ -18,7 +18,9 @@ public class ScheduledDownloadsTests : IDisposable
     private readonly List<EpisodeInfo> _queued = [];
     private readonly HistorySeries _series = new()
     {
-        SeriesId = "SERIES", SeriesTitle = "Example", SonarrSeriesId = "10",
+        SeriesId = "SERIES",
+        SeriesTitle = "Example",
+        SonarrSeriesId = "10",
         Seasons = [new HistorySeason { SeasonId = "S1", SeasonNum = "1", EpisodesList = [] }]
     };
 
@@ -40,8 +42,13 @@ public class ScheduledDownloadsTests : IDisposable
         _sonarr.Object, _config, Path.Combine(_root, "subscriptions.json"));
     private HistoryEpisode Episode(string id, params string[] dubs)
     {
-        var episode = new HistoryEpisode { EpisodeId = id, Episode = "1", IsEpisodeAvailableOnStreamingService = true,
-            HistoryEpisodeAvailableDubLang = dubs.Length > 0 ? dubs.ToList() : ["ja-JP"] };
+        var episode = new HistoryEpisode
+        {
+            EpisodeId = id,
+            Episode = "1",
+            IsEpisodeAvailableOnStreamingService = true,
+            HistoryEpisodeAvailableDubLang = dubs.Length > 0 ? dubs.ToList() : ["ja-JP"]
+        };
         _series.Seasons[0].EpisodesList.Add(episode);
         return episode;
     }
@@ -227,6 +234,29 @@ public class ScheduledDownloadsTests : IDisposable
         await service.RunCheckAsync(false, TestContext.Current.CancellationToken);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.ConfigureAsync(true, 15, TestContext.Current.CancellationToken));
         Assert.Equal("broken", File.ReadAllText(path));
+    }
+
+    // Live 2026-10-30 (Firefly Wedding, HORROR COLLECTOR, ...): episodes 2-3 were out in Japanese
+    // when the user subscribed with English selected, so the baseline marked them handled and their
+    // English dubs would never have been queued.
+    [Fact]
+    public async Task EpisodeAwaitingTheSelectedDubAtSubscribeIsQueuedOnceTheDubArrives()
+    {
+        _config.Download.DefaultAudio = "en-US";
+        var episode = Episode("JP-ONLY", "ja-JP");
+        Episode("HAS-DUB", "ja-JP", "en-US"); // released with the dub already: back catalog, not queued
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+
+        var waiting = await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Empty(_queued);
+        Assert.Equal((1, 1), (waiting!.Shows[0].WaitingForLanguage, waiting.Shows[0].MissingFromBaseline));
+
+        episode.HistoryEpisodeAvailableDubLang.Add("en-US");
+        await Service().RunCheckAsync(true, TestContext.Current.CancellationToken); // across a restart
+        await Service().RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Equal("JP-ONLY", Assert.Single(_queued).Id);
+        Assert.Equal(["en-US"], _queued[0].SelectedDubs);
     }
 
     [Fact]

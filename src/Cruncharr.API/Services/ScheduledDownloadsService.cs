@@ -52,8 +52,13 @@ public sealed class ScheduledDownloadsService
         var state = _state;
         return new
         {
-            state.Enabled, state.IntervalMinutes, IsRunning, state.LastRun, state.LastError,
-            state.LastQueuedCount, state.LastRunSummary,
+            state.Enabled,
+            state.IntervalMinutes,
+            IsRunning,
+            state.LastRun,
+            state.LastError,
+            state.LastQueuedCount,
+            state.LastRunSummary,
             NextRun = state.Enabled && _config.History.Enabled && state.Subscriptions.Any(s => s.Enabled)
                 ? state.LastRun?.AddMinutes(state.IntervalMinutes) ?? DateTimeOffset.UtcNow : (DateTimeOffset?)null,
             HistoryEnabled = _config.History.Enabled,
@@ -217,70 +222,89 @@ public sealed class ScheduledDownloadsService
                     (_, _) => sonarrUnavailable = true) : [];
             if (sonarrUnavailable) throw new InvalidOperationException($"Sonarr is unavailable for {subscription.Title}; will retry without downloading duplicates.");
             foreach (var season in series.Seasons)
-            foreach (var episode in season.EpisodesList)
-            {
-                if (!IsReleased(episode, DateTimeOffset.UtcNow)) { show.NotReleased++; continue; }
-                if ((season.SpecialSeason || episode.SpecialEpisode) && !_config.History.AddSpecials) { show.Excluded++; continue; }
-                if (_config.History.SkipUnmonitored && _config.Sonarr.Enabled && !_config.Sonarr.AutoAddSeries &&
-                    !string.IsNullOrEmpty(episode.SonarrEpisodeId) && !episode.SonarrIsMonitored) { show.Excluded++; continue; }
-                if (local.Contains(episode.EpisodeId!) || files.Contains(episode.EpisodeId!))
+                foreach (var episode in season.EpisodesList)
                 {
+                    if (!IsReleased(episode, DateTimeOffset.UtcNow)) { show.NotReleased++; continue; }
+                    if ((season.SpecialSeason || episode.SpecialEpisode) && !_config.History.AddSpecials) { show.Excluded++; continue; }
+                    if (_config.History.SkipUnmonitored && _config.Sonarr.Enabled && !_config.Sonarr.AutoAddSeries &&
+                        !string.IsNullOrEmpty(episode.SonarrEpisodeId) && !episode.SonarrIsMonitored) { show.Excluded++; continue; }
+                    if (local.Contains(episode.EpisodeId!) || files.Contains(episode.EpisodeId!))
+                    {
+                        subscription.HandledEpisodeIds.Add(episode.EpisodeId!);
+                        show.HaveFile++;
+                        continue;
+                    }
+                    var dubs = (season.HistorySeasonDubLangOverride.Count > 0 ? season.HistorySeasonDubLangOverride :
+                        series.HistorySeriesDubLangOverride.Count > 0 ? series.HistorySeriesDubLangOverride :
+                        _config.Download.DownloadMultipleDubs ? _config.Download.DubLanguages : new List<string> { _config.Download.DefaultAudio })
+                        .Where(l => !l.Equals("none", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    var subs = (season.HistorySeasonSoftSubsOverride.Count > 0 ? season.HistorySeasonSoftSubsOverride :
+                        series.HistorySeriesSoftSubsOverride.Count > 0 ? series.HistorySeriesSoftSubsOverride : _config.Download.SoftSubs).ToList();
+                    // Wait for all requested dubs, including delayed releases, rather than
+                    // permanently marking an episode handled after downloading another language.
+                    var waitingForLanguage = dubs.Count == 0 ||
+                        dubs.Any(d => !HistoryEpisode.ContainsNormalized(episode.HistoryEpisodeAvailableDubLang, d)) ||
+                        !_config.Download.SkipSubs && _config.Download.DownloadOnlyWithAllSelectedDubSub && subs.Any(s => s is not ("all" or "none") &&
+                            !episode.HistoryEpisodeAvailableSoftSubs.Contains(s, StringComparer.OrdinalIgnoreCase));
+                    if (premium && waitingForLanguage)
+                    {
+                        // The subscription baseline marked episodes handled even when the selected dub
+                        // was not out yet, so a later dub release was skipped forever. Release them;
+                        // once the dub appears the episode is a new release for this subscription.
+                        subscription.HandledEpisodeIds.Remove(episode.EpisodeId!);
+                        show.WaitingForLanguage++;
+                        continue;
+                    }
+                    if (!backfill && subscription.HandledEpisodeIds.Contains(episode.EpisodeId!))
+                    {
+                        // Released before subscribing (or already queued/requested): scheduled checks
+                        // only add new releases. Backfill is the explicit way to fetch these.
+                        show.MissingFromBaseline++;
+                        continue;
+                    }
+                    if (!premium)
+                    {
+                        await _sonarrRequests!.PrepareAsync(new EpisodeInfo
+                        {
+                            Id = episode.EpisodeId!,
+                            SeriesId = series.SeriesId,
+                            SeriesTitle = series.SeriesTitle ?? subscription.Title,
+                            SeasonId = season.SeasonId,
+                            Title = episode.EpisodeTitle ?? "Episode"
+                        }, false, cancellationToken: ct);
+                        subscription.HandledEpisodeIds.Add(episode.EpisodeId!);
+                        show.Added++;
+                        continue;
+                    }
+                    var result = _queue.AddToQueue(new EpisodeInfo
+                    {
+                        Id = episode.EpisodeId!,
+                        Title = episode.EpisodeTitle ?? "Episode",
+                        Episode = episode.Episode,
+                        SeriesId = series.SeriesId,
+                        SeriesTitle = series.SeriesTitle ?? subscription.Title,
+                        SeasonId = season.SeasonId,
+                        SeasonTitle = season.SeasonTitle,
+                        SeasonNumber = int.TryParse(season.SeasonNum, out var sn) ? sn : 0,
+                        EpisodeNumber = int.TryParse(episode.Episode, out var en) ? en : 0,
+                        AudioLocale = dubs[0],
+                        Locale = _config.History.Lang,
+                        SelectedDubs = dubs,
+                        SelectedSubs = subs,
+                        ThumbnailUrl = episode.ThumbnailImageUrl,
+                        CoverArtUrl = series.ThumbnailImageUrl
+                    });
+                    // AddToQueue handles exact episode/season identity and persists its queue.
+                    if (result.Added) show.Added++; else show.AlreadyQueued++;
+                    // Only a durable queue entry may mark the episode handled; otherwise a
+                    // restart before it finishes would lose it and later checks would skip it.
+                    if (!result.Persisted)
+                    {
+                        show.Error = $"The download queue could not be saved; {subscription.Title} will be re-checked on the next run.";
+                        continue;
+                    }
                     subscription.HandledEpisodeIds.Add(episode.EpisodeId!);
-                    show.HaveFile++;
-                    continue;
                 }
-                if (!backfill && subscription.HandledEpisodeIds.Contains(episode.EpisodeId!))
-                {
-                    // Released before subscribing (or already queued/requested): scheduled checks
-                    // only add new releases. Backfill is the explicit way to fetch these.
-                    show.MissingFromBaseline++;
-                    continue;
-                }
-                if (!premium)
-                {
-                    await _sonarrRequests!.PrepareAsync(new EpisodeInfo {
-                        Id = episode.EpisodeId!, SeriesId = series.SeriesId, SeriesTitle = series.SeriesTitle ?? subscription.Title,
-                        SeasonId = season.SeasonId, Title = episode.EpisodeTitle ?? "Episode"
-                    }, false, cancellationToken: ct);
-                    subscription.HandledEpisodeIds.Add(episode.EpisodeId!);
-                    show.Added++;
-                    continue;
-                }
-                var dubs = (season.HistorySeasonDubLangOverride.Count > 0 ? season.HistorySeasonDubLangOverride :
-                    series.HistorySeriesDubLangOverride.Count > 0 ? series.HistorySeriesDubLangOverride :
-                    _config.Download.DownloadMultipleDubs ? _config.Download.DubLanguages : new List<string> { _config.Download.DefaultAudio })
-                    .Where(l => !l.Equals("none", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                var subs = (season.HistorySeasonSoftSubsOverride.Count > 0 ? season.HistorySeasonSoftSubsOverride :
-                    series.HistorySeriesSoftSubsOverride.Count > 0 ? series.HistorySeriesSoftSubsOverride : _config.Download.SoftSubs).ToList();
-                // Wait for all requested dubs, including delayed releases, rather than
-                // permanently marking an episode handled after downloading another language.
-                if (dubs.Count == 0 || dubs.Any(d => !HistoryEpisode.ContainsNormalized(episode.HistoryEpisodeAvailableDubLang, d)))
-                { show.WaitingForLanguage++; continue; }
-                if (!_config.Download.SkipSubs && _config.Download.DownloadOnlyWithAllSelectedDubSub && subs.Any(s => s is not ("all" or "none") &&
-                    !episode.HistoryEpisodeAvailableSoftSubs.Contains(s, StringComparer.OrdinalIgnoreCase)))
-                { show.WaitingForLanguage++; continue; }
-                var result = _queue.AddToQueue(new EpisodeInfo
-                {
-                    Id = episode.EpisodeId!, Title = episode.EpisodeTitle ?? "Episode", Episode = episode.Episode,
-                    SeriesId = series.SeriesId, SeriesTitle = series.SeriesTitle ?? subscription.Title,
-                    SeasonId = season.SeasonId, SeasonTitle = season.SeasonTitle,
-                    SeasonNumber = int.TryParse(season.SeasonNum, out var sn) ? sn : 0,
-                    EpisodeNumber = int.TryParse(episode.Episode, out var en) ? en : 0,
-                    AudioLocale = dubs[0], Locale = _config.History.Lang,
-                    SelectedDubs = dubs, SelectedSubs = subs,
-                    ThumbnailUrl = episode.ThumbnailImageUrl, CoverArtUrl = series.ThumbnailImageUrl
-                });
-                // AddToQueue handles exact episode/season identity and persists its queue.
-                if (result.Added) show.Added++; else show.AlreadyQueued++;
-                // Only a durable queue entry may mark the episode handled; otherwise a
-                // restart before it finishes would lose it and later checks would skip it.
-                if (!result.Persisted)
-                {
-                    show.Error = $"The download queue could not be saved; {subscription.Title} will be re-checked on the next run.";
-                    continue;
-                }
-                subscription.HandledEpisodeIds.Add(episode.EpisodeId!);
-            }
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { show.Error = ex.Message; }

@@ -1174,8 +1174,12 @@ public class HistoryService : IHistoryService, IDisposable
                     int.TryParse(source.Episode, out var number) && number > 0).ToHashSet();
                 if (numbered.Count < 3) continue;
                 var storedAnchors = numbered.Where(source => int.TryParse(source.SonarrEpisodeId, out var id) && episodesById.ContainsKey(id))
-                    .Select(source => new { HistoryEpisode = source, Episode = episodesById[int.Parse(source.SonarrEpisodeId!)],
-                        Score = CalculateEpisodeEvidenceScore(source, episodesById[int.Parse(source.SonarrEpisodeId!)]) });
+                    .Select(source => new
+                    {
+                        HistoryEpisode = source,
+                        Episode = episodesById[int.Parse(source.SonarrEpisodeId!)],
+                        Score = CalculateEpisodeEvidenceScore(source, episodesById[int.Parse(source.SonarrEpisodeId!)])
+                    });
                 var anchors = identityCandidates.Concat(storedAnchors).Where(candidate => candidate.Score >= 0.8 &&
                         numbered.Contains(candidate.HistoryEpisode) && candidate.Episode.SeasonNumber > 0)
                     .OrderByDescending(candidate => candidate.Score)
@@ -1342,15 +1346,23 @@ public class HistoryService : IHistoryService, IDisposable
         var failed = failedEpisodes.ToHashSet();
         var matched = new List<HistoryEpisode>();
 
+        // Crunchyroll also lists films, OVAs and side stories as ordinary seasons ("PSYCHO-PASS:
+        // Sinners of the System") that TVDB/Sonarr files under season 0. A provider season with
+        // no episode matched to a regular Sonarr season is aligned to season 0 like a special;
+        // the same title/overview evidence thresholds still guard every assignment.
+        bool IsSeasonZeroCandidate(HistorySeason season, HistoryEpisode historyEpisode) =>
+            IsSpecialHistoryEpisode(historySeries, historyEpisode) ||
+            !season.EpisodesList.Any(other => int.TryParse(other.SonarrSeasonNumber, out var number) && number > 0);
+
         foreach (var historySeason in historySeries.Seasons.Where(historySeason =>
                      historySeason.EpisodesList.Any(historyEpisode =>
                          failed.Contains(historyEpisode) &&
-                         IsSpecialHistoryEpisode(historySeries, historyEpisode))))
+                         IsSeasonZeroCandidate(historySeason, historyEpisode))))
         {
             var sourceEpisodes = historySeason.EpisodesList
                 .Where(historyEpisode =>
                     failed.Contains(historyEpisode) &&
-                    IsSpecialHistoryEpisode(historySeries, historyEpisode))
+                    IsSeasonZeroCandidate(historySeason, historyEpisode))
                 .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.Episode))
                 .ToList();
             if (sourceEpisodes.Count == 0) continue;
@@ -1393,6 +1405,29 @@ public class HistoryService : IHistoryService, IDisposable
                     pair.HistoryEpisode.EpisodeTitle,
                     pair.SonarrEpisode.EpisodeNumber,
                     pair.SonarrEpisode.Title);
+            }
+        }
+
+        // A lone leftover whose neighbours in the same provider season sit either side of exactly
+        // one free season-0 slot takes that slot when its title still points there (a two-word
+        // title like "First Guardian" is too short for the stricter single-episode rule).
+        foreach (var historySeason in historySeries.Seasons)
+        {
+            var ordered = historySeason.EpisodesList.OrderBy(episode => ParseEpisodeOrdinal(episode.Episode)).ToList();
+            for (var index = 1; index < ordered.Count - 1; index++)
+            {
+                var source = ordered[index];
+                if (!failed.Contains(source) || matched.Contains(source) || !IsSeasonZeroCandidate(historySeason, source)) continue;
+                if (ordered[index - 1].SonarrSeasonNumber != "0" || ordered[index + 1].SonarrSeasonNumber != "0" ||
+                    !int.TryParse(ordered[index - 1].SonarrEpisodeNumber, out var before) ||
+                    !int.TryParse(ordered[index + 1].SonarrEpisodeNumber, out var after) || after - before != 2) continue;
+                var slot = sonarrEpisodes.FirstOrDefault(episode => episode.SeasonNumber == 0 &&
+                    episode.EpisodeNumber == before + 1 && !usedSonarrEpisodeIds.Contains(episode.Id));
+                if (slot != null && CalculateEpisodeEvidenceScore(source, slot) >= 0.45 &&
+                    TryAssignSonarrEpisode(source, slot, usedSonarrEpisodeIds))
+                {
+                    matched.Add(source);
+                }
             }
         }
 
@@ -1491,14 +1526,37 @@ public class HistoryService : IHistoryService, IDisposable
             sonarrEpisode.Overview);
 
         var titleEvidence = Math.Max(titleSimilarity, titleTokenSimilarity);
-        if (titleEvidence > 0.0 && overviewSimilarity > 0.0)
-        {
-            // Keep a strong title sufficient on its own while using the overview to break ties
-            // between repeated titles such as "Part 1" across seasons.
-            return Math.Max(overviewSimilarity, titleEvidence * 0.85 + overviewSimilarity * 0.15);
-        }
+        // Keep a strong title sufficient on its own while using the overview to break ties
+        // between repeated titles such as "Part 1" across seasons.
+        var score = titleEvidence > 0.0 && overviewSimilarity > 0.0
+            ? Math.Max(overviewSimilarity, titleEvidence * 0.85 + overviewSimilarity * 0.15)
+            : Math.Max(titleEvidence, overviewSimilarity);
 
-        return Math.Max(titleEvidence, overviewSimilarity);
+        // Sonarr often prefixes a special's title with its film or arc name ("Psycho-Pass:
+        // Sinners of the System - Case.1 Crime and Punishment" for "Crime and Punishment").
+        // One full title appearing word-for-word inside the other is strong evidence on its own,
+        // whatever the overviews say, though still below an exact match.
+        return titleSimilarity > 0.0 && ContainsTitlePhrase(historyEpisode.EpisodeTitle, sonarrEpisode.Title)
+            ? Math.Max(score, 0.85)
+            : score;
+    }
+
+    // True when the shorter title (at least three words) appears as a contiguous word sequence
+    // inside the longer one. Short phrases such as "Part 1" are too common to count.
+    internal static bool ContainsTitlePhrase(string? first, string? second)
+    {
+        static string[] Words(string? value) => string.IsNullOrWhiteSpace(value) ? [] :
+            System.Text.RegularExpressions.Regex.Matches(value, @"[\p{L}\p{N}]+")
+                .Select(match => match.Value.ToLowerInvariant()).ToArray();
+        var firstWords = Words(first);
+        var secondWords = Words(second);
+        var (shorter, longer) = firstWords.Length <= secondWords.Length ? (firstWords, secondWords) : (secondWords, firstWords);
+        if (shorter.Length < 3) return false;
+        for (var start = 0; start + shorter.Length <= longer.Length; start++)
+        {
+            if (longer.AsSpan(start, shorter.Length).SequenceEqual(shorter)) return true;
+        }
+        return false;
     }
 
     private static bool IsGenericEpisodeTitle(string? title) =>

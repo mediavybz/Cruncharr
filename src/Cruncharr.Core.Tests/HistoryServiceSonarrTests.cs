@@ -15,32 +15,37 @@ public class HistoryServiceSonarrTests : IDisposable
     [InlineData("A Returner's Magic Should Be Special", "1")]
     public async Task RegularSeasonsDoNotBecomeSpecialsFromMissingNumbersOrWordsInTheTitle(string title, string number)
     {
-        var history=CreateTestHistory();
-        history[0].SonarrSeriesId="100";
-        var season=history[0].Seasons[0];
-        season.SeasonTitle=title; season.SeasonNum=number; season.SpecialSeason=true;
-        season.EpisodesList[0].EpisodeSeasonNum=number;
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        var season = history[0].Seasons[0];
+        season.SeasonTitle = title; season.SeasonNum = number; season.SpecialSeason = true;
+        season.EpisodesList[0].EpisodeSeasonNum = number;
         await SaveTestHistory(history);
-        _sonarrServiceMock.Setup(s=>s.GetCurrentEpisodesAsync(100,It.IsAny<SonarrConfig>(),true,It.IsAny<CancellationToken>()))
-            .ReturnsAsync([new SonarrEpisode {Id=101,Title=season.EpisodesList[0].EpisodeTitle,SeasonNumber=1,EpisodeNumber=1,HasFile=true}]);
-        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1",true);
-        var matched=(await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList[0];
-        Assert.Equal("101",matched.SonarrEpisodeId);
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrEpisode { Id = 101, Title = season.EpisodesList[0].EpisodeTitle, SeasonNumber = 1, EpisodeNumber = 1, HasFile = true }]);
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
+        var matched = (await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList[0];
+        Assert.Equal("101", matched.SonarrEpisodeId);
         Assert.True(matched.SonarrHasFile);
     }
 
     [Fact]
     public async Task DuplicateProviderEditionsShareAnEpisodeWithoutStealingAnotherEpisodeInTheSeason()
     {
-        var history=CreateTestHistory(); history[0].SonarrSeriesId="100";
-        history[0].Seasons.Add(new HistorySeason {SeasonId="uncut",SeasonNum="1",SeasonTitle="Uncut",
-            EpisodesList=[new HistoryEpisode {EpisodeId="uncut-1",Episode="1",EpisodeSeasonNum="1",EpisodeTitle="To You, in 2000 Years"}]});
+        var history = CreateTestHistory(); history[0].SonarrSeriesId = "100";
+        history[0].Seasons.Add(new HistorySeason
+        {
+            SeasonId = "uncut",
+            SeasonNum = "1",
+            SeasonTitle = "Uncut",
+            EpisodesList = [new HistoryEpisode { EpisodeId = "uncut-1", Episode = "1", EpisodeSeasonNum = "1", EpisodeTitle = "To You, in 2000 Years" }]
+        });
         await SaveTestHistory(history);
-        _sonarrServiceMock.Setup(s=>s.GetCurrentEpisodesAsync(100,It.IsAny<SonarrConfig>(),true,It.IsAny<CancellationToken>()))
-            .ReturnsAsync([new SonarrEpisode {Id=101,Title="To You, in 2000 Years",SeasonNumber=1,EpisodeNumber=1,HasFile=true}]);
-        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1",true);
-        var all=(await _historyService.GetHistorySeriesAsync())[0].Seasons.SelectMany(s=>s.EpisodesList);
-        Assert.All(all,e=>Assert.Equal("101",e.SonarrEpisodeId));
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SonarrEpisode { Id = 101, Title = "To You, in 2000 Years", SeasonNumber = 1, EpisodeNumber = 1, HasFile = true }]);
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
+        var all = (await _historyService.GetHistorySeriesAsync())[0].Seasons.SelectMany(s => s.EpisodesList);
+        Assert.All(all, e => Assert.Equal("101", e.SonarrEpisodeId));
     }
 
     [Theory]
@@ -51,11 +56,21 @@ public class HistoryServiceSonarrTests : IDisposable
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
         history[0].Seasons[0].EpisodesList = new[] { "The Arrival", "The Journey", "A Day at the Beach" }
-            .Select((title, i) => new HistoryEpisode { EpisodeId = $"ep-{i + 1}", Episode = (i + 1).ToString(),
-                EpisodeSeasonNum = "1", EpisodeTitle = title }).ToList();
-        history[0].Seasons.Add(new HistorySeason { SeasonId = "hd", SeasonNum = "0", SeasonTitle = "Special Edition HD",
+            .Select((title, i) => new HistoryEpisode
+            {
+                EpisodeId = $"ep-{i + 1}",
+                Episode = (i + 1).ToString(),
+                EpisodeSeasonNum = "1",
+                EpisodeTitle = title
+            }).ToList();
+        history[0].Seasons.Add(new HistorySeason
+        {
+            SeasonId = "hd",
+            SeasonNum = "0",
+            SeasonTitle = "Special Edition HD",
             EpisodesList = [new HistoryEpisode { EpisodeId = "hd-1", Episode = "3", EpisodeSeasonNum = "0",
-                EpisodeTitle = sameTitle ? "A Day at the Beach" : "An Unrelated Story" }] });
+                EpisodeTitle = sameTitle ? "A Day at the Beach" : "An Unrelated Story" }]
+        });
         await SaveTestHistory(history);
         _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { "The Arrival", "The Journey", "Summer Vacation" }.Select((title, i) =>
@@ -76,14 +91,22 @@ public class HistoryServiceSonarrTests : IDisposable
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
         string[] sourceTitles = ["Red Green Blue Yellow", "Bronze Silver Golden Road", "Completely Translated Finale"];
-        history[0].Seasons[0].EpisodesList = sourceTitles.Select((title, i) => new HistoryEpisode {
-            EpisodeId = $"ep-{i + 1}", Episode = (i + 1).ToString(), EpisodeSeasonNum = "1", EpisodeTitle = title
+        history[0].Seasons[0].EpisodesList = sourceTitles.Select((title, i) => new HistoryEpisode
+        {
+            EpisodeId = $"ep-{i + 1}",
+            Episode = (i + 1).ToString(),
+            EpisodeSeasonNum = "1",
+            EpisodeTitle = title
         }).ToList();
         await SaveTestHistory(history);
         string[] targetTitles = ["Red Green Blue Orange", "Bronze Silver Golden Castle", "Summer Vacation"];
         _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), true, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(targetTitles.Select((title, i) => new SonarrEpisode {
-                Id = 101 + i, Title = title, SeasonNumber = 1, EpisodeNumber = numbersAgree || i == 2 ? i + 1 : 2 - i
+            .ReturnsAsync(targetTitles.Select((title, i) => new SonarrEpisode
+            {
+                Id = 101 + i,
+                Title = title,
+                SeasonNumber = 1,
+                EpisodeNumber = numbersAgree || i == 2 ? i + 1 : 2 - i
             }).ToList());
 
         await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
@@ -98,18 +121,29 @@ public class HistoryServiceSonarrTests : IDisposable
     [InlineData(false)]
     public async Task CorroboratedSeasonNumbersPreventSimilarTitlesFromTakingTheWrongEpisode(bool rematch)
     {
-        var history=CreateTestHistory(); history[0].SonarrSeriesId="100";
-        string[] titles=["A New Arrival", "A Quiet Dinner", "The Battle Begins", "The Battle Begin"];
-        history[0].Seasons[0].EpisodesList=titles.Select((title,i)=>new HistoryEpisode {
-            EpisodeId=$"ep-{i+1}",Episode=(i+1).ToString(),EpisodeSeasonNum="1",EpisodeTitle=title,
-            SonarrEpisodeId=!rematch && i<3 ? (101+i).ToString() : null }).ToList();
+        var history = CreateTestHistory(); history[0].SonarrSeriesId = "100";
+        string[] titles = ["A New Arrival", "A Quiet Dinner", "The Battle Begins", "The Battle Begin"];
+        history[0].Seasons[0].EpisodesList = titles.Select((title, i) => new HistoryEpisode
+        {
+            EpisodeId = $"ep-{i + 1}",
+            Episode = (i + 1).ToString(),
+            EpisodeSeasonNum = "1",
+            EpisodeTitle = title,
+            SonarrEpisodeId = !rematch && i < 3 ? (101 + i).ToString() : null
+        }).ToList();
         await SaveTestHistory(history);
-        _sonarrServiceMock.Setup(s=>s.GetCurrentEpisodesAsync(100,It.IsAny<SonarrConfig>(),rematch,It.IsAny<CancellationToken>()))
-            .ReturnsAsync(titles.Select((title,i)=>new SonarrEpisode {Id=101+i,SeasonNumber=1,EpisodeNumber=i+1,
-                Title=i==3 ? "Uniforms are Uniforms" : title,HasFile=true}).ToList());
-        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1",rematch);
-        var matched=(await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList;
-        Assert.Equal(new[] {"101","102","103","104"},matched.Select(e=>e.SonarrEpisodeId));
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), rematch, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(titles.Select((title, i) => new SonarrEpisode
+            {
+                Id = 101 + i,
+                SeasonNumber = 1,
+                EpisodeNumber = i + 1,
+                Title = i == 3 ? "Uniforms are Uniforms" : title,
+                HasFile = true
+            }).ToList());
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", rematch);
+        var matched = (await _historyService.GetHistorySeriesAsync())[0].Seasons[0].EpisodesList;
+        Assert.Equal(new[] { "101", "102", "103", "104" }, matched.Select(e => e.SonarrEpisodeId));
     }
 
     [Theory]
@@ -120,17 +154,29 @@ public class HistoryServiceSonarrTests : IDisposable
         var history = CreateTestHistory();
         history[0].SonarrSeriesId = "100";
         string[] titles = ["A New Arrival", "A Quiet Dinner", "The Battle Begins", "The Final Journey"];
-        var sources = titles.Select((title, i) => new HistoryEpisode {
-            EpisodeId = $"ep-{i + 1}", Episode = (i + 1).ToString(), EpisodeSeasonNum = "1", EpisodeTitle = title
+        var sources = titles.Select((title, i) => new HistoryEpisode
+        {
+            EpisodeId = $"ep-{i + 1}",
+            Episode = (i + 1).ToString(),
+            EpisodeSeasonNum = "1",
+            EpisodeTitle = title
         }).ToList();
-        sources.Insert(0, new HistoryEpisode {
-            EpisodeId = "recap", Episode = duplicateNumber ? "4" : "5", EpisodeSeasonNum = "1",
-            EpisodeTitle = "The Story So Far", SpecialEpisode = false
+        sources.Insert(0, new HistoryEpisode
+        {
+            EpisodeId = "recap",
+            Episode = duplicateNumber ? "4" : "5",
+            EpisodeSeasonNum = "1",
+            EpisodeTitle = "The Story So Far",
+            SpecialEpisode = false
         });
         history[0].Seasons[0].EpisodesList = sources;
         await SaveTestHistory(history);
-        var targets = titles.Select((title, i) => new SonarrEpisode {
-            Id = 101 + i, SeasonNumber = 1, EpisodeNumber = i + 1, Title = title
+        var targets = titles.Select((title, i) => new SonarrEpisode
+        {
+            Id = 101 + i,
+            SeasonNumber = 1,
+            EpisodeNumber = i + 1,
+            Title = title
         }).ToList();
         targets.Add(new SonarrEpisode { Id = 200, SeasonNumber = 0, EpisodeNumber = 1, Title = "The Story So Far" });
         targets.Add(new SonarrEpisode { Id = 105, SeasonNumber = 1, EpisodeNumber = 5, Title = "An Unrelated Episode" });
@@ -277,7 +323,9 @@ public class HistoryServiceSonarrTests : IDisposable
         var history = CreateTestHistory();
         history.Add(new HistorySeries
         {
-            SeriesId = "series-2", SeriesTitle = "Frieren", SeriesType = SeriesType.Series,
+            SeriesId = "series-2",
+            SeriesTitle = "Frieren",
+            SeriesType = SeriesType.Series,
             Seasons = [new HistorySeason { SeasonId = "s", SeasonNum = "1", EpisodesList = [] }]
         });
         await SaveTestHistory(history);
@@ -845,6 +893,74 @@ public class HistoryServiceSonarrTests : IDisposable
         var result = await _historyService.GetHistorySeriesAsync();
         Assert.Null(result[0].Seasons[0].EpisodesList[0].SonarrEpisodeId);
     }
+
+    // Live 2026-10-30: Crunchyroll lists PSYCHO-PASS's films/side stories and Tanya's OVA as
+    // ordinary seasons, while Sonarr files them in season 0 under prefixed titles. They stayed
+    // unmatched (grey) although Sonarr had every file.
+    [Fact]
+    public async Task ProviderSeasonsThatSonarrFilesAsSpecialsMatchSeasonZero()
+    {
+        static HistorySeason Season(string id, string number, string title, params string[] episodeTitles) => new()
+        {
+            SeasonId = id,
+            SeasonNum = number,
+            SeasonTitle = title,
+            EpisodesList = episodeTitles.Select((episodeTitle, i) => new HistoryEpisode
+            {
+                EpisodeId = $"{id}-{i + 1}",
+                Episode = (i + 1).ToString(),
+                EpisodeSeasonNum = number,
+                EpisodeTitle = episodeTitle
+            }).ToList()
+        };
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons =
+        [
+            Season("main", "1", "PSYCHO-PASS", "Crime Coefficient", "Those Capable", "Nobody Knows Your Mask"),
+            Season("sinners", "4", "PSYCHO-PASS: Sinners of the System", "Crime and Punishment", "First Guardian", "On the Other Side of Love and Hate"),
+            Season("inspector", "6", "PSYCHO-PASS 3: First Inspector", "Act One (Ziggurat Capture Part 1)", "Act Two (Ziggurat Capture Part 2)"),
+            Season("pasta", "3", "Operation Desert Pasta", "Saga of Tanya the Evil: Operation Desert Pasta"),
+            Season("unrelated", "5", "Something Else", "A Completely Different Story")
+        ];
+        // Differently worded overviews used to drag the containment evidence below the threshold.
+        history[0].Seasons[3].EpisodesList[0].EpisodeDescription = "Tanya's battalion is sent to the southern continent.";
+        await SaveTestHistory(history);
+        SonarrEpisode Episode(int id, int season, int number, string title) =>
+            new() { Id = id, SeriesId = 100, SeasonNumber = season, EpisodeNumber = number, Title = title, HasFile = true };
+        _sonarrServiceMock.Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                Episode(101, 1, 1, "Crime Coefficient"), Episode(102, 1, 2, "Those Capable"), Episode(103, 1, 3, "Nobody Knows Your Mask"),
+                Episode(201, 0, 1, "Criminal Coefficient / Those Capable (Extended)"),
+                Episode(212, 0, 12, "Psycho-Pass: The Movie"),
+                Episode(213, 0, 13, "Psycho-Pass: Sinners of the System - Case.1 Crime and Punishment"),
+                Episode(214, 0, 14, "Psycho-Pass: Sinners of the System - Case.2 First Guardian"),
+                Episode(215, 0, 15, "Sinners of the System: Case.3 - On the Other Side of Love and Hate"),
+                Episode(216, 0, 16, "First Inspector: Ziggurat Capture (Part 1)"),
+                Episode(217, 0, 17, "First Inspector: Ziggurat Capture (Part 2)"),
+                new SonarrEpisode { Id = 218, SeriesId = 100, SeasonNumber = 0, EpisodeNumber = 18, Title = "Operation Desert Pasta",
+                    HasFile = true, Overview = "The Imperial Army opens a front in the desert against the Republic." }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync("series-1", true);
+
+        var ids = (await _historyService.GetHistorySeriesAsync())[0].Seasons
+            .ToDictionary(season => season.SeasonId!, season => season.EpisodesList.Select(e => e.SonarrEpisodeId).ToList());
+        Assert.Equal(["101", "102", "103"], ids["main"]);
+        Assert.Equal(["213", "214", "215"], ids["sinners"]);
+        Assert.Equal(["216", "217"], ids["inspector"]);
+        Assert.Equal(["218"], ids["pasta"]);
+        Assert.Equal([null], ids["unrelated"]);
+    }
+
+    [Theory]
+    [InlineData("Crime and Punishment", "Psycho-Pass: Sinners of the System - Case.1 Crime and Punishment", true)]
+    [InlineData("Saga of Tanya the Evil: Operation Desert Pasta", "Operation Desert Pasta", true)]
+    [InlineData("Part 1", "Ziggurat Capture Part 1", false)]
+    [InlineData("Capture and Release", "Ziggurat Capture (Part 1)", false)]
+    public void TitlePhraseContainmentNeedsAFullThreeWordPhrase(string first, string second, bool expected) =>
+        Assert.Equal(expected, HistoryService.ContainsTitlePhrase(first, second));
 
     [Fact]
     public async Task MatchHistoryEpisodesWithSonarrAsync_InsertedRegularSeasonSpecialsAlignToSonarrS00()

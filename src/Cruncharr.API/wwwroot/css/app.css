@@ -1079,6 +1079,7 @@
         .calendar-history-mark.mark-none { display: none; }
 
         .calendar-episode-time { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px; }
+        .calendar-episode-line { font-size: 0.75em; color: var(--text-secondary); text-align: center; margin-top: 2px; }
         .calendar-episode-locale { font-size: 0.7em; color: var(--text-muted); margin-top: 2px; }
         .calendar-episode-langs { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
         .cal-lang {

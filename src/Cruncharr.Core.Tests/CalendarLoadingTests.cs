@@ -93,6 +93,38 @@ public class CalendarLoadingTests
         Assert.Equal(1, calls);
     }
 
+    // Live 2026-10-30: every grey Calendar dot was an episode Sonarr had a file for, because the
+    // Calendar only looked at whether Cruncharr itself had downloaded it.
+    [Theory]
+    [InlineData(true, true, false, CalendarHistoryDownloadState.Downloaded)]
+    [InlineData(false, true, false, CalendarHistoryDownloadState.NotDownloaded)] // "count Sonarr" is off
+    [InlineData(true, false, false, CalendarHistoryDownloadState.NotDownloaded)]
+    [InlineData(true, false, true, CalendarHistoryDownloadState.Downloaded)]
+    public async Task HistoryMark_CountsAFileSonarrOwns(bool countSonarr, bool sonarrHasFile, bool wasDownloaded, CalendarHistoryDownloadState expected)
+    {
+        var config = new CruncharrConfig();
+        config.History.Enabled = true;
+        config.History.CountSonarr = countSonarr;
+        config.History.CheckPartialDownloads = false;
+        var history = new Mock<IHistoryService>();
+        history.Setup(value => value.GetHistorySeriesAsync()).ReturnsAsync([new HistorySeries
+        {
+            SeriesId = "SERIES1",
+            Seasons = [new HistorySeason
+            {
+                SeasonId = "SEASON1",
+                EpisodesList = [new HistoryEpisode { EpisodeId = "EPISODE1", SonarrHasFile = sonarrHasFile, WasDownloaded = wasDownloaded }]
+            }]
+        }]);
+        var service = new CalendarService(Api().Object, null, history.Object, config);
+
+        var week = await service.GetCustomCalendarAsync(Date, "en-US", cancellationToken: TestContext.Current.CancellationToken);
+
+        var episode = Assert.Single(week.CalendarDays!.SelectMany(day => day.CalendarEpisodes));
+        Assert.True(episode.IsInHistory);
+        Assert.Equal(expected, episode.HistoryDownloadState);
+    }
+
     [Fact]
     public async Task ConcurrentLoads_ShareFetchButNotMutableResponseData()
     {

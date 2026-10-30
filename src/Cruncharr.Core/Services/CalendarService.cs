@@ -666,7 +666,11 @@ public class CalendarService : ICalendarService
 
         if (!historyMatch.HistoryEpisode.WasDownloaded)
         {
-            calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.NotDownloaded;
+            // A file Sonarr owns counts as downloaded, the same as on the History page. Its audio
+            // tracks are not recorded, so there is no partial state to report for it.
+            calEpisode.HistoryDownloadState = _config?.History?.CountSonarr == true && historyMatch.HistoryEpisode.SonarrHasFile
+                ? CalendarHistoryDownloadState.Downloaded
+                : CalendarHistoryDownloadState.NotDownloaded;
             return;
         }
 

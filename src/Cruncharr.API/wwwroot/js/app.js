@@ -947,7 +947,7 @@
                         </div>
                         <div class="episode-info">
                             <div class="episode-title">${escapeHtml(ep.name) || 'Unknown Episode'}</div>
-                            <div class="episode-meta">${escapeHtml(ep.seasonTitle || '')}${ep.time ? ' - ' + escapeHtml(ep.time) : ''} ${renderEditionBadge(ep.edition)}</div>
+                            <div class="episode-meta">${escapeHtml(addDownloadEpisodeMeta(ep))} ${renderEditionBadge(ep.edition)}</div>
                             ${ep.description ? `<div class="episode-desc" style="font-size:0.85em; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(ep.description)}</div>` : ''}
                             <div class="dub-section-label">Select Dubs:</div>
                             <div class="dub-selector">
@@ -1436,6 +1436,32 @@
             return CAL_GENERIC_SERIES_LABEL.test((value || '').trim());
         }
 
+        // "Episode 2", the label itself for specials such as "SP1", or nothing for placeholders ("...").
+        function episodeNumberLabel(number) {
+            const text = String(number ?? '').trim();
+            if (!/[\p{L}\p{N}]/u.test(text)) return '';
+            return /^\d/.test(text) ? `Episode ${text}` : text;
+        }
+
+        // Calendar card line: "Episode 2 · Death Games and Demons". Upcoming cards carry the series
+        // name as their title, and some titles repeat the number ("Episode 4: A Knight's Duty").
+        function calendarEpisodeLine(episode) {
+            const number = episodeNumberLabel(episode.episodeNumber);
+            const raw = String(episode.title || '').trim();
+            const title = raw === episode.seriesTitle ? '' : raw.replace(/^episode\s+[\d.]+\s*:?\s*/i, '');
+            return [number, title].filter(Boolean).join(' · ');
+        }
+
+        // Add Download row: "Sasaki and Peeps · Season 2 · Episode 2 · 23:40". The season title
+        // often already includes the show's name, so the show is only added when it is not.
+        function addDownloadEpisodeMeta(episode) {
+            const show = String(episode.seriesTitle || '').trim();
+            const season = String(episode.seasonTitle || '').trim();
+            const seasonNamesShow = show && season.toLowerCase().includes(show.toLowerCase());
+            return [seasonNamesShow ? '' : show, season, episodeNumberLabel(episode.episodeNum), episode.time]
+                .filter(Boolean).join(' · ');
+        }
+
         function findMatchingLocale(locales, requested) {
             const normalized = String(requested || '').toLowerCase();
             return (locales || []).find(locale => String(locale || '').toLowerCase() === normalized) || '';
@@ -1670,6 +1696,7 @@
                                         <div class="calendar-episode-time">${timeDisplay}</div>
                                         ${episodeThumb}
                                         <div class="calendar-episode-title" data-series-id="${escapeHtml(ep.seriesId || '')}">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
+                                        ${calendarEpisodeLine(ep) ? `<div class="calendar-episode-line">${escapeHtml(calendarEpisodeLine(ep))}</div>` : ''}
                                         ${ep.seasonName && ep.seasonName !== ep.seriesTitle
                                             ? `<div class="calendar-episode-season">${escapeHtml(ep.seasonName)}</div>`
                                             : ''}

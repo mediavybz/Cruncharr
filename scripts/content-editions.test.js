@@ -75,3 +75,24 @@ test('edition text is escaped and unsafe source links are omitted', async () => 
     assert.match(html, /&lt;img src=x&gt;/);
     assert.doesNotMatch(html, /<img|href=|title="" onclick=/);
 });
+
+test('Add Download rows name the show and the episode number', () => {
+    const ui = app([]);
+    const meta = episode => ui.run(`addDownloadEpisodeMeta(${JSON.stringify(episode)})`);
+    assert.equal(meta({ seriesTitle: 'Sasaki and Peeps', seasonTitle: 'Season 2', episodeNum: '2', time: '23:40' }),
+        'Sasaki and Peeps · Season 2 · Episode 2 · 23:40');
+    // A season title that already carries the show's name is not repeated.
+    assert.equal(meta({ seriesTitle: 'PSYCHO-PASS', seasonTitle: 'PSYCHO-PASS 2', episodeNum: '11' }), 'PSYCHO-PASS 2 · Episode 11');
+    assert.equal(meta({ seriesTitle: 'Wistoria', seasonTitle: 'Season 2', episodeNum: 'SP1' }), 'Wistoria · Season 2 · SP1');
+});
+
+test('Calendar cards spell out the episode number and its name', () => {
+    const ui = app([]);
+    const line = episode => ui.run(`calendarEpisodeLine(${JSON.stringify(episode)})`);
+    assert.equal(line({ seriesTitle: 'PSYREN Season 1', episodeNumber: '1', title: 'Urban Legend' }), 'Episode 1 · Urban Legend');
+    assert.equal(line({ seriesTitle: 'A Certain Dark Item', episodeNumber: '4', title: 'A Certain Dark Item' }), 'Episode 4');
+    assert.equal(line({ seriesTitle: 'Example', episodeNumber: '3', title: 'Episode 3' }), 'Episode 3');
+    assert.equal(line({ seriesTitle: 'Example', title: '' }), '');
+    assert.equal(line({ seriesTitle: 'Example', episodeNumber: '4', title: "Episode 4: A Knight's Duty" }), "Episode 4 · A Knight's Duty");
+    assert.equal(line({ seriesTitle: 'MASHLE', episodeNumber: '...', title: 'Mash Burnedead' }), 'Mash Burnedead');
+});

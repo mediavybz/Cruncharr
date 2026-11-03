@@ -64,6 +64,7 @@ public sealed class ScheduledDownloadsService
             state.LastRunSummary,
             state.AutoAddNewSeries,
             state.AutoAddLanguages,
+            state.AutoAddSubtitles,
             NextRun = state.Enabled && _config.History.Enabled && HasWork(state)
                 ? state.LastRun?.AddMinutes(state.IntervalMinutes) ?? DateTimeOffset.UtcNow : (DateTimeOffset?)null,
             HistoryEnabled = _config.History.Enabled,
@@ -84,9 +85,11 @@ public sealed class ScheduledDownloadsService
         _state = state; // Publish only after persistence succeeds.
     }
 
-    // autoAddNewSeries and autoAddLanguages are left unchanged when null.
+    // autoAddLanguages are the audio (dub) languages a new show must premiere in; autoAddSubtitles
+    // are the subtitles to download with it (empty = the global subtitle setting). Null leaves a
+    // setting unchanged.
     public async Task ConfigureAsync(bool enabled, int intervalMinutes, CancellationToken ct,
-        bool? autoAddNewSeries = null, List<string>? autoAddLanguages = null)
+        bool? autoAddNewSeries = null, List<string>? autoAddLanguages = null, List<string>? autoAddSubtitles = null)
     {
         if (intervalMinutes is < 1 or > 1440) throw new ArgumentException("Check interval must be 1–1440 minutes.");
         await _gate.WaitAsync(ct);
@@ -95,13 +98,10 @@ public sealed class ScheduledDownloadsService
             var state = CopyState();
             state.Enabled = enabled;
             state.IntervalMinutes = intervalMinutes;
-            if (autoAddLanguages != null)
-            {
-                state.AutoAddLanguages = autoAddLanguages.Where(l => !string.IsNullOrWhiteSpace(l))
-                    .Select(l => l.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            }
+            if (autoAddLanguages != null) state.AutoAddLanguages = NormalizeLanguages(autoAddLanguages);
+            if (autoAddSubtitles != null) state.AutoAddSubtitles = NormalizeLanguages(autoAddSubtitles);
             if (autoAddNewSeries == true && state.AutoAddLanguages.Count == 0)
-                throw new ArgumentException("Choose at least one language for new shows.");
+                throw new ArgumentException("Choose at least one audio language for new shows.");
             if (autoAddNewSeries.HasValue && autoAddNewSeries.Value != state.AutoAddNewSeries)
             {
                 state.AutoAddNewSeries = autoAddNewSeries.Value;
@@ -113,6 +113,9 @@ public sealed class ScheduledDownloadsService
         }
         finally { _gate.Release(); }
     }
+
+    private static List<string> NormalizeLanguages(IEnumerable<string> languages) =>
+        languages.Where(l => !string.IsNullOrWhiteSpace(l)).Select(l => l.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
     private static bool HasWork(SchedulerState state) =>
         state.AutoAddNewSeries || state.Subscriptions.Any(s => s.Enabled);
@@ -203,8 +206,8 @@ public sealed class ScheduledDownloadsService
     }
 
     // "Automatically add new shows": a series whose first episode (season 1, episode 1) is released
-    // in one of the chosen languages after the option was turned on gets a subscription with those
-    // languages, so this same check queues it and the download registers it in Sonarr. A show is
+    // with one of the chosen audio languages after the option was turned on gets a subscription with
+    // that audio and the chosen subtitles, so this same check queues it and the download registers it in Sonarr. A show is
     // added at most once; removing its schedule afterwards is respected.
     private async Task AddNewSeriesAsync(SchedulerState state, SchedulerRunSummary summary, CancellationToken ct)
     {
@@ -232,8 +235,9 @@ public sealed class ScheduledDownloadsService
                 var series = await LoadHistorySeriesAsync(premiere.Key)
                     ?? throw new InvalidOperationException($"Could not load {title}; it will be retried.");
                 var languages = premiere.Select(e => e.EpisodeMetadata.AudioLocale!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var subtitles = state.AutoAddSubtitles.Count > 0 ? state.AutoAddSubtitles : series.HistorySeriesSoftSubsOverride;
                 await _history.SetSeriesSettingsOverrideAsync(premiere.Key, series.HistorySeriesVideoQualityOverride,
-                    languages, series.HistorySeriesSoftSubsOverride);
+                    languages, subtitles);
                 // No baseline: everything already released in these languages belongs to the new show.
                 state.Subscriptions.Add(new SeriesSubscription { SeriesId = premiere.Key, Title = series.SeriesTitle ?? title });
                 state.AutoAddedSeriesIds.Add(premiere.Key);
@@ -394,6 +398,7 @@ public sealed class SchedulerState
     public SchedulerRunSummary? LastRunSummary { get; set; }
     public bool AutoAddNewSeries { get; set; }
     public List<string> AutoAddLanguages { get; set; } = [];
+    public List<string> AutoAddSubtitles { get; set; } = [];
     public DateTimeOffset? AutoAddSince { get; set; }
     public HashSet<string> AutoAddedSeriesIds { get; set; } = [];
     public List<SeriesSubscription> Subscriptions { get; set; } = [];

@@ -24,9 +24,11 @@ or Sonarr check leaves the episode pending for retry. Settings and episode basel
 survive restarts in `subscriptions.json` beside the main configuration file.
 
 **Automatically add new shows** (Settings → Scheduler) subscribes a series when its
-first episode (season 1, episode 1) is released in one of the chosen languages. The
-series is scheduled in that language, its released episodes are queued at the same
-check, and the download registers it in Sonarr. Only shows that premiere after the
+first episode (season 1, episode 1) is released with one of the chosen **audio (dub)**
+languages. The series is scheduled with that audio and the chosen **subtitles** (none
+chosen means the Softsubs Languages setting), its released episodes are queued at the
+same check, and the download registers it in Sonarr. For example, choose English audio
+for English dubs, or Japanese audio with English subtitles. Only shows that premiere after the
 option is turned on are added, each show at most once; removing its schedule is
 respected. New seasons of shows you do not follow are not added.
 

@@ -327,13 +327,14 @@ public class ScheduledDownloadsTests : IDisposable
         _history.Setup(h => h.CrUpdateSeriesAsync(It.IsAny<string>(), "")).ReturnsAsync(true);
         _history.Setup(h => h.GetHistorySeriesAsync()).ReturnsAsync(() => [_series, newShow]);
         _history.Setup(h => h.SetSeriesSettingsOverrideAsync("NEW", It.IsAny<string?>(), It.IsAny<List<string>?>(), It.IsAny<List<string>?>()))
-            .Callback<string, string?, List<string>?, List<string>?>((_, _, dubs, _) => newShow.HistorySeriesDubLangOverride = dubs!)
+            .Callback<string, string?, List<string>?, List<string>?>((_, _, dubs, subs) =>
+                (newShow.HistorySeriesDubLangOverride, newShow.HistorySeriesSoftSubsOverride) = (dubs!, subs!))
             .Returns(Task.CompletedTask);
         var api = new Mock<ICrunchyrollApiService>();
         var service = new ScheduledDownloadsService(_history.Object, _queue.Object, _auth.Object, _sonarr.Object, _config,
             Path.Combine(_root, "subscriptions.json"), api: api.Object);
         await Assert.ThrowsAsync<ArgumentException>(() => service.ConfigureAsync(true, 15, TestContext.Current.CancellationToken, autoAddNewSeries: true));
-        await service.ConfigureAsync(true, 15, TestContext.Current.CancellationToken, autoAddNewSeries: true, autoAddLanguages: ["en-US"]);
+        await service.ConfigureAsync(true, 15, TestContext.Current.CancellationToken, autoAddNewSeries: true, autoAddLanguages: ["en-US"], autoAddSubtitles: ["fr-FR"]);
 
         var after = DateTime.UtcNow.AddMinutes(1);
         static Cruncharr.Core.Services.CrBrowseEpisode Release(string series, string audio, double season, DateTime released) => new()
@@ -360,7 +361,7 @@ public class ScheduledDownloadsTests : IDisposable
         Assert.Null(summary.AutoAddError);
         Assert.Equal(["en-US"], newShow.HistorySeriesDubLangOverride);
         var queued = Assert.Single(_queued);
-        Assert.Equal(("NEW-E1", "en-US"), (queued.Id, queued.SelectedDubs![0]));
+        Assert.Equal(("NEW-E1", "en-US", "fr-FR"), (queued.Id, queued.SelectedDubs![0], queued.SelectedSubs![0]));
         foreach (var skipped in new[] { "OLD", "JAPANESE", "SEQUEL" })
             _history.Verify(h => h.CrUpdateSeriesAsync(skipped, ""), Times.Never);
 

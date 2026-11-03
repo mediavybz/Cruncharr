@@ -1,5 +1,3 @@
-using Cruncharr.Core.Configuration;
-using Cruncharr.Core.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Cruncharr.Core.Services;

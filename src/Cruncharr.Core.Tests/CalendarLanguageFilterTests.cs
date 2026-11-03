@@ -6,7 +6,6 @@ using Cruncharr.Core.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Xunit;
 
 namespace Cruncharr.Core.Tests;
 
@@ -113,7 +112,7 @@ public class CalendarLanguageFilterTests
             .Setup(service => service.GetCustomCalendarAsync(
                 It.IsAny<DateTime>(),
                 It.IsAny<string>(),
-                It.IsAny<bool>()))
+                It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(week);
 
         var controller = new CalendarController(
@@ -121,7 +120,7 @@ public class CalendarLanguageFilterTests
             new CruncharrConfig(),
             NullLogger<CalendarController>.Instance);
 
-        var result = await controller.GetCustomCalendar("2026-07-17", "en-us", false, "en-US");
+        var result = await controller.GetCustomCalendar("2026-07-17", "en-us", false, "en-US", TestContext.Current.CancellationToken);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var response = Assert.IsType<CalendarWeekResponse>(ok.Value);
         var episodes = Assert.Single(response.Days).Episodes;

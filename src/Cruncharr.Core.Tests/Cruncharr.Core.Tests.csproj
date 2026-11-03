@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Cruncharr.API\Cruncharr.API.csproj" />
+    <ProjectReference Include="..\Cruncharr.CLI\Cruncharr.CLI.csproj" />
     <ProjectReference Include="..\Cruncharr.Core\Cruncharr.Core.csproj" />
   </ItemGroup>
 

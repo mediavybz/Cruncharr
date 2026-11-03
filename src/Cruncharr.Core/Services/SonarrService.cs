@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text.Json;
 using Cruncharr.Core.Configuration;
-using Cruncharr.Core.Utils;
 using Microsoft.Extensions.Logging;
 
 #pragma warning disable IL2026
@@ -136,7 +135,12 @@ public partial class SonarrService : ISonarrService
     // The request gate also coalesces concurrent batch-download cache misses instead of bursting
     // identical reads at Sonarr (the live failure was simultaneous connections reset by peer).
     private static readonly TimeSpan MetadataCacheTtl = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan FileStatusCacheTtl = TimeSpan.FromSeconds(15);
+    // How long a non-forced read (e.g. opening History) may reuse a series' file status. It was
+    // 15 s, so nearly every History visit re-read all matched series one after another through
+    // the request gate. Forced reads (scheduler, Refresh, imports) always fetch.
+    private static readonly TimeSpan FileStatusCacheTtl = TimeSpan.FromMinutes(2);
+    // After Sonarr fails to answer, skip it this long instead of retrying every series.
+    private static readonly TimeSpan FileStatusFailureBackoff = TimeSpan.FromSeconds(15);
     private (string Key, DateTime RetryAfterUtc)? _fileStatusFailure;
     private const int MaxTransientAttempts = 3;
     private (string Key, DateTime FetchedUtc, List<SonarrSeries> Data)? _seriesCache;
@@ -222,12 +226,13 @@ public partial class SonarrService : ISonarrService
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (currentLibrary) timeout.CancelAfter(TimeSpan.FromSeconds(8));
         var acquired = false;
         try
         {
-            await _metadataRequestGate.WaitAsync(timeout.Token);
+            // Waiting for the gate is not Sonarr being slow; only the request itself is timed.
+            await _metadataRequestGate.WaitAsync(cancellationToken);
             acquired = true;
+            if (currentLibrary) timeout.CancelAfter(TimeSpan.FromSeconds(8));
             lock (_metadataCacheLock)
             {
                 if (_seriesCache is { } cached && cached.Key == cacheKey && CanReuse(cached.FetchedUtc))
@@ -305,15 +310,32 @@ public partial class SonarrService : ISonarrService
         if (index.FindExact(title) is { } exact) return exact;
         if (_api == null || string.IsNullOrEmpty(seriesId)) return null;
         var candidates = index.Candidates(title);
-        if (candidates.Count == 0) return null;
+        if (candidates.Count == 0)
+        {
+            _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): no similar owned series", title, seriesId);
+            return null;
+        }
+        _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): candidates {Candidates}", title, seriesId,
+            string.Join(", ", candidates.Select(c => $"{c.Title} [sonarr {c.Id}, tvdb {c.TvdbId}]")));
         // A lookup can identify an unowned spin-off with reused episode titles. Respect that
         // identity, except an unsuffixed name can also mean a year-qualified remake (Witchblade).
         var lookup = await LookupSeriesAsync(title, config).WaitAsync(cancellationToken);
         var lookupExact = new SonarrTitleIndex(lookup).Exact(title);
         if (lookupExact.Count > 0)
+        {
+            var before = candidates;
             candidates = candidates.Where(candidate => lookupExact.Any(item => item.TvdbId == candidate.TvdbId) ||
                 SonarrTitleIndex.IsYearQualifiedEdition(title, candidate)).ToList();
-        if (candidates.Count == 0) return null;
+            if (candidates.Count != before.Count)
+                _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): lookup names {Lookup}; dropped {Dropped}", title, seriesId,
+                    string.Join(", ", lookupExact.Select(l => $"{l.Title} [tvdb {l.TvdbId}]")),
+                    string.Join(", ", before.Except(candidates).Select(c => c.Title)));
+        }
+        if (candidates.Count == 0)
+        {
+            _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): Sonarr's lookup names a series that is not in the library", title, seriesId);
+            return null;
+        }
         await _matchGate.WaitAsync(cancellationToken);
         try
         {
@@ -327,13 +349,38 @@ public partial class SonarrService : ISonarrService
                     providerEpisodes ??= await _api.GetEpisodesAsync(seriesId, true, cancellationToken);
                     var sonarrEpisodes = await GetEpisodesAsync(candidate.Id, config).WaitAsync(cancellationToken);
                     if (providerEpisodes.Count == 0 || sonarrEpisodes.Count == 0)
-                        throw new HttpRequestException("Episode metadata is unavailable; Sonarr identity could not be verified.");
+                    {
+                        var reason = providerEpisodes.Count == 0
+                            ? $"Crunchyroll lists no episodes for '{title}', so its Sonarr identity cannot be verified yet."
+                            : $"Sonarr has no episodes yet for '{candidate.Title}', so the identity of '{title}' cannot be verified yet.";
+                        // Not cached: an empty Sonarr list can also be a transient read failure,
+                        // and the next attempt must be able to succeed without a restart.
+                        _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): provider episodes {Provider}, Sonarr episodes {Sonarr} for {Candidate} [sonarr {Id}]",
+                            title, seriesId, providerEpisodes.Count, sonarrEpisodes.Count, candidate.Title, candidate.Id);
+                        throw new HttpRequestException(reason);
+                    }
                     var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title));
-                    cached = (DateTime.UtcNow.Add(matches ? TimeSpan.FromDays(1) : TimeSpan.FromMinutes(5)), matches);
+                    _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): {Candidate} [sonarr {Id}] {Result} ({Provider} provider / {Sonarr} Sonarr episodes)",
+                        title, seriesId, candidate.Title, candidate.Id, matches ? "confirmed" : "rejected", providerEpisodes.Count, sonarrEpisodes.Count);
+                    // Both outcomes hold for a day: History matching runs every minute and Browse
+                    // verification every few minutes, and refetching a rejected franchise prefix
+                    // from Crunchyroll each time was the main source of request load.
+                    cached = (DateTime.UtcNow.AddDays(1), matches);
                     _episodeMatchCache[key] = cached;
                 }
                 if (cached.Matches) confirmed.Add(candidate);
             }
+            if (confirmed.Count > 1)
+            {
+                // Two owned editions sharing the same episode titles (Witchblade and its remake)
+                // cannot be told apart by name alone; leave the identity unassigned.
+                _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): ambiguous, {Count} owned series share its episodes: {Titles}",
+                    title, seriesId, confirmed.Count, string.Join(", ", confirmed.Select(c => c.Title)));
+                return null;
+            }
+            if (confirmed.Count == 0)
+                _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): no candidate's episode titles match ({Candidates})",
+                    title, seriesId, string.Join(", ", candidates.Select(c => c.Title)));
             return confirmed.Count == 1 ? confirmed[0] : null;
         }
         finally { _matchGate.Release(); }
@@ -394,13 +441,15 @@ public partial class SonarrService : ISonarrService
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (currentFileStatus) timeout.CancelAfter(TimeSpan.FromSeconds(8));
         var requestToken = timeout.Token;
         var gateAcquired = false;
         try
         {
-            await _metadataRequestGate.WaitAsync(requestToken);
+            // Queueing behind other Sonarr reads used to count toward the 8 s timeout, so a
+            // History load timed out series that Sonarr would have answered quickly.
+            await _metadataRequestGate.WaitAsync(cancellationToken);
             gateAcquired = true;
+            if (currentFileStatus) timeout.CancelAfter(TimeSpan.FromSeconds(8));
             lock (_metadataCacheLock)
             {
                 if (_episodeListCache.TryGetValue(listKey, out var cached) && CanReuse(cached.FetchedUtc))
@@ -441,13 +490,13 @@ public partial class SonarrService : ISonarrService
             {
                 if (response == null || IsTransient(response.StatusCode) ||
                     response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                    lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusCacheTtl); }
+                    lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusFailureBackoff); }
                 throw new HttpRequestException("Could not read current episode status from Sonarr.", null, response?.StatusCode);
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && currentFileStatus)
         {
-            lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusCacheTtl); }
+            lock (_metadataCacheLock) { _fileStatusFailure = (configKey, DateTime.UtcNow + FileStatusFailureBackoff); }
             throw new HttpRequestException("Sonarr episode status timed out. Please try again shortly.");
         }
         catch (Exception) when (currentFileStatus || cancellationToken.IsCancellationRequested) { throw; }

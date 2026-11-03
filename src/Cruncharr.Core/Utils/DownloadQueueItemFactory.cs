@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-using System.Linq;
 using System.Text.RegularExpressions;
 using Cruncharr.Core.Models;
 
@@ -25,7 +23,6 @@ public static class DownloadQueueItemFactory
 
     public static (string small, string big) GetThumbSmallBig(Dictionary<string, List<List<object>>>? images)
     {
-        var urls = new List<string>();
         if (images != null && images.ContainsKey("thumbnail"))
         {
             var thumbList = images["thumbnail"];

@@ -1,17 +1,19 @@
 using Cruncharr.API.Diagnostics;
+using Cruncharr.API.Security;
 using Cruncharr.API.Services;
 using Cruncharr.Core.Configuration;
-using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.Muxing.Syncing;
 using Newtonsoft.Json.Converters;
-using Newtonsoft.Json.Serialization;
 
 namespace Cruncharr.API;
 
 public class Program
 {
+    /// <summary>Per-client partition key for throttles: the remote address, or "unknown".</summary>
+    private static string ClientKey(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
     public static async Task Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
@@ -64,28 +66,15 @@ public class Program
         builder.Services.AddSwaggerGenNewtonsoftSupport();
 
         // Load configuration
-        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
-        var config = File.Exists(configPath) ? CruncharrConfig.Load(configPath) : new CruncharrConfig();
+        var configPath = CruncharrConfig.ConfigFilePath;
+        // An unreadable existing config starts the app on defaults with saves to it refused, so
+        // the user's real settings are never overwritten. The reason is logged and shown in the UI.
+        var config = CruncharrConfig.LoadOrRecover(configPath, out var configLoadError);
+        if (configLoadError != null) Console.Error.WriteLine(configLoadError);
         config.ApplyEnvironmentVariables();
 
-        // Persistence hardening: keep ALL per-user state on the mounted config volume (next to the
-        // config file) so it survives container/app UPDATES. Some defaults pointed at ApplicationData
-        // (~/.config INSIDE the container = ephemeral, wiped on every image update -> history/token
-        // reset each update). Redirect those ephemeral defaults to the config dir; respect any
-        // explicit user-set path.
+        config.KeepStateNextToConfig(configPath);
         var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? "";
-        var appDataDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        // Relative paths count as ephemeral too: when ApplicationData resolves empty (root
-        // with no HOME) the legacy default persisted literally as "Cruncharr/token.json",
-        // which lands in the read-only /app workdir and every token save fails with
-        // UnauthorizedAccessException (seen live) — token then can't survive a restart.
-        bool IsEphemeralPath(string? p) => string.IsNullOrEmpty(p) ||
-            !Path.IsPathRooted(p) ||
-            (!string.IsNullOrEmpty(appDataDir) && p.StartsWith(appDataDir, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(config.TokenFilePath))
-        {
-            config.TokenFilePath = Path.Combine(configDir, "token.json");
-        }
 
         builder.Services.AddSingleton(config);
 
@@ -107,7 +96,6 @@ public class Program
                 sp.GetService<ILogger<HistoryService>>(),
                 sp.GetService<ISonarrService>(),
                 sp.GetService<ICrunchyrollApiService>(),
-                sp.GetService<IMusicService>(),
                 sp.GetService<ICrunchyrollAuthService>(),
                 config));
         builder.Services.AddSingleton<IQueuePersistenceService>(sp =>
@@ -166,6 +154,27 @@ public class Program
             });
         });
 
+        // Crunchyroll logins are proxied through this endpoint; a fixed window per client keeps
+        // password guessing (and accidental retry storms) off the upstream account.
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = async (context, token) =>
+            {
+                context.HttpContext.Response.Headers.RetryAfter = "60";
+                context.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+                await context.HttpContext.Response.WriteAsync(
+                    "{\"success\":false,\"message\":\"Too many login attempts; wait a minute and try again.\"}", token);
+            };
+            options.AddPolicy("login", ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                ClientKey(ctx), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0
+                }));
+        });
+
         var app = builder.Build();
 
         // Compress responses before anything writes the body.
@@ -185,6 +194,38 @@ public class Program
         }
         app.UseCors("AllowSpecific");
 
+        // Response hardening headers. X-Frame-Options is deliberately not set so the UI can
+        // still be embedded in dashboards such as Organizr or Heimdall.
+        app.Use(async (ctx, next) =>
+        {
+            ctx.Response.OnStarting(static state =>
+            {
+                var headers = ((HttpContext)state).Response.Headers;
+                headers["X-Content-Type-Options"] = "nosniff";
+                headers["Referrer-Policy"] = "no-referrer";
+                return Task.CompletedTask;
+            }, ctx);
+            await next();
+        });
+
+        // Cross-site request guard for state-changing API calls. A page on another site can
+        // submit a plain form POST to e.g. /api/v1/config/reset without any CORS preflight;
+        // browsers label such requests with Sec-Fetch-Site. The UI's own calls are
+        // same-origin and origins listed in CORS_ORIGINS stay allowed, so nothing changes
+        // for legitimate use.
+        var allowedOrigins = RequestGuards.NormalizeOrigins(corsOrigins);
+        app.Use(async (ctx, next) =>
+        {
+            if (RequestGuards.IsCrossSiteStateChange(ctx.Request, allowedOrigins))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                ctx.Response.ContentType = "application/json; charset=utf-8";
+                await ctx.Response.WriteAsync("{\"error\":\"Forbidden\",\"message\":\"Cross-site requests are not allowed.\"}");
+                return;
+            }
+            await next();
+        });
+
         // Optional API-key gate. Off by default (no env var) so existing setups keep
         // working. When CRUNCHARR_API_KEY is set, every /api/* call must present the key
         // via the X-Api-Key header or an Authorization: Bearer <key>. The ?apiKey= query
@@ -197,6 +238,10 @@ public class Program
         if (!string.IsNullOrWhiteSpace(requiredApiKey))
         {
             var requiredKeyBytes = System.Text.Encoding.UTF8.GetBytes(requiredApiKey);
+            // After 30 wrong keys in a minute a client's further wrong keys are delayed and
+            // answered 429. A correct key always passes, so one guesser behind a shared
+            // reverse-proxy address cannot lock out the real users.
+            var keyFailures = new FailureThrottle(30, TimeSpan.FromMinutes(1));
             app.Use(async (ctx, next) =>
             {
                 var path = ctx.Request.Path.Value ?? "";
@@ -204,6 +249,7 @@ public class Program
                 var isHealth = path.StartsWith("/api/v1/health", StringComparison.OrdinalIgnoreCase);
                 if (isApi && !isHealth && !HttpMethods.IsOptions(ctx.Request.Method))
                 {
+                    var client = ClientKey(ctx);
                     var provided = ctx.Request.Headers["X-Api-Key"].FirstOrDefault();
                     if (string.IsNullOrEmpty(provided))
                     {
@@ -211,7 +257,10 @@ public class Program
                         if (auth != null && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                             provided = auth.Substring("Bearer ".Length).Trim();
                     }
-                    if (string.IsNullOrEmpty(provided))
+                    // Query-string keys are honoured only for the SSE stream (EventSource cannot
+                    // set headers); everywhere else they would just leak into access logs.
+                    if (string.IsNullOrEmpty(provided) &&
+                        path.StartsWith("/api/v1/queue/sse", StringComparison.OrdinalIgnoreCase))
                         provided = ctx.Request.Query["apiKey"].FirstOrDefault();
 
                     var providedBytes = System.Text.Encoding.UTF8.GetBytes(provided ?? "");
@@ -219,6 +268,21 @@ public class Program
                              System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(providedBytes, requiredKeyBytes);
                     if (!ok)
                     {
+                        // Only wrong keys count as guesses. Requests with no key at all are the
+                        // UI before its key is entered (and <img> loads, which cannot send one).
+                        var guessed = !string.IsNullOrEmpty(provided);
+                        if (guessed && keyFailures.IsBlocked(client))
+                        {
+                            try { await Task.Delay(TimeSpan.FromSeconds(1), ctx.RequestAborted); }
+                            catch (OperationCanceledException) { return; }
+                            ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                            ctx.Response.Headers.RetryAfter = "60";
+                            ctx.Response.Headers["WWW-Authenticate"] = "ApiKey";
+                            ctx.Response.ContentType = "application/json; charset=utf-8";
+                            await ctx.Response.WriteAsync("{\"error\":\"TooManyRequests\",\"message\":\"Too many failed API key attempts; try again in a minute.\"}");
+                            return;
+                        }
+                        if (guessed) keyFailures.RecordFailure(client);
                         ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                         ctx.Response.Headers["WWW-Authenticate"] = "ApiKey";
                         // Write the fixed contract directly: WriteAsJsonAsync needs generated
@@ -232,7 +296,14 @@ public class Program
                 await next();
             });
         }
+        else
+        {
+            app.Logger.LogWarning(
+                "CRUNCHARR_API_KEY is not set: anyone who can reach port 8585 can read and change settings. " +
+                "Set it (and AllowedHosts) if the container is reachable beyond a trusted network.");
+        }
 
+        app.UseRateLimiter();
         app.UseAuthorization();
         app.MapControllers();
 

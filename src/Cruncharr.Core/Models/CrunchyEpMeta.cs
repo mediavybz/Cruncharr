@@ -149,6 +149,7 @@ public class EpisodeDisplay
     public string Season { get; set; } = "";
     public string SeasonTitle { get; set; } = "";
     public string SeriesTitle { get; set; } = "";
+    public ContentEdition? Edition { get; set; }
     public string EpisodeNum { get; set; } = "";
     public string Id { get; set; } = "";
     public string Img { get; set; } = "";
@@ -156,6 +157,8 @@ public class EpisodeDisplay
     public string Time { get; set; } = "";
     public EpisodeType EpisodeType { get; set; } = EpisodeType.Unknown;
 }
+
+public record ContentEdition(string Label, string Explanation, string? SourceUrl = null);
 
 public enum StreamingService
 {

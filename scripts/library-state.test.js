@@ -28,3 +28,10 @@ test('library matching tolerates display punctuation without assigning ambiguous
     assert.equal(findSeries(index,{id:'CR1',title:'Shared title'}), first);
     assert.equal(findSeries(index,{title:''}), null);
 });
+
+test('multiplication sign in a Sonarr title matches the letter x used by Crunchyroll', () => {
+    const series = {sonarrSeriesId: 4, title: 'SPY×FAMILY'};
+    const index = createIndex([series]);
+    assert.equal(findSeries(index, {title: 'SPY x FAMILY'}), series);
+    assert.equal(findSeries(index, {title: 'Spy × Family'}), series);
+});

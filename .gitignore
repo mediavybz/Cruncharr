@@ -25,6 +25,8 @@ _ReSharper*/
 *.DotSettings.user
 
 # Sensitive files - NEVER commit these
+/.secrets/
+/.local/
 widevine/*.pem
 widevine/*.bin
 test-data/widevine/*.pem
@@ -71,6 +73,7 @@ logs/
 *.tmp
 *.temp
 .cache/
+__pycache__/
 
 # Test output files
 test_output*.txt
@@ -86,7 +89,6 @@ imgcache/
 status.md
 *.resume
 
-# Local agent/instruction material (not part of the application)
 examples/
 
 # Local-only workflow documentation

@@ -1,14 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Dynamic;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
 using System.Xml.Linq;
-using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.DRM;
-using Cruncharr.Core.Utils.Parser.Utils;
 
 namespace Cruncharr.Core.Utils.Parser;
 
@@ -232,12 +223,12 @@ public static class MpdParser
             number = segment.number,
             presentationTime = segment.presentationTime,
             uri = segment.resolvedUri,
-            byteRange = ObjectUtilities.GetMemberValue(segment, "byterange"),
+            byteRange = ByteRange.From((object?)ObjectUtilities.GetMemberValue(segment, "byterange")),
 
             map = new Map
             {
                 uri = segment.map.resolvedUri,
-                byteRange = ObjectUtilities.GetMemberValue(segment.map, "byterange")
+                byteRange = ByteRange.From((object?)ObjectUtilities.GetMemberValue(segment.map, "byterange"))
             }
         }).ToList() ?? [];
     }

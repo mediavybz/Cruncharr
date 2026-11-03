@@ -1,4 +1,4 @@
-# Sonarr library detection (1.0.86)
+# Sonarr library detection (1.0.87)
 
 Browse and Search now share verified Crunchyroll-to-Sonarr series identities with
 History and download naming. A show does not have to be in Cruncharr History to
@@ -21,8 +21,11 @@ Exact badges and saved verified identities appear in the first library response.
 Alternate-name verification runs once in the background for all browsers, with
 progress available without waiting for the entire catalog. Closing a page does
 not cancel that work. Verified identities are saved beside the configuration in
-`sonarr-library-identities.json` for up to a day and survive restarts. Changing the
-Sonarr connection, series identities or aliases invalidates the saved matches.
+`sonarr-library-identities.json` and survive restarts. Matches are rechecked after
+a day or when the library changes. Previously verified matches remain visible
+during rechecking, including when a title's metadata is temporarily unavailable.
+Changing the Sonarr connection clears saved matches. Removing a series or changing
+its TVDB identity removes its saved match; a rejected recheck also removes it.
 File availability still uses fresh Sonarr data independently of identity caching.
 
 While **Hide series in Sonarr** is on, candidates awaiting verification are also

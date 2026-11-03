@@ -6,6 +6,7 @@
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
+  <ExtraParams>--security-opt=no-new-privileges:true --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER</ExtraParams>
 
   <Icon>https://raw.githubusercontent.com/mediavybz/Cruncharr/master/icon.png</Icon>
   <WebUI>http://[IP]:[PORT:8585]/</WebUI>

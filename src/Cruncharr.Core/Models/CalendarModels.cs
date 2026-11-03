@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using Cruncharr.Core.Services;
-
 namespace Cruncharr.Core.Models;
 
 // [PT] Ported from upstream CalendarStructs.CalendarHistoryDownloadState
@@ -18,6 +14,18 @@ public class CalendarWeek
     public DateTime FirstDayOfWeek { get; set; }
     public string? FirstDayOfWeekString { get; set; }
     public List<CalendarDay>? CalendarDays { get; set; }
+
+    internal CalendarWeek Copy() => new()
+    {
+        FirstDayOfWeek = FirstDayOfWeek,
+        FirstDayOfWeekString = FirstDayOfWeekString,
+        CalendarDays = CalendarDays?.Select(day => new CalendarDay
+        {
+            DateTime = day.DateTime,
+            DayName = day.DayName,
+            CalendarEpisodes = day.CalendarEpisodes.Select(episode => episode.Copy()).ToList()
+        }).ToList()
+    };
 }
 
 public class CalendarDay
@@ -56,6 +64,15 @@ public class CalendarEpisode
     public CalendarHistoryDownloadState HistoryDownloadState { get; set; }
 
     public List<CalendarEpisode> CalendarEpisodes { get; set; } = [];
+
+    internal CalendarEpisode Copy()
+    {
+        var copy = (CalendarEpisode)MemberwiseClone();
+        copy.CalendarEpisodes = CalendarEpisodes.Select(episode => episode.Copy()).ToList();
+        copy.VersionGuids = new List<string>(VersionGuids);
+        copy.Versions = Versions?.ToList();
+        return copy;
+    }
 }
 
 public class AniListResponseCalendar

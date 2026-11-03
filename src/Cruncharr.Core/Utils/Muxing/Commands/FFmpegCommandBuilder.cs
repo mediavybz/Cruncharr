@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
-using System.Linq;
 using System.Xml;
-using Cruncharr.Core.Utils;
 using Cruncharr.Core.Utils.Muxing.Structs;
 
 namespace Cruncharr.Core.Utils.Muxing.Commands;
@@ -118,6 +113,11 @@ public class FFmpegCommandBuilder : CommandBuilder
             Options.Defaults.Audio != Languages.DEFAULT_lang)
         {
             metaData.Add($"-disposition:a:{audioIndex} default");
+        }
+        else if (aud.IsAudioRoleDescription)
+        {
+            // Standard audio-description flags so players list it as described audio, not a dub.
+            metaData.Add($"-disposition:a:{audioIndex} visual_impaired+descriptions");
         }
         else
         {

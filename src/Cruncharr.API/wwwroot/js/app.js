@@ -126,6 +126,8 @@
             }
             try {
                 const data = await response.json();
+                // The item is queued but would not survive a restart; tell the user why.
+                if (data.persisted === false) showToast(data.message || 'The download queue could not be saved.', 'warning');
                 return { added: data.added !== false, destination: data.destination || 'cruncharr', data };
             } catch (e) {
                 // Compatibility with an older backend that returned no admission flag.
@@ -187,6 +189,7 @@
         let allBrowseSeries = [];        // full series list from /series/all (for client-side dub filter)
         let browseSeriesPromise = null;  // de-duplicates background/visible catalog requests
         let browseCatalogLoaded = false;
+        let browseCatalogFetchedAt = 0;
         let browseFilteredSeries = [];
         let browseRenderedCount = 0;
         let browseLoadMoreObserver = null;
@@ -195,6 +198,7 @@
         let historyFilterText = '';
         const calendarSeriesTitleCache = new Map(); // seriesId -> canonical title from /series/{id}/list
         const calendarRequestGate = CruncharrCalendarRequests.createLatestRequestGate();
+        const seasonalRequestGate = CruncharrCalendarRequests.createLatestRequestGate();
 
         // Constants
         const AUTH_NOTIFICATION_THROTTLE_MS = 30000;
@@ -359,6 +363,9 @@
             if (currentPage === 'calendar' && page !== 'calendar') {
                 calendarRequestGate.cancel();
             }
+            if (currentPage === 'seasonal' && page !== 'seasonal') {
+                seasonalRequestGate.cancel();
+            }
             // Clear any pending browse result timeout
             if (selectBrowseResultTimeout) {
                 clearTimeout(selectBrowseResultTimeout);
@@ -496,7 +503,8 @@
             try {
                 const res = await fetch('/api/v1/scheduler/trigger', { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                if (typeof showToast === 'function') showToast('Scheduled release check completed', 'success');
+                const result = await res.json().catch(() => ({}));
+                showSchedulerRunToast(result.summary);
             } catch (e) {
                 if (typeof showToast === 'function') showToast('Scheduler trigger failed', 'error');
             } finally {
@@ -692,12 +700,13 @@
                     <button class="header-btn" id="music-btn" onclick="showFeaturedMusic()" style="display:none;">
                         <span>&#127925;</span> Music
                     </button>
-                    <div style="margin-left:auto;">
-                        <select class="form-select mw-200" id="season-dropdown" onchange="onSeasonChange(this.value)">
+                    <div class="season-picker">
+                        <select class="form-select" id="season-dropdown" aria-label="Season and edition" onchange="onSeasonChange(this.value)">
                             <option>Select Season</option>
                         </select>
                     </div>
                 </div>
+                <div id="add-edition-note" class="edition-note" hidden aria-live="polite"></div>
                 <div id="add-default-hint" class="hint" style="display:none; margin:6px 2px 0; font-size:0.82em; opacity:0.8;"></div>
                 <div id="add-episodes-list">
                     <div class="empty-state">
@@ -834,8 +843,21 @@
             if (!seasonId || !addDownloadSelectedSeries) return;
             // Filter episodes by selected season
             const filtered = addDownloadEpisodeList.filter(ep => ep.id === seasonId);
+            const note = document.getElementById('add-edition-note');
+            if (note) {
+                const edition = filtered[0]?.edition;
+                note.hidden = !edition;
+                note.innerHTML = edition
+                    ? `${renderEditionBadge(edition)} <span>${escapeHtml(edition.explanation)}</span>${edition.sourceUrl && isSafeUrl(edition.sourceUrl) ? ` <a href="${escapeHtmlAttribute(edition.sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : ''}`
+                    : '';
+            }
             selectedEpisodes.clear();
             renderAddEpisodesMultiDub(filtered);
+        }
+
+        function renderEditionBadge(edition) {
+            if (!edition) return '';
+            return `<span class="edition-badge${edition.label === 'Edition unknown' ? ' edition-unknown' : ''}" title="${escapeHtmlAttribute(edition.explanation)}">${escapeHtml(edition.label)}</span>`;
         }
 
         function renderAddEpisodesMultiDub(episodesToRender) {
@@ -847,7 +869,8 @@
             const episodes = episodesToRender || (seasonId ? addDownloadEpisodeList.filter(ep => ep.id === seasonId) : addDownloadEpisodeList);
             const allChecked = selectedEpisodes.size === episodes.length && episodes.length > 0;
             if (allCheckbox) allCheckbox.checked = allChecked;
-            if (addBtn) addBtn.disabled = selectedEpisodes.size === 0;
+            // Stays disabled while a submission is running (see addSelectedToQueue).
+            if (addBtn) addBtn.disabled = isAddingToQueue || selectedEpisodes.size === 0;
 
             if (episodes.length === 0) {
                 list.innerHTML = `
@@ -924,7 +947,7 @@
                         </div>
                         <div class="episode-info">
                             <div class="episode-title">${escapeHtml(ep.name) || 'Unknown Episode'}</div>
-                            <div class="episode-meta">${escapeHtml(ep.seasonTitle || '')}${ep.time ? ' - ' + escapeHtml(ep.time) : ''}</div>
+                            <div class="episode-meta">${escapeHtml(addDownloadEpisodeMeta(ep))} ${renderEditionBadge(ep.edition)}</div>
                             ${ep.description ? `<div class="episode-desc" style="font-size:0.85em; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(ep.description)}</div>` : ''}
                             <div class="dub-section-label">Select Dubs:</div>
                             <div class="dub-selector">
@@ -1088,13 +1111,38 @@
             renderAddEpisodesMultiDub();
         }
 
+        // Release order for queue submissions: season, then episode number. Non-numeric
+        // values (specials) go after the numbered ones; ties keep their original order.
+        function compareReleaseOrder(a, b) {
+            for (const field of ['season', 'episodeNumber']) {
+                const x = Number.parseFloat(a?.[field]), y = Number.parseFloat(b?.[field]);
+                const xNumber = Number.isFinite(x), yNumber = Number.isFinite(y);
+                if (xNumber && yNumber && x !== y) return x - y;
+                if (xNumber !== yNumber) return xNumber ? -1 : 1;
+            }
+            return 0;
+        }
+
         let isAddingToQueue = false;
+        // Each episode is submitted on its own, and with Sonarr enabled each one is registered
+        // there first, so a full season takes a while. The button shows the progress and stays
+        // disabled meanwhile; it used to look idle, and the extra clicks were silently ignored.
+        function setAddButtonProgress(text) {
+            const addBtn = document.getElementById('add-btn');
+            if (!addBtn) return;
+            addBtn.disabled = isAddingToQueue || selectedEpisodes.size === 0;
+            addBtn.textContent = text || downloadActionLabel();
+            if (isAddingToQueue) addBtn.setAttribute('aria-busy', 'true');
+            else addBtn.removeAttribute('aria-busy');
+        }
+
         async function addSelectedToQueue() {
             if (isAddingToQueue) return;
             const epKeys = Array.from(selectedEpisodes);
             if (epKeys.length === 0) return;
             
             isAddingToQueue = true;
+            setAddButtonProgress('Preparing…');
             try {
                 // ItemSelectMultiDub applies one dub list to every episode in a request. Group
                 // episodes by their own selected dub set so per-episode choices stay isolated.
@@ -1140,8 +1188,15 @@
                 // Add each queue item to the queue
                 let added = 0;
                 const markAsWatched = config?.crunchyroll?.markAsWatched || false;
-                for (const [key, item] of Object.entries(queueItems)) {
+                // Episodes are grouped by dub selection above, so submit them in release order;
+                // the queue starts downloads in submission order.
+                const orderedItems = Object.entries(queueItems)
+                    .map((entry, index) => ({ entry, index }))
+                    .sort((a, b) => compareReleaseOrder(a.entry[1], b.entry[1]) || a.index - b.index)
+                    .map(({ entry }) => entry);
+                for (const [index, [key, item]] of orderedItems.entries()) {
                     if (item && item.episodeId) {
+                        setAddButtonProgress(`Adding ${index + 1} of ${orderedItems.length}…`);
                         const queueRes = await sendDownloadRequest({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1194,6 +1249,7 @@
                 showToast('Failed to add to queue: ' + e.message, 'error');
             } finally {
                 isAddingToQueue = false;
+                setAddButtonProgress();
             }
         }
 
@@ -1380,6 +1436,32 @@
             return CAL_GENERIC_SERIES_LABEL.test((value || '').trim());
         }
 
+        // "Episode 2", the label itself for specials such as "SP1", or nothing for placeholders ("...").
+        function episodeNumberLabel(number) {
+            const text = String(number ?? '').trim();
+            if (!/[\p{L}\p{N}]/u.test(text)) return '';
+            return /^\d/.test(text) ? `Episode ${text}` : text;
+        }
+
+        // Calendar card line: "Episode 2 · Death Games and Demons". Upcoming cards carry the series
+        // name as their title, and some titles repeat the number ("Episode 4: A Knight's Duty").
+        function calendarEpisodeLine(episode) {
+            const number = episodeNumberLabel(episode.episodeNumber);
+            const raw = String(episode.title || '').trim();
+            const title = raw === episode.seriesTitle ? '' : raw.replace(/^episode\s+[\d.]+\s*:?\s*/i, '');
+            return [number, title].filter(Boolean).join(' · ');
+        }
+
+        // Add Download row: "Sasaki and Peeps · Season 2 · Episode 2 · 23:40". The season title
+        // often already includes the show's name, so the show is only added when it is not.
+        function addDownloadEpisodeMeta(episode) {
+            const show = String(episode.seriesTitle || '').trim();
+            const season = String(episode.seasonTitle || '').trim();
+            const seasonNamesShow = show && season.toLowerCase().includes(show.toLowerCase());
+            return [seasonNamesShow ? '' : show, season, episodeNumberLabel(episode.episodeNum), episode.time]
+                .filter(Boolean).join(' · ');
+        }
+
         function findMatchingLocale(locales, requested) {
             const normalized = String(requested || '').toLowerCase();
             return (locales || []).find(locale => String(locale || '').toLowerCase() === normalized) || '';
@@ -1392,7 +1474,7 @@
             return findMatchingLocale(episodeLocales, preferredAudio) || episodeLocales[0] || '';
         }
 
-        async function resolveCalendarSeriesTitle(seriesId, audioLocale) {
+        async function resolveCalendarSeriesTitle(seriesId, audioLocale, signal) {
             if (!seriesId) return '';
             if (calendarSeriesTitleCache.has(seriesId)) {
                 return calendarSeriesTitleCache.get(seriesId);
@@ -1400,7 +1482,7 @@
 
             try {
                 const dubQuery = audioLocale ? `?dubLang=${encodeURIComponent(audioLocale)}` : '';
-                const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/list${dubQuery}`);
+                const res = await fetch(`/api/v1/series/${encodeURIComponent(seriesId)}/list${dubQuery}`, { signal });
                 if (!res.ok) return '';
                 const data = await res.json();
                 const title = (data?.list || []).find(item => item?.seriesTitle)?.seriesTitle || '';
@@ -1411,7 +1493,7 @@
             }
         }
 
-        async function enrichCalendarSeriesTitles(days) {
+        async function enrichCalendarSeriesTitles(days, signal) {
             const episodes = (days || []).flatMap(day => day.episodes || []);
             const candidates = new Map();
 
@@ -1424,16 +1506,11 @@
             const resolvedTitles = new Map(await Promise.all(
                 Array.from(candidates, async ([seriesId, ep]) => [
                     seriesId,
-                    await resolveCalendarSeriesTitle(seriesId, ep.audioLocale)
+                    await resolveCalendarSeriesTitle(seriesId, ep.audioLocale, signal)
                 ])
             ));
 
-            for (const ep of episodes) {
-                const resolvedTitle = resolvedTitles.get(ep.seriesId);
-                if (!resolvedTitle || !isGenericCalendarSeriesLabel(ep.seriesTitle)) continue;
-                ep.seasonName = ep.seriesTitle;
-                ep.seriesTitle = resolvedTitle;
-            }
+            return resolvedTitles;
         }
 
         function consolidateCalendarEpisodes(episodes) {
@@ -1548,12 +1625,10 @@
                 const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
 
                 const res = await fetch(`/api/v1/calendar/custom?date=${sundayStr}&language=${encodeURIComponent(metaLang)}&dubFilter=${encodeURIComponent(dubFilter)}${forceUpdate ? '&forceUpdate=true' : ''}`, {
-                    signal: calendarRequest.signal
+                    signal: AbortSignal.any([calendarRequest.signal, AbortSignal.timeout(35000)])
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                if (!calendarRequestGate.isCurrent(calendarRequest)) return;
-                await enrichCalendarSeriesTitles(data.days);
                 if (!calendarRequestGate.isCurrent(calendarRequest)) return;
                 const grid = document.getElementById('calendar-grid');
                 if (!grid) return;
@@ -1620,7 +1695,8 @@
                                         ${historyMark}
                                         <div class="calendar-episode-time">${timeDisplay}</div>
                                         ${episodeThumb}
-                                        <div class="calendar-episode-title">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
+                                        <div class="calendar-episode-title" data-series-id="${escapeHtml(ep.seriesId || '')}">${escapeHtml(ep.seriesTitle || ep.seasonName || '')}</div>
+                                        ${calendarEpisodeLine(ep) ? `<div class="calendar-episode-line">${escapeHtml(calendarEpisodeLine(ep))}</div>` : ''}
                                         ${ep.seasonName && ep.seasonName !== ep.seriesTitle
                                             ? `<div class="calendar-episode-season">${escapeHtml(ep.seasonName)}</div>`
                                             : ''}
@@ -1638,6 +1714,15 @@
                         </div>
                     `;
                 }).join('');
+
+                // Optional title lookups must not delay the usable calendar or replace its cards.
+                const titles = await enrichCalendarSeriesTitles(data.days,
+                    AbortSignal.any([calendarRequest.signal, AbortSignal.timeout(10000)]));
+                if (!calendarRequestGate.isCurrent(calendarRequest)) return;
+                for (const label of grid.querySelectorAll('.calendar-episode-title[data-series-id]')) {
+                    const title = titles.get(label.dataset.seriesId);
+                    if (title) label.textContent = title;
+                }
             } catch (e) {
                 if (e?.name === 'AbortError' || !calendarRequestGate.isCurrent(calendarRequest)) return;
                 const grid = document.getElementById('calendar-grid');
@@ -1647,6 +1732,7 @@
                         <div class="empty-state">
                             <div class="empty-state-icon">&#10060;</div>
                             <div class="empty-state-title">Failed to load calendar</div>
+                            <button class="header-btn" onclick="fetchCalendar()">Retry</button>
                         </div>`;
                 }
             } finally {
@@ -1787,7 +1873,7 @@
                 </div>
             `;
             if (browseCatalogLoaded) renderBrowseFiltered();
-            else fetchAllSeries();
+            fetchAllSeries();
             loadSonarrLibrary();
         }
 
@@ -1889,6 +1975,7 @@
                 }
                 allBrowseSeries = compactBrowseSeries(parsed.series);
                 browseCatalogLoaded = true;
+                browseCatalogFetchedAt = cachedAt;
                 return true;
             } catch (e) {
                 removeSessionStorage(BROWSE_CACHE_KEY);
@@ -1897,18 +1984,19 @@
         }
 
         async function loadAllBrowseSeries() {
-            if (browseCatalogLoaded) return allBrowseSeries;
+            if (browseCatalogLoaded && Date.now() - browseCatalogFetchedAt < BROWSE_CACHE_TTL_MS) return allBrowseSeries;
             if (restoreBrowseCatalog()) return allBrowseSeries;
             if (!browseSeriesPromise) {
                 browseSeriesPromise = (async () => {
-                    const res = await fetch('/api/v1/series/all');
+                    const res = await fetch('/api/v1/series/all', { signal: AbortSignal.timeout(50000) });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     if (!Array.isArray(data) || data.length === 0) throw new Error('Catalog is empty. Please retry.');
                     allBrowseSeries = compactBrowseSeries(data);
                     browseCatalogLoaded = true;
+                    browseCatalogFetchedAt = Date.now();
                     writeSessionStorage(BROWSE_CACHE_KEY, JSON.stringify({
-                        cachedAt: Date.now(),
+                        cachedAt: browseCatalogFetchedAt,
                         series: allBrowseSeries
                     }));
                     return allBrowseSeries;
@@ -2161,7 +2249,9 @@
                         if (seasonId && !seasonMap.has(seasonId)) {
                             seasonMap.set(seasonId, {
                                 id: seasonId,
-                                title: ep.seasonTitle || `Season ${ep.season}`
+                                title: ep.seasonTitle || 'Untitled season',
+                                number: ep.season,
+                                edition: ep.edition
                             });
                         }
                     });
@@ -2194,7 +2284,7 @@
 
                     const dropdown = document.getElementById('season-dropdown');
                     if (dropdown) {
-                        dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(season.title)}</option>`).join('');
+                        dropdown.innerHTML = seasons.map(season => `<option value="${escapeHtmlAttribute(season.id)}">${escapeHtml(`Season ${season.number} · ${season.title}${season.edition ? ` — ${season.edition.label}` : ''}`)}</option>`).join('');
                         if (seasons.length > 0) {
                             const initialSeasonId = calendarTarget?.seasonId || seasons[0].id;
                             dropdown.value = initialSeasonId;
@@ -2288,17 +2378,24 @@
             if (!content || !seasonalSeason || !seasonalYear) return;
             content.innerHTML = '<div class="loading"><div class="spinner"></div>Loading seasonal anime...</div>';
 
+            // Only the latest season/year selection may render; switching aborts the older request.
+            const request = seasonalRequestGate.begin();
             try {
-                const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(seasonalSeason)}&year=${encodeURIComponent(seasonalYear)}`);
+                const res = await fetch(`/api/v1/series/seasonal?season=${encodeURIComponent(seasonalSeason)}&year=${encodeURIComponent(seasonalYear)}`, { signal: AbortSignal.any([request.signal, AbortSignal.timeout(40000)]) });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                if (!seasonalRequestGate.isCurrent(request)) return;
                 renderSeasonalContent(data || []);
             } catch (e) {
+                if (e?.name === 'AbortError' || !seasonalRequestGate.isCurrent(request)) return;
                 content.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">&#10060;</div>
                         <div class="empty-state-title">Failed to load seasonal anime</div>
+                        <button class="header-btn" onclick="fetchSeasonalSeries()">Retry</button>
                     </div>`;
+            } finally {
+                seasonalRequestGate.finish(request);
             }
         }
 
@@ -2811,7 +2908,7 @@
 
                 if (authStatus.isAuthenticated) {
                     if (nameEl) nameEl.textContent = authStatus.username || 'User';
-                    if (subEl) subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free';
+                    if (subEl) { subEl.textContent = authStatus.hasPremium ? 'Premium' : 'Free'; subEl.title = ''; }
                     if (avatarEl) { const au = resolveAvatarUrl(authStatus.avatar); avatarEl.innerHTML = au && isSafeUrl(au) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(au)} alt="" onerror="this.outerHTML='<span>&#128100;</span>'">` : '<span>&#128100;</span>'; }
                     if (loginBtn) loginBtn.style.display = 'none';
                     if (logoutBtn) logoutBtn.style.display = 'inline-block';
@@ -2821,7 +2918,7 @@
                     if (profiles.length > 1 && profileSection && profileList) {
                         profileSection.style.display = 'block';
                         profileList.innerHTML = profiles.map(p => `
-                            <div style="display:flex; align-items:center; justify-content:space-between; padding:10px; border-bottom:1px solid var(--border-color); ${p.isSelected ? 'background:rgba(244,117,33,0.1);' : ''}">
+                            <div style="display:flex; align-items:center; justify-content:space-between; padding:10px; border-bottom:1px solid var(--border-color); ${p.isSelected ? 'background:var(--accent-softer);' : ''}">
                                 <div style="display:flex; align-items:center; gap:10px;">
                                     <div style="width:32px; height:32px; border-radius:50%; background:var(--bg-tertiary); display:flex; align-items:center; justify-content:center; font-size:0.8em;">
                                         ${p.profileName ? escapeHtml(p.profileName.charAt(0).toUpperCase()) : '?'}
@@ -2840,9 +2937,18 @@
                     } else if (profileSection) {
                         profileSection.style.display = 'none';
                     }
+                } else if (authStatus.sessionError) {
+                    // Saved login whose refresh is failing: it is kept and retried, browsing
+                    // uses a guest session meanwhile. Logging in again or out both stay available.
+                    if (nameEl) nameEl.textContent = (authStatus.username && authStatus.username !== '???') ? authStatus.username : 'Saved login';
+                    if (subEl) { subEl.textContent = 'Login not refreshing - retrying'; subEl.title = authStatus.sessionError; }
+                    if (avatarEl) avatarEl.innerHTML = '<span>&#128100;</span>';
+                    if (loginBtn) loginBtn.style.display = 'inline-block';
+                    if (logoutBtn) logoutBtn.style.display = 'inline-block';
+                    if (profileSection) profileSection.style.display = 'none';
                 } else {
                     if (nameEl) nameEl.textContent = 'Not logged in';
-                    if (subEl) subEl.textContent = 'Anonymous mode';
+                    if (subEl) { subEl.textContent = 'Anonymous mode'; subEl.title = ''; }
                     if (avatarEl) avatarEl.innerHTML = '<span>&#128100;</span>';
                     if (loginBtn) loginBtn.style.display = 'inline-block';
                     if (logoutBtn) logoutBtn.style.display = 'none';
@@ -3244,6 +3350,50 @@
             } catch (e) { showToast(e.message, 'error'); }
         }
 
+        // One line per show: every episode that was not added is counted under its reason.
+        function schedulerShowLine(show) {
+            if (show.error) return show.error;
+            const parts = [];
+            if (show.added) parts.push(`${show.added} added`);
+            if (show.alreadyQueued) parts.push(`${show.alreadyQueued} already queued`);
+            if (show.haveFile) parts.push(`${show.haveFile} already downloaded`);
+            if (show.missingFromBaseline) parts.push(`${show.missingFromBaseline} missing from before you subscribed`);
+            if (show.waitingForLanguage) parts.push(`${show.waitingForLanguage} waiting for your languages`);
+            if (show.notReleased) parts.push(`${show.notReleased} not released yet`);
+            if (show.excluded) parts.push(`${show.excluded} skipped (specials or unmonitored)`);
+            return parts.join(' · ') || 'No episodes in History';
+        }
+
+        function showSchedulerRunToast(summary) {
+            if (typeof showToast !== 'function') return;
+            if (!summary) { showToast('Scheduler check finished', 'success'); return; }
+            const shows = summary.shows || [];
+            const missing = shows.reduce((total, show) => total + (show.missingFromBaseline || 0), 0);
+            const noun = count => count === 1 ? 'episode' : 'episodes';
+            if (summary.failed) {
+                showToast(`${summary.added} ${noun(summary.added)} added, but ${summary.failed} of ${shows.length} shows could not be checked. See Settings → Scheduler.`, 'error');
+            } else if (summary.added) {
+                showToast(`${summary.added} ${noun(summary.added)} ${summary.backfill ? 'queued from the back catalog' : 'added'}`, 'success');
+            } else if (summary.backfill) {
+                showToast('Nothing missing: every released episode is downloaded, queued, or waiting for your languages.', 'info');
+            } else {
+                showToast('No new episodes.' + (missing ? ` ${missing} older ${noun(missing)} without a file came out before you subscribed. Use Download missing in Settings → Scheduler.` : ''), 'info');
+            }
+        }
+
+        async function backfillSeriesSchedule(button) {
+            const seriesId = button.dataset.backfillSeries;
+            if (!seriesId || !confirm(`Queue every released episode of ${button.dataset.title} that has no file yet? New releases are still added automatically.`)) return;
+            button.disabled = true;
+            button.textContent = 'Checking…';
+            try {
+                const result = await schedulerRequest('subscriptions/' + encodeURIComponent(seriesId) + '/backfill', 'POST');
+                showSchedulerRunToast(result.summary);
+                fetchQueueStats();
+            } catch (e) { showToast(e.message, 'error'); }
+            finally { if (settingsTab === 'scheduler' && currentPage === 'settings') await renderSchedulerSettings(); }
+        }
+
         function schedulerStatusText(state) {
             const status = !state.historyEnabled ? 'History is disabled. Enable it in Settings → History.'
                 : !state.enabled ? 'Scheduler paused.' : state.isRunning ? 'Checking releases…'
@@ -3261,14 +3411,15 @@
                 content.innerHTML = `<div class="settings-section">
                     <div class="settings-section-header"><span class="settings-section-title">Scheduled new episodes</span></div>
                     <div class="settings-section-body">
-                        <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added. Series and season language settings apply; existing Sonarr files are skipped.</p>
+                        <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added; use <strong>Download missing</strong> to also queue older episodes that have no file. Series and season language settings apply; existing Sonarr files are skipped.</p>
                         <div class="setting-row"><div><div class="setting-label">Enable scheduler</div><div class="setting-desc">Pause or resume checks for all subscriptions.</div></div><label class="toggle-switch"><input id="setting-scheduler-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                         <div class="setting-row"><div><div class="setting-label">Check every (minutes)</div><div class="setting-desc">New releases enter the queue at the next check. Default: 15 minutes.</div></div><input class="form-input w-100" id="setting-scheduler-interval" type="number" min="1" max="1440" value="${state.intervalMinutes}"></div>
                         <p role="status" id="scheduler-summary">${escapeHtml(schedulerStatusText(state))}</p>
                         ${state.lastRun ? `<p class="setting-desc">Last check: ${escapeHtml(new Date(state.lastRun).toLocaleString())} · ${state.lastQueuedCount} added to queue</p>` : ''}
+                        ${state.lastRunSummary?.shows?.length ? `<ul class="setting-desc">${state.lastRunSummary.shows.map(show => `<li${show.error ? ' role="alert"' : ''}><strong>${escapeHtml(show.title)}</strong>: ${escapeHtml(schedulerShowLine(show))}</li>`).join('')}</ul>` : ''}
                         ${state.lastError ? `<p role="alert">${escapeHtml(state.lastError)}</p>` : ''}
                         <button class="header-btn" id="btn-scheduler-run" onclick="triggerScheduler()">Run now</button>
-                        <div>${state.subscriptions.map(sub => `<div class="setting-row"><div>${escapeHtml(sub.title)}</div><div style="display:flex;gap:8px"><button class="header-btn" data-schedule-series="${escapeHtmlAttribute(sub.seriesId)}" onclick="toggleSeriesSchedule(this)">${sub.enabled ? 'Scheduled · Pause' : 'Resume schedule'}</button><button class="header-btn" onclick="removeSeriesSchedule('${escapeJsString(sub.seriesId)}')">Remove</button></div></div>`).join('') || '<p>No series scheduled yet.</p>'}</div>
+                        <div>${state.subscriptions.map(sub => `<div class="setting-row"><div>${escapeHtml(sub.title)}</div><div style="display:flex;gap:8px"><button class="header-btn" data-schedule-series="${escapeHtmlAttribute(sub.seriesId)}" onclick="toggleSeriesSchedule(this)">${sub.enabled ? 'Scheduled · Pause' : 'Resume schedule'}</button><button class="header-btn" data-backfill-series="${escapeHtmlAttribute(sub.seriesId)}" data-title="${escapeHtmlAttribute(sub.title)}" onclick="backfillSeriesSchedule(this)" title="Queue released episodes that have no file yet">Download missing</button><button class="header-btn" onclick="removeSeriesSchedule('${escapeJsString(sub.seriesId)}')">Remove</button></div></div>`).join('') || '<p>No series scheduled yet.</p>'}</div>
                     </div></div>`;
             } catch (e) { if (settingsTab === 'scheduler') content.textContent = e.message; }
         }
@@ -3584,8 +3735,7 @@
                         <div class="settings-section">
                             <div class="settings-section-header"><span class="settings-section-title">Softsubs</span><span class="settings-section-desc">Subtitle download options</span></div>
                             <div class="settings-section-body">
-                                <div class="setting-row"><div><div class="setting-label">Softsubs Languages</div></div></div>
-                                <select class="form-select" id="setting-soft-subs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.softSubs||['en-US']).includes(o.value)?'selected':''}>${o.label}</option>`).join('')}</select>
+                                <div class="setting-row"><div><div class="setting-label">Softsubs Languages</div></div><select class="form-select" id="setting-soft-subs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o=>`<option value="${o.value}" ${(dl.softSubs||['en-US']).includes(o.value)?'selected':''}>${o.label}</option>`).join('')}</select></div>
 
                                 <div class="setting-row"><div><div class="setting-label">Add ScaledBorderAndShadow</div></div><select class="form-select mw-150" id="setting-scaled-border"><option value="DontAdd" ${dl.subsAddScaledBorder==='DontAdd'?'selected':''}>Don't Add</option><option value="ScaledBorderAndShadowYes" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowYes'?'selected':''}>yes</option><option value="ScaledBorderAndShadowNo" ${dl.subsAddScaledBorder==='ScaledBorderAndShadowNo'?'selected':''}>no</option></select></div>
 
@@ -3728,7 +3878,6 @@
                             <div class="settings-section-body">
                                 <div class="setting-row"><div><div class="setting-label">Persist Queue</div><div class="setting-desc">Always on — the queue is saved to /config so downloads and transcodes resume automatically after a container restart.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-persist-queue" checked disabled><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Auto Download</div><div class="setting-desc">Start downloads automatically</div></div><label class="toggle-switch"><input type="checkbox" id="setting-auto-download" ${q.autoDownload?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Allow Early Start</div><div class="setting-desc">Start next download early</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-early-start" ${dl.downloadAllowEarlyStart?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Wait for Selected Languages</div><div class="setting-desc">Only queue if all selected languages available</div></div><label class="toggle-switch"><input type="checkbox" id="setting-queue-skip-missing" ${dl.downloadOnlyWithAllSelectedDubSub?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Processing Jobs</div><div class="setting-desc">How many downloads may be in the mux/encode phase at once</div></div><input type="number" class="form-input w-80" id="setting-queue-proc-jobs" value="${escapeHtmlAttribute(q.simultaneousProcessingJobs||2)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Simultaneous Transcodes</div><div class="setting-desc">Max concurrent transcodes (the CPU-heavy encode step). Downloads/muxing stay parallel; only encoding is limited. Keep at 1 for software encoding; raise it for hardware encoders.</div></div><input type="number" class="form-input w-80" id="setting-queue-transcodes" value="${escapeHtmlAttribute(q.maxSimultaneousTranscodes||1)}" min="1"></div>
@@ -3794,8 +3943,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Webhook Enabled</div></div><label class="toggle-switch"><input type="checkbox" id="setting-webhook-enabled" ${n.webhookEnabled?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Method</div></div><select class="form-select mw-100" id="setting-webhook-method"><option value="POST" ${n.webhookMethod==='POST'?'selected':''}>POST</option><option value="GET" ${n.webhookMethod==='GET'?'selected':''}>GET</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Content-Type</div></div><input type="text" class="form-input w-200" id="setting-webhook-ct" value="${escapeHtmlAttribute(n.webhookContentType||'application/json')}"></div>
-                                <div class="setting-row"><div><div class="setting-label">Webhook Headers</div><div class="setting-desc">One header per line (Key: Value)</div></div></div>
-                                <textarea class="form-input w-300" id="setting-webhook-headers" rows="3">${escapeHtml(n.webhookHeaders?Object.entries(n.webhookHeaders).map(([k,v])=>k+': '+v).join('\n'):'')}</textarea>
+                                <div class="setting-row"><div><div class="setting-label">Webhook Headers</div><div class="setting-desc">One header per line (Key: Value)</div></div><textarea class="form-input w-300" id="setting-webhook-headers" rows="3">${escapeHtml(n.webhookHeaders?Object.entries(n.webhookHeaders).map(([k,v])=>k+': '+v).join('\n'):'')}</textarea></div>
                                 <div class="setting-row"><div><div class="setting-label">Webhook Body Template</div></div><textarea class="form-input w-300" id="setting-webhook-body" rows="3">${escapeHtml(n.webhookBodyTemplate||'')}</textarea></div>
                                 <div class="mt-10">
                                     <button class="header-btn" onclick="testWebhook()">Test Webhook</button>
@@ -3881,6 +4029,7 @@
 
         // ================== API / ACTIONS ==================
         let fetchConfigRetryCount = 0;
+        let configLoadErrorShown = false;
         const MAX_FETCH_CONFIG_RETRIES = 5;
         
         async function fetchConfig() {
@@ -3895,6 +4044,11 @@
                 applyTheme();
                 updateConnectionStatus(true);
                 fetchConfigRetryCount = 0;
+                // The saved config could not be loaded: these are defaults and saving is refused.
+                if (config.loadError && !configLoadErrorShown) {
+                    configLoadErrorShown = true;
+                    showToast(config.loadError, 'error');
+                }
                 if (wasEmpty && ['downloads', 'add-download', 'calendar'].includes(currentPage)) {
                     loadPage(currentPage);
                 }
@@ -3914,6 +4068,7 @@
         // Named themes -> data-theme attribute. "Dark" is the default :root (no attr).
         // "System" sets data-theme="system" and lets CSS follow prefers-color-scheme.
         const THEME_ATTR = { 'System': 'system', 'Light': 'light', 'AMOLED': 'amoled', 'Cinematic': 'cinematic', 'Nebula': 'nebula', 'Seerr': 'seerr', 'Sonarr': 'sonarr' };
+        const CUSTOM_ACCENT_TOKENS = ['--accent', '--accent-bright', '--accent-soft', '--accent-softer', '--accent-glow', '--accent-grad', '--shadow-glow', '--on-accent'];
         function applyTheme() {
             const theme = config?.appearance?.theme || 'System';
             const attr = THEME_ATTR[theme];
@@ -3950,10 +4105,25 @@
                 background.style.opacity = appearance.backgroundImageOpacity ?? 0.5;
                 background.style.filter = `blur(${appearance.backgroundImageBlurRadius ?? 10}px)`;
             }
+            // A custom accent also recolours the tokens derived from it (fills, glows, gradient);
+            // setting only --accent left them in the theme's own colour.
             const accentColor = config?.appearance?.accentColor;
-            document.documentElement.style.removeProperty('--accent');
-            if (accentColor && accentColor.toUpperCase() !== '#F47521') {
-                document.documentElement.style.setProperty('--accent', accentColor);
+            const rootStyle = document.documentElement.style;
+            for (const name of CUSTOM_ACCENT_TOKENS) rootStyle.removeProperty(name);
+            const rgb = /^#([0-9a-f]{6})$/i.test(accentColor || '') && accentColor.toUpperCase() !== '#F47521'
+                ? [0, 2, 4].map(i => parseInt(accentColor.slice(1 + i, 3 + i), 16)) : null;
+            if (rgb) {
+                const alpha = a => `rgba(${rgb.join(', ')}, ${a})`;
+                rootStyle.setProperty('--accent', accentColor);
+                rootStyle.setProperty('--accent-bright', accentColor);
+                rootStyle.setProperty('--accent-soft', alpha(0.16));
+                rootStyle.setProperty('--accent-softer', alpha(0.08));
+                rootStyle.setProperty('--accent-glow', alpha(0.40));
+                rootStyle.setProperty('--accent-grad', `linear-gradient(135deg, ${accentColor}, ${alpha(0.78)})`);
+                rootStyle.setProperty('--shadow-glow', `0 8px 30px ${alpha(0.30)}`);
+                // Black or white text on the accent, whichever reads better (WCAG relative luminance).
+                const [r, g, b] = rgb.map(c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+                rootStyle.setProperty('--on-accent', 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.179 ? '#0a0a0a' : '#ffffff');
             }
         }
         
@@ -4099,8 +4269,7 @@
                     if (downloadAudio !== undefined) dl.noAudio = !downloadAudio;
                     const chapters = getFieldValue('setting-chapters', 'bool');
                     if (chapters !== undefined) dl.includeChapters = chapters;
-                    // (Allow Early Start / Skip Missing Languages live on the Queue tab as
-                    // setting-queue-early-start / setting-queue-skip-missing.)
+                    // (Skip Missing Languages lives on the Queue tab as setting-queue-skip-missing.)
                     const defaultVideo = getFieldValue('setting-default-video');
                     if (defaultVideo !== undefined) dl.defaultVideo = defaultVideo;
                     
@@ -4238,8 +4407,6 @@
                     // These two belong to the download section of the backend config,
                     // even though they're shown on the Queue tab
                     const dlq = {};
-                    const earlyStart = getFieldValue('setting-queue-early-start', 'bool');
-                    if (earlyStart !== undefined) dlq.downloadAllowEarlyStart = earlyStart;
                     const skipMissing = getFieldValue('setting-queue-skip-missing', 'bool');
                     if (skipMissing !== undefined) dlq.downloadOnlyWithAllSelectedDubSub = skipMissing;
                     if (Object.keys(dlq).length) newConfig.download = dlq;
@@ -4854,12 +5021,19 @@
         
         // ================== HISTORY DETAIL & PARTIAL DOWNLOAD ==================
         
+        // History keeps Crunchyroll's audio-description hint as a trailing "*" ("en-US*" = the English
+        // dub, which also offers an audio-description option). It is the same dub, so show and
+        // compare plain language codes.
+        function plainDubLanguages(languages) {
+            return [...new Set((languages || []).map(code => String(code).replace(/\*$/, '')))];
+        }
+
         function isEpisodePartiallyDownloaded(episode) {
             // Upstream parity: partial download tracking can be disabled in History settings
             if (config?.history?.checkPartialDownloads === false) return false;
-            const downloadedDubs = episode.downloadedDubLang || [];
+            const downloadedDubs = plainDubLanguages(episode.downloadedDubLang);
             const downloadedSubs = episode.downloadedSoftSubs || [];
-            const availableDubs = episode.availableDubLang || [];
+            const availableDubs = plainDubLanguages(episode.availableDubLang);
             const availableSubs = episode.availableSoftSubs || [];
             const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];
             const requestedSubs = episode.requestedSoftSubs || config?.download?.softSubs || [];
@@ -4917,9 +5091,9 @@
                     ? 'Previously downloaded, but the completed file is missing — available to re-download'
                     : 'Not downloaded';
             }
-            const downloadedDubs = episode.downloadedDubLang || [];
+            const downloadedDubs = plainDubLanguages(episode.downloadedDubLang);
             const downloadedSubs = episode.downloadedSoftSubs || [];
-            const availableDubs = episode.availableDubLang || [];
+            const availableDubs = plainDubLanguages(episode.availableDubLang);
             const availableSubs = episode.availableSoftSubs || [];
             const requestedDubs = episode.requestedDubLang || config?.download?.dubLanguages || [];
             const requestedSubs = episode.requestedSoftSubs || config?.download?.softSubs || [];
@@ -5071,7 +5245,7 @@
                             <div class="history-episode-title">${escapeHtml(ep.episodeTitle || 'Unknown Episode')}${airStr ? `<span class="history-episode-airdate"> · ${escapeHtml(airStr)}</span>` : ''}</div>
                             <div class="history-episode-langs">
                                 ${sonarrBadge}
-                                ${(ep.downloadedDubLang || []).map(d => `<span class="lang-badge downloaded">${escapeHtml(d)}</span>`).join('')}
+                                ${plainDubLanguages(ep.downloadedDubLang).map(d => `<span class="lang-badge downloaded">${escapeHtml(d)}</span>`).join('')}
                             </div>
                             <div class="history-episode-status">
                                 <div class="tooltip-container" tabindex="0" aria-label="${escapeHtmlAttribute(tooltip)}">
@@ -5155,7 +5329,7 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const d = await res.json();
                 const episode = d.episode || d.Episode || {};
-                const dubs = episode.historyEpisodeAvailableDubLang || episode.HistoryEpisodeAvailableDubLang || episode.availableDubLang || episode.AvailableDubLang || [];
+                const dubs = plainDubLanguages(episode.historyEpisodeAvailableDubLang || episode.HistoryEpisodeAvailableDubLang || episode.availableDubLang || episode.AvailableDubLang);
                 const subs = episode.historyEpisodeAvailableSoftSubs || episode.HistoryEpisodeAvailableSoftSubs || episode.availableSoftSubs || episode.AvailableSoftSubs || [];
                 const overrideDubs = d.dubList || d.DubList || [];
                 const overrideSubs = d.subList || d.SubList || [];

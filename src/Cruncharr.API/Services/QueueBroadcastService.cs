@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Cruncharr.API.Controllers;
 using Cruncharr.Core.Services;
-using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 namespace Cruncharr.API.Services;

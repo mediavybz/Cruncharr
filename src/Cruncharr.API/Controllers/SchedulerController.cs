@@ -36,14 +36,30 @@ public class SchedulerController : ControllerBase
         try
         {
             _logger.LogInformation("Manual scheduler trigger requested");
-            await _subscriptions.RunCheckAsync(true, HttpContext.RequestAborted);
-            return Ok(new { Message = "Scheduler check triggered successfully" });
+            // The summary carries per-show counts and failures; a 200 with failed shows is a
+            // partial run, not a success.
+            var summary = await _subscriptions.RunCheckAsync(true, HttpContext.RequestAborted);
+            return Ok(new { Message = "Scheduler check finished", Summary = summary });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Manual scheduler trigger failed");
             return StatusCode(500, new { Error = "Scheduler trigger failed", Details = ex.Message });
         }
+    }
+
+    [HttpPost("subscriptions/{seriesId}/backfill")]
+    public async Task<IActionResult> Backfill(string seriesId)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(seriesId, "^[A-Za-z0-9_-]{1,64}$"))
+            return BadRequest(new { Message = "Invalid series ID" });
+        try
+        {
+            _logger.LogInformation("Backfill requested for {SeriesId}", seriesId);
+            return Ok(new { Summary = await _subscriptions.BackfillAsync(seriesId, HttpContext.RequestAborted) });
+        }
+        catch (ArgumentException ex) { return BadRequest(new { Message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { Message = ex.Message }); }
     }
 
     [HttpPost("settings")]

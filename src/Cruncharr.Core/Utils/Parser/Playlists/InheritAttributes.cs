@@ -1,9 +1,6 @@
 #nullable disable
 #pragma warning disable CS8632
-using System;
-using System.Collections.Generic;
 using System.Dynamic;
-using System.Linq;
 using System.Xml;
 using Cruncharr.Core.Utils.Parser.Utils;
 

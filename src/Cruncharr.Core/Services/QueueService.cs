@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Threading;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
@@ -54,6 +53,7 @@ public class QueueService : IQueueService, IDisposable
     private readonly object _queueMutationLock = new();
     private readonly IServiceProvider _serviceProvider;
     private readonly IQueuePersistenceService? _persistenceService;
+    private volatile bool _lastSaveSucceeded = true;
     private readonly ILogger<QueueService>? _logger;
     private ProcessingSlotManager? _processingSlots;
     private ProcessingSlotManager? _transcodeSlots;
@@ -63,6 +63,13 @@ public class QueueService : IQueueService, IDisposable
     // Ported from upstream: HashSet with lock for active download tracking
     private readonly object _downloadStartLock = new();
     private readonly HashSet<string> _activeOrStarting = new();
+    // Items whose download finished and that are now muxing/transcoding (or waiting to). They no
+    // longer hold a download slot, so the next download starts while they process; processing is
+    // limited separately by the processing and transcode slots.
+    private readonly HashSet<string> _processingPhase = new();
+    // Monotonic admission time: AddedAt orders the queue, and two admissions in the same clock
+    // tick would otherwise tie and come out in arbitrary order.
+    private DateTimeOffset _lastAddedAt = DateTimeOffset.MinValue;
 
     // Per-item cancellation. A remove or pause of an ACTIVE item cancels its in-flight
     // download/mux/encode instead of letting it run to completion in the background
@@ -106,7 +113,9 @@ public class QueueService : IQueueService, IDisposable
         {
             lock (_downloadStartLock)
             {
-                return _activeOrStarting.Count;
+                // Downloading and processing items are both work in progress (restarts and
+                // deploys wait on this).
+                return _activeOrStarting.Count + _processingPhase.Count;
             }
         }
     }
@@ -203,7 +212,7 @@ public class QueueService : IQueueService, IDisposable
             if (blockingItem != null)
             {
                 _logger?.LogInformation("Episode {EpisodeId} is already queued as {QueueItemId}; duplicate admission suppressed", episode.Id, blockingItem.Id);
-                return new QueueAddResult(false, blockingItem);
+                return new QueueAddResult(false, blockingItem, _lastSaveSucceeded);
             }
 
             // Done/Error/Cancelled rows describe terminal attempts, not live work. Reuse the
@@ -216,15 +225,27 @@ public class QueueService : IQueueService, IDisposable
             }
             item.Episode = episode;
             item.DownloadProgress = new DownloadProgress { State = DownloadState.Queued };
-            item.AddedAt = DateTimeOffset.UtcNow;
+            item.AddedAt = NextAddedAt();
             _queue[item.Id] = item;
         }
 
         _logger?.LogInformation("Added to queue: {EpisodeId} - {Title}", episode.Id, episode.Title);
         OnQueueStateChanged();
-        ScheduleSave();
+        var persisted = ScheduleSave();
+        if (!persisted)
+        {
+            _logger?.LogWarning("Episode {EpisodeId} was queued but the queue could not be saved; it will be lost if the app restarts before it finishes", episode.Id);
+        }
         RequestPump();
-        return new QueueAddResult(true, item);
+        return new QueueAddResult(true, item, persisted);
+    }
+
+    // Caller holds _queueMutationLock.
+    private DateTimeOffset NextAddedAt()
+    {
+        var now = DateTimeOffset.UtcNow;
+        _lastAddedAt = now > _lastAddedAt ? now : _lastAddedAt.AddTicks(1);
+        return _lastAddedAt;
     }
 
     internal static bool BlocksDuplicateAdmission(DownloadProgress? progress)
@@ -258,7 +279,9 @@ public class QueueService : IQueueService, IDisposable
     {
         lock (_queueMutationLock)
         {
-            return _queue.Values.ToList();
+            // The dictionary has no order; list in admission order so the UI matches the order
+            // downloads start in.
+            return _queue.Values.OrderBy(item => item.AddedAt).ThenBy(item => item.Id, StringComparer.Ordinal).ToList();
         }
     }
 
@@ -436,7 +459,7 @@ public class QueueService : IQueueService, IDisposable
     {
         lock (_downloadStartLock)
         {
-            if (_activeOrStarting.Contains(item.Id))
+            if (_activeOrStarting.Contains(item.Id) || _processingPhase.Contains(item.Id))
                 return false;
 
             if (item.DownloadProgress.State is DownloadState.Downloading or DownloadState.Processing)
@@ -451,7 +474,7 @@ public class QueueService : IQueueService, IDisposable
             if (item.DownloadProgress.IsPaused)
                 return false;
 
-            if (_activeOrStarting.Count >= (_config?.Download.SimultaneousDownloads ?? 2))
+            if (FreeDownloadSlots() == 0)
                 return false;
 
             _activeOrStarting.Add(item.Id);
@@ -462,6 +485,38 @@ public class QueueService : IQueueService, IDisposable
         return true;
     }
 
+    // Caller holds _downloadStartLock. A new download needs a free download slot, and the
+    // backlog of finished downloads still waiting for mux/transcode must stay bounded: each one
+    // keeps its raw streams on disk, so a slow transcode must not let them pile up without limit.
+    private int FreeDownloadSlots()
+    {
+        var downloads = Math.Max(1, _config?.Download.SimultaneousDownloads ?? 2);
+        var processingBacklog = downloads + Math.Max(1, _config?.Queue.SimultaneousProcessingJobs ?? 2);
+        return Math.Max(0, Math.Min(downloads - _activeOrStarting.Count, processingBacklog - _processingPhase.Count));
+    }
+
+    // The item's download finished and it moves on to mux/transcode: its download slot goes to
+    // the next queued item. The item stays tracked until RunDownloadAsync releases it.
+    private void MoveToProcessingPhase(QueueItem item)
+    {
+        bool moved;
+        lock (_downloadStartLock)
+        {
+            moved = _activeOrStarting.Remove(item.Id);
+            if (moved) _processingPhase.Add(item.Id);
+        }
+
+        if (moved)
+        {
+            NotifyDownloadStateChanged();
+            OnQueueStateChanged();
+            if (_config?.Queue.AutoDownload == true)
+            {
+                RequestPump();
+            }
+        }
+    }
+
     // Ported from upstream QueueManager.ReleaseDownloadSlot
     private void ReleaseDownloadSlot(QueueItem item)
     {
@@ -469,7 +524,7 @@ public class QueueService : IQueueService, IDisposable
 
         lock (_downloadStartLock)
         {
-            removed = _activeOrStarting.Remove(item.Id);
+            removed = _activeOrStarting.Remove(item.Id) | _processingPhase.Remove(item.Id);
         }
 
         if (removed)
@@ -497,7 +552,7 @@ public class QueueService : IQueueService, IDisposable
         lock (_downloadStartLock)
         {
             bool hasUnfinishedItems = _queue.Values.Any(q => !q.DownloadProgress.IsDone && !q.DownloadProgress.IsError);
-            if (!hasUnfinishedItems && _activeOrStarting.Count == 0)
+            if (!hasUnfinishedItems && _activeOrStarting.Count == 0 && _processingPhase.Count == 0)
             {
                 _logger?.LogInformation("Queue is empty and ShutdownWhenQueueEmpty is enabled - shutting down");
                 _config.Queue.ShutdownWhenQueueEmpty = false;
@@ -672,13 +727,12 @@ public class QueueService : IQueueService, IDisposable
 
         lock (_downloadStartLock)
         {
-            int limit = _config.Download.SimultaneousDownloads;
-            int freeSlots = Math.Max(0, limit - _activeOrStarting.Count);
+            int freeSlots = FreeDownloadSlots();
 
             if (freeSlots == 0)
                 return;
 
-            foreach (var item in _queue.Values.OrderBy(q => q.AddedAt))
+            foreach (var item in _queue.Values.OrderBy(q => q.AddedAt).ThenBy(q => q.Id, StringComparer.Ordinal))
             {
                 if (freeSlots == 0)
                     break;
@@ -686,7 +740,7 @@ public class QueueService : IQueueService, IDisposable
                 if (!IsAutoStartEligibleState(item.DownloadProgress))
                     continue;
 
-                if (_activeOrStarting.Contains(item.Id))
+                if (_activeOrStarting.Contains(item.Id) || _processingPhase.Contains(item.Id))
                     continue;
 
                 _activeOrStarting.Add(item.Id);
@@ -781,14 +835,10 @@ public class QueueService : IQueueService, IDisposable
             });
 
             var downloadService = _serviceProvider.GetRequiredService<IDownloadService>();
-            var result = await downloadService.DownloadEpisodeAsync(item.Episode, _config!, queueProgress, cancellationToken, onDownloadComplete: () =>
-            {
-                // Release download slot early so next download can start while this one is still processing (muxing/encoding)
-                if (_config?.Download.DownloadAllowEarlyStart == true)
-                {
-                    ReleaseDownloadSlot(item);
-                }
-            });
+            // Downloading and processing are separate lanes: once the streams are downloaded, the
+            // next download starts while this one muxes/transcodes (limited by its own slots).
+            var result = await downloadService.DownloadEpisodeAsync(item.Episode, _config!, queueProgress, cancellationToken,
+                onDownloadComplete: () => MoveToProcessingPhase(item));
 
             if (!result.Success)
             {
@@ -881,7 +931,8 @@ public class QueueService : IQueueService, IDisposable
         {
             _logger?.LogError(ex, "Download failed: {EpisodeId} - {Title}", item.Episode.Id, item.Episode.Title);
 
-            if (item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 5))
+            if (!IsDeterministicFailure(ex) &&
+                item.DownloadProgress.RetryAttemptCount < (_config?.Download.RetryAttempts ?? 5))
             {
                 var delay = TimeSpan.FromSeconds(Math.Max(1, (_config?.Download.RetryDelaySeconds ?? 5) * Math.Pow(3, item.DownloadProgress.RetryAttemptCount)));
                 ScheduleRetry(item.Id, delay, $"Error: {ex.Message}");
@@ -909,6 +960,14 @@ public class QueueService : IQueueService, IDisposable
         DownloadErrorType.MaturityRating or
         DownloadErrorType.MissingLanguage or
         DownloadErrorType.OutputConflict);
+
+    // Programming/type errors fail the same way on every attempt; retrying them only delays the
+    // error and hides it behind "retrying" (e.g. the ByteRange binder crash on every segment).
+    internal static bool IsDeterministicFailure(Exception ex) => ex is
+        Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or
+        InvalidCastException or
+        MissingMemberException or
+        NotImplementedException;
 
     private bool IsCurrentQueueItem(QueueItem item)
     {
@@ -1030,14 +1089,12 @@ public class QueueService : IQueueService, IDisposable
         OnQueueStateChanged();
     }
 
-    private void ScheduleSave()
+    private bool ScheduleSave()
     {
-        if (_persistenceService != null)
+        if (_persistenceService == null) return true;
+        lock (_queueMutationLock)
         {
-            lock (_queueMutationLock)
-            {
-                _persistenceService.ScheduleSave(_queue.Values.ToList());
-            }
+            return _lastSaveSucceeded = _persistenceService.ScheduleSave(_queue.Values.ToList());
         }
     }
 

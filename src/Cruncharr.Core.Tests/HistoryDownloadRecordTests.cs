@@ -2,7 +2,6 @@ using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Services;
 using Moq;
-using Xunit;
 
 namespace Cruncharr.Core.Tests;
 
@@ -18,7 +17,7 @@ public class HistoryDownloadRecordTests : IDisposable
 
     public HistoryDownloadRecordTests()
     {
-        _history = new HistoryService(_path, null, null, null, null, null, new CruncharrConfig());
+        _history = new HistoryService(_path, null, null, null, null, new CruncharrConfig());
     }
 
     public void Dispose()
@@ -279,7 +278,7 @@ public class HistoryDownloadRecordTests : IDisposable
                 CoverArtUrl = coverArtUrl
             });
 
-        using var history = new HistoryService(_path, null, null, api.Object, null, null, new CruncharrConfig());
+        using var history = new HistoryService(_path, null, null, api.Object, null, new CruncharrConfig());
         await history.UpdateWithSeasonDataAsync(new List<EpisodeInfo>
         {
             new()

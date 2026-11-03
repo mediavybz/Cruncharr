@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using System.Linq;
 using Cruncharr.Core.Models;
 using YamlDotNet.Serialization;
 
@@ -8,6 +7,13 @@ namespace Cruncharr.Core.Configuration;
 public class CruncharrConfig
 {
     private static readonly object _saveLock = new();
+
+    /// <summary>
+    /// The config file location: CRUNCHYROLL_CONFIG_PATH, or /config/cruncharr.yaml. Read on each
+    /// access so tests and tools that change the variable see the new value.
+    /// </summary>
+    public static string ConfigFilePath =>
+        Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
 
     [JsonPropertyName("crunchyroll")]
     [YamlMember(Alias = "crunchyroll", ApplyNamingConventions = false)]
@@ -79,31 +85,85 @@ public class CruncharrConfig
     [YamlMember(Alias = "tracked_series_release_last_check_utc", ApplyNamingConventions = false)]
     public DateTime? TrackedSeriesReleaseLastCheckUtc { get; set; }
 
+    // Config paths whose existing file could not be loaded, with the reason. Saving to one of
+    // them is refused for the rest of the process: the in-memory settings are only defaults, and
+    // writing them would replace the user's real (but unreadable) configuration.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _loadErrors = new();
+
+    private static string LoadErrorKey(string configPath) => Path.GetFullPath(configPath);
+
+    /// <summary>
+    /// Loads the config file. A missing file gives the defaults. An existing file that cannot be
+    /// read or parsed throws <see cref="ConfigLoadException"/> instead of looking like a fresh install.
+    /// </summary>
     public static CruncharrConfig Load(string configPath)
     {
-        if (File.Exists(configPath))
+        if (!File.Exists(configPath)) return new CruncharrConfig();
+
+        CruncharrConfig? config;
+        try
         {
-            try
+            var content = File.ReadAllText(configPath);
+
+            if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml"))
             {
-                var content = File.ReadAllText(configPath);
-
-                if (configPath.EndsWith(".yaml") || configPath.EndsWith(".yml"))
-                {
-                    var deserializer = new DeserializerBuilder()
-                        .IgnoreUnmatchedProperties()
-                        .Build();
-                    return deserializer.Deserialize<CruncharrConfig>(content) ?? new CruncharrConfig();
-                }
-
-                return Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(content) ?? new CruncharrConfig();
+                var deserializer = new DeserializerBuilder()
+                    .IgnoreUnmatchedProperties()
+                    .Build();
+                config = deserializer.Deserialize<CruncharrConfig>(content);
             }
-            catch
+            else
             {
-                return new CruncharrConfig();
+                config = Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(content);
             }
         }
-        return new CruncharrConfig();
+        catch (Exception ex)
+        {
+            throw new ConfigLoadException(configPath, ex);
+        }
+
+        // An empty file holds no settings, and an empty section ("download:") holds none either,
+        // so both can take defaults without losing anything.
+        config ??= new CruncharrConfig();
+        config.Crunchyroll ??= new();
+        config.Download ??= new();
+        config.History ??= new();
+        config.HistoryPageProperties ??= new();
+        config.SeasonsPageProperties ??= new();
+        config.Queue ??= new();
+        config.Notifications ??= new();
+        config.Sonarr ??= new();
+        config.Proxy ??= new();
+        config.FlareSolverr ??= new();
+        config.Calendar ??= new();
+        config.Appearance ??= new();
+        config.AddDownload ??= new();
+        return config;
     }
+
+    /// <summary>
+    /// Loads the config for a long-running host. If the existing file cannot be loaded, returns the
+    /// defaults so the app can still start, reports the reason in <paramref name="error"/>, and
+    /// refuses every later save to that path so the original file stays untouched.
+    /// </summary>
+    public static CruncharrConfig LoadOrRecover(string configPath, out string? error)
+    {
+        try
+        {
+            error = null;
+            return Load(configPath);
+        }
+        catch (ConfigLoadException ex)
+        {
+            error = ex.Message;
+            _loadErrors[LoadErrorKey(configPath)] = ex.Message;
+            return new CruncharrConfig();
+        }
+    }
+
+    /// <summary>The reason the config at this path could not be loaded at startup, or null.</summary>
+    public static string? GetLoadError(string configPath) =>
+        _loadErrors.TryGetValue(LoadErrorKey(configPath), out var error) ? error : null;
 
     public CruncharrConfig Clone() => Newtonsoft.Json.JsonConvert.DeserializeObject<CruncharrConfig>(
         Newtonsoft.Json.JsonConvert.SerializeObject(this),
@@ -111,6 +171,9 @@ public class CruncharrConfig
 
     public bool Save(string configPath)
     {
+        if (GetLoadError(configPath) is { } loadError)
+            throw new InvalidOperationException(loadError);
+
         lock (_saveLock)
         {
             try
@@ -131,6 +194,9 @@ public class CruncharrConfig
                 // caller shares this lock because multiple API surfaces save to the same path.
                 string tmp = configPath + ".tmp";
                 File.WriteAllText(tmp, content);
+                // Restrict the temp file before it becomes the live config so the secrets
+                // it holds are never world-readable, even briefly.
+                Cruncharr.Core.Utils.SecureFile.Restrict(tmp);
                 File.Move(tmp, configPath, overwrite: true);
 
                 // Config holds credentials (CR password, proxy password, Sonarr API key) in
@@ -189,6 +255,36 @@ public class CruncharrConfig
         // Example: if (Notifications.LegacyField != default) Notifications.NewField = Notifications.LegacyField;
     }
 
+    /// <summary>
+    /// Persistence hardening: keep ALL per-user state on the mounted config volume (next to the
+    /// config file) so it survives container/app UPDATES. Some defaults pointed at ApplicationData
+    /// (~/.config INSIDE the container = ephemeral, wiped on every image update -> history/token
+    /// reset each update). Redirect those ephemeral defaults to the config dir; respect any
+    /// explicit user-set path. Used by both the API and the CLI so they share one token and queue.
+    /// </summary>
+    public void KeepStateNextToConfig(string configPath)
+    {
+        var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? "";
+        var appDataDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        // Relative paths count as ephemeral too: when ApplicationData resolves empty (root
+        // with no HOME) the legacy default persisted literally as "Cruncharr/token.json",
+        // which lands in the read-only /app workdir and every token save fails with
+        // UnauthorizedAccessException (seen live) — token then can't survive a restart.
+        bool IsEphemeralPath(string? p) => string.IsNullOrEmpty(p) ||
+            !Path.IsPathRooted(p) ||
+            (!string.IsNullOrEmpty(appDataDir) && p.StartsWith(appDataDir, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(TokenFilePath))
+        {
+            TokenFilePath = Path.Combine(configDir, "token.json");
+        }
+        // The legacy UI default "Cruncharr/queue.json" is relative too. /app is read-only for
+        // the service user, so creating that directory at startup would abort the whole app.
+        if (!string.IsNullOrEmpty(configDir) && IsEphemeralPath(Queue.QueueFilePath))
+        {
+            Queue.QueueFilePath = Path.Combine(configDir, "queue.json");
+        }
+    }
+
     public void ApplyEnvironmentVariables()
     {
         // Apply common environment variables for Docker deployment
@@ -212,6 +308,16 @@ public class CruncharrConfig
 
         var sonarrApiKey = Environment.GetEnvironmentVariable("SONARR_API_KEY");
         if (!string.IsNullOrEmpty(sonarrApiKey)) Sonarr.ApiKey = sonarrApiKey;
+    }
+}
+
+/// <summary>An existing config file could not be read or parsed.</summary>
+public class ConfigLoadException : Exception
+{
+    public ConfigLoadException(string configPath, Exception inner)
+        : base($"Could not load the configuration file {configPath}: {inner.Message} " +
+               "Settings will not be saved, so the file is not overwritten. Fix the file, or move it aside to start over, then restart Cruncharr.", inner)
+    {
     }
 }
 
@@ -351,6 +457,8 @@ public class DownloadConfig
     [YamlMember(Alias = "dl_video_once", ApplyNamingConventions = false)]
     public bool DlVideoOnce { get; set; } = true;
 
+    // No longer used: a finished download always hands its slot to the next one while it
+    // muxes/transcodes. Kept so existing config files and API clients still load.
     [YamlMember(Alias = "download_allow_early_start", ApplyNamingConventions = false)]
     public bool DownloadAllowEarlyStart { get; set; } = false;
 

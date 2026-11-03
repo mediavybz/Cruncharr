@@ -6,10 +6,10 @@
 
 ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:8.0.423-bookworm-slim
 ARG DEBIAN_IMAGE=debian:bookworm-20260713-slim
-ARG FFMPEG_RELEASE=autobuild-2026-10-25-13-00
-ARG FFMPEG_VERSION=N-128094-g31855b2a70
-ARG FFMPEG_AMD64_SHA256=df26244c68c5523a656efdfcb6c70f3831665c4e3b31af313744484ee1e79a3a
-ARG FFMPEG_ARM64_SHA256=279086f1a945f3245edefbb101ebb9000b92f25913efe3271157d5dfb77881dd
+ARG FFMPEG_RELEASE=autobuild-2026-11-01-12-49
+ARG FFMPEG_VERSION=N-128273-g836436cfb9
+ARG FFMPEG_AMD64_SHA256=afdb03bfa9e6cfaa4587a1d663d7475bdbc7af40fe4156cacc6dba2c36f82b85
+ARG FFMPEG_ARM64_SHA256=4ba9cddb940a0cdbfd8fda5fa72566a660b9310803c37b7d7286786f2fa80a6c
 ARG BENTO4_COMMIT=b8c50a078356a1c3444ce0a8744634ed488424a4
 ARG BENTO4_SHA256=d8aee66b20b04516de724f0d2146f928d6001fc9f280f5ce14b7858bc90b7889
 ARG SOURCE_REVISION
@@ -111,7 +111,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -u 1000 -m -s /bin/sh cruncharr \
     && mkdir -p /downloads /config /tools /widevine /tmp/cruncharr /app/fonts \
-    && chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app
+    && chown -R cruncharr:cruncharr /downloads /config /tools /widevine /tmp/cruncharr /app/fonts
 
 WORKDIR /app
 COPY --from=dotnet-build --chmod=0755 /out/api/Cruncharr.API ./cruncharr-api
@@ -135,5 +135,7 @@ VOLUME ["/downloads", "/config", "/tools", "/widevine"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
     CMD grep -q ':2189 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null || exit 1
 
+# /app itself stays root-owned (only /app/fonts is user-writable) so the unprivileged
+# process cannot replace the binaries or UI that the next start would run.
 # Starts as root only to align bind-mount ownership, then execs the API through gosu.
 ENTRYPOINT ["./docker-entrypoint.sh"]

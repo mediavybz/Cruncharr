@@ -1,13 +1,8 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
@@ -19,17 +14,17 @@ namespace Cruncharr.Core.Services;
 
 public interface ICalendarService
 {
-    Task<CalendarWeek> GetCalendarForDateAsync(string weeksMondayDate, string language, bool forceUpdate = false);
-    Task<CalendarWeek> GetCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate = false);
-    Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language);
+    Task<CalendarWeek> GetCalendarForDateAsync(string weeksMondayDate, string language, bool forceUpdate = false, CancellationToken cancellationToken = default);
+    Task<CalendarWeek> GetCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate = false, CancellationToken cancellationToken = default);
+    Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language, CancellationToken cancellationToken = default);
 }
 
 public class CalendarService : ICalendarService
 {
     private readonly ILogger<CalendarService>? _logger;
     private readonly ICrunchyrollApiService _apiService;
-    private readonly ICrunchyrollAuthService _authService;
     private readonly HttpClientWrapper _httpClient;
+    private readonly SemaphoreSlim _customCalendarLoadLock = new(1, 1);
 
     // Singleton service hit by concurrent requests -> caches must be thread-safe. A plain Dictionary
     // read+written from two requests at once can corrupt internally (throw / hang).
@@ -75,12 +70,13 @@ public class CalendarService : ICalendarService
 
     private readonly IHistoryService? _historyService;
     private readonly CruncharrConfig? _config;
+    private static readonly TimeSpan HistoryRefreshInterval = TimeSpan.FromHours(1);
+    private readonly ConcurrentDictionary<string, DateTime> _lastHistoryRefresh = new(StringComparer.OrdinalIgnoreCase);
 
-    public CalendarService(ICrunchyrollApiService apiService, ICrunchyrollAuthService authService, ILogger<CalendarService>? logger = null,
+    public CalendarService(ICrunchyrollApiService apiService, ILogger<CalendarService>? logger = null,
         IHistoryService? historyService = null, CruncharrConfig? config = null)
     {
         _apiService = apiService;
-        _authService = authService;
         _logger = logger;
         _historyService = historyService;
         _config = config;
@@ -89,12 +85,13 @@ public class CalendarService : ICalendarService
         _httpClient = new HttpClientWrapper(_config);
     }
 
-    public async Task<CalendarWeek> GetCalendarForDateAsync(string weeksMondayDate, string language, bool forceUpdate = false)
+    public async Task<CalendarWeek> GetCalendarForDateAsync(string weeksMondayDate, string language, bool forceUpdate = false, CancellationToken cancellationToken = default)
     {
         var cacheKey = $"{language}_{weeksMondayDate}";
 
         if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek))
         {
+            cachedWeek = cachedWeek.Copy();
             await RefreshHistoryStatusesAsync(cachedWeek);
             return cachedWeek;
         }
@@ -107,7 +104,7 @@ public class CalendarService : ICalendarService
         request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
         request.Headers.AcceptEncoding.ParseAdd("gzip, deflate, br");
 
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
 
         if (!isOk)
         {
@@ -133,6 +130,7 @@ public class CalendarService : ICalendarService
         if (week != null)
         {
             _calendarCache[cacheKey] = week;
+            week = week.Copy();
             await RefreshHistoryStatusesAsync(week);
         }
 
@@ -230,17 +228,43 @@ public class CalendarService : ICalendarService
         }
     }
 
-    public async Task<CalendarWeek> GetCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate = false)
+    public async Task<CalendarWeek> GetCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate = false, CancellationToken cancellationToken = default)
     {
-        var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}";
-
-        if (!forceUpdate && _calendarCache.TryGetValue(cacheKey, out var cachedWeek) &&
-            _calendarCacheFetchedUtc.TryGetValue(cacheKey, out var fetchedUtc) &&
-            DateTime.UtcNow - fetchedUtc < CustomCalendarTtl)
+        cancellationToken.ThrowIfCancellationRequested();
+        var showUpcoming = _config?.Calendar?.ShowUpcomingEpisodes == true;
+        var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}_{showUpcoming}";
+        var week = forceUpdate ? null : GetCachedCustomCalendar(cacheKey);
+        // Only the fetch is shared. History marks belong to this response, not the cached week.
+        if (week == null)
         {
-            await RefreshHistoryStatusesAsync(cachedWeek);
-            return cachedWeek;
+            await _customCalendarLoadLock.WaitAsync(cancellationToken);
+            try
+            {
+                week = await BuildCustomCalendarAsync(targetDate, language, forceUpdate, showUpcoming, cancellationToken);
+            }
+            finally
+            {
+                _customCalendarLoadLock.Release();
+            }
         }
+        week = week.Copy();
+        await RefreshHistoryStatusesAsync(week);
+        return week;
+    }
+
+    private CalendarWeek? GetCachedCustomCalendar(string cacheKey)
+    {
+        return _calendarCache.TryGetValue(cacheKey, out var cachedWeek) &&
+            _calendarCacheFetchedUtc.TryGetValue(cacheKey, out var fetchedUtc) &&
+            DateTime.UtcNow - fetchedUtc < CustomCalendarTtl
+            ? cachedWeek : null;
+    }
+
+    private async Task<CalendarWeek> BuildCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate, bool showUpcoming, CancellationToken cancellationToken)
+    {
+        var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}_{showUpcoming}";
+        if (!forceUpdate && GetCachedCustomCalendar(cacheKey) is { } cachedWeek)
+            return cachedWeek;
 
         var week = new CalendarWeek
         {
@@ -262,7 +286,7 @@ public class CalendarService : ICalendarService
         week.FirstDayOfWeek = week.CalendarDays.First().DateTime;
 
         // Get new episodes from API ([PT] upstream: pass week start so paging can stop early)
-        var newEpisodes = await GetNewEpisodesFromApiAsync(language, week.FirstDayOfWeek);
+        var newEpisodes = await GetNewEpisodesFromApiAsync(language, week.FirstDayOfWeek, cancellationToken);
 
         // Don't poison the cache with an empty week when the API fetch failed
         // (e.g. auth not ready yet right after startup)
@@ -271,9 +295,10 @@ public class CalendarService : ICalendarService
         // TTL-expired rebuild that failed: serve the stale cached week instead of an empty one.
         if (!fetchSucceeded && _calendarCache.TryGetValue(cacheKey, out var staleWeek))
         {
-            await RefreshHistoryStatusesAsync(staleWeek);
             return staleWeek;
         }
+        if (!fetchSucceeded)
+            throw new HttpRequestException("Calendar data is unavailable. Please try again.");
 
         if (newEpisodes != null && newEpisodes.Count > 0)
         {
@@ -345,29 +370,36 @@ public class CalendarService : ICalendarService
         // calendar shows only today + past days (looked like "only today" early in the week).
         // AniList entries are marked AnilistEpisode and shown regardless of dub filter (upstream
         // CalendarManager behaviour). Best-effort — never fail the calendar over the merge.
-        try
+        if (showUpcoming)
         {
-            await LoadAnilistUpcomingAsync(language);
-            foreach (var day in week.CalendarDays)
+            try
             {
-                if (!_anilistCache.TryGetValue(day.DateTime.ToString("yyyy-MM-dd"), out var anilistForDay) || anilistForDay.Count == 0)
-                    continue;
-                foreach (var anilistEp in anilistForDay)
+                await LoadAnilistUpcomingAsync(language, cancellationToken);
+                foreach (var day in week.CalendarDays)
                 {
-                    // Once Crunchyroll has RELEASED an episode of this show on this day, the
-                    // AniList schedule entry is a redundant placeholder — drop it so the real
-                    // (downloadable) card replaces "Upcoming" instead of sitting next to it.
-                    // Match at SERIES level: episode numbers can't be compared reliably
-                    // (AniList absolute vs CR per-season, CR "1-2" merges), and some AniList
-                    // entries have no parseable CR series id — so fall back to fuzzy title.
-                    bool dup = day.CalendarEpisodes.Any(e => !e.AnilistEpisode && IsSameShow(e, anilistEp));
-                    if (!dup) day.CalendarEpisodes.Add(anilistEp);
+                    if (!_anilistCache.TryGetValue(day.DateTime.ToString("yyyy-MM-dd"), out var anilistForDay) || anilistForDay.Count == 0)
+                        continue;
+                    foreach (var anilistEp in anilistForDay)
+                    {
+                        // Once Crunchyroll has RELEASED an episode of this show on this day, the
+                        // AniList schedule entry is a redundant placeholder — drop it so the real
+                        // (downloadable) card replaces "Upcoming" instead of sitting next to it.
+                        // Match at SERIES level: episode numbers can't be compared reliably
+                        // (AniList absolute vs CR per-season, CR "1-2" merges), and some AniList
+                        // entries have no parseable CR series id — so fall back to fuzzy title.
+                        bool dup = day.CalendarEpisodes.Any(e => !e.AnilistEpisode && IsSameShow(e, anilistEp));
+                        if (!dup) day.CalendarEpisodes.Add(anilistEp);
+                    }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to merge AniList upcoming into custom calendar");
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to merge AniList upcoming into custom calendar");
+            }
         }
 
         // Sort episodes
@@ -394,7 +426,6 @@ public class CalendarService : ICalendarService
             _calendarCache[cacheKey] = week;
             _calendarCacheFetchedUtc[cacheKey] = DateTime.UtcNow;
         }
-        await RefreshHistoryStatusesAsync(week);
         return week;
     }
 
@@ -417,13 +448,13 @@ public class CalendarService : ICalendarService
     private static string NormalizeTitle(string? title) =>
         new string((title ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 
-    private async Task<List<CalendarEpisode>?> GetNewEpisodesFromApiAsync(string language, DateTime? firstWeekDay = null)
+    private async Task<List<CalendarEpisode>?> GetNewEpisodesFromApiAsync(string language, DateTime? firstWeekDay, CancellationToken cancellationToken)
     {
         try
         {
             _logger?.LogInformation("Fetching new episodes from API for calendar");
 
-            var newEpisodesBase = await _apiService.GetNewEpisodesAsync(language, 2000, firstWeekDay, true);
+            var newEpisodesBase = await _apiService.GetNewEpisodesAsync(language, 2000, firstWeekDay, true, cancellationToken);
 
             if (newEpisodesBase == null)
             {
@@ -501,6 +532,10 @@ public class CalendarService : ICalendarService
             }
 
             return calendarEpisodes;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -589,6 +624,53 @@ public class CalendarService : ICalendarService
         {
             RefreshHistoryStatus(calendarEpisode, historyBySeriesId);
         }
+
+        RefreshStaleHistorySeries(week);
+    }
+
+    // History only refreshes by itself for subscribed shows. For any other show, an aired episode
+    // stays grey even when Sonarr has it: the episode is missing from History or its Sonarr status
+    // is old. Refresh those shows in the background so the next Calendar load is correct.
+    private void RefreshStaleHistorySeries(CalendarWeek week)
+    {
+        if (_config?.Sonarr?.Enabled != true || _config.History?.CountSonarr != true)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var staleSeriesIds = week.CalendarDays!
+            .SelectMany(day => day.CalendarEpisodes)
+            .Where(episode => episode.IsInHistory && episode.HasPassed == true && !episode.AnilistEpisode &&
+                              episode.HistoryDownloadState == CalendarHistoryDownloadState.NotDownloaded)
+            .Select(episode => episode.CrSeriesID!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(seriesId => !_lastHistoryRefresh.TryGetValue(seriesId, out var last) || now - last >= HistoryRefreshInterval)
+            .ToList();
+        if (staleSeriesIds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var seriesId in staleSeriesIds)
+        {
+            _lastHistoryRefresh[seriesId] = now;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            foreach (var seriesId in staleSeriesIds)
+            {
+                try
+                {
+                    await _historyService!.CrUpdateSeriesAsync(seriesId, "");
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to refresh History for calendar series {SeriesId}", seriesId);
+                }
+            }
+        });
     }
 
     private void RefreshHistoryStatus(CalendarEpisode calendarEpisode, IReadOnlyDictionary<string, HistorySeries> historyBySeriesId)
@@ -633,7 +715,11 @@ public class CalendarService : ICalendarService
 
         if (!historyMatch.HistoryEpisode.WasDownloaded)
         {
-            calEpisode.HistoryDownloadState = CalendarHistoryDownloadState.NotDownloaded;
+            // A file Sonarr owns counts as downloaded, the same as on the History page. Its audio
+            // tracks are not recorded, so there is no partial state to report for it.
+            calEpisode.HistoryDownloadState = _config?.History?.CountSonarr == true && historyMatch.HistoryEpisode.SonarrHasFile
+                ? CalendarHistoryDownloadState.Downloaded
+                : CalendarHistoryDownloadState.NotDownloaded;
             return;
         }
 
@@ -760,11 +846,11 @@ public class CalendarService : ICalendarService
         }
     }
 
-    public async Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language)
+    public async Task<List<CalendarEpisode>> GetUpcomingEpisodesAsync(string language, CancellationToken cancellationToken = default)
     {
         try
         {
-            await LoadAnilistUpcomingAsync(language);
+            await LoadAnilistUpcomingAsync(language, cancellationToken);
 
             var upcoming = new List<CalendarEpisode>();
             var today = DateTime.Today.ToString("yyyy-MM-dd");
@@ -776,6 +862,10 @@ public class CalendarService : ICalendarService
 
             return upcoming.OrderBy(e => e.DateTime).ToList();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to get upcoming episodes");
@@ -783,7 +873,7 @@ public class CalendarService : ICalendarService
         }
     }
 
-    private async Task LoadAnilistUpcomingAsync(string language)
+    private async Task LoadAnilistUpcomingAsync(string language, CancellationToken cancellationToken)
     {
         // Refetch AniList once the next-fetch time has passed. NOTE: the guard is ONLY the
         // timestamp — do NOT also gate on `_anilistCache.ContainsKey(today)`. Every fetch
@@ -798,13 +888,15 @@ public class CalendarService : ICalendarService
 
         // Serialize the build so two concurrent first-loads don't both fetch and Add to the same
         // shared episode lists (List is not thread-safe). Double-check inside the lock.
-        await _anilistLoadLock.WaitAsync();
+        await _anilistLoadLock.WaitAsync(cancellationToken);
         try
         {
             if (DateTime.UtcNow < _anilistNextFetchUtc)
             {
                 return;
             }
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(TimeSpan.FromSeconds(5));
 
             // Use UTC midnight: new DateTimeOffset(localDate, TimeSpan.Zero) throws on any
             // non-UTC host because the local date's offset != zero. The value only feeds the
@@ -867,7 +959,7 @@ public class CalendarService : ICalendarService
                     Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
                 };
 
-                var (isOk, content, error) = await _httpClient.SendRequestAsync(request);
+                var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: budget.Token);
 
                 if (!isOk)
                 {
@@ -955,6 +1047,11 @@ public class CalendarService : ICalendarService
             _anilistCache = newCache;
 
             _anilistNextFetchUtc = DateTime.UtcNow + AnilistUpcomingTtl;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _anilistNextFetchUtc = DateTime.UtcNow + AnilistFailureBackoff;
+            _logger?.LogWarning("AniList calendar request timed out; keeping the previous schedule");
         }
         finally
         {

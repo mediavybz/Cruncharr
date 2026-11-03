@@ -99,7 +99,7 @@ public class LanguagePrefsController : ControllerBase
     {
         lock (_saveLock)
         {
-            var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH") ?? "/config/cruncharr.yaml";
+            var configPath = CruncharrConfig.ConfigFilePath;
             _config.Save(configPath);
             _logger.LogInformation("Saved config after adaptive language accept");
         }

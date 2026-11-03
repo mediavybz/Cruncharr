@@ -52,6 +52,38 @@ public class SonarrTitleIndexTests
             [new SonarrSeries { TvdbId = 100, Title = sonarrTitle }]));
     }
 
+    [Theory]
+    [InlineData("Clannad After Story", "Clannad")]
+    [InlineData("Overlord (Spanish Dub)", "Overlord")]
+    [InlineData("Gintama Season 2", "Gintama")]
+    [InlineData("Symphogear GX", "Senki Zesshou Symphogear")]
+    [InlineData("Attack on Titan Final Season", "Attack on Titan")]
+    public void UnseparatedSuffixesStillNominateTheFranchiseForEpisodeVerification(string providerTitle, string sonarrTitle)
+    {
+        var owned = new SonarrSeries { Id = 7, TvdbId = 100, Title = sonarrTitle };
+        if (sonarrTitle == "Senki Zesshou Symphogear")
+            owned.AlternateTitles = [new() { Title = "Senki Zesshou Symphogear GX" }];
+        var index = new SonarrTitleIndex([owned]);
+        Assert.Null(index.FindExact(providerTitle));
+        Assert.Same(owned, Assert.Single(index.Candidates(providerTitle)));
+    }
+
+    [Fact]
+    public void ShortOrUnrelatedNamesAreNotNominatedByContainment()
+    {
+        var index = new SonarrTitleIndex([new SonarrSeries { Id = 1, TvdbId = 1, Title = "Blue" }, new SonarrSeries { Id = 2, TvdbId = 2, Title = "Noragami" }]);
+        Assert.Empty(index.Candidates("Blue Lock"));
+        Assert.Empty(index.Candidates("Dr. Stone"));
+    }
+
+    [Fact]
+    public void MultiplicationSignMatchesTheLetterX()
+    {
+        var owned = new SonarrSeries { Id = 3, TvdbId = 3, Title = "SPY×FAMILY" };
+        Assert.Same(owned, new SonarrTitleIndex([owned]).FindExact("SPY x FAMILY"));
+        Assert.Equal("spyxfamily", SonarrTitleIndex.Normalize("SPY×FAMILY"));
+    }
+
     [Fact]
     public void SeasonAliasCanLinkMultipleCrunchyrollListingsToOneSonarrSeries()
     {

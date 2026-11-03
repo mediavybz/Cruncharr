@@ -12,18 +12,9 @@ class Program
 {
     static async Task<int> Main(string[] args)
     {
-        var services = new ServiceCollection();
-        services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Information));
-        services.AddSingleton<ICrunchyrollAuthService, CrunchyrollAuthService>();
-        services.AddSingleton<ICrunchyrollApiService, CrunchyrollApiService>();
-        services.AddSingleton<IAuthenticationService, AuthenticationService>();
-        services.AddSingleton<ISearchService, SearchService>();
-        services.AddSingleton<IDownloadService, DownloadService>();
-        services.AddSingleton<IQueueService, QueueService>();
-        services.AddSingleton<INotificationService, NotificationService>();
-        services.AddSingleton<ISonarrService, SonarrService>();
-
-        var provider = services.BuildServiceProvider();
+        var services = new ServiceCollection().AddCruncharrCli(GetConfigPath());
+        // Fail at startup, not inside a command, if a service cannot be constructed.
+        var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true });
 
         var rootCommand = new RootCommand("Cruncharr - Headless Crunchyroll downloader for *arr stacks");
 
@@ -35,7 +26,10 @@ class Program
         rootCommand.AddCommand(CreateConfigCommand());
         rootCommand.AddCommand(DaemonCommand.Create(provider));
 
-        return await rootCommand.InvokeAsync(args);
+        // Handlers report failure through Environment.ExitCode; returning InvokeAsync's 0 from
+        // Main would overwrite it, so every failed command used to exit with 0.
+        var exitCode = await rootCommand.InvokeAsync(args);
+        return exitCode != 0 ? exitCode : Environment.ExitCode;
     }
 
     static Command CreateLoginCommand(IServiceProvider provider)
@@ -111,7 +105,7 @@ class Program
 
         command.SetHandler(async (string url, string format, bool quiet, string? output) =>
         {
-            var config = LoadConfig();
+            var config = provider.GetRequiredService<CruncharrConfig>();
             if (!string.IsNullOrEmpty(output)) config.Download.OutputDirectory = output;
 
             var downloadService = provider.GetRequiredService<IDownloadService>();
@@ -206,7 +200,7 @@ class Program
 
             if (download)
             {
-                var config = LoadConfig();
+                var config = provider.GetRequiredService<CruncharrConfig>();
                 var downloadService = provider.GetRequiredService<IDownloadService>();
                 await downloadService.DownloadSeriesAsync(id, config);
             }
@@ -255,29 +249,17 @@ class Program
         getCommand.Add(getKeyArg);
         getCommand.SetHandler((string key) =>
         {
-            var config = LoadConfig();
-            var prop = typeof(CruncharrConfig).GetProperty(key);
-            if (prop != null)
-            {
-                Console.WriteLine(prop.GetValue(config));
-            }
+            Environment.ExitCode = ConfigEditor.Get(GetConfigPath(), key, Console.Out, Console.Error);
         }, getKeyArg);
 
-        var setCommand = new Command("set", "Set configuration value");
-        var setKeyArg = new Argument<string>("key", "Configuration key");
-        var setValueArg = new Argument<string>("value", "Configuration value");
+        var setCommand = new Command("set", "Set configuration value (e.g. download.output_dir /media or LogMode true)");
+        var setKeyArg = new Argument<string>("key", "Configuration key: a dotted path such as Download.OutputDirectory");
+        var setValueArg = new Argument<string>("value", "Configuration value; lists are comma-separated");
         setCommand.Add(setKeyArg);
         setCommand.Add(setValueArg);
         setCommand.SetHandler((string key, string value) =>
         {
-            var config = LoadConfig();
-            var prop = typeof(CruncharrConfig).GetProperty(key);
-            if (prop != null)
-            {
-                prop.SetValue(config, value);
-                SaveConfig(config);
-                Console.WriteLine($"Set {key} = {value}");
-            }
+            Environment.ExitCode = ConfigEditor.Set(GetConfigPath(), key, value, Console.Out, Console.Error);
         }, setKeyArg, setValueArg);
 
         command.AddCommand(getCommand);
@@ -286,12 +268,16 @@ class Program
         return command;
     }
 
-    static string GetConfigPath()
+    // CRUNCHYROLL_CONFIG_PATH, else cruncharr.yaml (or an existing .yml/.json) in
+    // CRUNCHYROLL_CONFIG_DIR (/config by default). Every command and service uses this one path.
+    internal static string GetConfigPath()
     {
         var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH");
         if (!string.IsNullOrEmpty(configPath)) return configPath;
         var configDir = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_DIR") ?? "/config";
-        return Path.Combine(configDir, "cruncharr.yaml");
+        return new[] { "cruncharr.yaml", "cruncharr.yml", "cruncharr.json" }
+            .Select(name => Path.Combine(configDir, name))
+            .FirstOrDefault(File.Exists) ?? Path.Combine(configDir, "cruncharr.yaml");
     }
 
     static CruncharrConfig LoadConfig()

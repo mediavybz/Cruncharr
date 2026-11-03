@@ -33,7 +33,8 @@ public sealed class SonarrTitleIndex
         new[] { item.Title, item.CleanTitle }.Concat(item.AlternateTitles?.Select(a => a.Title) ?? [])
             .Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!);
 
-    public static string Normalize(string? title) => new((title ?? "").Replace("&", "and")
+    // "×" is a letter-like separator in titles such as SPY×FAMILY; Crunchyroll writes it as "x".
+    public static string Normalize(string? title) => new((title ?? "").Replace("&", "and").Replace("×", "x")
         .Normalize(NormalizationForm.FormKD).Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
         .Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
@@ -67,16 +68,33 @@ public sealed class SonarrTitleIndex
                      (word.EndsWith(pair.Key, StringComparison.Ordinal) || pair.Key.EndsWith(word, StringComparison.Ordinal)) &&
                      (double)Math.Min(word.Length, pair.Key.Length) / Math.Max(word.Length, pair.Key.Length) >= 0.65))
             matches.AddRange(pair.Value.Select(entry => entry.Series));
+        // A one-word franchise with an unseparated suffix ("Clannad After Story", "Symphogear GX")
+        // shares too few words for the rule above and has no subtitle separator to split on.
+        // Containment of whole normalized names still only nominates; episodes decide.
+        var whole = Normalize(WithoutYear(title));
+        if (whole.Length >= 6)
+            foreach (var pair in _shortened.Where(pair => pair.Key.Length >= 6 && pair.Key != whole &&
+                         (whole.StartsWith(pair.Key, StringComparison.Ordinal) || pair.Key.StartsWith(whole, StringComparison.Ordinal) ||
+                          (Math.Min(whole.Length, pair.Key.Length) >= 8 &&
+                           (whole.EndsWith(pair.Key, StringComparison.Ordinal) || pair.Key.EndsWith(whole, StringComparison.Ordinal))))))
+                matches.AddRange(pair.Value);
         return matches.DistinctBy(Identity).ToList();
     }
+
+    // Trailing season/part/dub qualifiers that Crunchyroll or TVDB append to a franchise name.
+    private static readonly Regex TrailingQualifier = new(
+        @"\s*(?:\((?:[a-z]+\s+)?(?:dub|dubbed|sub|subbed)\)|(?:season|part|cour)\s*\d+|\d+(?:st|nd|rd|th)\s+season|final\s+season)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static IEnumerable<string> CandidateKeys(string title)
     {
         // Keep years in exact identities. Removing one here only permits an episode comparison.
         var withoutYear = WithoutYear(title);
         yield return Normalize(withoutYear);
-        var prefix = Regex.Split(withoutYear, @"\s+[-–—]\s+|:\s+")[0];
-        if (prefix != withoutYear && Normalize(prefix).Length >= 4) yield return Normalize(prefix);
+        var bare = TrailingQualifier.Replace(withoutYear, "");
+        if (bare != withoutYear && Normalize(bare).Length >= 4) yield return Normalize(bare);
+        var prefix = Regex.Split(bare, @"\s+[-–—]\s+|:\s+")[0];
+        if (prefix != bare && Normalize(prefix).Length >= 4) yield return Normalize(prefix);
     }
 
     private static string WithoutYear(string title) => Regex.Replace(title, @"\s*\((?:19|20)\d{2}\)\s*$", "");

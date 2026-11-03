@@ -18,13 +18,13 @@ public static class DaemonCommand
         command.SetHandler(async (int interval) =>
         {
             var logger = provider.GetRequiredService<ILogger<Program>>();
-            var config = LoadConfig();
+            var config = provider.GetRequiredService<CruncharrConfig>();
             var queueService = provider.GetRequiredService<IQueueService>();
             var downloadService = provider.GetRequiredService<IDownloadService>();
             var notificationService = provider.GetRequiredService<INotificationService>();
 
             logger.LogInformation("Cruncharr daemon starting. Interval: {Interval}s", interval);
-            logger.LogInformation("Config directory: {ConfigDir}", Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_DIR") ?? "/config");
+            logger.LogInformation("Config file: {ConfigPath}", Program.GetConfigPath());
             logger.LogInformation("Output directory: {OutputDir}", config.Download.OutputDirectory);
 
             var cts = new CancellationTokenSource();
@@ -62,24 +62,5 @@ public static class DaemonCommand
         }, intervalOption);
 
         return command;
-    }
-
-    static CruncharrConfig LoadConfig()
-    {
-        var configPath = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_PATH");
-        if (string.IsNullOrEmpty(configPath))
-        {
-            var configDir = Environment.GetEnvironmentVariable("CRUNCHYROLL_CONFIG_DIR") ?? "/config";
-            configPath = Path.Combine(configDir, "cruncharr.yaml");
-            if (!File.Exists(configPath))
-            {
-                configPath = Path.Combine(configDir, "cruncharr.yml");
-                if (!File.Exists(configPath))
-                    configPath = Path.Combine(configDir, "cruncharr.json");
-            }
-        }
-        var config = CruncharrConfig.Load(configPath);
-        config.ApplyEnvironmentVariables();
-        return config;
     }
 }

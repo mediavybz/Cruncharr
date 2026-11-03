@@ -666,9 +666,13 @@ public class DownloadService : IDownloadService
                         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                         catch (Exception ex)
                         {
-                            return new DownloadResult { Success = false, OutputPath = existing.OutputPath,
+                            return new DownloadResult
+                            {
+                                Success = false,
+                                OutputPath = existing.OutputPath,
                                 ErrorMessage = $"The download already exists, but Sonarr import registration failed: {ex.Message}",
-                                ErrorType = DownloadErrorType.Unknown };
+                                ErrorType = DownloadErrorType.Unknown
+                            };
                         }
                     }
                     progress?.Report(new DownloadProgress { State = DownloadState.Done, Percent = 100, Doing = "Already downloaded" });
@@ -924,13 +928,7 @@ public class DownloadService : IDownloadService
         if (!string.IsNullOrEmpty(pssh) && _widevine.CanDecrypt)
         {
             progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 25, Doing = "Fetching decryption keys..." });
-            // Refresh token before license request (matches desktop source behavior)
-            await _auth.RefreshTokenAsync(true, cancellationToken);
-            var authData = new Dictionary<string, string>{
-                { "authorization", "Bearer " + (_auth.Token?.access_token ?? "") },
-                { "x-cr-content-id", mediaGuid },
-                { "x-cr-video-token", playbackData.VideoToken ?? "" }
-            };
+            var authData = await CreateLicenseAuthDataAsync(mediaGuid, playbackData.VideoToken, cancellationToken);
             _logger?.LogInformation("Fetching Widevine keys for PSSH: {Pssh}", pssh);
             decryptionKeys = await _widevine.GetKeysAsync(pssh, ApiUrls.WidevineLicenceUrl, authData, _httpClient.Client);
             _logger?.LogInformation("Got {Count} decryption keys", decryptionKeys.Count);
@@ -1129,11 +1127,12 @@ public class DownloadService : IDownloadService
             };
         }
 
-        // Replace existing file if configured.
+        // Replace existing file if configured. It is NOT deleted here: a later download, mux,
+        // encode or cancel failure would otherwise leave nothing. MoveToFinalPath swaps it out
+        // once the replacement is complete.
         if (config.Download.ReplaceExistingFiles && File.Exists(outputPath))
         {
-            _logger?.LogInformation("Replacing existing file: {OutputPath}", outputPath);
-            File.Delete(outputPath);
+            _logger?.LogInformation("Will replace existing file: {OutputPath}", outputPath);
         }
 
         // Download streams. Always use a unique per-download working directory for the
@@ -1148,14 +1147,17 @@ public class DownloadService : IDownloadService
         // When the temp folder is enabled, also mux + encode INSIDE tempDir (which a user can
         // point at a tmpfs/RAM disk) and only move the finished file to the output volume at the
         // end. This keeps the heavy mux/transcode read-write off the output SSD. With the temp
-        // folder disabled, mux/encode write straight to the output dir as before (no extra move).
-        var transcodeInTemp = config.Download.UseTempFolder;
+        // folder disabled, mux/encode write straight to the output dir as before (no extra move) -
+        // unless existing files may be replaced: then they always stage in tempDir (which is under
+        // outputDir when the temp folder is off) so an existing file survives a failed replacement.
+        var transcodeInTemp = config.Download.UseTempFolder || config.Download.ReplaceExistingFiles;
         var preserveEncodingSource = false;
 
         try
         {
             var downloadedFiles = new List<string>();
             var audioTrackLanguages = new List<(string Path, string Lang)>();
+            var requiredTracks = new HashSet<string>(StringComparer.Ordinal); // primary-version tracks; extras are best-effort
             var syncVideos = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var videoLocales = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // Track video file -> locale mapping
 
@@ -1163,15 +1165,22 @@ public class DownloadService : IDownloadService
             if (playbackData.VideoUrl != null && (playbackData.VideoUrl.Contains(".mpd") || playbackData.VideoUrl.Contains("/dash/")))
             {
                 progress?.Report(new DownloadProgress { State = DownloadState.Downloading, Percent = 30, Doing = "Downloading DASH streams..." });
-                var (videoPath, audioPaths) = await DownloadDashTracksAsync(playbackData.VideoUrl, tempDir, config, progress, 30, 78, cancellationToken, playbackData.VideoToken, mediaId, episode.SelectedDubs);
+                // License requests name the content that was played: mediaGuid (the /play URL id),
+                // not the legacy "...V" mediaId. The keys fetched above for this PSSH are reused.
+                var knownKeys = !string.IsNullOrEmpty(pssh) && decryptionKeys is { Count: > 0 }
+                    ? new Dictionary<string, List<ContentKey>> { [pssh] = decryptionKeys }
+                    : null;
+                var (videoPath, audioPaths) = await DownloadDashTracksAsync(playbackData.VideoUrl, tempDir, config, progress, 30, 78, cancellationToken, playbackData.VideoToken, mediaGuid, episode.SelectedDubs, knownKeys: knownKeys);
                 if (videoPath != null && !config.Download.NoVideo)
                 {
                     downloadedFiles.Add(videoPath);
                     videoLocales[videoPath] = episode.AudioLocale;
+                    requiredTracks.Add(videoPath);
                 }
                 foreach (var (path, _) in audioPaths)
                 {
                     downloadedFiles.Add(path);
+                    requiredTracks.Add(path);
                 }
                 audioTrackLanguages = audioPaths;
 
@@ -1807,6 +1816,11 @@ public class DownloadService : IDownloadService
                 }).ToList();
             }
 
+            foreach (var dropped in DropUndecryptedTracks(downloadedFiles, audioTrackLanguages, requiredTracks))
+            {
+                _logger?.LogWarning("Dropping {File}: it could not be decrypted and would not play", Path.GetFileName(dropped));
+            }
+
             // Sync Timing: Calculate delays for dubs if enabled
             var audioDelays = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             if (config.Download.SyncTiming && config.Download.DlVideoOnce && syncVideos.Count > 0 && _videoSyncer != null)
@@ -1961,9 +1975,9 @@ public class DownloadService : IDownloadService
                         {
                             if (config.Download.ReplaceExistingFiles)
                             {
-                                // [PT] Ported from upstream c123093: respect ReplaceExistingFiles config in quality-probe rename path
-                                _logger?.LogInformation("Replacing existing file: {OutputPath}", newOutputPath);
-                                File.Delete(newOutputPath);
+                                // [PT] Ported from upstream c123093: respect ReplaceExistingFiles config in quality-probe rename path.
+                                // The existing file is swapped out by MoveToFinalPath only once the replacement is complete.
+                                _logger?.LogInformation("Will replace existing file: {OutputPath}", newOutputPath);
                             }
                             else
                             {
@@ -2358,40 +2372,13 @@ public class DownloadService : IDownloadService
 
         const int maxRetries = 3;
 
-        // Use stream endpoint settings from auth service (ported from source)
-        var streamEndpoint = _auth.StreamEndpoint;
-        var streamEndpointSecondary = _auth.StreamEndpointSecondary;
-
-        var endpoints = new List<(string Endpoint, string UserAgent, CrAuthSettings Settings)>();
-
-        var primaryUrl = $"{ApiUrls.Playback}/{episodeId}/{streamEndpoint.Endpoint}/play";
-        if (streamEndpoint.Video || streamEndpoint.Audio)
-        {
-            endpoints.Add((primaryUrl, streamEndpoint.UserAgent, streamEndpoint));
-        }
-
-        var secondaryUrl = !string.IsNullOrEmpty(streamEndpointSecondary.Endpoint)
-            ? $"{ApiUrls.Playback}/{episodeId}/{streamEndpointSecondary.Endpoint}/play"
-            : null;
-
-        // Only add secondary endpoint if it's different from primary
-        if (!string.IsNullOrEmpty(secondaryUrl) && secondaryUrl != primaryUrl && (streamEndpointSecondary.Video || streamEndpointSecondary.Audio))
-        {
-            endpoints.Add((secondaryUrl, streamEndpointSecondary.UserAgent, streamEndpointSecondary));
-        }
-
-        // Fallback endpoint - only add if different from primary and secondary
-        var fallbackUrl = $"{ApiUrls.Playback}/{episodeId}/web/firefox/play";
-        if (fallbackUrl != primaryUrl && fallbackUrl != secondaryUrl)
-        {
-            endpoints.Add((fallbackUrl, ApiUrls.FirefoxUserAgent, streamEndpoint));
-        }
+        var endpoints = BuildPlaybackEndpoints(episodeId, _auth.StreamEndpoint);
 
         PlaybackData? mergedData = null;
         bool rateLimited = false;
         int retryDelaySeconds = GetRetryDelaySeconds(retryAttempt, config);
 
-        foreach (var (endpoint, userAgent, settings) in endpoints)
+        foreach (var (endpoint, userAgent) in endpoints)
         {
             var request = HttpClientWrapper.CreateRequest(endpoint, HttpMethod.Get, true, token.access_token);
             request.Headers.Add("User-Agent", userAgent);
@@ -2568,6 +2555,23 @@ public class DownloadService : IDownloadService
         throw new DownloadException("Failed to get playback data from all endpoints. The content may not be available in your region.", DownloadErrorType.NetworkError);
     }
 
+    // /play endpoints to request. Every request carries the access token minted by the primary
+    // stream client, and the play service rejects a play URL for any other device with 40016
+    // "Outdated Token" (verified in 31e765e). So the secondary endpoint and the old hard-coded
+    // web/firefox fallback could never return data: they only added a failing request and a
+    // "[PLAYBACK ERROR BODY] 40016" warning to every download. Upstream sends its secondary
+    // request with a separately signed-in client, which Cruncharr does not have.
+    // (internal for the regression test)
+    internal static List<(string Endpoint, string UserAgent)> BuildPlaybackEndpoints(string episodeId, CrAuthSettings primary)
+    {
+        var endpoints = new List<(string Endpoint, string UserAgent)>();
+        if (primary.Video || primary.Audio)
+        {
+            endpoints.Add(($"{ApiUrls.Playback}/{episodeId}/{primary.Endpoint}/play", primary.UserAgent));
+        }
+        return endpoints;
+    }
+
     // Exponential backoff for playback rate-limit retries (upstream Helpers.GetRetryDelaySeconds):
     // base * 2^attempt, capped at the configured max.
     private static int GetRetryDelaySeconds(int retryAttempt, CruncharrConfig? config)
@@ -2654,6 +2658,65 @@ public class DownloadService : IDownloadService
         _logger?.LogError("Hardsub {Lang} not available. Available: {Available}",
             hsLang, string.Join(", ", playback.HardSubs.Values.Select(h => h.Hlang).Where(h => !string.IsNullOrEmpty(h))));
         return (false, $"Hardsub {hsLang} not available. Available: {string.Join(", ", playback.HardSubs.Values.Select(h => h.Hlang).Where(h => !string.IsNullOrEmpty(h)))}. Enable 'Hard Sub Raw Fallback' to use raw stream.");
+    }
+
+    // License-request headers, built with a token refreshed right before the request.
+    // RefreshTokenAsync only renews within 60 s of expiry, so the token read at /play time can
+    // have barely a minute left; reusing it for a later license request is what returned
+    // 401 {"error":"Forbidden"}. (internal for the regression test)
+    internal async Task<Dictionary<string, string>> CreateLicenseAuthDataAsync(string contentId, string? videoToken, CancellationToken cancellationToken)
+    {
+        await _auth.RefreshTokenAsync(true, cancellationToken);
+        return new Dictionary<string, string>{
+            { "authorization", "Bearer " + (_auth.Token?.access_token ?? "") },
+            { "x-cr-content-id", contentId },
+            { "x-cr-video-token", videoToken ?? "" }
+        };
+    }
+
+    // Keys for each distinct track PSSH: reuse keys already obtained for that PSSH, otherwise
+    // request a license once. Empty results are kept so a failed PSSH is not requested twice.
+    // (internal for the regression test)
+    internal static async Task<Dictionary<string, List<ContentKey>>> ResolveTrackKeysAsync(
+        IEnumerable<string?> psshs,
+        IReadOnlyDictionary<string, List<ContentKey>>? knownKeys,
+        Func<string, Task<List<ContentKey>>> requestKeys)
+    {
+        var keys = new Dictionary<string, List<ContentKey>>(StringComparer.Ordinal);
+        foreach (var pssh in psshs)
+        {
+            if (string.IsNullOrEmpty(pssh) || keys.ContainsKey(pssh)) continue;
+            keys[pssh] = knownKeys?.GetValueOrDefault(pssh) is { Count: > 0 } known
+                ? known
+                : await requestKeys(pssh);
+        }
+        return keys;
+    }
+
+    internal static bool IsUndecryptedTrack(string path) =>
+        Path.GetFileName(path).Contains(".enc.", StringComparison.OrdinalIgnoreCase);
+
+    // Run after every decryption attempt. A still-encrypted primary track used to be muxed as
+    // is, so the item was reported Complete while its video or audio could not be played: fail
+    // instead (the queue retries Unknown errors). A best-effort extra (additional dub, audio
+    // description) is dropped with a warning, matching how a failed extra download is handled.
+    // (internal for the regression test)
+    internal static List<string> DropUndecryptedTracks(
+        List<string> downloadedFiles,
+        List<(string Path, string Lang)> audioTracks,
+        IReadOnlySet<string> requiredTracks)
+    {
+        var undecrypted = downloadedFiles.Where(IsUndecryptedTrack).ToList();
+        var required = undecrypted.Where(requiredTracks.Contains).ToList();
+        if (required.Count > 0)
+        {
+            throw new DownloadException(
+                $"Could not decrypt {string.Join(", ", required.Select(Path.GetFileName))}: no usable Widevine keys were obtained, so the file would not play.",
+                DownloadErrorType.Unknown);
+        }
+        downloadedFiles.RemoveAll(undecrypted.Contains);
+        audioTracks.RemoveAll(track => undecrypted.Contains(track.Path));
+        return undecrypted;
     }
 
     private async Task DeAuthVideoAsync(string contentId, string videoToken)
@@ -2892,7 +2955,7 @@ public class DownloadService : IDownloadService
         }
     }
 
-    private async Task<(string? VideoPath, List<(string Path, string Lang)> AudioPaths)> DownloadDashTracksAsync(string manifestUrl, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null, string? mediaGuid = null, List<string>? selectedDubs = null, bool audioOnly = false, string audioFileSuffix = "")
+    private async Task<(string? VideoPath, List<(string Path, string Lang)> AudioPaths)> DownloadDashTracksAsync(string manifestUrl, string tempDir, CruncharrConfig config, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null, string? mediaGuid = null, List<string>? selectedDubs = null, bool audioOnly = false, string audioFileSuffix = "", IReadOnlyDictionary<string, List<ContentKey>>? knownKeys = null)
     {
         // Download manifest with auth headers
         var manifestRequest = new HttpRequestMessage(HttpMethod.Get, manifestUrl);
@@ -2901,7 +2964,7 @@ public class DownloadService : IDownloadService
         // instead of a hardcoded (and quickly stale) TV UA. Falls back to the current TV default.
         var manifestUserAgent = !string.IsNullOrEmpty(_auth.StreamEndpoint?.UserAgent)
             ? _auth.StreamEndpoint.UserAgent
-            : "ANDROIDTV/3.66.0_22348 Android/16";
+            : "ANDROIDTV/3.75.0_22365 Android/16";
         manifestRequest.Headers.Add("User-Agent", manifestUserAgent);
         if (!string.IsNullOrEmpty(videoToken))
         {
@@ -2977,6 +3040,20 @@ public class DownloadService : IDownloadService
 
         _logger?.LogInformation("Selected {AudioCount} audio tracks for download", chosenAudios.Count);
 
+        // Get every track's keys BEFORE downloading any segments, as the up-front request in
+        // DownloadEpisodeAsync does. Requesting them after each track finished (the old order)
+        // sent the access token from /play time to the license server minutes later; the token
+        // only lives ~5 minutes, so slow or long tracks got 401 {"error":"Forbidden"} and stayed
+        // encrypted ("No decryption keys obtained for audio, may be unplayable").
+        var trackKeys = new Dictionary<string, List<ContentKey>>();
+        if (_widevine.CanDecrypt)
+        {
+            var trackPsshs = chosenAudios.Select(a => a.Track.pssh).Prepend(audioOnly ? null : chosenVideo?.pssh);
+            trackKeys = await ResolveTrackKeysAsync(trackPsshs, knownKeys,
+                async trackPssh => await _widevine.GetKeysAsync(trackPssh, ApiUrls.WidevineLicenceUrl,
+                    await CreateLicenseAuthDataAsync(mediaGuid ?? "", videoToken, cancellationToken), _httpClient.Client));
+        }
+
         string? videoPath = null;
         var audioPaths = new List<(string Path, string Lang)>();
 
@@ -3018,13 +3095,7 @@ public class DownloadService : IDownloadService
             // Decrypt if needed
             if (chosenVideo.pssh != null && _widevine.CanDecrypt)
             {
-                var authData = new Dictionary<string, string>{
-                    { "authorization", "Bearer " + (_auth.Token?.access_token ?? "") },
-                    { "x-cr-content-id", mediaGuid ?? "" },
-                    { "x-cr-video-token", videoToken ?? "" }
-                };
-
-                var keys = await _widevine.GetKeysAsync(chosenVideo.pssh, ApiUrls.WidevineLicenceUrl, authData, _httpClient.Client);
+                var keys = trackKeys.GetValueOrDefault(chosenVideo.pssh) ?? new List<ContentKey>();
                 if (keys.Count > 0)
                 {
                     await DecryptWithMp4Decrypt(videoOutput, videoPath, keys);
@@ -3103,13 +3174,7 @@ public class DownloadService : IDownloadService
                     // Decrypt if needed
                     if (audioItem.pssh != null && _widevine.CanDecrypt)
                     {
-                        var authData = new Dictionary<string, string>{
-                            { "authorization", "Bearer " + (_auth.Token?.access_token ?? "") },
-                            { "x-cr-content-id", mediaGuid ?? "" },
-                            { "x-cr-video-token", videoToken ?? "" }
-                        };
-
-                        var keys = await _widevine.GetKeysAsync(audioItem.pssh, ApiUrls.WidevineLicenceUrl, authData, _httpClient.Client);
+                        var keys = trackKeys.GetValueOrDefault(audioItem.pssh) ?? new List<ContentKey>();
                         if (keys.Count > 0)
                         {
                             await DecryptWithMp4Decrypt(audioOutput, audioFinalPath, keys);
@@ -3349,7 +3414,7 @@ public class DownloadService : IDownloadService
         if (keys.Count == 0) return;
 
         // Find decryptor tool (prefer shaka-packager, fallback to mp4decrypt)
-        string? decryptToolPath = null;
+        string? decryptToolPath;
         bool useShaka = false;
 
         var mp4decryptPath = FindExecutable("mp4decrypt");
@@ -3421,7 +3486,7 @@ public class DownloadService : IDownloadService
         var decryptedFiles = new List<string>();
 
         // Find decryptor tool
-        string? decryptToolPath = null;
+        string? decryptToolPath;
         bool useShaka = false;
 
         // Check for mp4decrypt first, then shaka-packager
@@ -3466,7 +3531,7 @@ public class DownloadService : IDownloadService
                     shakaKeys
                 };
 
-                _logger?.LogInformation("Running shaka-packager: {Args}", string.Join(" ", args));
+                _logger?.LogInformation("Running shaka-packager: {Args}", RedactContentKeys(string.Join(" ", args)));
                 await RunProcessAsync(decryptToolPath!, args, cancellationToken);
             }
             else
@@ -3698,6 +3763,17 @@ public class DownloadService : IDownloadService
         return success;
     }
 
+    private static readonly System.Text.RegularExpressions.Regex ContentKeyPattern = new(
+        @"(?<=(?:^|\s)--key\s+[0-9A-Fa-f]+:)[0-9A-Fa-f]+|(?<=\bkey=)[0-9A-Fa-f]+",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Masks DRM content keys (mp4decrypt <c>--key KID:KEY</c>, shaka <c>key=KEY</c>) before a
+    /// command line is logged. The key ID stays visible for troubleshooting.
+    /// </summary>
+    internal static string RedactContentKeys(string commandLine) =>
+        string.IsNullOrEmpty(commandLine) ? commandLine : ContentKeyPattern.Replace(commandLine, "[redacted]");
+
     private static string EscapeProcessArgument(string arg)
     {
         if (string.IsNullOrEmpty(arg)) return "";
@@ -3717,7 +3793,7 @@ public class DownloadService : IDownloadService
             CreateNoWindow = true
         };
 
-        _logger?.LogDebug("Running: {Executable} {Args}", executable, startInfo.Arguments);
+        _logger?.LogDebug("Running: {Executable} {Args}", executable, RedactContentKeys(startInfo.Arguments));
 
         using var process = Process.Start(startInfo);
         if (process == null)
@@ -3725,6 +3801,7 @@ public class DownloadService : IDownloadService
             _logger?.LogError("Failed to start process: {Executable}", executable);
             return;
         }
+        ProcessPriority.Lower(process);
 
         // Read stdout/stderr concurrently to avoid deadlocks on full buffers
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -3775,7 +3852,7 @@ public class DownloadService : IDownloadService
             CreateNoWindow = true
         };
 
-        _logger?.LogDebug("Running: {Executable} {Args}", executable, startInfo.Arguments);
+        _logger?.LogDebug("Running: {Executable} {Args}", executable, RedactContentKeys(startInfo.Arguments));
 
         using var process = Process.Start(startInfo);
         if (process == null)
@@ -3783,6 +3860,7 @@ public class DownloadService : IDownloadService
             _logger?.LogError("Failed to start process: {Executable}", executable);
             return "";
         }
+        ProcessPriority.Lower(process);
 
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -3853,24 +3931,34 @@ public class DownloadService : IDownloadService
 
         var destDir = Path.GetDirectoryName(destPath);
         if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
-        if (File.Exists(destPath))
+        if (File.Exists(destPath) && !replaceExisting)
         {
-            if (!replaceExisting)
-            {
-                throw new DownloadException($"Output already exists at '{destPath}'.", DownloadErrorType.OutputConflict);
-            }
-            File.Delete(destPath);
+            throw new DownloadException($"Output already exists at '{destPath}'.", DownloadErrorType.OutputConflict);
         }
 
+        // Stage the file beside the destination first (the slow, possibly cross-device step), then
+        // swap it in with a same-directory rename. An existing file is only replaced by that final
+        // rename, so a failed copy can never leave the user without the previous file.
+        var stagingPath = Path.Combine(destDir ?? string.Empty,
+            "." + Path.GetFileName(destPath) + ".crpart-" + Guid.NewGuid().ToString("N"));
         try
         {
-            File.Move(sourcePath, destPath);
+            try
+            {
+                File.Move(sourcePath, stagingPath);
+            }
+            catch (IOException)
+            {
+                // Cross-device (EXDEV) or similar: copy then remove the source.
+                File.Copy(sourcePath, stagingPath);
+                File.Delete(sourcePath);
+            }
+            File.Move(stagingPath, destPath, overwrite: replaceExisting);
         }
-        catch (IOException)
+        catch
         {
-            // Cross-device (EXDEV) or similar: copy then remove the source.
-            File.Copy(sourcePath, destPath, overwrite: replaceExisting);
-            File.Delete(sourcePath);
+            try { File.Delete(stagingPath); } catch { /* best effort */ }
+            throw;
         }
         _logger?.LogInformation("Moved output to {Dest}", destPath);
     }
@@ -4006,6 +4094,8 @@ public class DownloadService : IDownloadService
             _logger?.LogError("Failed to start process: {Executable}", ffmpegPath);
             return -1;
         }
+        // Encodes run on idle CPU only, so the web UI and other services stay responsive.
+        ProcessPriority.Idle(process);
 
         await using var killRegistration = cancellationToken.Register(() =>
         {
@@ -4083,9 +4173,6 @@ public class DownloadService : IDownloadService
 
         return process.ExitCode;
     }
-
-    // Codec-aware quality option (mirrors upstream Helpers.GetQualityOption).
-    private static IEnumerable<string> SplitArguments(string commandLine) => EncodingCommand.SplitArguments(commandLine);
 
     private string? FindExecutable(string name)
     {

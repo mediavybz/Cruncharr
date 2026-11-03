@@ -139,7 +139,10 @@ public class QueueController : ControllerBase
             {
                 result.Added,
                 Destination = "cruncharr",
-                Message = result.Added ? "Added to queue" : "Episode is already in the queue",
+                Message = !result.Persisted
+                    ? "Queued, but the queue file could not be saved. This download will be lost if Cruncharr restarts before it finishes; check the queue path and disk space."
+                    : result.Added ? "Added to queue" : "Episode is already in the queue",
+                result.Persisted,
                 EpisodeId = request.EpisodeId,
                 QueueItemId = result.Item.Id,
                 State = result.Item.DownloadProgress.State.ToString()

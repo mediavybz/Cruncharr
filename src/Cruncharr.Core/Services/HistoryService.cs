@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Cruncharr.Core.Configuration;
 using Cruncharr.Core.Models;
 using Cruncharr.Core.Utils;
@@ -64,13 +65,12 @@ public class HistoryService : IHistoryService, IDisposable
     private readonly ILogger<HistoryService>? _logger;
     private readonly ISonarrService? _sonarrService;
     private readonly ICrunchyrollApiService? _apiService;
-    private readonly IMusicService? _musicService;
     private readonly ICrunchyrollAuthService? _authService;
     private readonly CruncharrConfig _config;
     private List<HistorySeries> _historyList = [];
     private volatile bool _loaded = false;
 
-    public HistoryService(string? historyPath = null, ILogger<HistoryService>? logger = null, ISonarrService? sonarrService = null, ICrunchyrollApiService? apiService = null, IMusicService? musicService = null, ICrunchyrollAuthService? authService = null, CruncharrConfig? config = null)
+    public HistoryService(string? historyPath = null, ILogger<HistoryService>? logger = null, ISonarrService? sonarrService = null, ICrunchyrollApiService? apiService = null, ICrunchyrollAuthService? authService = null, CruncharrConfig? config = null)
     {
         _historyPath = historyPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -84,7 +84,6 @@ public class HistoryService : IHistoryService, IDisposable
         _logger = logger;
         _sonarrService = sonarrService;
         _apiService = apiService;
-        _musicService = musicService;
         _authService = authService;
         _config = config ?? new CruncharrConfig();
         Directory.CreateDirectory(Path.GetDirectoryName(_historyPath)!);
@@ -648,30 +647,69 @@ public class HistoryService : IHistoryService, IDisposable
             episode.EpisodeNumber > 0 ? episode.EpisodeNumber : null);
 
     // Persistence
+    // A failed load throws and leaves _loaded false, so no caller can save an empty History
+    // over the file; the next call tries again.
     private async Task LoadRichHistoryAsync()
     {
-        if (!File.Exists(_historyPath))
-        {
-            _historyList = [];
-            return;
-        }
+        _historyList = await LoadHistoryFileAsync(_historyPath, HistoryJsonContext.Default.ListHistorySeries);
+        SanitizeHistoryCollections();
+    }
+
+    // Loads a History file; a missing file is an empty History. A damaged file is replaced by its
+    // newest readable daily backup and kept beside it as "<name>.corrupt-<time>". Without a usable
+    // backup, or when the file cannot be read at all, this throws instead of returning an empty
+    // list that the next write would save over the user's History.
+    private async Task<T> LoadHistoryFileAsync<T>(string path, JsonTypeInfo<T> typeInfo) where T : new()
+    {
+        if (!File.Exists(path)) return new T();
 
         try
         {
-            var content = await DecompressJsonFileAsync(_historyPath);
-            if (string.IsNullOrEmpty(content))
+            return await ReadHistoryFileAsync(path, typeInfo);
+        }
+        catch (Exception ex) when (ex is not IOException and not UnauthorizedAccessException)
+        {
+            foreach (var backup in GetDatedBackups(path).OrderByDescending(b => b.Date))
             {
-                // Fallback to uncompressed
-                content = await File.ReadAllTextAsync(_historyPath);
+                T restored;
+                try { restored = await ReadHistoryFileAsync(backup.Path, typeInfo); }
+                catch (Exception) { continue; }
+
+                try
+                {
+                    var damaged = $"{path}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+                    File.Move(path, damaged);
+                    File.Copy(backup.Path, path);
+                    _logger?.LogError(ex, "History file {Path} was damaged. Restored it from {Backup}; the damaged file was kept as {Damaged}",
+                        path, backup.Path, damaged);
+                    return restored;
+                }
+                catch (Exception restoreEx)
+                {
+                    _logger?.LogError(restoreEx, "Could not restore History file {Path} from {Backup}", path, backup.Path);
+                    break;
+                }
             }
-            _historyList = JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListHistorySeries) ?? [];
-            SanitizeHistoryCollections();
+            throw new InvalidDataException(
+                $"Could not load History file {path}: {ex.Message} History is left unchanged until the file is fixed or restored from a backup.", ex);
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to load rich history");
-            _historyList = [];
+            throw new IOException(
+                $"Could not read History file {path}: {ex.Message} History is left unchanged until the file can be read.", ex);
         }
+    }
+
+    private static async Task<T> ReadHistoryFileAsync<T>(string path, JsonTypeInfo<T> typeInfo)
+    {
+        var content = await DecompressJsonFileAsync(path);
+        if (string.IsNullOrEmpty(content))
+        {
+            // Fallback to uncompressed
+            content = await File.ReadAllTextAsync(path);
+        }
+        return JsonSerializer.Deserialize(content, typeInfo)
+            ?? throw new InvalidDataException("The file does not contain a History list.");
     }
 
     private void SanitizeHistoryCollections()
@@ -701,6 +739,8 @@ public class HistoryService : IHistoryService, IDisposable
     {
         try
         {
+            // Never write the placeholder list that stands in until History has loaded.
+            if (!_loaded) throw new InvalidOperationException("History has not been loaded; it was not saved.");
             await WriteJsonToFileCompressedAsync(_historyPath, _historyList, keepBackups: 5);
         }
         catch (Exception ex)
@@ -710,27 +750,8 @@ public class HistoryService : IHistoryService, IDisposable
         }
     }
 
-    private async Task<List<DownloadHistory>> LoadHistoryAsync()
-    {
-        if (!File.Exists(_flatHistoryPath)) return new List<DownloadHistory>();
-
-        try
-        {
-            var content = await DecompressJsonFileAsync(_flatHistoryPath);
-            if (string.IsNullOrEmpty(content))
-            {
-                // Fallback to uncompressed
-                content = await File.ReadAllTextAsync(_flatHistoryPath);
-            }
-            var flatHistory = JsonSerializer.Deserialize(content, HistoryJsonContext.Default.ListDownloadHistory) ?? new List<DownloadHistory>();
-            return flatHistory;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to load flat history");
-            return new List<DownloadHistory>();
-        }
-    }
+    private Task<List<DownloadHistory>> LoadHistoryAsync() =>
+        LoadHistoryFileAsync(_flatHistoryPath, HistoryJsonContext.Default.ListDownloadHistory);
 
     private async Task SaveHistoryAsync(List<DownloadHistory> flatHistory)
     {
@@ -829,25 +850,31 @@ public class HistoryService : IHistoryService, IDisposable
         return Path.Combine(dir, backupName);
     }
 
+    private static List<(string Path, DateTime Date)> GetDatedBackups(string pathToFile)
+    {
+        string dir = Path.GetDirectoryName(pathToFile)!;
+        string name = Path.GetFileName(pathToFile);
+        string glob = $".{name}.*.bak";
+        var rx = new System.Text.RegularExpressions.Regex(@"^\." + System.Text.RegularExpressions.Regex.Escape(name) + @"\.(\d{4}-\d{2}-\d{2})\.bak$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        var datedBackups = new List<(string Path, DateTime Date)>();
+        foreach (var path in Directory.EnumerateFiles(dir, glob, SearchOption.TopDirectoryOnly))
+        {
+            string file = Path.GetFileName(path);
+            var match = rx.Match(file);
+            if (match.Success && DateTime.TryParseExact(match.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            {
+                datedBackups.Add((path, date));
+            }
+        }
+        return datedBackups;
+    }
+
     private static void PruneBackups(string pathToFile, int keep)
     {
         try
         {
-            string dir = Path.GetDirectoryName(pathToFile)!;
-            string name = Path.GetFileName(pathToFile);
-            string glob = $".{name}.*.bak";
-            var rx = new System.Text.RegularExpressions.Regex(@"^\." + System.Text.RegularExpressions.Regex.Escape(name) + @"\.(\d{4}-\d{2}-\d{2})\.bak$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-
-            var datedBackups = new List<(string Path, DateTime Date)>();
-            foreach (var path in Directory.EnumerateFiles(dir, glob, SearchOption.TopDirectoryOnly))
-            {
-                string file = Path.GetFileName(path);
-                var match = rx.Match(file);
-                if (match.Success && DateTime.TryParseExact(match.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
-                {
-                    datedBackups.Add((path, date));
-                }
-            }
+            var datedBackups = GetDatedBackups(pathToFile);
 
             // Sort by date descending and delete oldest
             foreach (var backup in datedBackups.OrderByDescending(b => b.Date).Skip(keep))
@@ -936,6 +963,7 @@ public class HistoryService : IHistoryService, IDisposable
         // identity as Browse and download naming. Preserve explicit saved links.
         var titleIndex = new SonarrTitleIndex(sonarrSeries);
         var resolvedTitles = new Dictionary<(string? Id, string Title), SonarrSeries?>();
+        var unverified = 0;
         foreach (var entry in await GetHistorySeriesAsync())
         {
             var title = entry.SeriesTitle ?? "";
@@ -943,12 +971,24 @@ public class HistoryService : IHistoryService, IDisposable
             var match = titleIndex.FindExact(title);
             if (match == null && titleIndex.Candidates(title).Count > 0)
             {
-                // Propagate lookup outages so a release check retries instead of treating an
-                // unverified owned series as missing and downloading duplicates.
-                match = await _sonarrService.ResolveSeriesAsync(entry.SeriesId ?? "", title, _config.Sonarr);
+                try
+                {
+                    match = await _sonarrService.ResolveSeriesAsync(entry.SeriesId ?? "", title, _config.Sonarr);
+                }
+                catch (Exception ex)
+                {
+                    // One unverifiable series (no episodes listed, lookup timeout) must not stop
+                    // every other series from being linked. Its link stays empty, which is what
+                    // makes the next run retry it; release checks keep their own retry logic.
+                    unverified++;
+                    _logger?.LogWarning("Sonarr identity for {Title} ({SeriesId}) could not be verified yet: {Reason}", title, entry.SeriesId, ex.Message);
+                }
             }
             resolvedTitles[(entry.SeriesId, title)] = match;
         }
+
+        if (unverified > 0)
+            _logger?.LogInformation("Sonarr history matching: {Count} series could not be verified this run and will be retried", unverified);
 
         var sonarrSeriesById = updateAll
             ? sonarrSeries.ToDictionary(series => series.Id.ToString())
@@ -1134,8 +1174,12 @@ public class HistoryService : IHistoryService, IDisposable
                     int.TryParse(source.Episode, out var number) && number > 0).ToHashSet();
                 if (numbered.Count < 3) continue;
                 var storedAnchors = numbered.Where(source => int.TryParse(source.SonarrEpisodeId, out var id) && episodesById.ContainsKey(id))
-                    .Select(source => new { HistoryEpisode = source, Episode = episodesById[int.Parse(source.SonarrEpisodeId!)],
-                        Score = CalculateEpisodeEvidenceScore(source, episodesById[int.Parse(source.SonarrEpisodeId!)]) });
+                    .Select(source => new
+                    {
+                        HistoryEpisode = source,
+                        Episode = episodesById[int.Parse(source.SonarrEpisodeId!)],
+                        Score = CalculateEpisodeEvidenceScore(source, episodesById[int.Parse(source.SonarrEpisodeId!)])
+                    });
                 var anchors = identityCandidates.Concat(storedAnchors).Where(candidate => candidate.Score >= 0.8 &&
                         numbered.Contains(candidate.HistoryEpisode) && candidate.Episode.SeasonNumber > 0)
                     .OrderByDescending(candidate => candidate.Score)
@@ -1155,10 +1199,15 @@ public class HistoryService : IHistoryService, IDisposable
                     var target = episodes.FirstOrDefault(target => target.SeasonNumber == alignment.Key.SeasonNumber &&
                         target.EpisodeNumber == int.Parse(source.Episode!) + alignment.Key.Offset);
                     if (target == null || assignedInSeason.Contains(target.Id.ToString())) continue;
-                    // A decisive conflicting title still overrides the majority numbering.
+                    // A decisive conflicting title still overrides the majority numbering: either a
+                    // near-exact title, or a strong one (Glass Fleet "Like Flight" vs Sonarr "Like
+                    // Flights...") when the numbered slot's own title clearly disagrees. A recap that
+                    // Sonarr files as a special shifts every later number by one.
                     var best = identityCandidates.FirstOrDefault(candidate => candidate.HistoryEpisode == source);
-                    if (best != null && best.Episode.Id != target.Id && best.Score >= 0.95 &&
-                        CalculateEpisodeEvidenceScore(source, target) + 0.15 < best.Score) continue;
+                    var targetScore = CalculateEpisodeEvidenceScore(source, target);
+                    if (best != null && best.Episode.Id != target.Id &&
+                        (best.Score >= 0.95 && targetScore + 0.15 < best.Score ||
+                         best.Score >= 0.8 && targetScore + 0.3 < best.Score)) continue;
                     assignedInSeason.Add(target.Id.ToString());
                     source.AssignSonarrEpisodeData(target);
                     usedSonarrEpisodeIds.Add(target.Id);
@@ -1293,30 +1342,6 @@ public class HistoryService : IHistoryService, IDisposable
         }
     }
 
-    private static (SonarrEpisode? Episode, double Score) FindClosestMatchEpisodeWithScore(List<SonarrEpisode> episodeList, string title)
-    {
-        if (string.IsNullOrWhiteSpace(title) || episodeList.Count == 0)
-        {
-            return (null, 0.0);
-        }
-
-        SonarrEpisode? closestMatch = null;
-        double highestSimilarity = 0.0;
-        foreach (var episode in episodeList)
-        {
-            if (!string.IsNullOrWhiteSpace(episode.Title))
-            {
-                double similarity = StringSimilarity.CalculateSimilarity(episode.Title, title);
-                if (similarity <= highestSimilarity) continue;
-
-                highestSimilarity = similarity;
-                closestMatch = episode;
-            }
-        }
-
-        return highestSimilarity < 0.8 ? (null, highestSimilarity) : (closestMatch, highestSimilarity);
-    }
-
     private List<HistoryEpisode> MatchSpecialEpisodesByOrder(
         HistorySeries historySeries,
         List<HistoryEpisode> failedEpisodes,
@@ -1326,15 +1351,23 @@ public class HistoryService : IHistoryService, IDisposable
         var failed = failedEpisodes.ToHashSet();
         var matched = new List<HistoryEpisode>();
 
+        // Crunchyroll also lists films, OVAs and side stories as ordinary seasons ("PSYCHO-PASS:
+        // Sinners of the System") that TVDB/Sonarr files under season 0. A provider season with
+        // no episode matched to a regular Sonarr season is aligned to season 0 like a special;
+        // the same title/overview evidence thresholds still guard every assignment.
+        bool IsSeasonZeroCandidate(HistorySeason season, HistoryEpisode historyEpisode) =>
+            IsSpecialHistoryEpisode(historySeries, historyEpisode) ||
+            !season.EpisodesList.Any(other => int.TryParse(other.SonarrSeasonNumber, out var number) && number > 0);
+
         foreach (var historySeason in historySeries.Seasons.Where(historySeason =>
                      historySeason.EpisodesList.Any(historyEpisode =>
                          failed.Contains(historyEpisode) &&
-                         IsSpecialHistoryEpisode(historySeries, historyEpisode))))
+                         IsSeasonZeroCandidate(historySeason, historyEpisode))))
         {
             var sourceEpisodes = historySeason.EpisodesList
                 .Where(historyEpisode =>
                     failed.Contains(historyEpisode) &&
-                    IsSpecialHistoryEpisode(historySeries, historyEpisode))
+                    IsSeasonZeroCandidate(historySeason, historyEpisode))
                 .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.Episode))
                 .ToList();
             if (sourceEpisodes.Count == 0) continue;
@@ -1377,6 +1410,29 @@ public class HistoryService : IHistoryService, IDisposable
                     pair.HistoryEpisode.EpisodeTitle,
                     pair.SonarrEpisode.EpisodeNumber,
                     pair.SonarrEpisode.Title);
+            }
+        }
+
+        // A lone leftover whose neighbours in the same provider season sit either side of exactly
+        // one free season-0 slot takes that slot when its title still points there (a two-word
+        // title like "First Guardian" is too short for the stricter single-episode rule).
+        foreach (var historySeason in historySeries.Seasons)
+        {
+            var ordered = historySeason.EpisodesList.OrderBy(episode => ParseEpisodeOrdinal(episode.Episode)).ToList();
+            for (var index = 1; index < ordered.Count - 1; index++)
+            {
+                var source = ordered[index];
+                if (!failed.Contains(source) || matched.Contains(source) || !IsSeasonZeroCandidate(historySeason, source)) continue;
+                if (ordered[index - 1].SonarrSeasonNumber != "0" || ordered[index + 1].SonarrSeasonNumber != "0" ||
+                    !int.TryParse(ordered[index - 1].SonarrEpisodeNumber, out var before) ||
+                    !int.TryParse(ordered[index + 1].SonarrEpisodeNumber, out var after) || after - before != 2) continue;
+                var slot = sonarrEpisodes.FirstOrDefault(episode => episode.SeasonNumber == 0 &&
+                    episode.EpisodeNumber == before + 1 && !usedSonarrEpisodeIds.Contains(episode.Id));
+                if (slot != null && CalculateEpisodeEvidenceScore(source, slot) >= 0.45 &&
+                    TryAssignSonarrEpisode(source, slot, usedSonarrEpisodeIds))
+                {
+                    matched.Add(source);
+                }
             }
         }
 
@@ -1463,8 +1519,8 @@ public class HistoryService : IHistoryService, IDisposable
             IsGenericEpisodeTitle(sonarrEpisode.Title)
                 ? 0.0
                 : StringSimilarity.CalculateSimilarity(
-                    historyEpisode.EpisodeTitle.ToLowerInvariant(),
-                    sonarrEpisode.Title.ToLowerInvariant());
+                    TitleForComparison(historyEpisode.EpisodeTitle),
+                    TitleForComparison(sonarrEpisode.Title));
         var titleTokenSimilarity = titleSimilarity == 0.0
             ? 0.0
             : CalculateNormalizedTokenCosine(
@@ -1475,15 +1531,51 @@ public class HistoryService : IHistoryService, IDisposable
             sonarrEpisode.Overview);
 
         var titleEvidence = Math.Max(titleSimilarity, titleTokenSimilarity);
-        if (titleEvidence > 0.0 && overviewSimilarity > 0.0)
-        {
-            // Keep a strong title sufficient on its own while using the overview to break ties
-            // between repeated titles such as "Part 1" across seasons.
-            return Math.Max(overviewSimilarity, titleEvidence * 0.85 + overviewSimilarity * 0.15);
-        }
+        // Keep a strong title sufficient on its own while using the overview to break ties
+        // between repeated titles such as "Part 1" across seasons.
+        var score = titleEvidence > 0.0 && overviewSimilarity > 0.0
+            ? Math.Max(overviewSimilarity, titleEvidence * 0.85 + overviewSimilarity * 0.15)
+            : Math.Max(titleEvidence, overviewSimilarity);
 
-        return Math.Max(titleEvidence, overviewSimilarity);
+        // Sonarr often prefixes a special's title with its film or arc name ("Psycho-Pass:
+        // Sinners of the System - Case.1 Crime and Punishment" for "Crime and Punishment").
+        // One full title appearing word-for-word inside the other is strong evidence on its own,
+        // whatever the overviews say, though still below an exact match.
+        return titleSimilarity > 0.0 && ContainsTitlePhrase(historyEpisode.EpisodeTitle, sonarrEpisode.Title)
+            ? Math.Max(score, 0.85)
+            : score;
     }
+
+    // True when the shorter title (at least three words) appears as a contiguous word sequence
+    // inside the longer one. Short phrases such as "Part 1" are too common to count anywhere, but a
+    // short title that the longer one starts with and then subtitles ("HLB" -> "HLB - Hero League
+    // of Baseball") still names the same episode.
+    internal static bool ContainsTitlePhrase(string? first, string? second)
+    {
+        static string[] Words(string? value) => string.IsNullOrWhiteSpace(value) ? [] :
+            System.Text.RegularExpressions.Regex.Matches(value, @"[\p{L}\p{N}]+")
+                .Select(match => match.Value.ToLowerInvariant()).ToArray();
+        var firstWords = Words(first);
+        var secondWords = Words(second);
+        var (shorter, longer) = firstWords.Length <= secondWords.Length ? (firstWords, secondWords) : (secondWords, firstWords);
+        if (shorter.Length == 0 || shorter.Length == longer.Length) return false;
+        if (shorter.Length < 3)
+        {
+            var (shortTitle, longTitle) = firstWords.Length <= secondWords.Length ? (first!, second!) : (second!, first!);
+            return System.Text.RegularExpressions.Regex.IsMatch(longTitle.Trim(),
+                $@"^{System.Text.RegularExpressions.Regex.Escape(shortTitle.Trim())}\s*[-–—:]\s*\S",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        }
+        for (var start = 0; start + shorter.Length <= longer.Length; start++)
+        {
+            if (longer.AsSpan(start, shorter.Length).SequenceEqual(shorter)) return true;
+        }
+        return false;
+    }
+
+    // Trailing ellipses/periods are styling ("Like Flights..." on TVDB), not part of the title.
+    private static string TitleForComparison(string title) =>
+        title.Trim().TrimEnd('.', '…', ' ').ToLowerInvariant();
 
     private static bool IsGenericEpisodeTitle(string? title) =>
         !string.IsNullOrWhiteSpace(title) &&
@@ -1641,43 +1733,9 @@ public class HistoryService : IHistoryService, IDisposable
 
         await EnsureLoadedAsync();
 
-        // Mark episodes unavailable under lock
-        await _lock.WaitAsync();
-        try
-        {
-            var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
-
-            if (historySeries != null)
-            {
-                if (string.IsNullOrEmpty(seasonId))
-                {
-                    foreach (var historySeriesSeason in historySeries.Seasons)
-                    {
-                        foreach (var historyEpisode in historySeriesSeason.EpisodesList)
-                        {
-                            historyEpisode.IsEpisodeAvailableOnStreamingService = false;
-                        }
-                    }
-                }
-                else
-                {
-                    var matchingSeason = historySeries.Seasons.FirstOrDefault(historySeason => historySeason.SeasonId == seasonId);
-
-                    if (matchingSeason != null)
-                    {
-                        foreach (var historyEpisode in matchingSeason.EpisodesList)
-                        {
-                            historyEpisode.IsEpisodeAvailableOnStreamingService = false;
-                        }
-                    }
-                }
-            }
-        }
-        finally
-        {
-            _lock.Release();
-        }
-
+        // Fetch everything BEFORE touching availability: episodes are only marked unavailable
+        // (and then removed) for seasons whose data was actually retrieved. Marking first used to
+        // let a failed season fetch delete the series from History.
         // Perform API calls OUTSIDE the lock
         List<SeasonInfo>? seasons = null;
         try
@@ -1733,34 +1791,62 @@ public class HistoryService : IHistoryService, IDisposable
             _logger?.LogWarning(ex, "Failed to refresh series metadata for {SeriesId}", seriesId);
         }
 
+        var fetchedSeasons = new List<(string SeasonId, List<EpisodeInfo> Episodes)>();
+        var complete = true;
         foreach (var season in seasons)
         {
-            var candidateIds = new List<string>();
-            candidateIds.Add(season.Id);
-
             if (!string.IsNullOrEmpty(seasonId) &&
-                !candidateIds.Contains(seasonId, StringComparer.OrdinalIgnoreCase))
+                !string.Equals(season.Id, seasonId, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            foreach (var candidateId in candidateIds)
+            try
             {
-                try
-                {
-                    var seasonEpisodes = await _apiService.GetSeasonDataByIdAsync(candidateId, lang, true);
+                var seasonEpisodes = await _apiService.GetSeasonDataByIdAsync(season.Id, lang, true);
 
-                    if (seasonEpisodes != null && seasonEpisodes.Count > 0)
-                    {
-                        await UpdateWithSeasonDataAsync(seasonEpisodes);
-                        break;
-                    }
-                }
-                catch (Exception ex)
+                if (seasonEpisodes != null && seasonEpisodes.Count > 0)
                 {
-                    _logger?.LogWarning(ex, "Failed to refresh series data for candidate {CandidateId}", candidateId);
+                    fetchedSeasons.Add((season.Id, seasonEpisodes));
+                    continue;
+                }
+                _logger?.LogWarning("Season {SeasonId} returned no episodes", season.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to refresh series data for candidate {CandidateId}", season.Id);
+            }
+            complete = false;
+        }
+
+        // Mark the verified scope unavailable, then let the fetched data mark what still exists.
+        // A complete refresh verifies the whole requested scope (so episodes and seasons that
+        // Crunchyroll removed are dropped); a partial one only the seasons it fetched.
+        await _lock.WaitAsync();
+        try
+        {
+            var historySeries = _historyList.FirstOrDefault(series => series.SeriesId == seriesId);
+            var fetchedIds = fetchedSeasons.Select(season => season.SeasonId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var historySeason in historySeries?.Seasons ?? [])
+            {
+                var inScope = complete
+                    ? string.IsNullOrEmpty(seasonId) || historySeason.SeasonId == seasonId
+                    : historySeason.SeasonId != null && fetchedIds.Contains(historySeason.SeasonId);
+                if (!inScope) continue;
+                foreach (var historyEpisode in historySeason.EpisodesList)
+                {
+                    historyEpisode.IsEpisodeAvailableOnStreamingService = false;
                 }
             }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        foreach (var (_, seasonEpisodes) in fetchedSeasons)
+        {
+            await UpdateWithSeasonDataAsync(seasonEpisodes);
         }
 
         // Final update under lock
@@ -1803,7 +1889,9 @@ public class HistoryService : IHistoryService, IDisposable
         await MatchHistorySeriesWithSonarrAsync(false);
         await MatchHistoryEpisodesWithSonarrAsync(seriesId, false);
 
-        return true;
+        // A partial refresh kept the seasons it could not verify; report it so callers retry
+        // instead of acting on incomplete data.
+        return complete;
     }
 
     // Recover the real Crunchyroll series id from a downloaded episode of a history series whose id

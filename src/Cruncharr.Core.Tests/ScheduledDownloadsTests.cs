@@ -18,7 +18,9 @@ public class ScheduledDownloadsTests : IDisposable
     private readonly List<EpisodeInfo> _queued = [];
     private readonly HistorySeries _series = new()
     {
-        SeriesId = "SERIES", SeriesTitle = "Example", SonarrSeriesId = "10",
+        SeriesId = "SERIES",
+        SeriesTitle = "Example",
+        SonarrSeriesId = "10",
         Seasons = [new HistorySeason { SeasonId = "S1", SeasonNum = "1", EpisodesList = [] }]
     };
 
@@ -40,8 +42,13 @@ public class ScheduledDownloadsTests : IDisposable
         _sonarr.Object, _config, Path.Combine(_root, "subscriptions.json"));
     private HistoryEpisode Episode(string id, params string[] dubs)
     {
-        var episode = new HistoryEpisode { EpisodeId = id, Episode = "1", IsEpisodeAvailableOnStreamingService = true,
-            HistoryEpisodeAvailableDubLang = dubs.Length > 0 ? dubs.ToList() : ["ja-JP"] };
+        var episode = new HistoryEpisode
+        {
+            EpisodeId = id,
+            Episode = "1",
+            IsEpisodeAvailableOnStreamingService = true,
+            HistoryEpisodeAvailableDubLang = dubs.Length > 0 ? dubs.ToList() : ["ja-JP"]
+        };
         _series.Seasons[0].EpisodesList.Add(episode);
         return episode;
     }
@@ -147,6 +154,28 @@ public class ScheduledDownloadsTests : IDisposable
     }
 
     [Fact]
+    public async Task UnsavedQueueAdmissionIsRetriedInsteadOfMarkedHandled()
+    {
+        var persisted = false;
+        _queue.Setup(q => q.AddToQueue(It.IsAny<EpisodeInfo>())).Returns<EpisodeInfo>(e =>
+        {
+            _queued.Add(e);
+            return new QueueAddResult(true, new QueueItem { Episode = e }, persisted);
+        });
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        Episode("NEW");
+
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Contains("could not be saved", JObject.FromObject(service.GetStatus())["LastError"]!.Value<string>());
+
+        persisted = true;
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        await Service().RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Equal(["NEW", "NEW"], _queued.Select(e => e.Id));
+    }
+
+    [Fact]
     public async Task SonarrFailureDoesNotQueueOrConsumePendingReleases()
     {
         _config.Sonarr.Enabled = true;
@@ -205,6 +234,82 @@ public class ScheduledDownloadsTests : IDisposable
         await service.RunCheckAsync(false, TestContext.Current.CancellationToken);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.ConfigureAsync(true, 15, TestContext.Current.CancellationToken));
         Assert.Equal("broken", File.ReadAllText(path));
+    }
+
+    // Live 2026-10-30 (Firefly Wedding, HORROR COLLECTOR, ...): episodes 2-3 were out in Japanese
+    // when the user subscribed with English selected, so the baseline marked them handled and their
+    // English dubs would never have been queued.
+    [Fact]
+    public async Task EpisodeAwaitingTheSelectedDubAtSubscribeIsQueuedOnceTheDubArrives()
+    {
+        _config.Download.DefaultAudio = "en-US";
+        var episode = Episode("JP-ONLY", "ja-JP");
+        Episode("HAS-DUB", "ja-JP", "en-US"); // released with the dub already: back catalog, not queued
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+
+        var waiting = await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Empty(_queued);
+        Assert.Equal((1, 1), (waiting!.Shows[0].WaitingForLanguage, waiting.Shows[0].MissingFromBaseline));
+
+        episode.HistoryEpisodeAvailableDubLang.Add("en-US");
+        await Service().RunCheckAsync(true, TestContext.Current.CancellationToken); // across a restart
+        await Service().RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Equal("JP-ONLY", Assert.Single(_queued).Id);
+        Assert.Equal(["en-US"], _queued[0].SelectedDubs);
+    }
+
+    [Fact]
+    public async Task RunSummaryExplainsEveryEpisodeThatWasNotAdded()
+    {
+        Episode("OLD"); // released before subscribing, no file anywhere
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        Episode("NEW");
+        Episode("DUB-LATER", "en-US"); // default audio is ja-JP; only English is out so far
+        Episode("FUTURE").EpisodeCrPremiumAirDate = DateTime.UtcNow.AddDays(1);
+
+        var summary = await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+
+        var show = Assert.Single(summary!.Shows);
+        Assert.Equal((1, 1, 1, 1, 0), (show.Added, show.MissingFromBaseline, show.WaitingForLanguage, show.NotReleased, summary.Failed));
+        Assert.Null(show.Error);
+        // The same summary survives for the Settings page.
+        Assert.Equal(1, JObject.FromObject(service.GetStatus())["LastRunSummary"]!["Shows"]![0]!["MissingFromBaseline"]!.Value<int>());
+    }
+
+    [Fact]
+    public async Task RunSummaryReportsAPartialFailure()
+    {
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        _history.Setup(h => h.CrUpdateSeriesAsync("SERIES", "")).ReturnsAsync(false);
+
+        var summary = await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, summary!.Failed);
+        Assert.Contains("Could not refresh", summary.Shows[0].Error);
+    }
+
+    [Fact]
+    public async Task BackfillQueuesEpisodesMissingSinceSubscribingExactlyOnce()
+    {
+        Episode("OLD");
+        var service = Service();
+        await service.SubscribeAsync("SERIES", true, TestContext.Current.CancellationToken);
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Empty(_queued);
+
+        var summary = await service.BackfillAsync("SERIES", TestContext.Current.CancellationToken);
+        Assert.True(summary.Backfill);
+        Assert.Equal(1, summary.Added);
+        Assert.Equal("OLD", Assert.Single(_queued).Id);
+
+        // Scheduled checks, including after a restart, do not queue it again.
+        await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+        await Service().RunCheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Single(_queued);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.BackfillAsync("OTHER", TestContext.Current.CancellationToken));
     }
 
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }

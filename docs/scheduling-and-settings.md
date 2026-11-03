@@ -23,6 +23,13 @@ Local files and freshly checked Sonarr files are skipped. A failed provider refr
 or Sonarr check leaves the episode pending for retry. Settings and episode baselines
 survive restarts in `subscriptions.json` beside the main configuration file.
 
+**Automatically add new shows** (Settings → Scheduler) subscribes a series when its
+first episode (season 1, episode 1) is released in one of the chosen languages. The
+series is scheduled in that language, its released episodes are queued at the same
+check, and the download registers it in Sonarr. Only shows that premiere after the
+option is turned on are added, each show at most once; removing its schedule is
+respected. New seasons of shows you do not follow are not added.
+
 The older **History → Auto Refresh Interval** is a separate bulk operation on all
 History entries. Its default is 0 (disabled). Its auto-add option can queue missing
 back-catalog episodes; use Scheduler subscriptions for new releases only. Adding a

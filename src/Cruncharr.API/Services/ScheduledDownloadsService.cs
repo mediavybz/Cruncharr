@@ -16,16 +16,19 @@ public sealed class ScheduledDownloadsService
     private readonly ISonarrService _sonarr;
     private readonly CruncharrConfig _config;
     private readonly ISonarrAcquisitionService? _sonarrRequests;
+    private readonly ICrunchyrollApiService? _api;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SchedulerState _state;
     private readonly string? _loadError;
     public bool IsRunning { get; private set; }
 
     public ScheduledDownloadsService(IHistoryService history, IQueueService queue,
-        ICrunchyrollAuthService auth, ISonarrService sonarr, CruncharrConfig config, string? statePath = null, ISonarrAcquisitionService? sonarrRequests = null)
+        ICrunchyrollAuthService auth, ISonarrService sonarr, CruncharrConfig config, string? statePath = null, ISonarrAcquisitionService? sonarrRequests = null,
+        ICrunchyrollApiService? api = null)
     {
         (_history, _queue, _auth, _sonarr, _config) = (history, queue, auth, sonarr, config);
         _sonarrRequests = sonarrRequests;
+        _api = api;
         var configPath = CruncharrConfig.ConfigFilePath;
         _path = statePath ?? Path.Combine(Path.GetDirectoryName(configPath) ?? ".", "subscriptions.json");
         // A corrupt subscription file must not reset the baseline and enqueue old episodes.
@@ -59,7 +62,9 @@ public sealed class ScheduledDownloadsService
             state.LastError,
             state.LastQueuedCount,
             state.LastRunSummary,
-            NextRun = state.Enabled && _config.History.Enabled && state.Subscriptions.Any(s => s.Enabled)
+            state.AutoAddNewSeries,
+            state.AutoAddLanguages,
+            NextRun = state.Enabled && _config.History.Enabled && HasWork(state)
                 ? state.LastRun?.AddMinutes(state.IntervalMinutes) ?? DateTimeOffset.UtcNow : (DateTimeOffset?)null,
             HistoryEnabled = _config.History.Enabled,
             CanDownload = _auth.IsAuthenticated && _auth.Profile.HasPremium ||
@@ -79,7 +84,9 @@ public sealed class ScheduledDownloadsService
         _state = state; // Publish only after persistence succeeds.
     }
 
-    public async Task ConfigureAsync(bool enabled, int intervalMinutes, CancellationToken ct)
+    // autoAddNewSeries and autoAddLanguages are left unchanged when null.
+    public async Task ConfigureAsync(bool enabled, int intervalMinutes, CancellationToken ct,
+        bool? autoAddNewSeries = null, List<string>? autoAddLanguages = null)
     {
         if (intervalMinutes is < 1 or > 1440) throw new ArgumentException("Check interval must be 1–1440 minutes.");
         await _gate.WaitAsync(ct);
@@ -88,10 +95,27 @@ public sealed class ScheduledDownloadsService
             var state = CopyState();
             state.Enabled = enabled;
             state.IntervalMinutes = intervalMinutes;
+            if (autoAddLanguages != null)
+            {
+                state.AutoAddLanguages = autoAddLanguages.Where(l => !string.IsNullOrWhiteSpace(l))
+                    .Select(l => l.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            if (autoAddNewSeries == true && state.AutoAddLanguages.Count == 0)
+                throw new ArgumentException("Choose at least one language for new shows.");
+            if (autoAddNewSeries.HasValue && autoAddNewSeries.Value != state.AutoAddNewSeries)
+            {
+                state.AutoAddNewSeries = autoAddNewSeries.Value;
+                // Only shows that premiere after the option is turned on are added, so enabling it
+                // never subscribes the current season's back catalog.
+                state.AutoAddSince = autoAddNewSeries.Value ? DateTimeOffset.UtcNow : null;
+            }
             Save(state);
         }
         finally { _gate.Release(); }
     }
+
+    private static bool HasWork(SchedulerState state) =>
+        state.AutoAddNewSeries || state.Subscriptions.Any(s => s.Enabled);
 
     public async Task SubscribeAsync(string seriesId, bool enabled, CancellationToken ct)
     {
@@ -104,10 +128,8 @@ public sealed class ScheduledDownloadsService
             {
                 if (!enabled) return;
                 if (!_config.History.Enabled) throw new ArgumentException("Enable History before scheduling a series.");
-                if (!await _history.CrUpdateSeriesAsync(seriesId, ""))
-                    throw new ArgumentException("Could not load this series. No schedule was created; try again.");
-                var series = (await _history.GetHistorySeriesAsync()).FirstOrDefault(s => s.SeriesId == seriesId)
-                    ?? throw new ArgumentException("Series was not found in History.");
+                var series = await LoadHistorySeriesAsync(seriesId)
+                    ?? throw new ArgumentException("Could not load this series. No schedule was created; try again.");
                 subscription = new SeriesSubscription { SeriesId = seriesId, Title = series.SeriesTitle ?? seriesId };
                 subscription.HandledEpisodeIds = series.Seasons.SelectMany(s => s.EpisodesList)
                     .Where(e => IsReleased(e, subscription.CreatedAt))
@@ -119,6 +141,11 @@ public sealed class ScheduledDownloadsService
         }
         finally { _gate.Release(); }
     }
+
+    private async Task<HistorySeries?> LoadHistorySeriesAsync(string seriesId) =>
+        await _history.CrUpdateSeriesAsync(seriesId, "")
+            ? (await _history.GetHistorySeriesAsync()).FirstOrDefault(s => s.SeriesId == seriesId)
+            : null;
 
     public async Task RemoveAsync(string seriesId, CancellationToken ct)
     {
@@ -140,8 +167,7 @@ public sealed class ScheduledDownloadsService
     public async Task<SchedulerRunSummary?> RunCheckAsync(bool force, CancellationToken ct)
     {
         if (_loadError != null) { if (force) throw new InvalidOperationException(_loadError); return null; }
-        if (!force && (!_state.Enabled || !_config.History.Enabled ||
-            !_state.Subscriptions.Any(s => s.Enabled) ||
+        if (!force && (!_state.Enabled || !_config.History.Enabled || !HasWork(_state) ||
             _state.LastRun?.AddMinutes(_state.IntervalMinutes) > DateTimeOffset.UtcNow)) return null;
         if (!await _gate.WaitAsync(0, ct))
         {
@@ -156,6 +182,7 @@ public sealed class ScheduledDownloadsService
         try
         {
             if (!_config.History.Enabled) throw new InvalidOperationException("History is disabled.");
+            if (state.AutoAddNewSeries) await AddNewSeriesAsync(state, summary, ct);
             foreach (var subscription in state.Subscriptions.Where(s => s.Enabled))
             {
                 ct.ThrowIfCancellationRequested();
@@ -174,6 +201,51 @@ public sealed class ScheduledDownloadsService
         }
         return summary;
     }
+
+    // "Automatically add new shows": a series whose first episode (season 1, episode 1) is released
+    // in one of the chosen languages after the option was turned on gets a subscription with those
+    // languages, so this same check queues it and the download registers it in Sonarr. A show is
+    // added at most once; removing its schedule afterwards is respected.
+    private async Task AddNewSeriesAsync(SchedulerState state, SchedulerRunSummary summary, CancellationToken ct)
+    {
+        if (_api == null || state.AutoAddSince is not { } since) return;
+        var premium = _auth.IsAuthenticated && _auth.Profile.HasPremium;
+        if (!premium && (!_config.Sonarr.Enabled || !_config.Sonarr.SearchWithoutPremium || _sonarrRequests == null))
+        {
+            summary.AutoAddError = "New shows were not checked: sign in with Premium or enable Sonarr requests.";
+            return;
+        }
+        var feed = await _api.GetNewEpisodesAsync("en-US", 200, true, ct);
+        var premieres = (feed?.Data ?? [])
+            .Where(e => IsSeriesPremiere(e.EpisodeMetadata) && !string.IsNullOrEmpty(e.EpisodeMetadata.SeriesId) &&
+                        new DateTimeOffset(DateTime.SpecifyKind(e.EpisodeMetadata.PremiumAvailableDate, DateTimeKind.Utc)) >= since &&
+                        state.AutoAddLanguages.Contains(e.EpisodeMetadata.AudioLocale ?? "", StringComparer.OrdinalIgnoreCase))
+            .GroupBy(e => e.EpisodeMetadata.SeriesId!)
+            .Where(g => !state.AutoAddedSeriesIds.Contains(g.Key) && state.Subscriptions.All(s => s.SeriesId != g.Key))
+            .ToList();
+        foreach (var premiere in premieres)
+        {
+            ct.ThrowIfCancellationRequested();
+            var title = premiere.First().EpisodeMetadata.SeriesTitle ?? premiere.Key;
+            try
+            {
+                var series = await LoadHistorySeriesAsync(premiere.Key)
+                    ?? throw new InvalidOperationException($"Could not load {title}; it will be retried.");
+                var languages = premiere.Select(e => e.EpisodeMetadata.AudioLocale!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                await _history.SetSeriesSettingsOverrideAsync(premiere.Key, series.HistorySeriesVideoQualityOverride,
+                    languages, series.HistorySeriesSoftSubsOverride);
+                // No baseline: everything already released in these languages belongs to the new show.
+                state.Subscriptions.Add(new SeriesSubscription { SeriesId = premiere.Key, Title = series.SeriesTitle ?? title });
+                state.AutoAddedSeriesIds.Add(premiere.Key);
+                summary.AutoAdded.Add(series.SeriesTitle ?? title);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { summary.AutoAddError = ex.Message; }
+        }
+    }
+
+    internal static bool IsSeriesPremiere(Cruncharr.Core.Services.CrBrowseEpisodeMetaData episode) =>
+        !episode.IsClip && episode.SeasonNumber == 1 && (episode.Episode?.Trim() == "1" || episode.EpisodeCount == 1);
 
     // Explicit, user-triggered catch-up for one subscription: queues released episodes that have
     // no local or Sonarr file, including those the subscription baseline marked handled. Scheduled
@@ -320,6 +392,10 @@ public sealed class SchedulerState
     public string? LastError { get; set; }
     public int LastQueuedCount { get; set; }
     public SchedulerRunSummary? LastRunSummary { get; set; }
+    public bool AutoAddNewSeries { get; set; }
+    public List<string> AutoAddLanguages { get; set; } = [];
+    public DateTimeOffset? AutoAddSince { get; set; }
+    public HashSet<string> AutoAddedSeriesIds { get; set; } = [];
     public List<SeriesSubscription> Subscriptions { get; set; } = [];
 }
 
@@ -329,7 +405,9 @@ public sealed class SchedulerRunSummary
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset FinishedAt { get; set; }
     public int Added => Shows.Sum(s => s.Added);
-    public int Failed => Shows.Count(s => s.Error != null);
+    public int Failed => Shows.Count(s => s.Error != null) + (AutoAddError != null ? 1 : 0);
+    public List<string> AutoAdded { get; set; } = [];
+    public string? AutoAddError { get; set; }
     public List<SubscriptionRunResult> Shows { get; set; } = [];
 }
 

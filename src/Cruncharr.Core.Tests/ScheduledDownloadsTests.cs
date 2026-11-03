@@ -312,5 +312,64 @@ public class ScheduledDownloadsTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => service.BackfillAsync("OTHER", TestContext.Current.CancellationToken));
     }
 
+    // "Automatically add new shows" (Settings -> Scheduler): a series whose season 1 episode 1 is
+    // released in a chosen language after the option was turned on is subscribed with that language.
+    [Fact]
+    public async Task NewShowInAChosenLanguageIsSubscribedAndQueuedOnce()
+    {
+        var newShow = new HistorySeries
+        {
+            SeriesId = "NEW",
+            SeriesTitle = "New Show",
+            Seasons = [new HistorySeason { SeasonId = "N1", SeasonNum = "1", EpisodesList =
+                [new HistoryEpisode { EpisodeId = "NEW-E1", Episode = "1", IsEpisodeAvailableOnStreamingService = true, HistoryEpisodeAvailableDubLang = ["ja-JP", "en-US"] }] }]
+        };
+        _history.Setup(h => h.CrUpdateSeriesAsync(It.IsAny<string>(), "")).ReturnsAsync(true);
+        _history.Setup(h => h.GetHistorySeriesAsync()).ReturnsAsync(() => [_series, newShow]);
+        _history.Setup(h => h.SetSeriesSettingsOverrideAsync("NEW", It.IsAny<string?>(), It.IsAny<List<string>?>(), It.IsAny<List<string>?>()))
+            .Callback<string, string?, List<string>?, List<string>?>((_, _, dubs, _) => newShow.HistorySeriesDubLangOverride = dubs!)
+            .Returns(Task.CompletedTask);
+        var api = new Mock<ICrunchyrollApiService>();
+        var service = new ScheduledDownloadsService(_history.Object, _queue.Object, _auth.Object, _sonarr.Object, _config,
+            Path.Combine(_root, "subscriptions.json"), api: api.Object);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.ConfigureAsync(true, 15, TestContext.Current.CancellationToken, autoAddNewSeries: true));
+        await service.ConfigureAsync(true, 15, TestContext.Current.CancellationToken, autoAddNewSeries: true, autoAddLanguages: ["en-US"]);
+
+        var after = DateTime.UtcNow.AddMinutes(1);
+        static Cruncharr.Core.Services.CrBrowseEpisode Release(string series, string audio, double season, DateTime released) => new()
+        {
+            Id = $"{series}-{audio}",
+            EpisodeMetadata = new Cruncharr.Core.Services.CrBrowseEpisodeMetaData
+            { SeriesId = series, SeriesTitle = series, AudioLocale = audio, SeasonNumber = season, Episode = "1", PremiumAvailableDate = released }
+        };
+        api.Setup(a => a.GetNewEpisodesAsync("en-US", It.IsAny<int>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Cruncharr.Core.Services.CrBrowseEpisodeBase
+            {
+                Data =
+            [
+                Release("NEW", "en-US", 1, after),
+                Release("OLD", "en-US", 1, after.AddDays(-2)),   // premiered before the option was turned on
+                Release("JAPANESE", "ja-JP", 1, after),          // not a chosen language
+                Release("SEQUEL", "en-US", 2, after)             // a new season, not a new show
+            ]
+            });
+
+        var summary = await service.RunCheckAsync(true, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["New Show"], summary!.AutoAdded);
+        Assert.Null(summary.AutoAddError);
+        Assert.Equal(["en-US"], newShow.HistorySeriesDubLangOverride);
+        var queued = Assert.Single(_queued);
+        Assert.Equal(("NEW-E1", "en-US"), (queued.Id, queued.SelectedDubs![0]));
+        foreach (var skipped in new[] { "OLD", "JAPANESE", "SEQUEL" })
+            _history.Verify(h => h.CrUpdateSeriesAsync(skipped, ""), Times.Never);
+
+        // Never added twice, and removing the schedule is respected.
+        Assert.Empty((await service.RunCheckAsync(true, TestContext.Current.CancellationToken))!.AutoAdded);
+        await service.RemoveAsync("NEW", TestContext.Current.CancellationToken);
+        Assert.Empty((await service.RunCheckAsync(true, TestContext.Current.CancellationToken))!.AutoAdded);
+        Assert.True(JObject.FromObject(service.GetStatus())["AutoAddNewSeries"]!.Value<bool>());
+    }
+
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

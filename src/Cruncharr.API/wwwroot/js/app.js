@@ -3370,6 +3370,9 @@
             const shows = summary.shows || [];
             const missing = shows.reduce((total, show) => total + (show.missingFromBaseline || 0), 0);
             const noun = count => count === 1 ? 'episode' : 'episodes';
+            if (summary.autoAdded?.length) {
+                showToast(`New shows added: ${summary.autoAdded.join(', ')}`, 'success');
+            }
             if (summary.failed) {
                 showToast(`${summary.added} ${noun(summary.added)} added, but ${summary.failed} of ${shows.length} shows could not be checked. See Settings → Scheduler.`, 'error');
             } else if (summary.added) {
@@ -3414,8 +3417,12 @@
                         <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added; use <strong>Download missing</strong> to also queue older episodes that have no file. Series and season language settings apply; existing Sonarr files are skipped.</p>
                         <div class="setting-row"><div><div class="setting-label">Enable scheduler</div><div class="setting-desc">Pause or resume checks for all subscriptions.</div></div><label class="toggle-switch"><input id="setting-scheduler-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                         <div class="setting-row"><div><div class="setting-label">Check every (minutes)</div><div class="setting-desc">New releases enter the queue at the next check. Default: 15 minutes.</div></div><input class="form-input w-100" id="setting-scheduler-interval" type="number" min="1" max="1440" value="${state.intervalMinutes}"></div>
+                        <div class="setting-row"><div><div class="setting-label">Automatically add new shows</div><div class="setting-desc">When a new series releases its first episode in one of the languages below, schedule it in that language and send it to Sonarr. Only shows that premiere after you turn this on are added.</div></div><label class="toggle-switch"><input id="setting-scheduler-autoadd" type="checkbox" ${state.autoAddNewSeries ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+                        <div class="setting-row"><div><div class="setting-label">Languages for new shows</div><div class="setting-desc">Hold Ctrl or Cmd to choose more than one.</div></div><select class="form-select" id="setting-scheduler-autoadd-langs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}" ${(state.autoAddLanguages || []).includes(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</select></div>
                         <p role="status" id="scheduler-summary">${escapeHtml(schedulerStatusText(state))}</p>
                         ${state.lastRun ? `<p class="setting-desc">Last check: ${escapeHtml(new Date(state.lastRun).toLocaleString())} · ${state.lastQueuedCount} added to queue</p>` : ''}
+                        ${state.lastRunSummary?.autoAdded?.length ? `<p class="setting-desc">New shows added: ${state.lastRunSummary.autoAdded.map(title => escapeHtml(title)).join(', ')}</p>` : ''}
+                        ${state.lastRunSummary?.autoAddError ? `<p role="alert">${escapeHtml(state.lastRunSummary.autoAddError)}</p>` : ''}
                         ${state.lastRunSummary?.shows?.length ? `<ul class="setting-desc">${state.lastRunSummary.shows.map(show => `<li${show.error ? ' role="alert"' : ''}><strong>${escapeHtml(show.title)}</strong>: ${escapeHtml(schedulerShowLine(show))}</li>`).join('')}</ul>` : ''}
                         ${state.lastError ? `<p role="alert">${escapeHtml(state.lastError)}</p>` : ''}
                         <button class="header-btn" id="btn-scheduler-run" onclick="triggerScheduler()">Run now</button>
@@ -3428,9 +3435,12 @@
             const interval = document.getElementById('setting-scheduler-interval');
             if (!interval || !interval.reportValidity()) return false;
             try {
+                const languages = document.getElementById('setting-scheduler-autoadd-langs');
                 const state = await schedulerRequest('settings', 'POST', {
                     enabled: document.getElementById('setting-scheduler-enabled').checked,
-                    intervalMinutes: Number(interval.value)
+                    intervalMinutes: Number(interval.value),
+                    autoAddNewSeries: document.getElementById('setting-scheduler-autoadd')?.checked ?? false,
+                    autoAddLanguages: languages ? [...languages.selectedOptions].map(option => option.value) : []
                 });
                 const summary = document.getElementById('scheduler-summary');
                 if (summary) summary.textContent = schedulerStatusText(state);

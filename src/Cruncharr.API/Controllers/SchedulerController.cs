@@ -67,7 +67,8 @@ public class SchedulerController : ControllerBase
     {
         try
         {
-            await _subscriptions.ConfigureAsync(request.Enabled, request.IntervalMinutes, HttpContext.RequestAborted);
+            await _subscriptions.ConfigureAsync(request.Enabled, request.IntervalMinutes, HttpContext.RequestAborted,
+                request.AutoAddNewSeries, request.AutoAddLanguages);
             return Ok(_subscriptions.GetStatus());
         }
         catch (ArgumentException ex) { return BadRequest(new { Message = ex.Message }); }
@@ -96,5 +97,5 @@ public class SchedulerController : ControllerBase
     }
 }
 
-public record SchedulerSettingsRequest(bool Enabled, int IntervalMinutes);
+public record SchedulerSettingsRequest(bool Enabled, int IntervalMinutes, bool? AutoAddNewSeries = null, List<string>? AutoAddLanguages = null);
 public record SubscriptionRequest(bool Enabled);

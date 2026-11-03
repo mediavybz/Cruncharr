@@ -28,9 +28,17 @@ public sealed class SonarrAcquisitionTests : IDisposable
         Directory.CreateDirectory(_directory);
         _config.Sonarr = new SonarrConfig { Enabled = true, Host = "sonarr.test", Port = 8989, ApiKey = "fixture-key" };
         _config.Download.OutputDirectory = _directory;
-        _episodes = Enumerable.Range(1, 3).Select(n => new EpisodeInfo {
-            Id = $"GEPISODE{n}", SeriesId = "GSERIES", SeriesTitle = "The Example", SeasonId = "GSEASON",
-            SeasonTitle = "The Example", SeasonNumber = 1, EpisodeNumber = n, Episode = n.ToString(), Title = $"An Adventure with Character {n}"
+        _episodes = Enumerable.Range(1, 3).Select(n => new EpisodeInfo
+        {
+            Id = $"GEPISODE{n}",
+            SeriesId = "GSERIES",
+            SeriesTitle = "The Example",
+            SeasonId = "GSEASON",
+            SeasonTitle = "The Example",
+            SeasonNumber = 1,
+            EpisodeNumber = n,
+            Episode = n.ToString(),
+            Title = $"An Adventure with Character {n}"
         }).ToList();
         _api.Setup(a => a.ParseEpisodeByIdAsync(It.IsAny<string>(), null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync((string id, string? _, bool _, CancellationToken _) => _episodes.FirstOrDefault(e => e.Id == id));
@@ -146,7 +154,7 @@ public sealed class SonarrAcquisitionTests : IDisposable
         var command = Assert.Single(_server.Writes, w => w.Path == "command").Body;
         Assert.Equal("ManualImport", command["name"]!.Value<string>());
         Assert.Equal(42, command["files"]![0]!["seriesId"]!.Value<int>());
-        Assert.Equal(new[]{101}, command["files"]![0]!["episodeIds"]!.Values<int>());
+        Assert.Equal(new[] { 101 }, command["files"]![0]!["episodeIds"]!.Values<int>());
         Assert.Equal("/incoming/Example/episode.mkv", command["files"]![0]!["path"]!.Value<string>());
         Assert.Equal("Copy", command["importMode"]!.Value<string>());
 
@@ -349,8 +357,16 @@ public sealed class SonarrAcquisitionTests : IDisposable
         public bool FailReads { get; set; }
         public bool RejectImport { get; set; }
         public List<(string Method, string Path, JToken Body)> Writes { get; } = [];
-        public JObject Series() => new() { ["id"] = 42, ["tvdbId"] = 100, ["title"] = "The Example",
-            ["path"] = "/library/The Example", ["qualityProfileId"] = 9, ["monitored"] = true, ["tags"] = new JArray(7) };
+        public JObject Series() => new()
+        {
+            ["id"] = 42,
+            ["tvdbId"] = 100,
+            ["title"] = "The Example",
+            ["path"] = "/library/The Example",
+            ["qualityProfileId"] = 9,
+            ["monitored"] = true,
+            ["tags"] = new JArray(7)
+        };
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -378,12 +394,20 @@ public sealed class SonarrAcquisitionTests : IDisposable
             }
             else if (path == "qualityprofile") result = JArray.Parse("[{\"id\":9,\"name\":\"Anime\"}]");
             else if (path == "rootfolder") result = JArray.Parse("[{\"id\":1,\"path\":\"/library\"}]");
-            else if (path == "episode") result = JArray.FromObject(Enumerable.Range(1, 3).Select(n => new {
-                id = 100 + n, seriesId = 42, episodeNumber = n, seasonNumber = 1, absoluteEpisodeNumber = n,
-                title = $"An Adventure with Character {n}", hasFile = Files.Contains(100 + n), monitored = true
+            else if (path == "episode") result = JArray.FromObject(Enumerable.Range(1, 3).Select(n => new
+            {
+                id = 100 + n,
+                seriesId = 42,
+                episodeNumber = n,
+                seasonNumber = 1,
+                absoluteEpisodeNumber = n,
+                title = $"An Adventure with Character {n}",
+                hasFile = Files.Contains(100 + n),
+                monitored = true
             }));
             else if (path == "episode/monitor") result = new JArray();
-            else if (path == "manualimport" && method == "GET") result = new JArray(new JObject {
+            else if (path == "manualimport" && method == "GET") result = new JArray(new JObject
+            {
                 ["path"] = Uri.UnescapeDataString(request.RequestUri.Query.Split("folder=")[1].Split('&')[0]),
                 ["quality"] = JObject.Parse("{\"quality\":{\"id\":5},\"revision\":{\"version\":1}}"),
                 ["languages"] = JArray.Parse("[{\"id\":8,\"name\":\"Japanese\"}]")

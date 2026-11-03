@@ -116,11 +116,27 @@ public class QueueController : ControllerBase
             if (!episode.IsMusicVideo && _sonarrRequests != null && _config.Sonarr.Enabled && (!premium || _config.Sonarr.AutoAddSeries))
                 sonarrState = await _sonarrRequests.PrepareAsync(episode, premium, request.SonarrTvdbId, cancellationToken);
             if (sonarrState?.AlreadyInSonarr == true)
-                return Ok(new { Added = false, Destination = "sonarr", Message = sonarrState.Status,
-                    EpisodeId = request.EpisodeId, sonarrState.SonarrSeriesId, sonarrState.EpisodeCount, sonarrState.EpisodeFileCount });
+                return Ok(new
+                {
+                    Added = false,
+                    Destination = "sonarr",
+                    Message = sonarrState.Status,
+                    EpisodeId = request.EpisodeId,
+                    sonarrState.SonarrSeriesId,
+                    sonarrState.EpisodeCount,
+                    sonarrState.EpisodeFileCount
+                });
             if (!premium)
-                return Ok(new { Added = true, Destination = "sonarr", Message = sonarrState!.Status,
-                    EpisodeId = request.EpisodeId, sonarrState.SonarrSeriesId, sonarrState.EpisodeCount, sonarrState.EpisodeFileCount });
+                return Ok(new
+                {
+                    Added = true,
+                    Destination = "sonarr",
+                    Message = sonarrState!.Status,
+                    EpisodeId = request.EpisodeId,
+                    sonarrState.SonarrSeriesId,
+                    sonarrState.EpisodeCount,
+                    sonarrState.EpisodeFileCount
+                });
 
             var result = _queueService.AddToQueue(episode);
             _logger.LogInformation(result.Added

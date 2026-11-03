@@ -556,7 +556,11 @@ public class ConfigController : ControllerBase
         if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path)) return NotFound();
         var mime = Path.GetExtension(path).ToLowerInvariant() switch
         {
-            ".jpg" or ".jpeg" => "image/jpeg", ".png" => "image/png", ".webp" => "image/webp", ".gif" => "image/gif", _ => null
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => null
         };
         if (mime == null) return BadRequest(new { Message = "Use a JPG, PNG, WebP or GIF background image." });
         return PhysicalFile(Path.GetFullPath(path), mime);

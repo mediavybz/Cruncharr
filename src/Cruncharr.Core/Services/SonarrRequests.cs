@@ -160,10 +160,15 @@ public partial class SonarrService
             var checkedFile = checkedFiles.Single();
             var rejections = checkedFile["rejections"]?.Select(r => (string?)r["reason"]).Where(r => !string.IsNullOrEmpty(r)).ToList() ?? [];
             if (rejections.Count > 0) throw new InvalidOperationException("Sonarr import: " + string.Join("; ", rejections));
-            body = new { name = "ManualImport", importMode = "Copy", files = new[] { new {
+            body = new
+            {
+                name = "ManualImport",
+                importMode = "Copy",
+                files = new[] { new {
                 path, seriesId, episodeIds = new[] { episodeId.Value }, quality = checkedFile["quality"], languages = checkedFile["languages"],
                 releaseGroup = checkedFile["releaseGroup"], indexerFlags = checkedFile["indexerFlags"], releaseType = checkedFile["releaseType"]
-            } } };
+            } }
+            };
         }
         var command = await RequestJsonAsync(HttpMethod.Post, "command", config, body, cancellationToken);
         return (int)command["id"]!;

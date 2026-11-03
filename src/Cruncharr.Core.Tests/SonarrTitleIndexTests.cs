@@ -7,13 +7,13 @@ public class SonarrTitleIndexTests
     [Fact]
     public void ArcLabelsAndCompoundChapterNamesCanBeVerifiedWithoutHardcodedSeriesIds()
     {
-        var series=new SonarrSeries {Id=1,Title="Monogatari"};
+        var series = new SonarrSeries { Id = 1, Title = "Monogatari" };
         Assert.Single(new SonarrTitleIndex([series]).Candidates("Tsukimonogatari"));
         Assert.Single(new SonarrTitleIndex([series]).Candidates("Nekomonogatari Black"));
-        Assert.True(SonarrTitleIndex.EpisodesConfirmIdentity(["Distant Memories","Haruka's Heart"],
-            ["Migiwa Kazuha Arc I: Distant Memories","Migiwa Kazuha Arc IV: Haruka's Heart"]));
+        Assert.True(SonarrTitleIndex.EpisodesConfirmIdentity(["Distant Memories", "Haruka's Heart"],
+            ["Migiwa Kazuha Arc I: Distant Memories", "Migiwa Kazuha Arc IV: Haruka's Heart"]));
         Assert.False(SonarrTitleIndex.EpisodesConfirmIdentity(["Distant Memories"],
-            ["First Arc I: Distant Memories","Second Arc I: Distant Memories"]));
+            ["First Arc I: Distant Memories", "Second Arc I: Distant Memories"]));
     }
 
     [Fact]
@@ -87,8 +87,13 @@ public class SonarrTitleIndexTests
     [Fact]
     public void SeasonAliasCanLinkMultipleCrunchyrollListingsToOneSonarrSeries()
     {
-        var owned = new SonarrSeries { Id = 49, TvdbId = 264053, Title = "Senran Kagura",
-            AlternateTitles = [new() { Title = "Senran Kagura Shinovi Master - Tokyo Youma-hen" }] };
+        var owned = new SonarrSeries
+        {
+            Id = 49,
+            TvdbId = 264053,
+            Title = "Senran Kagura",
+            AlternateTitles = [new() { Title = "Senran Kagura Shinovi Master - Tokyo Youma-hen" }]
+        };
         Assert.Same(owned, new SonarrTitleIndex([owned]).FindExact("Senran Kagura"));
         Assert.Same(owned, SonarrTitleIndex.ResolveLookup("SENRAN KAGURA SHINOVI MASTER", [owned],
             [new SonarrSeries { TvdbId = 264053, Title = "Senran Kagura" }]));

@@ -67,7 +67,9 @@ public sealed class SonarrLibraryVerificationService(
             Connection = connectionScope,
             Series = library.OrderBy(s => s.Id).Select(s => new
             {
-                s.Id, s.TvdbId, Titles = SonarrTitleIndex.Titles(s).Order(StringComparer.Ordinal).ToArray()
+                s.Id,
+                s.TvdbId,
+                Titles = SonarrTitleIndex.Titles(s).Order(StringComparer.Ordinal).ToArray()
             })
         });
         State state;

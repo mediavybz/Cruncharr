@@ -35,7 +35,11 @@ public class AuthRecoveryTests
         using var scope = new AuthScope();
         File.WriteAllText(scope.TokenFile, JsonConvert.SerializeObject(new CrToken
         {
-            access_token = "old", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(-5)
+            access_token = "old",
+            refresh_token = "saved",
+            account_id = "acct",
+            device_id = "dev",
+            expires = DateTime.Now.AddMinutes(-5)
         }));
         scope.SetToken(new CrToken { refresh_token = "sso", device_id = "dev" });
         var refreshTokens = new List<string?>();

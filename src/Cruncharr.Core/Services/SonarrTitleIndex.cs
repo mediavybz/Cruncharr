@@ -15,18 +15,18 @@ public sealed class SonarrTitleIndex
     public SonarrTitleIndex(IEnumerable<SonarrSeries> series)
     {
         foreach (var item in series)
-        foreach (var title in Titles(item))
-        {
-            Add(_exact, Normalize(title), item);
-            Add(_editions, Normalize(WithoutYear(title)), item);
-            foreach (var key in CandidateKeys(title)) Add(_shortened, key, item);
-            var words = TitleWords(title);
-            foreach (var word in words)
+            foreach (var title in Titles(item))
             {
-                if (!_words.TryGetValue(word, out var entries)) _words[word] = entries = [];
-                entries.Add((item, words));
+                Add(_exact, Normalize(title), item);
+                Add(_editions, Normalize(WithoutYear(title)), item);
+                foreach (var key in CandidateKeys(title)) Add(_shortened, key, item);
+                var words = TitleWords(title);
+                foreach (var word in words)
+                {
+                    if (!_words.TryGetValue(word, out var entries)) _words[word] = entries = [];
+                    entries.Add((item, words));
+                }
             }
-        }
     }
 
     public static IEnumerable<string> Titles(SonarrSeries item) =>
@@ -64,10 +64,10 @@ public sealed class SonarrTitleIndex
         }
         // Compound franchise names can omit a scene alias (e.g. a Monogatari chapter).
         foreach (var word in words.Where(word => word.Length >= 8))
-        foreach (var pair in _words.Where(pair => pair.Key.Length >= 8 && pair.Key != word &&
-                     (word.EndsWith(pair.Key, StringComparison.Ordinal) || pair.Key.EndsWith(word, StringComparison.Ordinal)) &&
-                     (double)Math.Min(word.Length, pair.Key.Length) / Math.Max(word.Length, pair.Key.Length) >= 0.65))
-            matches.AddRange(pair.Value.Select(entry => entry.Series));
+            foreach (var pair in _words.Where(pair => pair.Key.Length >= 8 && pair.Key != word &&
+                         (word.EndsWith(pair.Key, StringComparison.Ordinal) || pair.Key.EndsWith(word, StringComparison.Ordinal)) &&
+                         (double)Math.Min(word.Length, pair.Key.Length) / Math.Max(word.Length, pair.Key.Length) >= 0.65))
+                matches.AddRange(pair.Value.Select(entry => entry.Series));
         // A one-word franchise with an unseparated suffix ("Clannad After Story", "Symphogear GX")
         // shares too few words for the rule above and has no subtitle separator to split on.
         // Containment of whole normalized names still only nominates; episodes decide.
@@ -110,7 +110,9 @@ public sealed class SonarrTitleIndex
         // over a similar owned parent. Enrich owned entries with Sonarr's scene aliases.
         var enriched = lookup.Where(s => s.TvdbId > 0).Select(s => new SonarrSeries
         {
-            TvdbId = s.TvdbId, Title = s.Title, CleanTitle = s.CleanTitle,
+            TvdbId = s.TvdbId,
+            Title = s.Title,
+            CleanTitle = s.CleanTitle,
             AlternateTitles = (s.AlternateTitles ?? []).Concat(library.Where(l => l.TvdbId == s.TvdbId)
                 .SelectMany(l => l.AlternateTitles ?? [])).ToList()
         }).ToList();

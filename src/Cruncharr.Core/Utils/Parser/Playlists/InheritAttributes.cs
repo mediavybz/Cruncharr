@@ -295,7 +295,7 @@ public class InheritAttributes
                                 metadata.aspectRatio = Convert.ToInt32(val);
                                 break;
                             case "3D":
-                            ((IDictionary<string, object>)metadata)["3D"] = Convert.ToInt32(val);
+                                ((IDictionary<string, object>)metadata)["3D"] = Convert.ToInt32(val);
                                 break;
                         }
                     }

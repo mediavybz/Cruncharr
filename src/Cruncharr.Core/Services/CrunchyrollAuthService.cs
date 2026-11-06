@@ -59,6 +59,8 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private readonly INotificationService? _notification;
     private readonly SemaphoreSlim _refreshTokenGate = new(1, 1);
     private static readonly TimeSpan TokenRefreshBuffer = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan ClientUpdateCheckInterval = TimeSpan.FromMinutes(10);
+    private DateTime _lastClientUpdateCheckUtc = DateTime.MinValue;
 
     public CrToken? Token { get; private set; }
     public CrProfile Profile { get; private set; } = new();
@@ -1309,6 +1311,54 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         throw new Exception("Login failed - no refresh token received from Crunchyroll");
     }
 
+    // Crunchyroll retires TV client versions without notice (2026-10-10, 2026-11-06). The saved
+    // session stays valid, but every refresh with the retired client fails with client_inactive;
+    // previously only a restart's password login looked for the replacement client, so the app
+    // stayed signed out until it was restarted. Fetch the current client and retry once instead.
+    private async Task<(bool IsOk, string ResponseContent, string Error)> SendRefreshGrantAsync(
+        string refreshToken, string deviceId, CancellationToken cancellationToken)
+    {
+        var result = await _httpClient.SendRequestAsync(CreateRefreshGrantRequest(refreshToken, deviceId), false, cancellationToken: cancellationToken);
+        if (result.IsOk || result.ResponseContent?.Contains("client_inactive", StringComparison.Ordinal) != true ||
+            DateTime.UtcNow - _lastClientUpdateCheckUtc < ClientUpdateCheckInterval)
+        {
+            return result;
+        }
+
+        _lastClientUpdateCheckUtc = DateTime.UtcNow;
+        var retiredClient = StreamEndpoint.Authorization;
+        _logger?.LogWarning("Crunchyroll retired this sign-in client; checking for an updated client...");
+        await UpdateAuthCredentialsAsync(cancellationToken);
+        if (string.IsNullOrEmpty(StreamEndpoint.Authorization) || StreamEndpoint.Authorization == retiredClient)
+        {
+            return result;
+        }
+
+        _logger?.LogInformation("Retrying the session refresh with the updated client");
+        return await _httpClient.SendRequestAsync(CreateRefreshGrantRequest(refreshToken, deviceId), false, cancellationToken: cancellationToken);
+    }
+
+    private HttpRequestMessage CreateRefreshGrantRequest(string refreshToken, string deviceId)
+    {
+        var formData = new Dictionary<string, string>{
+            { "refresh_token", refreshToken },
+            { "grant_type", "refresh_token" },
+            { "scope", "offline_access" },
+            { "device_id", deviceId },
+            { "device_type", StreamEndpoint.Device_type },
+        };
+        if (!string.IsNullOrEmpty(StreamEndpoint.Device_name))
+        {
+            formData.Add("device_name", StreamEndpoint.Device_name);
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth) { Content = new FormUrlEncodedContent(formData) };
+        request.Headers.Add("Authorization", StreamEndpoint.Authorization);
+        request.Headers.Add("User-Agent", StreamEndpoint.UserAgent);
+        SetETPCookie(refreshToken);
+        return request;
+    }
+
     public async Task<bool> LoginWithTokenAsync(bool useBetaApi, CancellationToken cancellationToken = default)
     {
         if (Token?.refresh_token == null)
@@ -1320,39 +1370,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
         string uuid = string.IsNullOrEmpty(Token.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
 
-        var formData = new Dictionary<string, string>{
-            { "refresh_token", Token.refresh_token },
-            { "scope", "offline_access" },
-            { "device_id", uuid },
-            { "grant_type", "refresh_token" },
-            { "device_type", StreamEndpoint.Device_type },
-        };
-
-        if (!string.IsNullOrEmpty(StreamEndpoint.Device_name))
-        {
-            formData.Add("device_name", StreamEndpoint.Device_name);
-        }
-
-        var requestContent = new FormUrlEncodedContent(formData);
-
-        var crunchyAuthHeaders = new Dictionary<string, string>{
-            { "Authorization", StreamEndpoint.Authorization },
-            { "User-Agent", StreamEndpoint.UserAgent }
-        };
-
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
-        {
-            Content = requestContent
-        };
-
-        foreach (var header in crunchyAuthHeaders)
-        {
-            request.Headers.Add(header.Key, header.Value);
-        }
-
-        SetETPCookie(Token.refresh_token);
-
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false);
+        var (isOk, content, error) = await SendRefreshGrantAsync(Token.refresh_token, uuid, cancellationToken);
 
         if (!string.IsNullOrEmpty(content) && (
             content.Contains("<title>Just a moment...</title>") ||
@@ -1449,39 +1467,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
         string uuid = string.IsNullOrEmpty(Token?.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
 
-        var formData = new Dictionary<string, string>{
-            { "refresh_token", Token?.refresh_token ?? "" },
-            { "grant_type", "refresh_token" },
-            { "scope", "offline_access" },
-            { "device_id", uuid },
-            { "device_type", StreamEndpoint.Device_type },
-        };
-
-        if (!string.IsNullOrEmpty(StreamEndpoint.Device_name))
-        {
-            formData.Add("device_name", StreamEndpoint.Device_name);
-        }
-
-        var requestContent = new FormUrlEncodedContent(formData);
-
-        var crunchyAuthHeaders = new Dictionary<string, string>{
-            { "Authorization", StreamEndpoint.Authorization },
-            { "User-Agent", StreamEndpoint.UserAgent }
-        };
-
-        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrls.Auth)
-        {
-            Content = requestContent
-        };
-
-        foreach (var header in crunchyAuthHeaders)
-        {
-            request.Headers.Add(header.Key, header.Value);
-        }
-
-        SetETPCookie(Token?.refresh_token ?? string.Empty);
-
-        var (isOk, content, error) = await _httpClient.SendRequestAsync(request, false, cancellationToken: cancellationToken);
+        var (isOk, content, error) = await SendRefreshGrantAsync(Token?.refresh_token ?? "", uuid, cancellationToken);
 
         if (isOk)
         {

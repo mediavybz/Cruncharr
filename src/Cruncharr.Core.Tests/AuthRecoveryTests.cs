@@ -82,6 +82,40 @@ public class AuthRecoveryTests
         Assert.Equal("account", scope.Auth.Token?.access_token);
     }
 
+    // 2026-11-06: Crunchyroll retired TV 3.75.0 mid-session. The saved login was still valid, but
+    // every refresh failed until a restart looked up 3.76.0. A refresh now does that itself.
+    [Fact]
+    public async Task RetiredClientDuringRefresh_UpdatesTheClientAndKeepsTheSession()
+    {
+        using var scope = new AuthScope();
+        var retired = scope.Auth.StreamEndpoint.Authorization;
+        const string updated = "Basic dXBkYXRlZC10djpzZWNyZXQ=";
+        scope.SetToken(new CrToken { access_token = "old", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(-1) });
+        var grants = new List<string>();
+        var updateChecks = 0;
+        scope.Respond((request, _) =>
+        {
+            if (request.RequestUri!.Host == "codeberg.org")
+            {
+                updateChecks++;
+                return Task.FromResult(Status(HttpStatusCode.OK, $$"""[{"type":"tv","version_name":"99.0.0","version_code":"1","Authorization":"{{updated}}"}]"""));
+            }
+            if (request.RequestUri.AbsoluteUri != ApiUrls.Auth) return Task.FromResult(Status(HttpStatusCode.NotFound));
+            var auth = request.Headers.GetValues("Authorization").Single();
+            grants.Add(auth);
+            return Task.FromResult(auth == updated
+                ? Status(HttpStatusCode.OK, AccountToken)
+                : Status(HttpStatusCode.Unauthorized, """{"code":"auth.obtain_access_token.client_inactive","error":"invalid_client"}"""));
+        });
+
+        Assert.True(await scope.Auth.RefreshTokenAsync(true, TestContext.Current.CancellationToken, force: true));
+
+        Assert.Equal([retired!, updated], grants);
+        Assert.Equal(1, updateChecks);
+        Assert.Equal("account", scope.Auth.Token?.access_token);
+        Assert.Null(scope.Auth.SessionError);
+    }
+
     [Fact]
     public async Task RetiredTvClient_RetriesTheUpdatedTvClientBeforeMobile()
     {

@@ -57,6 +57,31 @@ public class AuthRecoveryTests
         Assert.Equal("account", scope.Auth.Token?.access_token);
     }
 
+    // History refreshes authenticate once per series; a fresh signed-in session must not rotate
+    // its refresh token each time (2026-11-06: ~50 rotations an hour before the session was revoked).
+    [Fact]
+    public async Task FreshSignedInSession_IsReusedUntilItNeedsRefreshing()
+    {
+        using var scope = new AuthScope();
+        scope.SetToken(new CrToken { access_token = "account", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(30) });
+        typeof(CrunchyrollAuthService).GetProperty(nameof(scope.Auth.Profile))!.SetValue(scope.Auth, new CrProfile { Username = "viewer" });
+        var grants = 0;
+        scope.Respond((request, _) =>
+        {
+            if (request.RequestUri!.AbsoluteUri == ApiUrls.Auth) grants++;
+            return Task.FromResult(request.RequestUri.AbsoluteUri == ApiUrls.Auth ? Status(HttpStatusCode.OK, AccountToken) : Status(HttpStatusCode.NotFound));
+        });
+
+        for (var i = 0; i < 3; i++)
+            Assert.True(await scope.Auth.AuthenticateAsync(true, TestContext.Current.CancellationToken));
+        Assert.Equal(0, grants);
+
+        scope.SetToken(new CrToken { access_token = "old", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(-1) });
+        await scope.Auth.AuthenticateAsync(true, TestContext.Current.CancellationToken);
+        Assert.Equal(1, grants);
+        Assert.Equal("account", scope.Auth.Token?.access_token);
+    }
+
     [Fact]
     public async Task RetiredTvClient_RetriesTheUpdatedTvClientBeforeMobile()
     {

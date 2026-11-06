@@ -19,6 +19,20 @@ public class CalendarLoadingTests
 {
     private static readonly DateTime Date = new(2026, 10, 21);
 
+    // The week containing today keeps its copy for 5 minutes so new releases appear promptly;
+    // a 30-minute copy hid a noon release until 1 PM on 2026-11-06. Past weeks keep 30 minutes.
+    [Theory]
+    [InlineData("2026-11-08", 5)]   // current week, ending Sunday
+    [InlineData("2026-11-06", 5)]   // current week, ending today
+    [InlineData("2026-11-12", 5)]   // window still includes today
+    [InlineData("2026-11-05", 30)]  // ended yesterday
+    [InlineData("2026-11-13", 30)]  // starts tomorrow
+    public void CurrentWeekCalendarExpiresSooner(string weekEnd, int minutes)
+    {
+        var now = new DateTime(2026, 11, 6, 12, 4, 0);
+        Assert.Equal(TimeSpan.FromMinutes(minutes), CalendarService.CustomCalendarTtlFor(DateTime.Parse(weekEnd), now));
+    }
+
     private static CrBrowseEpisodeBase Episodes() => new()
     {
         Data = [new CrBrowseEpisode

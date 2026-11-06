@@ -311,6 +311,15 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             return false;
         }
 
+        // A signed-in session with a fresh access token is reused. Refreshing on every call
+        // (History refreshes call this once per series) rotated the refresh token about 50 times
+        // an hour. The profile and subscription are still reloaded on each real refresh, which
+        // happens within minutes because access tokens are short-lived.
+        if (IsAuthenticated && !IsTokenExpiredOrNearExpiry())
+        {
+            return true;
+        }
+
         if (Token?.refresh_token != null)
         {
             await LoginWithTokenAsync(useBetaApi, cancellationToken);

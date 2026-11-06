@@ -65,8 +65,12 @@ public class SessionHealthTests : IDisposable
         Assert.Equal("saved", _auth.Token?.refresh_token);
         Assert.Equal(savedFile, File.ReadAllText(TokenFile));
 
-        // A later successful refresh restores the account session.
+        // A later successful refresh restores the account session. Requests made before the
+        // retry wait ends keep browsing as a guest without contacting the sign-in service.
         _refresh = () => Status(HttpStatusCode.OK, AccountToken);
+        Assert.False(await _auth.RefreshTokenAsync(true, TestContext.Current.CancellationToken));
+        typeof(CrunchyrollAuthService).GetField("_nextRefreshAttemptUtc", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(_auth, DateTime.MinValue);
         Assert.Single(await _api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(["Bearer guest", "Bearer account"], _catalogBearers);
         Assert.True(_auth.IsAuthenticated);

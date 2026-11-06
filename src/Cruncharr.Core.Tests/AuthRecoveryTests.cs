@@ -116,6 +116,30 @@ public class AuthRecoveryTests
         Assert.Null(scope.Auth.SessionError);
     }
 
+    // A rejected refresh is not retried by every following request (about 170 rejected sign-ins
+    // an hour on 2026-11-06); the session is kept and the next attempt waits.
+    [Fact]
+    public async Task RejectedRefresh_WaitsBeforeTheNextAttempt()
+    {
+        using var scope = new AuthScope();
+        scope.SetToken(new CrToken { access_token = "old", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(-1) });
+        var attempts = 0;
+        scope.Respond((request, _) =>
+        {
+            if (request.RequestUri!.AbsoluteUri == ApiUrls.Auth) attempts++;
+            return Task.FromResult(Status(HttpStatusCode.Unauthorized, """{"error":"unauthorized"}"""));
+        });
+
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.False(await scope.Auth.RefreshTokenAsync(true, TestContext.Current.CancellationToken));
+            await scope.Auth.AuthenticateAsync(true, TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(1, attempts);
+        Assert.Equal("saved", scope.Auth.Token?.refresh_token);
+    }
+
     [Fact]
     public async Task RetiredTvClient_RetriesTheUpdatedTvClientBeforeMobile()
     {

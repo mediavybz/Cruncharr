@@ -61,6 +61,12 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     private static readonly TimeSpan TokenRefreshBuffer = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan ClientUpdateCheckInterval = TimeSpan.FromMinutes(10);
     private DateTime _lastClientUpdateCheckUtc = DateTime.MinValue;
+    // After a rejected refresh, wait before the next attempt (1, 2, 4, 8, then 15 minutes).
+    // Every request used to retry immediately: about 170 rejected sign-ins an hour on
+    // 2026-11-06, the kind of pattern that can get an account flagged.
+    private static readonly TimeSpan MaxRefreshRetryDelay = TimeSpan.FromMinutes(15);
+    private int _failedRefreshes;
+    private DateTime _nextRefreshAttemptUtc = DateTime.MinValue;
 
     public CrToken? Token { get; private set; }
     public CrProfile Profile { get; private set; } = new();
@@ -1322,7 +1328,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         if (result.IsOk || result.ResponseContent?.Contains("client_inactive", StringComparison.Ordinal) != true ||
             DateTime.UtcNow - _lastClientUpdateCheckUtc < ClientUpdateCheckInterval)
         {
-            return result;
+            return RecordRefreshResult(result);
         }
 
         _lastClientUpdateCheckUtc = DateTime.UtcNow;
@@ -1331,12 +1337,27 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
         await UpdateAuthCredentialsAsync(cancellationToken);
         if (string.IsNullOrEmpty(StreamEndpoint.Authorization) || StreamEndpoint.Authorization == retiredClient)
         {
-            return result;
+            return RecordRefreshResult(result);
         }
 
         _logger?.LogInformation("Retrying the session refresh with the updated client");
-        return await _httpClient.SendRequestAsync(CreateRefreshGrantRequest(refreshToken, deviceId), false, cancellationToken: cancellationToken);
+        return RecordRefreshResult(await _httpClient.SendRequestAsync(CreateRefreshGrantRequest(refreshToken, deviceId), false, cancellationToken: cancellationToken));
     }
+
+    private (bool IsOk, string ResponseContent, string Error) RecordRefreshResult((bool IsOk, string ResponseContent, string Error) result)
+    {
+        // Success needs nothing here: storing the new token clears the wait.
+        if (!result.IsOk)
+        {
+            _failedRefreshes++;
+            var delay = TimeSpan.FromMinutes(Math.Min(MaxRefreshRetryDelay.TotalMinutes, Math.Pow(2, _failedRefreshes - 1)));
+            _nextRefreshAttemptUtc = DateTime.UtcNow + delay;
+            _logger?.LogWarning("Next Crunchyroll sign-in refresh attempt in {Minutes} min", delay.TotalMinutes);
+        }
+        return result;
+    }
+
+    private bool RefreshIsWaiting() => DateTime.UtcNow < _nextRefreshAttemptUtc;
 
     private HttpRequestMessage CreateRefreshGrantRequest(string refreshToken, string deviceId)
     {
@@ -1368,6 +1389,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
             return false;
         }
 
+        if (RefreshIsWaiting()) return false;
         string uuid = string.IsNullOrEmpty(Token.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
 
         var (isOk, content, error) = await SendRefreshGrantAsync(Token.refresh_token, uuid, cancellationToken);
@@ -1465,6 +1487,7 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
 
         var hadUserSession = !string.IsNullOrWhiteSpace(Token?.refresh_token) && !string.IsNullOrWhiteSpace(Profile.Username) && Profile.Username != "???";
 
+        if (RefreshIsWaiting()) return false;
         string uuid = string.IsNullOrEmpty(Token?.device_id) ? Guid.NewGuid().ToString() : Token.device_id;
 
         var (isOk, content, error) = await SendRefreshGrantAsync(Token?.refresh_token ?? "", uuid, cancellationToken);
@@ -1811,6 +1834,9 @@ public class CrunchyrollAuthService : ICrunchyrollAuthService
     {
         Token = JsonConvert.DeserializeObject<CrToken>(content);
         SessionError = null;
+        // A new session (sign-in or successful refresh) ends any wait after earlier failures.
+        _failedRefreshes = 0;
+        _nextRefreshAttemptUtc = DateTime.MinValue;
 
         if (Token is { expires_in: not null })
         {

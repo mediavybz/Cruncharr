@@ -2056,6 +2056,8 @@ public class DownloadService : IDownloadService
                                     $"Muxing failed for audio locale '{locale}'.",
                                     DownloadErrorType.Unknown);
                             }
+                            // The shared video is still needed by the remaining groups.
+                            DeleteMuxedInputs(group == groups[^1] ? groupMediaFiles : group.Select(track => track.Path), config);
 
                             // Post-process encoding for this group if configured
                             if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
@@ -2089,6 +2091,7 @@ public class DownloadService : IDownloadService
                         {
                             throw new DownloadException("Muxing failed.", DownloadErrorType.Unknown);
                         }
+                        DeleteMuxedInputs(downloadedFiles, config);
 
                         // Post-process encoding if configured
                         if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
@@ -3961,6 +3964,26 @@ public class DownloadService : IDownloadService
             throw;
         }
         _logger?.LogInformation("Moved output to {Dest}", destPath);
+    }
+
+    // The muxed file now holds these video/audio streams. Removing them before the wait for a
+    // transcode slot (and the encode itself) halves what a finished episode keeps in the temp
+    // folder, which is often RAM: each episode used to hold its raw streams AND the muxed copy
+    // until the encode finished.
+    private void DeleteMuxedInputs(IEnumerable<string> paths, CruncharrConfig config)
+    {
+        if (config.Download.NoCleanup) return;
+        foreach (var path in paths)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger?.LogWarning(ex, "Could not remove muxed stream {Path}; it is removed with the working folder", path);
+            }
+        }
     }
 
     // Acquire a transcode slot before encoding so the CPU-heavy encode step honors the

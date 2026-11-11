@@ -492,6 +492,11 @@ public class QueueService : IQueueService, IDisposable
     {
         var downloads = Math.Max(1, _config?.Download.SimultaneousDownloads ?? 2);
         var processingBacklog = downloads + Math.Max(1, _config?.Queue.SimultaneousProcessingJobs ?? 2);
+        // With encoding on, the transcode slots are the bottleneck. More finished episodes than one
+        // ready per slot only wait in the temp folder, which is often RAM (2026-11-11: the host ran
+        // out of memory while finished episodes queued behind a single AV1 encode).
+        if (_config?.Download.EncodeEnabled == true && !string.IsNullOrEmpty(_config.Download.EncodingPreset))
+            processingBacklog = Math.Min(processingBacklog, 2 * Math.Max(1, _config.Queue.MaxSimultaneousTranscodes));
         return Math.Max(0, Math.Min(downloads - _activeOrStarting.Count, processingBacklog - _processingPhase.Count));
     }
 

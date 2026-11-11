@@ -60,6 +60,32 @@ public class QueueLaneTests
         await WaitForAsync(() => harness.Queue.ActiveDownloads == 0);
     }
 
+    // 2026-11-11: with a single slow AV1 transcode, up to four finished episodes waited in the temp
+    // folder (RAM) behind it. With encoding on, one encoding and one ready episode are enough.
+    [Fact]
+    public async Task ProcessingBacklog_WithEncoding_FollowsTheTranscodeSlots()
+    {
+        var downloads = new StagedDownloadService();
+        using var harness = StartQueue(downloads, simultaneousDownloads: 2, processingJobs: 2, encodingPreset: "AV1");
+        foreach (var id in new[] { "E1", "E2", "E3" }) harness.Queue.AddToQueue(Episode(id));
+
+        await downloads.Started("E1");
+        await downloads.Started("E2");
+        downloads.FinishDownload("E1");
+        downloads.FinishDownload("E2");
+
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.False(downloads.HasStarted("E3"));
+
+        downloads.FinishProcessing("E1");
+        await downloads.Started("E3");
+
+        downloads.FinishProcessing("E2");
+        downloads.FinishDownload("E3");
+        downloads.FinishProcessing("E3");
+        await WaitForAsync(() => harness.Queue.ActiveDownloads == 0);
+    }
+
     [Fact]
     public async Task Queue_ListsAndStartsItemsInTheOrderTheyWereAdded()
     {
@@ -82,9 +108,10 @@ public class QueueLaneTests
 
     private static EpisodeInfo Episode(string id) => new() { Id = id, Title = id };
 
-    private static Harness StartQueue(StagedDownloadService downloads, int simultaneousDownloads, int processingJobs, bool start = true)
+    private static Harness StartQueue(StagedDownloadService downloads, int simultaneousDownloads, int processingJobs, bool start = true,
+        string? encodingPreset = null)
     {
-        var harness = new Harness(downloads, simultaneousDownloads, processingJobs);
+        var harness = new Harness(downloads, simultaneousDownloads, processingJobs, encodingPreset);
         if (start) harness.Start();
         return harness;
     }
@@ -104,8 +131,11 @@ public class QueueLaneTests
         private readonly CruncharrConfig _config = new();
         private Task? _processor;
 
-        public Harness(StagedDownloadService downloads, int simultaneousDownloads, int processingJobs)
+        public Harness(StagedDownloadService downloads, int simultaneousDownloads, int processingJobs, string? encodingPreset)
         {
+            _config.Download.EncodeEnabled = encodingPreset != null;
+            _config.Download.EncodingPreset = encodingPreset ?? "";
+            _config.Queue.MaxSimultaneousTranscodes = 1;
             _provider = new ServiceCollection().AddSingleton<IDownloadService>(downloads).BuildServiceProvider();
             Queue = new QueueService(_provider);
             _config.Queue.AutoDownload = true;

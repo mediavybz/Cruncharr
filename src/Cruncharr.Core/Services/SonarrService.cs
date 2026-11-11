@@ -307,7 +307,7 @@ public partial class SonarrService : ISonarrService
     {
         var library = await GetSeriesAsync(config);
         var index = new SonarrTitleIndex(library);
-        if (index.FindExact(title) is { } exact) return exact;
+        if ((index.FindExact(title) ?? index.FindCollectionParent(title)) is { } exact) return exact;
         if (_api == null || string.IsNullOrEmpty(seriesId)) return null;
         var candidates = index.Candidates(title);
         if (candidates.Count == 0)

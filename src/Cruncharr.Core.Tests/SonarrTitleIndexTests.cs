@@ -35,6 +35,37 @@ public class SonarrTitleIndexTests
         Assert.True(SonarrTitleIndex.EpisodesConfirmIdentity(["A New Friend!", "The Journey"], ["A new friend", "The Journey", "Other"]));
     }
 
+    // Crunchyroll lists a franchise's films as their own show; TVDB files them under the
+    // franchise series. Only an exact franchise name, held by exactly one series, qualifies.
+    [Theory]
+    [InlineData("Puella Magi Madoka Magica Movies", 965)]
+    [InlineData("Attack on Titan OAD", 7)]
+    [InlineData("Attack on Titan - The Movie", 7)]
+    [InlineData("Puella Magi Madoka Magica", null)] // no collection suffix
+    [InlineData("Magia Record Movies", null)]       // the franchise is only part of a series title
+    [InlineData("Movies", null)]
+    public void FilmCollectionsResolveToTheirFranchiseSeries(string title, int? expected)
+    {
+        var index = new SonarrTitleIndex(
+        [
+            new SonarrSeries { Id = 965, TvdbId = 219181, Title = "Puella Magi Madoka Magica" },
+            new SonarrSeries { Id = 433, TvdbId = 370931, Title = "Magia Record: Puella Magi Madoka Magica Side Story" },
+            new SonarrSeries { Id = 7, TvdbId = 267440, Title = "Attack on Titan" }
+        ]);
+        Assert.Equal(expected, index.FindCollectionParent(title)?.Id);
+    }
+
+    [Fact]
+    public void FilmCollectionNamedLikeTwoSeriesIsLeftToTheUser()
+    {
+        var index = new SonarrTitleIndex(
+        [
+            new SonarrSeries { Id = 1, TvdbId = 1, Title = "Witchblade" },
+            new SonarrSeries { Id = 2, TvdbId = 2, Title = "Witchblade (2006)", AlternateTitles = [new() { Title = "Witchblade" }] }
+        ]);
+        Assert.Null(index.FindCollectionParent("Witchblade Movies"));
+    }
+
     [Theory]
     [InlineData("Haganai", "Haganai: I Don't Have Many Friends")]
     [InlineData("We, Without Wings - under the innocent sky", "We Without Wings")]

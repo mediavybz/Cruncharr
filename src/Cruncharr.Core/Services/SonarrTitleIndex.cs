@@ -50,6 +50,20 @@ public sealed class SonarrTitleIndex
     public SonarrSeries? FindExact(string title) => Exact(title) is { Count: 1 } matches &&
         (_editions.GetValueOrDefault(Normalize(title))?.Count ?? 0) <= 1 ? matches[0] : null;
 
+    // Crunchyroll lists a franchise's films or OVAs as their own show ("Puella Magi Madoka Magica
+    // Movies"); TVDB files them as season 0 of the franchise series. When the title is such a
+    // collection and exactly one series is named exactly like the franchise, that series is the
+    // match. Which special each film is still needs episode evidence before anything is imported.
+    public SonarrSeries? FindCollectionParent(string title)
+    {
+        var franchise = CollectionSuffix.Replace(WithoutYear(title), "");
+        return franchise.Length < title.Trim().Length && Normalize(franchise).Length >= 4 ? FindExact(franchise) : null;
+    }
+
+    private static readonly Regex CollectionSuffix = new(
+        @"\s*[-:–—]?\s*(?:the\s+)?(?:movies?|films?|specials?|ovas?|oads?)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     public List<SonarrSeries> Candidates(string title)
     {
         var matches = Exact(title).ToList();

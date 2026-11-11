@@ -830,6 +830,92 @@ public class HistoryServiceSonarrTests : IDisposable
         Assert.All(matched, episode => Assert.Equal("0", episode.SonarrSeasonNumber));
     }
 
+    // Crunchyroll's "Puella Magi Madoka Magica Movies" lists each film as a one-episode season;
+    // TVDB files them under season 0 of the TV series with translated titles. Real titles from
+    // 2026-11-11, when all three films stayed unmatched and could not be imported.
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_FilmCollectionAlignsToSeasonZeroInReleaseOrder()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].SeriesTitle = "Puella Magi Madoka Magica Movies";
+        HistorySeason Film(string number, string season, string title, string description) => new()
+        {
+            SeasonId = $"film-{number}",
+            SeasonTitle = season,
+            SeasonNum = number,
+            EpisodesList = [new HistoryEpisode { EpisodeId = $"film-{number}", Episode = "1", EpisodeSeasonNum = number, EpisodeTitle = title, EpisodeDescription = description }]
+        };
+        history[0].Seasons =
+        [
+            Film("1", "Beginnings", "Puella Magi Madoka Magica the Movie Pt. 1: Beginnings",
+                "A strange creature offers Madoka, a 14-year-old girl, and her friend Sayaka a chance to have any wish granted in exchange for becoming magical girls."),
+            Film("2", "Eternal", "Puella Magi Madoka Magica the Movie Pt. 2: Eternal",
+                "Madoka learns from Kyubey that his species makes contracts with magical girls to collect the energy of their despair."),
+            Film("3", "Rebellion", "Puella Magi Madoka Magica the Movie -Rebellion-",
+                "Madoka and the other magical girls reappear at Mitakihara fighting nightmares, but Homura senses something is wrong with their world.")
+        ];
+        await SaveTestHistory(history);
+        _sonarrServiceMock
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode { Id = 1, SeasonNumber = 1, EpisodeNumber = 1, Title = "As If I Met Her in a Dream...", Overview = "Madoka dreams of a girl fighting a monster." },
+                new SonarrEpisode { Id = 2, SeasonNumber = 1, EpisodeNumber = 2, Title = "That Would Be Truly Wonderful", Overview = "Kyubey explains the contract to Madoka and Sayaka." },
+                new SonarrEpisode { Id = 3, SeasonNumber = 1, EpisodeNumber = 3, Title = "I'm Not Afraid of Anything Anymore", Overview = "Mami fights a witch." },
+                new SonarrEpisode { Id = 31333, SeasonNumber = 0, EpisodeNumber = 1, Title = "Madoka Magica the Movie Part I: The Beginning Story",
+                    Overview = "Madoka Kaname is a 14-year-old girl offered a wish by a strange creature in exchange for becoming a magical girl." },
+                new SonarrEpisode { Id = 31334, SeasonNumber = 0, EpisodeNumber = 2, Title = "Madoka Magica the Movie Part II: The Eternal Story",
+                    Overview = "The truth about Kyubey's contracts and the magical girls' despair comes to light." },
+                new SonarrEpisode { Id = 31335, SeasonNumber = 0, EpisodeNumber = 3, Title = "Madoka Magica the Movie Part III: The Rebellion Story",
+                    Overview = "Homura realizes the world where the magical girls fight nightmares is not what it seems." },
+                new SonarrEpisode { Id = 31336, SeasonNumber = 0, EpisodeNumber = 4, Title = "Madoka Magica the Movie Part IV: Walpurgisnacht: Rising" }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var films = (await _historyService.GetHistorySeriesAsync())[0].Seasons.Select(season => season.EpisodesList.Single());
+        Assert.Equal(["31333", "31334", "31335"], films.Select(film => film.SonarrEpisodeId));
+    }
+
+    // A long series also lists unrelated one-off specials as one-episode seasons. Those are not a
+    // film collection, so each still needs a near-exact title (2026-11-11: grouping One Piece's
+    // one-off specials by order paired "Heroines" with "One Piece Recap").
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_OneOffSpecialsOfARegularSeriesAreNotGrouped()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].Seasons[0].EpisodesList.Add(new HistoryEpisode { EpisodeId = "regular-2", Episode = "2", EpisodeSeasonNum = "1", EpisodeTitle = "Second Episode" });
+        history[0].Seasons.Add(new HistorySeason
+        {
+            SeasonId = "s-heroines",
+            SeasonTitle = "One Piece HEROINES Special",
+            SeasonNum = "0",
+            EpisodesList = [new HistoryEpisode { EpisodeId = "heroines", Episode = "1", EpisodeSeasonNum = "0", EpisodeTitle = "One Piece Heroines" }]
+        });
+        history[0].Seasons.Add(new HistorySeason
+        {
+            SeasonId = "s-east-blue",
+            SeasonTitle = "One Piece: Episode of East Blue",
+            SeasonNum = "3",
+            EpisodesList = [new HistoryEpisode { EpisodeId = "east-blue", Episode = "1", EpisodeSeasonNum = "3", EpisodeTitle = "One Piece: Episode of East Blue" }]
+        });
+        await SaveTestHistory(history);
+        _sonarrServiceMock
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode { Id = 1140, SeasonNumber = 0, EpisodeNumber = 31, Title = "One Piece Recap" },
+                new SonarrEpisode { Id = 1144, SeasonNumber = 0, EpisodeNumber = 35, Title = "One Piece Film: Gold Episode 0" }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var specials = (await _historyService.GetHistorySeriesAsync())[0].Seasons.Skip(1).Select(season => season.EpisodesList.Single());
+        Assert.All(specials, special => Assert.True(string.IsNullOrEmpty(special.SonarrEpisodeId)));
+    }
+
     [Fact]
     public async Task MatchHistoryEpisodesWithSonarrAsync_SpecialNeverUsesUnrelatedAbsoluteNumber()
     {

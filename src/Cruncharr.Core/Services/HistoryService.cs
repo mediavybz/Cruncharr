@@ -1360,29 +1360,45 @@ public class HistoryService : IHistoryService, IDisposable
             IsSpecialHistoryEpisode(historySeries, historyEpisode) ||
             !season.EpisodesList.Any(other => int.TryParse(other.SonarrSeasonNumber, out var number) && number > 0);
 
-        foreach (var historySeason in historySeries.Seasons.Where(historySeason =>
-                     historySeason.EpisodesList.Any(historyEpisode =>
-                         failed.Contains(historyEpisode) &&
-                         IsSeasonZeroCandidate(historySeason, historyEpisode))))
-        {
-            var sourceEpisodes = historySeason.EpisodesList
-                .Where(historyEpisode =>
-                    failed.Contains(historyEpisode) &&
-                    IsSeasonZeroCandidate(historySeason, historyEpisode))
-                .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.Episode))
-                .ToList();
-            if (sourceEpisodes.Count == 0) continue;
+        List<HistoryEpisode> SeasonZeroSources(HistorySeason historySeason) => historySeason.EpisodesList
+            .Where(historyEpisode => failed.Contains(historyEpisode) && IsSeasonZeroCandidate(historySeason, historyEpisode))
+            .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.Episode))
+            .ToList();
 
+        // A film collection ("Puella Magi Madoka Magica Movies") lists each film as its own
+        // one-episode season. Alone, each film needs a near-exact title, which translated film
+        // titles rarely have; in release order together they are compared like any run of
+        // specials, and each film must still land on its own best-scoring special. Only a show
+        // that is entirely films is grouped: a long series also lists unrelated one-off specials
+        // as seasons, and aligning those by order paired the wrong ones.
+        var filmCollection = historySeries.Seasons.Count > 1 && historySeries.Seasons.All(season => season.EpisodesList.Count == 1);
+        if (filmCollection)
+        {
+            var films = historySeries.Seasons.SelectMany(SeasonZeroSources)
+                .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.EpisodeSeasonNum)).ToList();
+            if (films.Count > 0) AlignWithSeasonZero(films, requireBestTarget: films.Count > 1);
+        }
+        else
+        {
+            foreach (var historySeason in historySeries.Seasons)
+            {
+                var sourceEpisodes = SeasonZeroSources(historySeason);
+                if (sourceEpisodes.Count > 0) AlignWithSeasonZero(sourceEpisodes);
+            }
+        }
+
+        void AlignWithSeasonZero(List<HistoryEpisode> sourceEpisodes, bool requireBestTarget = false)
+        {
             var targetEpisodes = sonarrEpisodes
                 .Where(sonarrEpisode =>
                     sonarrEpisode.SeasonNumber == 0 &&
                     !usedSonarrEpisodeIds.Contains(sonarrEpisode.Id))
                 .OrderBy(sonarrEpisode => sonarrEpisode.EpisodeNumber)
                 .ToList();
-            if (targetEpisodes.Count < sourceEpisodes.Count) continue;
+            if (targetEpisodes.Count < sourceEpisodes.Count) return;
 
             var alignment = FindBestOrderedSpecialAlignment(sourceEpisodes, targetEpisodes);
-            if (alignment.Count != sourceEpisodes.Count) continue;
+            if (alignment.Count != sourceEpisodes.Count) return;
 
             var scores = alignment
                 .Select(pair => CalculateEpisodeEvidenceScore(pair.HistoryEpisode, pair.SonarrEpisode))
@@ -1393,11 +1409,13 @@ public class HistoryService : IHistoryService, IDisposable
                   scores.Average() >= 0.25;
             if (!hasEnoughEvidence)
             {
-                continue;
+                return;
             }
 
             foreach (var pair in alignment)
             {
+                if (requireBestTarget && targetEpisodes.MaxBy(target => CalculateEpisodeEvidenceScore(pair.HistoryEpisode, target)) != pair.SonarrEpisode)
+                    continue;
                 if (!TryAssignSonarrEpisode(pair.HistoryEpisode, pair.SonarrEpisode, usedSonarrEpisodeIds))
                 {
                     continue;

@@ -123,7 +123,9 @@ public sealed class SonarrAcquisitionService(
                 var lookup = await sonarr.LookupSeriesAsync(episode.SeriesTitle, config.Sonarr).WaitAsync(cancellationToken);
                 var index = new SonarrTitleIndex(lookup);
                 var candidates = index.Candidates(episode.SeriesTitle).Where(s => s.TvdbId > 0).ToList();
-                var selected = tvdbId.HasValue ? candidates.SingleOrDefault(s => s.TvdbId == tvdbId.Value) : index.FindExact(episode.SeriesTitle);
+                var selected = tvdbId.HasValue
+                    ? candidates.SingleOrDefault(s => s.TvdbId == tvdbId.Value)
+                    : index.FindExact(episode.SeriesTitle) ?? index.FindCollectionParent(episode.SeriesTitle);
                 if (selected == null || selected.TvdbId <= 0)
                 {
                     if (candidates.Count == 0) throw new InvalidOperationException("Sonarr has no matching TVDB series. Check the title in Sonarr.");

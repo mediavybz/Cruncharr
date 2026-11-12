@@ -65,6 +65,15 @@ Every preset preserves audio, subtitles and attachments unless its additional
 parameters explicitly override them. A selected custom preset cannot be deleted
 until another is selected. Renamed built-in aliases continue to work.
 
+### Temp folder in RAM
+
+**Settings → Download → Temp Directory** can point at a RAM disk (tmpfs) to keep download,
+mux and encode I/O off an SSD. Everything written there is memory, so **RAM Limit (GB)** caps
+Cruncharr's memory, including the encoder and its temp files: a new download waits, with the
+reason shown in the queue, until it fits. 0 means automatic, a quarter of the memory available
+to Cruncharr. One job always runs, so a limit set too low slows the queue but never stops it. A
+temp folder on disk is not limited.
+
 Encoding errors fail the queue item instead of reporting an unencoded download as
 success. The muxed source is preserved, including in the temporary working directory.
 All 19 built-in software profiles were smoke-tested with the container FFmpeg using

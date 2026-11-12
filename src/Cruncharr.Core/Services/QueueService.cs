@@ -40,6 +40,11 @@ public interface IQueueService
     void ReleaseTranscodeSlot();
     void SetTranscodeLimit(int newLimit);
 
+    // Measured sizes for the RAM temp-folder ceiling: an episode's temp files at their peak, and
+    // the encoder's memory.
+    void RecordEpisodeFootprint(long bytes) { }
+    void RecordEncoderPeak(long bytes) { }
+
     // Init-completion gate (ported from upstream c123093)
     void SetInitialized(bool initialized);
     bool IsGloballyPaused { get; }
@@ -57,6 +62,9 @@ public class QueueService : IQueueService, IDisposable
     private readonly ILogger<QueueService>? _logger;
     private ProcessingSlotManager? _processingSlots;
     private ProcessingSlotManager? _transcodeSlots;
+    private int _runningTranscodes;
+    private readonly RamTempBudget _ramBudget;
+    private int _memoryRecheckScheduled;
     private CruncharrConfig? _config;
     private CancellationToken _cancellationToken;
 
@@ -129,6 +137,7 @@ public class QueueService : IQueueService, IDisposable
     public QueueService(IServiceProvider serviceProvider, ILogger<QueueService>? logger = null, IQueuePersistenceService? persistenceService = null, INotificationService? notificationService = null)
     {
         _serviceProvider = serviceProvider;
+        _ramBudget = serviceProvider.GetService<RamTempBudget>() ?? new RamTempBudget();
         _logger = logger;
         _persistenceService = persistenceService;
         _notificationService = notificationService;
@@ -748,6 +757,21 @@ public class QueueService : IQueueService, IDisposable
                 if (_activeOrStarting.Contains(item.Id) || _processingPhase.Contains(item.Id))
                     continue;
 
+                // RAM temp folder: start only when the episode fits under the memory ceiling. With
+                // nothing in flight it starts anyway; waiting cannot free memory then.
+                var inFlight = _activeOrStarting.Count + _processingPhase.Count;
+                if (inFlight > 0 && !_ramBudget.HasRoomForDownload(_config.Download, toStart.Count + 1, EncodersToStart(), out var waitReason))
+                {
+                    if (item.DownloadProgress.Doing != waitReason)
+                    {
+                        item.DownloadProgress.Doing = waitReason;
+                        changed = true;
+                        _logger?.LogInformation("{Reason}; {Title} starts when memory is free", waitReason, item.Episode?.Title);
+                    }
+                    ScheduleMemoryRecheck();
+                    break;
+                }
+
                 _activeOrStarting.Add(item.Id);
                 freeSlots--;
                 toStart.Add(item);
@@ -1138,11 +1162,34 @@ public class QueueService : IQueueService, IDisposable
         {
             await _transcodeSlots.WaitAsync(cancellationToken);
         }
+        Interlocked.Increment(ref _runningTranscodes);
     }
 
     public void ReleaseTranscodeSlot()
     {
+        Interlocked.Decrement(ref _runningTranscodes);
         _transcodeSlots?.Release();
+        RequestPump(); // the encoder's memory is free again
+    }
+
+    public void RecordEpisodeFootprint(long bytes) => _ramBudget.RecordEpisode(bytes);
+    public void RecordEncoderPeak(long bytes) => _ramBudget.RecordEncoder(bytes);
+
+    // Encoder slots that will start for episodes already downloaded, without another admission check.
+    private int EncodersToStart() => _config?.Download.EncodeEnabled == true && !string.IsNullOrEmpty(_config.Download.EncodingPreset)
+        ? Math.Max(0, Math.Max(1, _config.Queue.MaxSimultaneousTranscodes) - Volatile.Read(ref _runningTranscodes))
+        : 0;
+
+    // Memory also frees without a queue event (an encode's memory shrinks, another process
+    // exits), so a held download is re-checked on a timer.
+    private void ScheduleMemoryRecheck()
+    {
+        if (Interlocked.Exchange(ref _memoryRecheckScheduled, 1) == 1) return;
+        _ = Task.Delay(TimeSpan.FromSeconds(15), _cancellationToken).ContinueWith(_ =>
+        {
+            Interlocked.Exchange(ref _memoryRecheckScheduled, 0);
+            RequestPump();
+        }, TaskScheduler.Default);
     }
 
     public void SetTranscodeLimit(int newLimit)

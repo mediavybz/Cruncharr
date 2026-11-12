@@ -86,6 +86,32 @@ public class QueueLaneTests
         await WaitForAsync(() => harness.Queue.ActiveDownloads == 0);
     }
 
+    // RAM temp folder at its ceiling: the next download waits with the reason shown, and starts
+    // once memory is free. The first download always starts, since waiting cannot free memory.
+    [Fact]
+    public async Task RamCeiling_HoldsTheNextDownloadUntilMemoryIsFree()
+    {
+        long used = 8L << 30;
+        var budget = new RamTempBudget(_ => true, _ => Interlocked.Read(ref used), availableMemory: 64L << 30);
+        var downloads = new StagedDownloadService();
+        using var harness = StartQueue(downloads, simultaneousDownloads: 2, processingJobs: 2, ramBudget: budget);
+        harness.Queue.AddToQueue(Episode("E1"));
+        var second = harness.Queue.AddToQueue(Episode("E2")).Item;
+
+        await downloads.Started("E1");
+        await WaitForAsync(() => second.DownloadProgress.Doing == "Waiting for RAM: 8.0 of 10.0 GB in use");
+        Assert.False(downloads.HasStarted("E2"));
+
+        Interlocked.Exchange(ref used, 1L << 30);
+        downloads.FinishDownload("E1"); // a queue event re-checks; the timer covers memory freed otherwise
+        await downloads.Started("E2");
+
+        downloads.FinishProcessing("E1");
+        downloads.FinishDownload("E2");
+        downloads.FinishProcessing("E2");
+        await WaitForAsync(() => harness.Queue.ActiveDownloads == 0);
+    }
+
     [Fact]
     public async Task Queue_ListsAndStartsItemsInTheOrderTheyWereAdded()
     {
@@ -109,9 +135,9 @@ public class QueueLaneTests
     private static EpisodeInfo Episode(string id) => new() { Id = id, Title = id };
 
     private static Harness StartQueue(StagedDownloadService downloads, int simultaneousDownloads, int processingJobs, bool start = true,
-        string? encodingPreset = null)
+        string? encodingPreset = null, RamTempBudget? ramBudget = null)
     {
-        var harness = new Harness(downloads, simultaneousDownloads, processingJobs, encodingPreset);
+        var harness = new Harness(downloads, simultaneousDownloads, processingJobs, encodingPreset, ramBudget);
         if (start) harness.Start();
         return harness;
     }
@@ -131,12 +157,17 @@ public class QueueLaneTests
         private readonly CruncharrConfig _config = new();
         private Task? _processor;
 
-        public Harness(StagedDownloadService downloads, int simultaneousDownloads, int processingJobs, string? encodingPreset)
+        public Harness(StagedDownloadService downloads, int simultaneousDownloads, int processingJobs, string? encodingPreset,
+            RamTempBudget? ramBudget = null)
         {
+            _config.Download.UseTempFolder = ramBudget != null;
+            _config.Download.TempMemoryLimitGb = 10;
             _config.Download.EncodeEnabled = encodingPreset != null;
             _config.Download.EncodingPreset = encodingPreset ?? "";
             _config.Queue.MaxSimultaneousTranscodes = 1;
-            _provider = new ServiceCollection().AddSingleton<IDownloadService>(downloads).BuildServiceProvider();
+            var services = new ServiceCollection().AddSingleton<IDownloadService>(downloads);
+            if (ramBudget != null) services.AddSingleton(ramBudget);
+            _provider = services.BuildServiceProvider();
             Queue = new QueueService(_provider);
             _config.Queue.AutoDownload = true;
             _config.Download.SimultaneousDownloads = simultaneousDownloads;

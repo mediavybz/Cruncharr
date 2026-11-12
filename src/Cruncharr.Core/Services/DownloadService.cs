@@ -2057,6 +2057,7 @@ public class DownloadService : IDownloadService
                                     DownloadErrorType.Unknown);
                             }
                             // The shared video is still needed by the remaining groups.
+                            RecordTempFootprint(tempDir);
                             DeleteMuxedInputs(group == groups[^1] ? groupMediaFiles : group.Select(track => track.Path), config);
 
                             // Post-process encoding for this group if configured
@@ -2091,6 +2092,7 @@ public class DownloadService : IDownloadService
                         {
                             throw new DownloadException("Muxing failed.", DownloadErrorType.Unknown);
                         }
+                        RecordTempFootprint(tempDir);
                         DeleteMuxedInputs(downloadedFiles, config);
 
                         // Post-process encoding if configured
@@ -3970,6 +3972,11 @@ public class DownloadService : IDownloadService
     // transcode slot (and the encode itself) halves what a finished episode keeps in the temp
     // folder, which is often RAM: each episode used to hold its raw streams AND the muxed copy
     // until the encode finished.
+    // Right after a mux, raw streams and the muxed file coexist: the episode's largest temp
+    // footprint, which the RAM ceiling reserves for each new download.
+    private void RecordTempFootprint(string tempDir) =>
+        _queueService?.RecordEpisodeFootprint(RamTempBudget.DirectoryBytes(tempDir));
+
     private void DeleteMuxedInputs(IEnumerable<string> paths, CruncharrConfig config)
     {
         if (config.Download.NoCleanup) return;
@@ -4097,6 +4104,19 @@ public class DownloadService : IDownloadService
     /// percentage + ETA through the queue progress (Percent stays in the 95-99 processing
     /// band; Doing carries the human-readable "Encoding... N%"). Kills ffmpeg on cancel.
     /// </summary>
+    private static long ProcessMemory(Process process)
+    {
+        try
+        {
+            process.Refresh();
+            return process.WorkingSet64;
+        }
+        catch (InvalidOperationException)
+        {
+            return 0; // exited between progress blocks
+        }
+    }
+
     private async Task<int> RunFfmpegWithEncodeProgressAsync(string ffmpegPath, List<string> args, double? durationSeconds, IProgress<DownloadProgress>? progress, string? label, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
@@ -4132,6 +4152,7 @@ public class DownloadService : IDownloadService
         double outTimeSeconds = 0;
         double speed = 0;
         var lastReport = DateTime.MinValue;
+        long peakMemory = 0;
 
         string? line;
         while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) != null)
@@ -4152,6 +4173,7 @@ public class DownloadService : IDownloadService
                     if (double.TryParse(sVal, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sp)) speed = sp;
                     break;
                 case "progress": // end of a stats block — report once per block, throttled
+                    peakMemory = Math.Max(peakMemory, ProcessMemory(process));
                     if (progress == null) break;
                     var now = DateTime.UtcNow;
                     if (value != "end" && (now - lastReport).TotalSeconds < 1) break;
@@ -4183,6 +4205,8 @@ public class DownloadService : IDownloadService
         }
 
         await process.WaitForExitAsync(cancellationToken);
+        // The encoder's memory, reserved by the RAM ceiling while no encode is running yet.
+        if (peakMemory > 0) _queueService?.RecordEncoderPeak(peakMemory);
         var error = await errorTask;
 
         if (process.ExitCode != 0)

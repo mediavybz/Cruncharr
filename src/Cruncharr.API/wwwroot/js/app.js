@@ -750,13 +750,17 @@
                 return;
             }
             popup.innerHTML = globalSearchResults.map(s => `
-                <div class="search-result-item" onclick="selectGlobalResult('${escapeJsString(s.id)}')">
+                <div class="search-result-item" onclick="${s.contentType === 'episode'
+                    ? `selectGlobalEpisode('${escapeJsString(s.seriesId || '')}', '${escapeJsString(s.id)}', '${escapeJsString((s.audioLocales || [])[0] || '')}')`
+                    : `selectGlobalResult('${escapeJsString(s.id)}')`}">
                     <div class="search-result-poster">
                         ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                     </div>
                     <div class="search-result-info">
                         <div class="search-result-title">${escapeHtml(s.title)}</div>
-                        <div class="search-result-type">${libraryIndicator(s)} ${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
+                        <div class="search-result-type">${s.contentType === 'episode'
+                            ? `Episode · ${escapeHtml(s.seriesTitle || '')}`
+                            : `${libraryIndicator(s)} ${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}`}</div>
                         <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
                     </div>
                 </div>
@@ -832,6 +836,14 @@
             const input = document.getElementById('global-search');
             if (input) input.value = '';
             selectBrowseResult(seriesId);
+        }
+
+        // An episode found by name opens its show with that episode selected, like a pasted link.
+        function selectGlobalEpisode(seriesId, episodeId, audioLocale) {
+            closeGlobalSearch();
+            const input = document.getElementById('global-search');
+            if (input) input.value = '';
+            selectBrowseResult(seriesId, { episodeId, audioLocale });
         }
 
         document.addEventListener('click', (e) => {
@@ -2104,13 +2116,13 @@
             return series.map(s => `
                 <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
                     <div class="history-poster-img">
-                        <span class="poster-type-badge">Series</span>
+                        <span class="poster-type-badge">${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</span>
                         ${libraryIndicator(s)}
                         ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                     </div>
                     <div class="history-poster-info">
                         <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
-                        <div class="history-poster-meta">${s.episodeCount == null ? 'Episode count unavailable' : s.episodeCount === 0 ? 'No episodes currently listed' : `${s.episodeCount} episode(s)`}</div>
+                        <div class="history-poster-meta">${s.contentType === 'movie_listing' ? 'Movie' : s.episodeCount == null ? 'Episode count unavailable' : s.episodeCount === 0 ? 'No episodes currently listed' : `${s.episodeCount} episode(s)`}</div>
                     </div>
                 </div>
             `).join('');

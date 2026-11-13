@@ -23,6 +23,14 @@ public class GuestCatalogAccessTests
         {"total":1,"data":[{"id":"GEPISODE1","title":"Episode 1","episode":"1","episode_number":1,"season_number":1,"series_id":"GSERIES01","series_title":"Naruto","season_id":"GSEASON01","season_title":"Season 1","audio_locale":"ja-JP","is_premium_only":true}]}
         """;
 
+    // Browse loads series, then films ("movie_listing"). Fakes that count catalog requests serve
+    // an empty film catalog so each load is still one counted request.
+    private static bool IsFilmCatalog(HttpRequestMessage request) =>
+        System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["type"] == "movie_listing";
+
+    private static HttpResponseMessage NoFilms() =>
+        new(HttpStatusCode.OK) { Content = new StringContent("""{"total":0,"data":[]}""") };
+
     private static Mock<ICrunchyrollAuthService> Guest()
     {
         var auth = new Mock<ICrunchyrollAuthService>();
@@ -292,8 +300,9 @@ public class GuestCatalogAccessTests
         using var api = new CrunchyrollApiService(Guest().Object, timeProvider: clock);
         var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
-        SetTransport(ApiTransport(api), new Handler(async (_, token) =>
+        SetTransport(ApiTransport(api), new Handler(async (request, token) =>
         {
+            if (IsFilmCatalog(request)) return NoFilms();
             calls++;
             await pending.Task.WaitAsync(token);
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series) };
@@ -314,8 +323,9 @@ public class GuestCatalogAccessTests
         var auth = Guest();
         using var api = new CrunchyrollApiService(auth.Object);
         var calls = 0;
-        SetTransport(ApiTransport(api), new Handler((_, _) =>
+        SetTransport(ApiTransport(api), new Handler((request, _) =>
         {
+            if (IsFilmCatalog(request)) return Task.FromResult(NoFilms());
             calls++;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series) });
         }));
@@ -373,6 +383,7 @@ public class GuestCatalogAccessTests
         var starts = new List<string>();
         SetTransport(ApiTransport(api), new Handler((request, _) =>
         {
+            if (IsFilmCatalog(request)) return Task.FromResult(NoFilms());
             var start = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["start"]!;
             starts.Add(start);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -384,6 +395,23 @@ public class GuestCatalogAccessTests
         Assert.Equal(new[] { "0", "1", "2" }, starts);
         Assert.Equal(3, result.Count);
         Assert.All(result, series => Assert.Equal(0, series.EpisodeCount));
+    }
+
+    // 2026-11-13: films ("movie_listing") could be found by search but never browsed.
+    [Fact]
+    public async Task Catalog_IncludesFilmsAfterSeries()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        SetTransport(ApiTransport(api), new Handler((request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(IsFilmCatalog(request)
+                ? """{"total":2,"data":[{"id":"GMTE00351664","title":"Miss Kobayashi's Dragon Maid: A lonely dragon wants to be loved"},{"id":"GSERIES01","title":"Listed as both"}]}"""
+                : Series)
+        })));
+
+        var catalog = await api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal([("GSERIES01", "series"), ("GMTE00351664", "movie_listing")], catalog.Select(item => (item.Id, item.ContentType)));
     }
 
     [Fact]

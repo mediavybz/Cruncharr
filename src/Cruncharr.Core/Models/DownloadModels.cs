@@ -120,6 +120,9 @@ public class SeriesInfo
     public string Id { get; set; } = "";
     public string ContentType { get; set; } = "series";
     public string Title { get; set; } = "";
+    // Search results of type "episode": the show the episode belongs to.
+    public string? SeriesId { get; set; }
+    public string? SeriesTitle { get; set; }
     public string? Description { get; set; }
     public string? CoverArtUrl { get; set; }
     public string? ThumbnailUrl { get; set; }

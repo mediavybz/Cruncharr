@@ -99,6 +99,9 @@ public class SessionHealthTests : IDisposable
             {
                 if (request.RequestUri!.AbsoluteUri != ApiUrls.Auth)
                 {
+                    // Browse also loads the film catalog; this fake has no films.
+                    if (System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["type"] == "movie_listing")
+                        return Status(HttpStatusCode.OK, """{"total":0,"data":[]}""");
                     _catalogBearers.Add(request.Headers.Authorization!.ToString());
                     return Status(HttpStatusCode.OK, Series);
                 }

@@ -129,6 +129,37 @@ public class SearchResultParsingTests
         Assert.Contains(results, item => item.ContentType == "movie_listing");
     }
 
+    // 2026-11-13: an OVA searched by its own title could not be found. Episodes with a known show
+    // now follow the show results; the show is opened with the episode selected.
+    [Fact]
+    public void ParseSearchResults_ListsEpisodesWithTheirShowAfterShowResults()
+    {
+        const string json = """
+        {
+          "data": [
+            { "type": "episode", "count": 2, "items": [
+              { "id": "G50UZ7VZ2", "title": "Japanese Hospitality (The Attendant Is a Dragon)",
+                "images": { "thumbnail": [[{ "width": 320, "source": "https://example.test/ova.jpg" }]] },
+                "episode_metadata": { "series_id": "G6497Z43Y", "series_title": "Miss Kobayashi's Dragon Maid", "audio_locale": "en-US", "episode": "OVA" } },
+              { "id": "NOSHOW", "title": "Japanese Hospitality trailer" }
+            ]},
+            { "type": "series", "count": 1, "items": [
+              { "id": "G6NQV80X6", "title": "Japanese Anime Classic Collection" }
+            ]}
+          ]
+        }
+        """;
+
+        var results = CrunchyrollApiService.ParseSearchResults(json, "Japanese Hospitality");
+
+        Assert.Equal(["G6NQV80X6", "G50UZ7VZ2"], results.Select(item => item.Id));
+        var episode = results[1];
+        Assert.Equal("episode", episode.ContentType);
+        Assert.Equal(("G6497Z43Y", "Miss Kobayashi's Dragon Maid"), (episode.SeriesId, episode.SeriesTitle));
+        Assert.Equal(["en-US"], episode.AudioLocales);
+        Assert.Equal("https://example.test/ova.jpg", episode.ThumbnailUrl);
+    }
+
     [Fact]
     public void ParseSearchResults_RanksExactMovieAheadOfFuzzySeries()
     {

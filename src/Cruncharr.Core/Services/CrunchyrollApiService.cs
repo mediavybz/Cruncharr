@@ -219,7 +219,8 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             .Where(group => string.Equals(group.Type, "episode", StringComparison.OrdinalIgnoreCase))
             .SelectMany(group => group.Items ?? [])
             .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.EpisodeMetadata?.SeriesId))
-            .DistinctBy(item => item.Id, StringComparer.Ordinal)
+            // Each dubbed version of an episode is its own search hit; list the episode once.
+            .DistinctBy(item => (item.EpisodeMetadata!.SeriesId, item.Title))
             .Select((item, index) => new { Item = item, Index = index })
             .OrderBy(value => SearchRelevance(value.Item.Title, normalizedQuery))
             .ThenBy(value => value.Index)

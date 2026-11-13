@@ -137,10 +137,12 @@ public class SearchResultParsingTests
         const string json = """
         {
           "data": [
-            { "type": "episode", "count": 2, "items": [
+            { "type": "episode", "count": 3, "items": [
               { "id": "G50UZ7VZ2", "title": "Japanese Hospitality (The Attendant Is a Dragon)",
                 "images": { "thumbnail": [[{ "width": 320, "source": "https://example.test/ova.jpg" }]] },
                 "episode_metadata": { "series_id": "G6497Z43Y", "series_title": "Miss Kobayashi's Dragon Maid", "audio_locale": "en-US", "episode": "OVA" } },
+              { "id": "GQJUGE901", "title": "Japanese Hospitality (The Attendant Is a Dragon)",
+                "episode_metadata": { "series_id": "G6497Z43Y", "series_title": "Miss Kobayashi's Dragon Maid", "audio_locale": "ja-JP" } },
               { "id": "NOSHOW", "title": "Japanese Hospitality trailer" }
             ]},
             { "type": "series", "count": 1, "items": [

@@ -204,6 +204,41 @@ public class GuestCatalogAccessTests
         Assert.Equal("GEPISODE1", Assert.Single(selected).Value.EpisodeId);
     }
 
+    // Miss Kobayashi's Dragon Maid: both OVAs are labelled "OVA" (episode_number 1 and 2). They were
+    // grouped as one episode, so "Japanese Hospitality" never appeared in the list (2026-11-13).
+    [Fact]
+    public async Task SeriesList_KeepsEpisodesThatShareANonNumericLabel()
+    {
+        const string ovaSeason = """
+            {"total":1,"data":[{"id":"GS00377859JAJP","title":"OVAs","season_number":0,"identifier":"G6497Z43Y|S00377859"}]}
+            """;
+        const string ovas = """
+            {"total":2,"data":[
+              {"id":"GYDQ18ZZ6","title":"Valentines and Hot Springs! (Please Don't Get Your Hopes Up)","episode":"OVA","episode_number":1,"season_number":0,"series_id":"G6497Z43Y","series_title":"Miss Kobayashi's Dragon Maid","season_id":"GS00377859JAJP","season_title":"OVAs","audio_locale":"ja-JP","is_premium_only":true},
+              {"id":"GQJUGE901","title":"Japanese Hospitality (The Attendant Is a Dragon)","episode":"OVA","episode_number":2,"season_number":0,"series_id":"G6497Z43Y","series_title":"Miss Kobayashi's Dragon Maid","season_id":"GS00377859JAJP","season_title":"OVAs","audio_locale":"ja-JP","is_premium_only":true}]}
+            """;
+        using var api = new CrunchyrollApiService(Guest().Object);
+        SetTransport(ApiTransport(api), new Handler((request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("/seasons") ? ovaSeason : ovas)
+        })));
+
+        var listing = await api.ListSeriesIdAsync("G6497Z43Y", "en-US", null, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(["Valentines and Hot Springs! (Please Don't Get Your Hopes Up)", "Japanese Hospitality (The Attendant Is a Dragon)"],
+            listing!.List.Select(item => item.Name));
+    }
+
+    [Theory]
+    [InlineData("OVA", 2, "OVA#2")]  // shared non-numeric label: the number tells episodes apart
+    [InlineData("12", 12, "12")]     // regular label: unchanged, dubbed versions still group
+    [InlineData("11-12", 11, "11-12")]
+    [InlineData("SP", null, "SP")]
+    [InlineData("", 5, "5")]
+    [InlineData(null, null, null)]
+    public void EpisodeGroupLabel_SeparatesSharedNonNumericLabels(string? label, int? number, string? expected) =>
+        Assert.Equal(expected, CrunchyrollApiService.EpisodeGroupLabel(label, number));
+
     [Fact]
     public async Task SlowSeasonalEnrichment_FallsBackToCrunchyrollWithinItsBudget()
     {

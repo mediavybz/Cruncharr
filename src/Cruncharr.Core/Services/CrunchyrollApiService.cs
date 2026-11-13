@@ -892,6 +892,19 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     }
 
     // [PT] Ported from upstream CrunchyEpisode.IsRegularEpisodeNumber
+    // Groups one episode's dubbed versions (separate seasons that share the season identifier)
+    // under one key. Several episodes of a season can share a non-numeric label such as "OVA" or
+    // "SP": Miss Kobayashi's Dragon Maid's two OVAs merged into one entry and the second was never
+    // listed (2026-11-13). Such labels are grouped together with their episode_number, which the
+    // dubbed versions of one episode share. Null means neither is known.
+    internal static string? EpisodeGroupLabel(string? episodeLabel, int? episodeNumber)
+    {
+        if (string.IsNullOrEmpty(episodeLabel)) return episodeNumber?.ToString(CultureInfo.InvariantCulture);
+        return IsRegularEpisodeNumber(episodeLabel) || episodeNumber == null
+            ? episodeLabel
+            : $"{episodeLabel}#{episodeNumber.Value.ToString(CultureInfo.InvariantCulture)}";
+    }
+
     internal static bool IsRegularEpisodeNumber(string? episode)
     {
         return !string.IsNullOrWhiteSpace(episode) &&
@@ -1135,9 +1148,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
             foreach (var episode in seasonData)
             {
-                string episodeNum =
-                    (episode.Episode != string.Empty ? episode.Episode : (episode.EpisodeNumber != null ? episode.EpisodeNumber + "" : $"F{fallbackIndex++}"))
-                    ?? string.Empty;
+                string episodeNum = EpisodeGroupLabel(episode.Episode, episode.EpisodeNumber) ?? $"F{fallbackIndex++}";
 
                 var seasonIdentifier = !string.IsNullOrEmpty(s.Identifier)
                     ? (s.Identifier.Split('|').Length > 1 ? s.Identifier.Split('|')[1] : $"S{episode.SeasonNumber}")

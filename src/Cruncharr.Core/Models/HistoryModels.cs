@@ -112,6 +112,8 @@ public class HistoryEpisode
     public bool IsEpisodeAvailableOnStreamingService { get; set; }
     public string? ThumbnailImageUrl { get; set; }
     public bool WasDownloaded { get; set; }
+    // Crunchyroll's running time; 0 when unknown. Tells a film from short clips sharing its name.
+    public int DurationMs { get; set; }
 
     // Sonarr integration fields
     public string? SonarrEpisodeId { get; set; }

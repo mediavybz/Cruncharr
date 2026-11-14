@@ -17,7 +17,7 @@ public class SonarrIdentityResolutionTests
                     ? "[{\"id\":1,\"title\":\"Bewilderment\"},{\"id\":2,\"title\":\"Defiance\"}]"
                     : "[{\"id\":3,\"title\":\"Parallax\"},{\"id\":4,\"title\":\"Conundrum\"}]")
                 : "[{\"id\":1,\"tvdbId\":79072,\"title\":\"Witchblade\"},{\"id\":2,\"tvdbId\":79473,\"title\":\"Witchblade (2006)\"}]";
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {Content=new StringContent(json)});
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) });
         }
     }
 
@@ -26,12 +26,40 @@ public class SonarrIdentityResolutionTests
     [InlineData(true, null)]
     public async Task EpisodeEvidenceResolvesYearQualifiedEditionsAndRejectsAmbiguousEvidence(bool sameEpisodes, int? expected)
     {
-        var api=new Mock<ICrunchyrollApiService>();
-        api.Setup(a=>a.GetEpisodesAsync("CR",true,It.IsAny<CancellationToken>())).ReturnsAsync(
-            [new EpisodeInfo {Title="Bewilderment"},new EpisodeInfo {Title="Defiance"}]);
-        var service=new SonarrService(new TestHttpClientFactory(new HttpClient(new EditionsHandler(sameEpisodes))),api:api.Object);
-        var result=await service.ResolveSeriesAsync("CR","Witchblade",new SonarrConfig {Host="sonarr.test",Port=8989},TestContext.Current.CancellationToken);
-        Assert.Equal(expected,result?.Id);
+        var api = new Mock<ICrunchyrollApiService>();
+        api.Setup(a => a.GetEpisodesAsync("CR", true, It.IsAny<CancellationToken>())).ReturnsAsync(
+            [new EpisodeInfo { Title = "Bewilderment" }, new EpisodeInfo { Title = "Defiance" }]);
+        var service = new SonarrService(new TestHttpClientFactory(new HttpClient(new EditionsHandler(sameEpisodes))), api: api.Object);
+        var result = await service.ResolveSeriesAsync("CR", "Witchblade", new SonarrConfig { Host = "sonarr.test", Port = 8989 }, TestContext.Current.CancellationToken);
+        Assert.Equal(expected, result?.Id);
+    }
+
+    // A film has one video, so it can never show the two matching episode titles a series needs.
+    // A season 0 special that is the film confirms the franchise; a franchise without one does not.
+    private sealed class FilmHandler(string specialTitle, int runtime) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("/episode")
+                    ? "[{\"id\":1,\"seasonNumber\":1,\"title\":\"End and Beginning\",\"runtime\":24}," +
+                      $"{{\"id\":11,\"seasonNumber\":0,\"title\":\"{specialTitle}\",\"runtime\":{runtime}}}]"
+                    : "[{\"id\":262,\"tvdbId\":294002,\"title\":\"Overlord\"}]")
+            });
+    }
+
+    [Theory]
+    [InlineData("Movie: The Dark Hero", 93, 262)]
+    [InlineData("The Dark Hero - Theater Manners", 2, null)] // a clip about the film
+    public async Task FilmIsConfirmedByItsFranchiseSpecial(string specialTitle, int runtime, int? expected)
+    {
+        var api = new Mock<ICrunchyrollApiService>();
+        api.Setup(a => a.GetEpisodesAsync("FILM", true, It.IsAny<CancellationToken>())).ReturnsAsync(
+            [new EpisodeInfo { Title = "Overlord: The Dark Hero", DurationMs = 93 * 60_000 }]);
+        var service = new SonarrService(new TestHttpClientFactory(new HttpClient(new FilmHandler(specialTitle, runtime))), api: api.Object);
+        var result = await service.ResolveSeriesAsync("FILM", "Overlord: The Dark Hero",
+            new SonarrConfig { Host = "sonarr.test", Port = 8989, ApiKey = "test-key" }, TestContext.Current.CancellationToken);
+        Assert.Equal(expected, result?.Id);
     }
 
     private sealed class Handler : HttpMessageHandler

@@ -399,6 +399,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Versions = ep.Versions?.Select(MapEpisodeVersion).ToList(),
                 Images = ExtractImageUrls(ep.Images),
                 ThumbnailUrl = ExtractBestImage(ep.Images, "thumbnail") ?? ExtractBestImage(ep.Images, "episode_thumbnail"),
+                DurationMs = ep.DurationMs,
                 SubtitleLocales = ep.SubtitleLocales ?? new List<string>()
             };
         }
@@ -687,6 +688,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Images = ExtractImageUrls(episode.Images),
                 ThumbnailUrl = ExtractBestImage(episode.Images, "thumbnail") ?? ExtractBestImage(episode.Images, "episode_thumbnail"),
                 CoverArtUrl = ExtractBestImage(episode.Images, "poster_tall"),
+                DurationMs = episode.DurationMs,
                 SubtitleLocales = episode.SubtitleLocales ?? new List<string>()
             };
         }
@@ -834,6 +836,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     ThumbnailUrl = ExtractBestImage(e.Images, "thumbnail") ?? ExtractBestImage(e.Images, "episode_thumbnail"),
                     CoverArtUrl = ExtractBestImage(e.Images, "poster_tall"),
                     Versions = e.Versions?.Select(MapEpisodeVersion).ToList(),
+                    DurationMs = e.DurationMs,
                     SubtitleLocales = e.SubtitleLocales ?? new List<string>()
                 };
             }).ToList();

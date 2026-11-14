@@ -359,7 +359,8 @@ public partial class SonarrService : ISonarrService
                             title, seriesId, providerEpisodes.Count, sonarrEpisodes.Count, candidate.Title, candidate.Id);
                         throw new HttpRequestException(reason);
                     }
-                    var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title));
+                    var matches = SonarrTitleIndex.EpisodesConfirmIdentity(providerEpisodes.Select(e => e.Title), sonarrEpisodes.Select(e => e.Title)) ||
+                        IsFilmOf(candidate, providerEpisodes, sonarrEpisodes);
                     _logger?.LogDebug("Sonarr identity {Title} ({SeriesId}): {Candidate} [sonarr {Id}] {Result} ({Provider} provider / {Sonarr} Sonarr episodes)",
                         title, seriesId, candidate.Title, candidate.Id, matches ? "confirmed" : "rejected", providerEpisodes.Count, sonarrEpisodes.Count);
                     // Both outcomes hold for a day: History matching runs every minute and Browse
@@ -385,6 +386,12 @@ public partial class SonarrService : ISonarrService
         }
         finally { _matchGate.Release(); }
     }
+
+    // A film has one video, so the two matching titles a series needs can never exist; the
+    // franchise is confirmed instead by a season 0 special that is this film.
+    private static bool IsFilmOf(SonarrSeries candidate, List<Cruncharr.Core.Models.EpisodeInfo> providerEpisodes, List<SonarrEpisode> sonarrEpisodes) =>
+        providerEpisodes.DistinctBy(e => SonarrTitleIndex.Normalize(e.Title)).Count() == 1 && !string.IsNullOrWhiteSpace(providerEpisodes[0].Title)
+            && SonarrTitleIndex.FindFilmSpecial(providerEpisodes[0].Title!, providerEpisodes.Max(e => e.DurationMs) / 60_000, candidate.Title, sonarrEpisodes) != null;
 
     public virtual async Task<List<SonarrSeries>> LookupSeriesAsync(string title, SonarrConfig config)
     {
@@ -732,6 +739,8 @@ public class SonarrEpisode
     public int AbsoluteEpisodeNumber { get; set; }
     public string? Overview { get; set; }
     public DateTimeOffset AirDateUtc { get; set; }
+    // Minutes; 0 when TVDB has no running time.
+    public int Runtime { get; set; }
 }
 
 #pragma warning restore IL2026

@@ -37,6 +37,79 @@ public class SonarrTitleIndexTests
 
     // Crunchyroll lists a franchise's films as their own show; TVDB files them under the
     // franchise series. Only an exact franchise name, held by exactly one series, qualifies.
+    // Real TVDB season 0 entries (2026-11-13). Crunchyroll lists each film as its own show.
+    private static readonly SonarrEpisode[] OverlordSpecials =
+    [
+        new() { Id = 10, SeasonNumber = 0, EpisodeNumber = 10, Title = "Movie: The Undead King", Runtime = 102 },
+        new() { Id = 11, SeasonNumber = 0, EpisodeNumber = 11, Title = "Movie: The Dark Hero", Runtime = 93 },
+        new() { Id = 14, SeasonNumber = 0, EpisodeNumber = 14, Title = "The Undead King - Theater Manners", Runtime = 2 },
+        new() { Id = 15, SeasonNumber = 0, EpisodeNumber = 15, Title = "The Dark Hero - Theater Manners", Runtime = 2 },
+        new() { Id = 99, SeasonNumber = 1, EpisodeNumber = 1, Title = "The Dark Hero", Runtime = 24 }
+    ];
+
+    [Theory]
+    [InlineData(93)]
+    [InlineData(0)] // running time unknown: the closer title still decides
+    public void FilmMatchesItsFranchiseSpecialNotTheClipsSharingItsName(int minutes)
+    {
+        Assert.Equal(11, SonarrTitleIndex.FindFilmSpecial("Overlord: The Dark Hero", minutes, "Overlord", OverlordSpecials)?.Id);
+        Assert.Equal(10, SonarrTitleIndex.FindFilmSpecial("Overlord: The Undead King", minutes, "Overlord", OverlordSpecials)?.Id);
+    }
+
+    [Fact]
+    public void FilmRunningTimeRulesOutAShortEpisodeWithTheSameTitle()
+    {
+        SonarrEpisode[] specials =
+        [
+            new() { Id = 3, SeasonNumber = 0, EpisodeNumber = 3, Title = "Heaven's Lost Property Final - The Movie: Eternally My Master", Runtime = 50 },
+            new() { Id = 4, SeasonNumber = 0, EpisodeNumber = 4, Title = "Heaven’s Lost Property Final: The Movie - Eternally My Master", Runtime = 24 }
+        ];
+        // Unknown running time: two equally close titles are left unmatched.
+        Assert.Null(SonarrTitleIndex.FindFilmSpecial("Heaven's Lost Property Final – The Movie: Eternally My Master", 0, "Heaven's Lost Property", specials));
+        Assert.Equal(3, SonarrTitleIndex.FindFilmSpecial("Heaven's Lost Property Final – The Movie: Eternally My Master", 49, "Heaven's Lost Property", specials)?.Id);
+    }
+
+    [Theory]
+    [InlineData("Kabaneri of the Iron Fortress: Life That Burns", "Kabaneri of the Iron Fortress", 2)]
+    [InlineData("Kabaneri of the Iron Fortress: Light That Gathers", "Kabaneri of the Iron Fortress", 1)]
+    [InlineData("Date A Live The Movie: Mayuri Judgement", "Date A Live", 3)]
+    [InlineData("One Piece Film: The Desert Princess and the Pirates, Adventures in Alabasta", "One Piece", 16)]
+    [InlineData("Gintama: The Very Final", "Gintama", 17)]
+    [InlineData("PSYCHO-PASS: The Movie", "Psycho-Pass", 12)]
+    [InlineData("SPY x FAMILY CODE: White", "SPY x FAMILY", 5)]
+    public void FilmTitlesMatchTheirTranslatedSpecial(string film, string series, int expected)
+    {
+        SonarrEpisode[] specials =
+        [
+            new() { Id = 1, SeasonNumber = 0, EpisodeNumber = 1, Title = "Kabaneri of the Iron Fortress Recap 1: Gathering Light", Runtime = 105 },
+            new() { Id = 2, SeasonNumber = 0, EpisodeNumber = 2, Title = "Kabaneri of the Iron Fortress Recap 2: Burning Life", Runtime = 105 },
+            new() { Id = 3, SeasonNumber = 0, EpisodeNumber = 3, Title = "Date A Live Movie: Mayuri Judgment", Runtime = 75 },
+            new() { Id = 16, SeasonNumber = 0, EpisodeNumber = 16, Title = "Episode of Arabasta: The Desert Princess and the Pirates", Runtime = 90 },
+            new() { Id = 17, SeasonNumber = 0, EpisodeNumber = 17, Title = "Gintama: The Final", Runtime = 104 },
+            new() { Id = 7, SeasonNumber = 0, EpisodeNumber = 7, Title = "Gintama: The Movie: The Final Chapter: Be Forever Yorozuya", Runtime = 110 },
+            new() { Id = 12, SeasonNumber = 0, EpisodeNumber = 12, Title = "Psycho-Pass: The Movie", Runtime = 110 },
+            new() { Id = 20, SeasonNumber = 0, EpisodeNumber = 20, Title = "Psycho-Pass: Providence", Runtime = 120 },
+            new() { Id = 5, SeasonNumber = 0, EpisodeNumber = 3, Title = "CODE: White", Runtime = 110 },
+            new() { Id = 6, SeasonNumber = 0, EpisodeNumber = 4, Title = "SPY×FAMILY CODE: White - Movie Etiquette Course", Runtime = 2 }
+        ];
+        Assert.Equal(expected, SonarrTitleIndex.FindFilmSpecial(film, 0, series, specials)?.Id);
+    }
+
+    [Theory]
+    [InlineData("Monster Strike The Movie", "Monster")] // a different franchise sharing a word
+    [InlineData("Assassination Classroom the Movie: Our Time", "Assassination Classroom")] // a different film of the franchise
+    [InlineData("Tokyo Revengers (Live-Action Movie)", "Tokyo Revengers")] // TVDB has no special for it
+    public void FilmWithoutASpecialHasNoMatch(string film, string series)
+    {
+        SonarrEpisode[] specials =
+        [
+            new() { Id = 1, SeasonNumber = 0, EpisodeNumber = 1, Title = "Monster - A Monster Without A Name by Franz Bonaparta", Runtime = 0 },
+            new() { Id = 2, SeasonNumber = 0, EpisodeNumber = 2, Title = "Assassination Classroom the Movie: 365 Days' Time", Runtime = 92 },
+            new() { Id = 3, SeasonNumber = 0, EpisodeNumber = 3, Title = "Fairy Tale Revengers - Snow White #3", Runtime = 4 }
+        ];
+        Assert.Null(SonarrTitleIndex.FindFilmSpecial(film, 0, series, specials));
+    }
+
     [Theory]
     [InlineData("Puella Magi Madoka Magica Movies", 965)]
     [InlineData("Attack on Titan OAD", 7)]

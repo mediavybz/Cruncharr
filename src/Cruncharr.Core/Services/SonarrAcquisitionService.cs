@@ -292,12 +292,16 @@ public sealed class SonarrAcquisitionService(
                         {
                             var mapped = MapImportPath(path, config.Download.OutputDirectory, config.Sonarr.DownloadPath);
                             var sourceId = link.ImportEpisodeIds.GetValueOrDefault(path);
-                            var source = (await history.GetHistorySeriesAsync()).FirstOrDefault(s => s.SeriesId == link.SeriesId)
-                                ?.Seasons.SelectMany(s => s.EpisodesList).FirstOrDefault(e => e.EpisodeId == sourceId);
+                            var sourceSeries = (await history.GetHistorySeriesAsync()).FirstOrDefault(s => s.SeriesId == link.SeriesId);
+                            var source = sourceSeries?.Seasons.SelectMany(s => s.EpisodesList).FirstOrDefault(e => e.EpisodeId == sourceId);
                             if (!int.TryParse(source?.SonarrEpisodeId, out var episodeId))
                             {
                                 link.NeedsEpisodeMatch = true;
-                                throw new InvalidOperationException("Waiting for a confirmed Sonarr episode match before importing.");
+                                // Retries continue, so the import happens once TVDB adds the special. A new
+                                // show with one episode so far is also one video, but not feature-length.
+                                throw new InvalidOperationException(sourceSeries != null && HistoryService.IsFilm(sourceSeries) && source!.DurationMs >= 40 * 60_000
+                                    ? "TVDB does not list this film as a special of the Sonarr series yet. The file stays in the download folder and is imported once TVDB adds it."
+                                    : "Waiting for a confirmed Sonarr episode match before importing.");
                             }
                             link.PendingImports[path] = await sonarr.ImportFileAsync(mapped, link.SonarrSeriesId, config.Sonarr, cancellationToken, episodeId);
                             await SaveAsync();

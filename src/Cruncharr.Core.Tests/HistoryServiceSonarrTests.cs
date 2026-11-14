@@ -878,6 +878,39 @@ public class HistoryServiceSonarrTests : IDisposable
         Assert.Equal(["31333", "31334", "31335"], films.Select(film => film.SonarrEpisodeId));
     }
 
+    // Crunchyroll lists "Overlord: The Dark Hero" as its own show, one video in two dubbed
+    // seasons; TVDB files it as Overlord S00E11 next to a 2-minute clip of the same name.
+    [Fact]
+    public async Task MatchHistoryEpisodesWithSonarrAsync_FilmListedAloneTakesItsFranchiseSpecial()
+    {
+        var history = CreateTestHistory();
+        history[0].SonarrSeriesId = "100";
+        history[0].SeriesTitle = "Overlord: The Dark Hero";
+        HistorySeason Dub(string id) => new()
+        {
+            SeasonId = id,
+            SeasonTitle = "Overlord: The Dark Hero",
+            SeasonNum = "0",
+            EpisodesList = [new HistoryEpisode { EpisodeId = id, Episode = "1", EpisodeSeasonNum = "0", EpisodeTitle = "Overlord: The Dark Hero", DurationMs = 93 * 60_000 }]
+        };
+        history[0].Seasons = [Dub("ja"), Dub("en")];
+        await SaveTestHistory(history);
+        _sonarrServiceMock.Setup(s => s.GetSeriesAsync(It.IsAny<SonarrConfig>())).ReturnsAsync([new SonarrSeries { Id = 100, Title = "Overlord" }]);
+        _sonarrServiceMock
+            .Setup(s => s.GetCurrentEpisodesAsync(100, It.IsAny<SonarrConfig>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new SonarrEpisode { Id = 1, SeasonNumber = 1, EpisodeNumber = 1, Title = "End and Beginning", Runtime = 24 },
+                new SonarrEpisode { Id = 11, SeasonNumber = 0, EpisodeNumber = 11, Title = "Movie: The Dark Hero", Runtime = 93 },
+                new SonarrEpisode { Id = 15, SeasonNumber = 0, EpisodeNumber = 15, Title = "The Dark Hero - Theater Manners", Runtime = 2 }
+            ]);
+
+        await _historyService.MatchHistoryEpisodesWithSonarrAsync(history[0].SeriesId!);
+
+        var dubs = (await _historyService.GetHistorySeriesAsync())[0].Seasons.Select(season => season.EpisodesList.Single());
+        Assert.Equal(["11", "11"], dubs.Select(film => film.SonarrEpisodeId));
+    }
+
     // A long series also lists unrelated one-off specials as one-episode seasons. Those are not a
     // film collection, so each still needs a near-exact title (2026-11-11: grouping One Piece's
     // one-off specials by order paired "Heroines" with "One Piece Recap").

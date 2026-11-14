@@ -549,6 +549,7 @@ public class HistoryService : IHistoryService, IDisposable
             SpecialEpisode = IsSpecialEpisode(episode),
             IsEpisodeAvailableOnStreamingService = true,
             ThumbnailImageUrl = episode.ThumbnailUrl,
+            DurationMs = episode.DurationMs,
             EpisodeType = EpisodeType.Episode,
             EpisodeSeriesType = SeriesType.Series,
             HistoryEpisodeAvailableDubLang = GetAvailableDubLocales(episode),
@@ -566,6 +567,7 @@ public class HistoryService : IHistoryService, IDisposable
         historyEpisode.SpecialEpisode = IsSpecialEpisode(episode);
         historyEpisode.IsEpisodeAvailableOnStreamingService = true;
         historyEpisode.ThumbnailImageUrl = episode.ThumbnailUrl;
+        if (episode.DurationMs > 0) historyEpisode.DurationMs = episode.DurationMs;
         historyEpisode.EpisodeSeriesType = SeriesType.Series;
         // Update available dub/sub metadata for existing episodes
         foreach (var locale in GetAvailableDubLocales(episode).Where(locale =>
@@ -1053,6 +1055,7 @@ public class HistoryService : IHistoryService, IDisposable
 
         // Find series and parse Sonarr ID under lock
         int sonarrSeriesId;
+        bool isFilm;
         await _lock.WaitAsync();
         try
         {
@@ -1063,6 +1066,7 @@ public class HistoryService : IHistoryService, IDisposable
             {
                 return;
             }
+            isFilm = IsFilm(historySeries);
         }
         finally
         {
@@ -1083,6 +1087,10 @@ public class HistoryService : IHistoryService, IDisposable
 
         if (episodes.Count == 0)
             throw new InvalidOperationException("Sonarr returned no episodes. Existing matches were preserved.");
+        // A film's special is found by setting the franchise name aside, so it needs the series title.
+        var filmSeriesTitle = isFilm
+            ? (await _sonarrService.GetSeriesAsync(_config.Sonarr))?.FirstOrDefault(series => series.Id == sonarrSeriesId)?.Title
+            : null;
 
         var nextAirDate = GetNextAirDate(episodes);
         var episodesById = episodes.ToDictionary(episode => episode.Id);
@@ -1136,6 +1144,16 @@ public class HistoryService : IHistoryService, IDisposable
                     historyEpisode.ClearSonarrEpisodeData();
                     episodesToMatch.Add(historyEpisode);
                 }
+            }
+
+            // Crunchyroll lists the film on its own; TVDB files it as a special of this series.
+            // Every dub of the film is the same video and takes the same special.
+            if (filmSeriesTitle != null && episodesToMatch.Count > 0 &&
+                SonarrTitleIndex.FindFilmSpecial(episodesToMatch[0].EpisodeTitle!, allHistoryEpisodes.Max(e => e.DurationMs) / 60_000,
+                    filmSeriesTitle, episodes) is { } special)
+            {
+                foreach (var film in episodesToMatch) film.AssignSonarrEpisodeData(special);
+                episodesToMatch.Clear();
             }
 
             var titleAvailableEpisodes = episodes
@@ -1525,6 +1543,14 @@ public class HistoryService : IHistoryService, IDisposable
 
         alignment.Reverse();
         return alignment;
+    }
+
+    // One video, however many dubbed seasons list it: a film or a one-off OVA.
+    internal static bool IsFilm(HistorySeries series)
+    {
+        var titles = series.Seasons.SelectMany(season => season.EpisodesList)
+            .Select(episode => SonarrTitleIndex.Normalize(episode.EpisodeTitle)).Distinct().ToList();
+        return titles is [{ Length: > 0 }];
     }
 
     private static double CalculateEpisodeEvidenceScore(

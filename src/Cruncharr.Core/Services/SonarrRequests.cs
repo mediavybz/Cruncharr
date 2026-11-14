@@ -109,11 +109,18 @@ public partial class SonarrService
         InvalidateCache();
     }
 
+    public async Task SetEpisodeMonitoringAsync(IReadOnlyList<int> episodeIds, bool monitored, SonarrConfig config, CancellationToken cancellationToken = default)
+    {
+        if (episodeIds.Count == 0) return;
+        await RequestJsonAsync(HttpMethod.Put, "episode/monitor", config, new { episodeIds, monitored }, cancellationToken);
+        InvalidateCache();
+    }
+
     public async Task<int> SearchEpisodesAsync(int seriesId, IReadOnlyList<int> episodeIds, SonarrConfig config, CancellationToken cancellationToken = default)
     {
         if (episodeIds.Count == 0) throw new ArgumentException("At least one episode is required.", nameof(episodeIds));
         await SetMonitoringAsync(seriesId, true, config, cancellationToken);
-        await RequestJsonAsync(HttpMethod.Put, "episode/monitor", config, new { episodeIds, monitored = true }, cancellationToken);
+        await SetEpisodeMonitoringAsync(episodeIds, true, config, cancellationToken);
         // Reconcile a retry after Sonarr accepted a command but Cruncharr lost its response.
         var recent = await RequestJsonAsync(HttpMethod.Get, "command", config, cancellationToken: cancellationToken);
         var existing = recent.FirstOrDefault(c => (string?)c["name"] == "EpisodeSearch" &&

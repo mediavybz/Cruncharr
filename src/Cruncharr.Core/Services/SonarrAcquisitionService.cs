@@ -37,8 +37,20 @@ public class SonarrAcquisitionState
     public int EpisodeFileCount { get; set; }
 }
 
+// A Sonarr episode that Cruncharr unmonitored while it has the episode queued, so Sonarr's feeds
+// do not grab a second copy. Unmonitored is false when Sonarr was already not monitoring it.
+public sealed class SonarrMonitoringHold
+{
+    public string EpisodeId { get; set; } = "";
+    public string Server { get; set; } = "";
+    public int SonarrEpisodeId { get; set; }
+    public bool Unmonitored { get; set; }
+    public DateTime LastQueuedUtc { get; set; }
+}
+
 public interface ISonarrAcquisitionService
 {
+    Task HoldQueuedEpisodesAsync(IReadOnlyCollection<string> queuedEpisodeIds, CancellationToken cancellationToken = default);
     Task<SonarrAcquisitionState> PrepareAsync(EpisodeInfo episode, bool premium, int? tvdbId = null, CancellationToken cancellationToken = default);
     Task RegisterImportAsync(EpisodeInfo episode, string outputPath, CancellationToken cancellationToken = default);
     Task SynchronizeAsync(CancellationToken cancellationToken = default);
@@ -55,6 +67,13 @@ public sealed class SonarrAcquisitionService(
     private volatile bool _retryNow;
     private readonly string _path = statePath ?? Path.Combine(AppContext.BaseDirectory, "sonarr-requests.json");
     private List<SonarrAcquisitionState>? _state;
+    private List<SonarrMonitoringHold>? _holds;
+    // Each History read copies the whole History, so an unmatched queued episode is looked up once a minute.
+    private readonly Dictionary<string, DateTime> _holdLookups = [];
+    private string HoldsPath => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_path))!, "sonarr-monitoring-holds.json");
+    // A finished download reports Done before it registers its Sonarr import, so a hold outlives
+    // the queue entry by this long.
+    internal TimeSpan HoldReleaseDelay { get; init; } = TimeSpan.FromMinutes(10);
     private DateTime _lastLibrarySync;
     private string Server => $"{config.Sonarr.UseSsl}|{config.Sonarr.Host}|{config.Sonarr.Port}|{config.Sonarr.UrlBase}";
     private static T Copy<T>(T value) => JsonConvert.DeserializeObject<T>(JsonConvert.SerializeObject(value))!;
@@ -210,6 +229,91 @@ public sealed class SonarrAcquisitionService(
             await SaveAsync();
         }
         finally { _gate.Release(); }
+    }
+
+    // Sonarr keeps searching a monitored episode while Cruncharr downloads and transcodes it, and
+    // the two copies both end up imported. Each queued episode is unmonitored in Sonarr; monitoring
+    // returns once the episode left the queue and its Sonarr import finished, or when it failed or
+    // was removed, so Sonarr can still fetch it.
+    public async Task HoldQueuedEpisodesAsync(IReadOnlyCollection<string> queuedEpisodeIds, CancellationToken cancellationToken = default)
+    {
+        if (!config.Sonarr.Enabled) return;
+        // Turning the setting off releases every hold.
+        var queued = config.Sonarr.UnmonitorPremiumRequests ? queuedEpisodeIds.ToHashSet() : [];
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await LoadAsync();
+            _holds ??= File.Exists(HoldsPath)
+                ? JsonConvert.DeserializeObject<List<SonarrMonitoringHold>>(await File.ReadAllTextAsync(HoldsPath, cancellationToken)) ?? []
+                : [];
+            var now = DateTime.UtcNow;
+            var holds = _holds.Where(h => h.Server == Server).ToList();
+            foreach (var hold in holds.Where(h => queued.Contains(h.EpisodeId))) hold.LastQueuedUtc = now;
+            foreach (var id in _holdLookups.Keys.Where(id => !queued.Contains(id)).ToList()) _holdLookups.Remove(id);
+            var unheld = queued.Where(id => holds.All(h => h.EpisodeId != id) &&
+                (!_holdLookups.TryGetValue(id, out var lookedUp) || now - lookedUp >= TimeSpan.FromMinutes(1))).ToHashSet();
+            foreach (var id in unheld) _holdLookups[id] = now;
+            await HoldNewEpisodesAsync(unheld, holds, now, cancellationToken);
+
+            var importing = _state!.Where(s => s.Server == Server).SelectMany(s => s.ImportEpisodeIds.Values).ToHashSet();
+            // Dub editions share one Sonarr episode; it is released when none of them is still held.
+            var released = holds.GroupBy(h => h.SonarrEpisodeId)
+                .Where(group => group.All(h => !queued.Contains(h.EpisodeId) && !importing.Contains(h.EpisodeId) && now - h.LastQueuedUtc >= HoldReleaseDelay))
+                .ToList();
+            if (released.Count > 0)
+            {
+                await sonarr.SetEpisodeMonitoringAsync(released.Where(g => g.Any(h => h.Unmonitored)).Select(g => g.Key).ToList(), true, config.Sonarr, cancellationToken);
+                foreach (var hold in released.SelectMany(g => g)) _holds.Remove(hold);
+                await SaveHoldsAsync();
+            }
+        }
+        finally { _gate.Release(); }
+    }
+
+    private async Task HoldNewEpisodesAsync(HashSet<string> episodeIds, List<SonarrMonitoringHold> holds, DateTime now, CancellationToken cancellationToken)
+    {
+        if (episodeIds.Count == 0) return;
+        // An episode without a confirmed Sonarr match is checked again a minute later.
+        var matched = (await history.GetHistorySeriesAsync())
+            .Where(series => int.TryParse(series.SonarrSeriesId, out _))
+            .SelectMany(series => series.Seasons.SelectMany(season => season.EpisodesList)
+                .Where(e => episodeIds.Contains(e.EpisodeId ?? "") && int.TryParse(e.SonarrEpisodeId, out _))
+                .Select(e => (EpisodeId: e.EpisodeId!, SeriesId: int.Parse(series.SonarrSeriesId!), SonarrEpisodeId: int.Parse(e.SonarrEpisodeId!))))
+            .DistinctBy(e => e.EpisodeId)
+            .ToList();
+        if (matched.Count == 0) return;
+        var monitored = new HashSet<int>();
+        foreach (var seriesId in matched.Select(e => e.SeriesId).Distinct())
+            monitored.UnionWith((await sonarr.GetCurrentEpisodesAsync(seriesId, config.Sonarr, true, cancellationToken))
+                .Where(e => e.Monitored).Select(e => e.Id));
+        var unmonitor = matched.Select(e => e.SonarrEpisodeId).Where(monitored.Contains).ToHashSet();
+        var request = unmonitor.ToList();
+        foreach (var episode in matched)
+        {
+            var hold = new SonarrMonitoringHold
+            {
+                EpisodeId = episode.EpisodeId,
+                Server = Server,
+                SonarrEpisodeId = episode.SonarrEpisodeId,
+                // Only the first edition records the change, so a released episode is re-monitored once.
+                Unmonitored = unmonitor.Remove(episode.SonarrEpisodeId),
+                LastQueuedUtc = now
+            };
+            holds.Add(hold);
+            _holds!.Add(hold);
+        }
+        // Saved first: after a crash, an unrecorded change would leave the episode unmonitored for good.
+        await SaveHoldsAsync();
+        await sonarr.SetEpisodeMonitoringAsync(request, false, config.Sonarr, cancellationToken);
+        logger?.LogInformation("Holding {Count} queued episodes from Sonarr searches", matched.Count);
+    }
+
+    private async Task SaveHoldsAsync()
+    {
+        var temporary = HoldsPath + ".tmp";
+        await File.WriteAllTextAsync(temporary, JsonConvert.SerializeObject(_holds, Formatting.Indented));
+        File.Move(temporary, HoldsPath, overwrite: true);
     }
 
     // 1, 2, 4, 8, 16, 32, then 60 minutes.

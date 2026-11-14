@@ -15,6 +15,15 @@ Open **Settings → Sonarr**. Enable the connection and use **Test Connection** 
 
 **Turn off Sonarr monitoring for Premium requests** also unmonitors an existing show so feeds cannot grab competing releases while Cruncharr supplies it. Turn this off to preserve existing monitoring. This does not cancel downloads or searches Sonarr has already started. Newly added Premium series always start unmonitored.
 
+The same setting unmonitors each episode while it is in the Cruncharr queue. A queued
+episode can wait behind other downloads and transcodes, and Sonarr's RSS feed previously
+grabbed and imported a second copy during that wait. Monitoring is restored about ten
+minutes after the episode leaves the queue, once its Sonarr import has finished. A failed
+or removed download is restored the same way, so Sonarr can still fetch the episode.
+Episodes are held only after History has matched them to a Sonarr episode. The holds are
+saved in `sonarr-monitoring-holds.json` beside the configuration, and turning the setting
+off restores every held episode.
+
 Choose a **quality profile** and **root folder** for new series. Automatic selects the most common profile and most used root folder in the existing Sonarr library. An empty library with multiple profiles needs an explicit profile selection. Existing series keep their profiles, paths and tags.
 
 **Cruncharr download folder as seen by Sonarr** maps Cruncharr's output directory to the path Sonarr can access. For example, if the same host folder is mounted at `/downloads` in Cruncharr and `/incoming/cruncharr` in Sonarr, enter `/incoming/cruncharr`. Leave it blank when the full paths are identical. Sonarr needs access to the completed files; an API connection alone cannot transfer them. A per-series output override must remain under the mapped output directory, or use identical paths with the mapping blank.

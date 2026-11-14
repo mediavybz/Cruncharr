@@ -24,6 +24,7 @@ public interface ISonarrService
     Task<SonarrSetupOptions> GetSetupOptionsAsync(SonarrConfig config, CancellationToken cancellationToken = default);
     Task<SonarrSeries> AddSeriesAsync(int tvdbId, SonarrConfig config, CancellationToken cancellationToken = default);
     Task SetMonitoringAsync(int seriesId, bool monitored, SonarrConfig config, CancellationToken cancellationToken = default);
+    Task SetEpisodeMonitoringAsync(IReadOnlyList<int> episodeIds, bool monitored, SonarrConfig config, CancellationToken cancellationToken = default);
     Task<int> SearchEpisodesAsync(int seriesId, IReadOnlyList<int> episodeIds, SonarrConfig config, CancellationToken cancellationToken = default);
     Task<int> ImportFileAsync(string path, int seriesId, SonarrConfig config, CancellationToken cancellationToken = default, int? episodeId = null);
     Task<string> GetCommandStatusAsync(int commandId, SonarrConfig config, CancellationToken cancellationToken = default);

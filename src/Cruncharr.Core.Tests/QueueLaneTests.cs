@@ -99,7 +99,7 @@ public class QueueLaneTests
         var second = harness.Queue.AddToQueue(Episode("E2")).Item;
 
         await downloads.Started("E1");
-        await WaitForAsync(() => second.DownloadProgress.Doing == "Waiting for RAM: 8.0 of 10.0 GB in use");
+        await WaitForAsync(() => second.DownloadProgress.Doing?.StartsWith("Waiting for RAM: next episode needs ") == true && second.DownloadProgress.Doing.EndsWith("; 8.0 of 10.0 GB in use"));
         Assert.False(downloads.HasStarted("E2"));
 
         Interlocked.Exchange(ref used, 1L << 30);

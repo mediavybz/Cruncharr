@@ -779,28 +779,38 @@ public class HlsDownloader
             request.Headers.Add("User-Agent", ApiUrls.FirefoxUserAgent);
         }
 
-        return await SendRequestWithRetry(request, partIndex, segOffset, isKey, retryCount, cancellationToken);
+        var idleTimeout = TimeSpan.FromMilliseconds(timeout > 0 ? timeout : 15_000);
+        return await SendRequestWithRetry(request, partIndex, segOffset, isKey, retryCount, idleTimeout, cancellationToken);
     }
 
-    private async Task<byte[]?> SendRequestWithRetry(HttpRequestMessage requestPara, int partIndex, int segOffset, bool isKey, int retryCount, CancellationToken cancellationToken)
+    // The idle timeout covers the response body too. HttpClient's own timeout ends once the headers
+    // arrive, so a CDN connection that went silent mid-part (2026-11-18, Rayearth part 341 after a
+    // connection reset) blocked the download for hours instead of being retried.
+    private async Task<byte[]?> SendRequestWithRetry(HttpRequestMessage requestPara, int partIndex, int segOffset, bool isKey, int retryCount,
+        TimeSpan idleTimeout, CancellationToken cancellationToken)
     {
         for (int attempt = 0; attempt < retryCount + 1; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             using (var request = await CloneHttpRequestMessageAsync(requestPara))
+            using (var stalled = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
                 try
                 {
-                    using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    stalled.CancelAfter(idleTimeout);
+                    using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, stalled.Token);
                     response.EnsureSuccessStatusCode();
-                    return await ReadContentAsByteArrayAsync(response.Content, cancellationToken);
+                    return await ReadContentAsByteArrayAsync(response.Content, stalled, idleTimeout);
                 }
-                catch (Exception ex) when (ex is HttpRequestException or IOException)
+                catch (Exception ex) when (ex is HttpRequestException or IOException ||
+                                           ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
                 {
                     string partType = isKey ? "Key" : "Part";
                     int partIndx = partIndex + 1 + segOffset;
                     Console.Error.WriteLine($"{partType} {partIndx}: Attempt {attempt + 1} to retrieve data failed.");
-                    Console.Error.WriteLine($"\tError: {ex.Message}");
+                    Console.Error.WriteLine(ex is OperationCanceledException
+                        ? $"\tError: no data received for {idleTimeout.TotalSeconds:0} seconds."
+                        : $"\tError: {ex.Message}");
                     if (attempt == retryCount)
                         throw;
 
@@ -819,17 +829,19 @@ public class HlsDownloader
         return null;
     }
 
-    private async Task<byte[]> ReadContentAsByteArrayAsync(HttpContent content, CancellationToken cancellationToken)
+    private async Task<byte[]> ReadContentAsByteArrayAsync(HttpContent content, CancellationTokenSource stalled, TimeSpan idleTimeout)
     {
         using (var memoryStream = new MemoryStream())
-        using (var contentStream = await content.ReadAsStreamAsync(cancellationToken))
+        using (var contentStream = await content.ReadAsStreamAsync(stalled.Token))
         using (var throttledStream = new ThrottledStream(contentStream, _config?.Download.DownloadSpeedLimit ?? 0))
         {
             byte[] buffer = new byte[8192];
             int bytesRead;
-            while ((bytesRead = await throttledStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+            while ((bytesRead = await throttledStream.ReadAsync(buffer.AsMemory(0, buffer.Length), stalled.Token)) > 0)
             {
-                await memoryStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+                // Slow parts are fine; only a connection that stops delivering is abandoned.
+                stalled.CancelAfter(idleTimeout);
+                await memoryStream.WriteAsync(buffer.AsMemory(0, bytesRead), stalled.Token);
             }
 
             return memoryStream.ToArray();

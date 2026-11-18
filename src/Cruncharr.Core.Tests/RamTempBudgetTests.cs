@@ -50,7 +50,7 @@ public class RamTempBudgetTests
         // 3 GB episode + 4 GB encoder reserve on top of 3 GB in use: exactly 10 GB.
         Assert.True(Budget(used: 3 * GiB).HasRoomForDownload(download, newEpisodes: 1, encodersToStart: 1, out _));
         Assert.False(Budget(used: 4 * GiB).HasRoomForDownload(download, newEpisodes: 1, encodersToStart: 1, out var reason));
-        Assert.Equal("Waiting for RAM: 4.0 of 10.0 GB in use", reason);
+        Assert.Equal("Waiting for RAM: next episode needs 7.0 GB; 4.0 of 10.0 GB in use", reason);
         // A running encoder is already part of the memory in use.
         Assert.True(Budget(used: 4 * GiB).HasRoomForDownload(download, newEpisodes: 1, encodersToStart: 0, out _));
     }

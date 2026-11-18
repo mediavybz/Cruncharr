@@ -85,6 +85,38 @@ public class RangedSegmentDownloadTests : IDisposable
         Assert.Equal(Media[..100].Concat(Media[156..]).ToArray(), await File.ReadAllBytesAsync(output));
     }
 
+    // Live 2026-11-18: after a connection reset, a part's retry received headers and then no more
+    // data. The body read had no timeout, so the download sat at part 340 of 347 for hours.
+    [Fact]
+    public async Task PartThatStopsSendingIsRetriedInsteadOfHangingForever()
+    {
+        var server = new StallingServer(Media[..100], Media[156..206]);
+        using var client = new HttpClient(server);
+        var output = Path.Combine(_root.FullName, "stalled.m4s");
+        const string playlist = $"""
+            #EXTM3U
+            #EXT-X-MAP:URI="https://cdn.example.test/init.mp4"
+            #EXTINF:2.0,
+            {MediaUrl}
+            #EXT-X-ENDLIST
+            """;
+        var downloader = new HlsDownloader(new HlsOptions
+        {
+            Output = output,
+            M3U8Json = new M3U8Json { Segments = (List<dynamic>)M3u8MediaPlaylistParser.Parse(playlist, MediaUrl).Segments },
+            Threads = 1,
+            Retries = 1,
+            Timeout = 200,
+            FsRetryTime = 0
+        }, true, false, false, client, new CruncharrConfig(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var (ok, _) = await downloader.Download().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        Assert.True(ok);
+        Assert.Equal(2, server.PartRequests);
+        Assert.Equal(Media[..100].Concat(Media[156..206]).ToArray(), await File.ReadAllBytesAsync(output));
+    }
+
     [Fact]
     public void From_AcceptsEveryShapeTheParsersHandOver()
     {
@@ -155,6 +187,40 @@ public class RangedSegmentDownloadTests : IDisposable
         U32(70); U32(2000); U32(0x90000000);
         sidx.CopyTo(media, 100);
         return media;
+    }
+
+    // The part's first response sends a few bytes and then goes silent; the retry gets all of it.
+    private sealed class StallingServer(byte[] init, byte[] part) : HttpMessageHandler
+    {
+        public int PartRequests;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Stream body = request.RequestUri!.AbsoluteUri != MediaUrl ? new MemoryStream(init)
+                : Interlocked.Increment(ref PartRequests) == 1 ? new SilentAfterStream(part[..10]) : new MemoryStream(part);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
+        }
+    }
+
+    private sealed class SilentAfterStream(byte[] start) : Stream
+    {
+        private bool _sent;
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (!_sent) { _sent = true; start.CopyTo(buffer); return start.Length; }
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class RangeServer(byte[] media) : HttpMessageHandler

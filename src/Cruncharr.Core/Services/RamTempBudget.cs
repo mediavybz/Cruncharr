@@ -53,9 +53,12 @@ public sealed class RamTempBudget
         if (!Applies(download)) return true;
         var used = _memoryInUse(download.TempDirectory);
         var limit = LimitBytes(download);
-        if (used + newEpisodes * EpisodeBytes + Math.Max(0, encodersToStart) * EncoderBytes <= limit) return true;
+        var reserved = newEpisodes * EpisodeBytes + Math.Max(0, encodersToStart) * EncoderBytes;
+        if (used + reserved <= limit) return true;
+        // "2.1 of 8.0 GB in use" alone read as a stuck queue; the room for the episode and its
+        // encoder is what the download waits for.
         waitReason = string.Create(CultureInfo.InvariantCulture,
-            $"Waiting for RAM: {used / (double)GiB:0.0} of {limit / (double)GiB:0.0} GB in use");
+            $"Waiting for RAM: next episode needs {reserved / (double)GiB:0.0} GB; {used / (double)GiB:0.0} of {limit / (double)GiB:0.0} GB in use");
         return false;
     }
 

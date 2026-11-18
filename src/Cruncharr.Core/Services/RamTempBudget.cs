@@ -8,6 +8,8 @@ namespace Cruncharr.Core.Services;
 // 18 GB and the host killed a virtual machine. With the folder in RAM, a download starts only
 // when the container's memory (app, encoder and temp files together) leaves room for one more
 // episode and for an encoder that is not running yet. A temp folder on disk is not limited.
+public sealed record RamBudgetStatus(bool Applies, long LimitBytes, long UsedBytes, long EpisodeEstimateBytes, long EncoderEstimateBytes);
+
 public sealed class RamTempBudget
 {
     public const double AutomaticShare = 0.25;
@@ -38,6 +40,10 @@ public sealed class RamTempBudget
     // episode or a heavier encoder preset raises them and the ceiling still holds.
     public void RecordEpisode(long bytes) => RaiseTo(ref _episodeBytes, bytes);
     public void RecordEncoder(long bytes) => RaiseTo(ref _encoderBytes, bytes);
+
+    // What the ceiling sees now, for diagnosing a download that waits for memory.
+    public RamBudgetStatus Status(DownloadConfig download) => new(
+        Applies(download), LimitBytes(download), Applies(download) ? _memoryInUse(download.TempDirectory) : 0, EpisodeBytes, EncoderBytes);
 
     public bool Applies(DownloadConfig download) => download.UseTempFolder && _isRamBacked(download.TempDirectory);
 

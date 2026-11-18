@@ -44,6 +44,7 @@ public interface IQueueService
     // the encoder's memory.
     void RecordEpisodeFootprint(long bytes) { }
     void RecordEncoderPeak(long bytes) { }
+    RamBudgetStatus? RamBudgetStatus => null;
 
     // Init-completion gate (ported from upstream c123093)
     void SetInitialized(bool initialized);
@@ -1181,6 +1182,7 @@ public class QueueService : IQueueService, IDisposable
 
     public void RecordEpisodeFootprint(long bytes) => _ramBudget.RecordEpisode(bytes);
     public void RecordEncoderPeak(long bytes) => _ramBudget.RecordEncoder(bytes);
+    public RamBudgetStatus? RamBudgetStatus => _config == null ? null : _ramBudget.Status(_config.Download);
 
     // Encoder slots that will start for episodes already downloaded, without another admission check.
     private int EncodersToStart() => _config?.Download.EncodeEnabled == true && !string.IsNullOrEmpty(_config.Download.EncodingPreset)

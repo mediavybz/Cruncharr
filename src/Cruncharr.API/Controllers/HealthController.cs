@@ -45,6 +45,27 @@ public class HealthController : ControllerBase
     }
 
     /// <summary>
+    /// Memory diagnostics: how much the app holds, how much of that is live managed data, and
+    /// what the RAM temp-folder ceiling currently counts and reserves.
+    /// </summary>
+    [HttpGet("memory")]
+    public IActionResult GetMemory()
+    {
+        var gc = GC.GetGCMemoryInfo();
+        return Ok(new
+        {
+            ServerGc = System.Runtime.GCSettings.IsServerGC,
+            HeapCount = GC.GetConfigurationVariables().TryGetValue("HeapCount", out var heaps) ? heaps : null,
+            WorkingSetBytes = Environment.WorkingSet,
+            ManagedLiveBytes = GC.GetTotalMemory(false),
+            ManagedHeapBytes = gc.HeapSizeBytes,
+            ManagedCommittedBytes = gc.TotalCommittedBytes,
+            ManagedFragmentedBytes = gc.FragmentedBytes,
+            RamBudget = _queueService.RamBudgetStatus
+        });
+    }
+
+    /// <summary>
     /// Readiness check for Docker/Kubernetes
     /// </summary>
     [HttpGet("ready")]

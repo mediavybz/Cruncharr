@@ -2907,8 +2907,27 @@ public class DownloadService : IDownloadService
         }
     }
 
+    // A streamed body is not covered by HttpClient's timeout, so a connection that stops sending
+    // would hold the download forever; it fails after this long without data and is retried.
+    private static readonly TimeSpan StreamIdleTimeout = TimeSpan.FromSeconds(60);
+
     private async Task DownloadStreamAsync(string url, string outputPath, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null)
     {
+        using var stalled = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        stalled.CancelAfter(StreamIdleTimeout);
+        try
+        {
+            await DownloadStreamCoreAsync(url, outputPath, progress, startPercent, endPercent, stalled);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException($"The stream stopped sending data for {StreamIdleTimeout.TotalSeconds:0} seconds.");
+        }
+    }
+
+    private async Task DownloadStreamCoreAsync(string url, string outputPath, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationTokenSource stalled)
+    {
+        var cancellationToken = stalled.Token;
         // Direct file download - stream to disk without buffering entire file in memory
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -2926,6 +2945,7 @@ public class DownloadService : IDownloadService
 
         while ((read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
         {
+            stalled.CancelAfter(StreamIdleTimeout);
             await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             downloaded += read;
 

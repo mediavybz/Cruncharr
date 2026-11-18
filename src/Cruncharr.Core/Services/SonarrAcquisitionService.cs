@@ -75,6 +75,11 @@ public sealed class SonarrAcquisitionService(
     // the queue entry by this long.
     internal TimeSpan HoldReleaseDelay { get; init; } = TimeSpan.FromMinutes(10);
     private DateTime _lastLibrarySync;
+    // Re-reads every matched show's episodes from Sonarr. Every minute this was about 80 full
+    // episode lists and a History save per minute, a constant churn of memory and Sonarr load.
+    // History pages and scheduled checks read Sonarr's current file status themselves, so this
+    // only keeps the saved badges fresh.
+    internal static readonly TimeSpan LibraryRefreshInterval = TimeSpan.FromMinutes(10);
     private string Server => $"{config.Sonarr.UseSsl}|{config.Sonarr.Host}|{config.Sonarr.Port}|{config.Sonarr.UrlBase}";
     private static T Copy<T>(T value) => JsonConvert.DeserializeObject<T>(JsonConvert.SerializeObject(value))!;
 
@@ -464,7 +469,7 @@ public sealed class SonarrAcquisitionService(
         }
         finally { _gate.Release(); }
         // Library-wide refreshes must not hold the request-state lock while reading every show.
-        if (DateTime.UtcNow - _lastLibrarySync > TimeSpan.FromMinutes(1))
+        if (DateTime.UtcNow - _lastLibrarySync > LibraryRefreshInterval)
         {
             _lastLibrarySync = DateTime.UtcNow;
             await history.MatchHistorySeriesWithSonarrAsync();

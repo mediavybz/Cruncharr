@@ -602,7 +602,8 @@ public class QueueService : IQueueService, IDisposable
         _config = config;
         _cancellationToken = cancellationToken;
         _processingSlots?.Dispose();
-        _processingSlots = new ProcessingSlotManager(config.Queue.SimultaneousProcessingJobs);
+        // A limit of 0 would hold every download at "Waiting for processing slot" forever.
+        _processingSlots = new ProcessingSlotManager(Math.Max(1, config.Queue.SimultaneousProcessingJobs));
         _transcodeSlots?.Dispose();
         _transcodeSlots = new ProcessingSlotManager(Math.Max(1, config.Queue.MaxSimultaneousTranscodes));
 
@@ -1161,7 +1162,7 @@ public class QueueService : IQueueService, IDisposable
 
     public void SetProcessingLimit(int newLimit)
     {
-        _processingSlots?.SetLimit(newLimit);
+        _processingSlots?.SetLimit(Math.Max(1, newLimit));
     }
 
     public async Task WaitForTranscodeSlotAsync(CancellationToken cancellationToken = default)

@@ -928,14 +928,18 @@ public class HistoryService : IHistoryService, IDisposable
             var current = snapshot.SelectMany(s => s.Seasons).SelectMany(s => s.EpisodesList)
                 .Where(e => !string.IsNullOrEmpty(e.SonarrEpisodeId)).GroupBy(e => e.SonarrEpisodeId!)
                 .ToDictionary(g => g.Key, g => g.First());
+            var changed = false;
             foreach (var episode in _historyList.Where(s => !failures.Contains(s.SonarrSeriesId ?? ""))
                          .SelectMany(s => s.Seasons).SelectMany(s => s.EpisodesList))
                 if (episode.SonarrEpisodeId != null && current.TryGetValue(episode.SonarrEpisodeId, out var fresh))
                 {
-                    episode.SonarrHasFile = files.Contains(episode.EpisodeId ?? "");
+                    var hasFile = files.Contains(episode.EpisodeId ?? "");
+                    changed |= episode.SonarrHasFile != hasFile || episode.SonarrIsMonitored != fresh.SonarrIsMonitored;
+                    episode.SonarrHasFile = hasFile;
                     episode.SonarrIsMonitored = fresh.SonarrIsMonitored;
                 }
-            await SaveRichHistoryAsync(throwOnError: true);
+            // History is several megabytes; rewriting it when nothing changed was pure churn.
+            if (changed) await SaveRichHistoryAsync(throwOnError: true);
         }
         finally { _lock.Release(); }
     }

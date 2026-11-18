@@ -9,6 +9,12 @@
     <Version>1.0.87</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
+    <!-- Web projects default to the server GC: one heap per core (20 on the Unraid host), sized
+         for throughput and slow to return memory. Measured 2026-11-18, it committed about three
+         times the live data and held over 1 GB while idle, all counted against the RAM
+         temp-folder ceiling. The workstation GC suits a single-user background app. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>

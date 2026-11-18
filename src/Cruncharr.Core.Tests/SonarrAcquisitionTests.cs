@@ -378,6 +378,27 @@ public sealed class SonarrAcquisitionTests : IDisposable
     }
 
     [Fact]
+    public async Task FileStatusRefreshSavesHistoryOnlyWhenAStatusChanged()
+    {
+        await QueueMatchedEpisodeAsync();
+        var path = Path.Combine(_directory, "history.json");
+        await _history.RefreshSonarrFileStatusAsync(Token);
+        var unchanged = DateTime.UtcNow.AddHours(-1);
+        File.SetLastWriteTimeUtc(path, unchanged);
+
+        _sonarr.InvalidateCache();
+        await _history.RefreshSonarrFileStatusAsync(Token);
+        Assert.Equal(unchanged, File.GetLastWriteTimeUtc(path));
+
+        _server.Files.Add(101);
+        _sonarr.InvalidateCache();
+        await _history.RefreshSonarrFileStatusAsync(Token);
+        Assert.NotEqual(unchanged, File.GetLastWriteTimeUtc(path));
+        var reloaded = new HistoryService(path, sonarrService: _sonarr, apiService: _api.Object, config: _config);
+        Assert.True((await reloaded.GetHistorySeriesAsync()).Single().Seasons.Single().EpisodesList[0].SonarrHasFile);
+    }
+
+    [Fact]
     public async Task SonarrOutagePreservesPreviouslyConfirmedFiles()
     {
         _server.Files.Add(101);

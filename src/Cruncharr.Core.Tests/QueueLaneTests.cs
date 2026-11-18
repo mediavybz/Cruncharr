@@ -134,6 +134,35 @@ public class QueueLaneTests
 
     private static EpisodeInfo Episode(string id) => new() { Id = id, Title = id };
 
+    // Live 2026-11-18: a container update marked the download in progress Cancelled, and a
+    // restored queue leaves Cancelled items alone, so the episode was never downloaded.
+    [Fact]
+    public async Task Shutdown_LeavesTheActiveDownloadToRestartInsteadOfCancellingIt()
+    {
+        var downloads = new StagedDownloadService();
+        var harness = StartQueue(downloads, simultaneousDownloads: 1, processingJobs: 1);
+        var item = harness.Queue.AddToQueue(Episode("E1")).Item;
+        await downloads.Started("E1");
+
+        harness.Dispose();
+        await WaitForAsync(() => harness.Queue.ActiveDownloads == 0);
+
+        Assert.Equal(DownloadState.Downloading, item.DownloadProgress.State);
+    }
+
+    [Fact]
+    public async Task RemovingAnActiveDownload_StillCancelsIt()
+    {
+        var downloads = new StagedDownloadService();
+        using var harness = StartQueue(downloads, simultaneousDownloads: 1, processingJobs: 1);
+        var item = harness.Queue.AddToQueue(Episode("E1")).Item;
+        await downloads.Started("E1");
+
+        harness.Queue.RemoveFromQueue(item.Id);
+
+        await WaitForAsync(() => item.DownloadProgress.State == DownloadState.Cancelled);
+    }
+
     private static Harness StartQueue(StagedDownloadService downloads, int simultaneousDownloads, int processingJobs, bool start = true,
         string? encodingPreset = null, RamTempBudget? ramBudget = null)
     {

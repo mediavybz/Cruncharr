@@ -949,6 +949,13 @@ public class QueueService : IQueueService, IDisposable
             {
                 _logger?.LogInformation("Download cancelled but item re-queued; leaving it queued: {EpisodeId}", item.Episode.Id);
             }
+            else if (outerCancellationToken.IsCancellationRequested)
+            {
+                // The app is stopping, not the user cancelling. Cancelled survives a restart as the
+                // user's choice, so every container update used to drop the download in progress.
+                // Left mid-flight, the restored queue starts it again.
+                _logger?.LogInformation("Download interrupted by shutdown; it restarts with the app: {EpisodeId}", item.Episode.Id);
+            }
             else
             {
                 item.DownloadProgress.State = DownloadState.Cancelled;

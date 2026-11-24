@@ -109,11 +109,18 @@ public partial class SonarrService
         InvalidateCache();
     }
 
+    public async Task SetEpisodeMonitoringAsync(IReadOnlyList<int> episodeIds, bool monitored, SonarrConfig config, CancellationToken cancellationToken = default)
+    {
+        if (episodeIds.Count == 0) return;
+        await RequestJsonAsync(HttpMethod.Put, "episode/monitor", config, new { episodeIds, monitored }, cancellationToken);
+        InvalidateCache();
+    }
+
     public async Task<int> SearchEpisodesAsync(int seriesId, IReadOnlyList<int> episodeIds, SonarrConfig config, CancellationToken cancellationToken = default)
     {
         if (episodeIds.Count == 0) throw new ArgumentException("At least one episode is required.", nameof(episodeIds));
         await SetMonitoringAsync(seriesId, true, config, cancellationToken);
-        await RequestJsonAsync(HttpMethod.Put, "episode/monitor", config, new { episodeIds, monitored = true }, cancellationToken);
+        await SetEpisodeMonitoringAsync(episodeIds, true, config, cancellationToken);
         // Reconcile a retry after Sonarr accepted a command but Cruncharr lost its response.
         var recent = await RequestJsonAsync(HttpMethod.Get, "command", config, cancellationToken: cancellationToken);
         var existing = recent.FirstOrDefault(c => (string?)c["name"] == "EpisodeSearch" &&
@@ -134,6 +141,13 @@ public partial class SonarrService
             System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) => parsed,
         _ => null
     };
+
+    // Full paths, as Sonarr sees them, of the video files it has for a series.
+    public async Task<HashSet<string>> GetEpisodeFilePathsAsync(int seriesId, SonarrConfig config, CancellationToken cancellationToken = default)
+    {
+        var files = await RequestJsonAsync(HttpMethod.Get, $"episodefile?seriesId={seriesId}", config, cancellationToken: cancellationToken);
+        return files.Select(file => ((string?)file["path"] ?? "").Replace('\\', '/')).Where(path => path.Length > 0).ToHashSet(StringComparer.Ordinal);
+    }
 
     public async Task<int> ImportFileAsync(string path, int seriesId, SonarrConfig config, CancellationToken cancellationToken = default, int? episodeId = null)
     {

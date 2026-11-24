@@ -23,6 +23,14 @@ public class GuestCatalogAccessTests
         {"total":1,"data":[{"id":"GEPISODE1","title":"Episode 1","episode":"1","episode_number":1,"season_number":1,"series_id":"GSERIES01","series_title":"Naruto","season_id":"GSEASON01","season_title":"Season 1","audio_locale":"ja-JP","is_premium_only":true}]}
         """;
 
+    // Browse loads series, then films ("movie_listing"). Fakes that count catalog requests serve
+    // an empty film catalog so each load is still one counted request.
+    private static bool IsFilmCatalog(HttpRequestMessage request) =>
+        System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["type"] == "movie_listing";
+
+    private static HttpResponseMessage NoFilms() =>
+        new(HttpStatusCode.OK) { Content = new StringContent("""{"total":0,"data":[]}""") };
+
     private static Mock<ICrunchyrollAuthService> Guest()
     {
         var auth = new Mock<ICrunchyrollAuthService>();
@@ -204,6 +212,41 @@ public class GuestCatalogAccessTests
         Assert.Equal("GEPISODE1", Assert.Single(selected).Value.EpisodeId);
     }
 
+    // Miss Kobayashi's Dragon Maid: both OVAs are labelled "OVA" (episode_number 1 and 2). They were
+    // grouped as one episode, so "Japanese Hospitality" never appeared in the list (2026-11-13).
+    [Fact]
+    public async Task SeriesList_KeepsEpisodesThatShareANonNumericLabel()
+    {
+        const string ovaSeason = """
+            {"total":1,"data":[{"id":"GS00377859JAJP","title":"OVAs","season_number":0,"identifier":"G6497Z43Y|S00377859"}]}
+            """;
+        const string ovas = """
+            {"total":2,"data":[
+              {"id":"GYDQ18ZZ6","title":"Valentines and Hot Springs! (Please Don't Get Your Hopes Up)","episode":"OVA","episode_number":1,"season_number":0,"series_id":"G6497Z43Y","series_title":"Miss Kobayashi's Dragon Maid","season_id":"GS00377859JAJP","season_title":"OVAs","audio_locale":"ja-JP","is_premium_only":true},
+              {"id":"GQJUGE901","title":"Japanese Hospitality (The Attendant Is a Dragon)","episode":"OVA","episode_number":2,"season_number":0,"series_id":"G6497Z43Y","series_title":"Miss Kobayashi's Dragon Maid","season_id":"GS00377859JAJP","season_title":"OVAs","audio_locale":"ja-JP","is_premium_only":true}]}
+            """;
+        using var api = new CrunchyrollApiService(Guest().Object);
+        SetTransport(ApiTransport(api), new Handler((request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("/seasons") ? ovaSeason : ovas)
+        })));
+
+        var listing = await api.ListSeriesIdAsync("G6497Z43Y", "en-US", null, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(["Valentines and Hot Springs! (Please Don't Get Your Hopes Up)", "Japanese Hospitality (The Attendant Is a Dragon)"],
+            listing!.List.Select(item => item.Name));
+    }
+
+    [Theory]
+    [InlineData("OVA", 2, "OVA#2")]  // shared non-numeric label: the number tells episodes apart
+    [InlineData("12", 12, "12")]     // regular label: unchanged, dubbed versions still group
+    [InlineData("11-12", 11, "11-12")]
+    [InlineData("SP", null, "SP")]
+    [InlineData("", 5, "5")]
+    [InlineData(null, null, null)]
+    public void EpisodeGroupLabel_SeparatesSharedNonNumericLabels(string? label, int? number, string? expected) =>
+        Assert.Equal(expected, CrunchyrollApiService.EpisodeGroupLabel(label, number));
+
     [Fact]
     public async Task SlowSeasonalEnrichment_FallsBackToCrunchyrollWithinItsBudget()
     {
@@ -257,8 +300,9 @@ public class GuestCatalogAccessTests
         using var api = new CrunchyrollApiService(Guest().Object, timeProvider: clock);
         var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
-        SetTransport(ApiTransport(api), new Handler(async (_, token) =>
+        SetTransport(ApiTransport(api), new Handler(async (request, token) =>
         {
+            if (IsFilmCatalog(request)) return NoFilms();
             calls++;
             await pending.Task.WaitAsync(token);
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series) };
@@ -279,8 +323,9 @@ public class GuestCatalogAccessTests
         var auth = Guest();
         using var api = new CrunchyrollApiService(auth.Object);
         var calls = 0;
-        SetTransport(ApiTransport(api), new Handler((_, _) =>
+        SetTransport(ApiTransport(api), new Handler((request, _) =>
         {
+            if (IsFilmCatalog(request)) return Task.FromResult(NoFilms());
             calls++;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Series) });
         }));
@@ -338,6 +383,7 @@ public class GuestCatalogAccessTests
         var starts = new List<string>();
         SetTransport(ApiTransport(api), new Handler((request, _) =>
         {
+            if (IsFilmCatalog(request)) return Task.FromResult(NoFilms());
             var start = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["start"]!;
             starts.Add(start);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -349,6 +395,23 @@ public class GuestCatalogAccessTests
         Assert.Equal(new[] { "0", "1", "2" }, starts);
         Assert.Equal(3, result.Count);
         Assert.All(result, series => Assert.Equal(0, series.EpisodeCount));
+    }
+
+    // 2026-11-13: films ("movie_listing") could be found by search but never browsed.
+    [Fact]
+    public async Task Catalog_IncludesFilmsAfterSeries()
+    {
+        using var api = new CrunchyrollApiService(Guest().Object);
+        SetTransport(ApiTransport(api), new Handler((request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(IsFilmCatalog(request)
+                ? """{"total":2,"data":[{"id":"GMTE00351664","title":"Miss Kobayashi's Dragon Maid: A lonely dragon wants to be loved"},{"id":"GSERIES01","title":"Listed as both"}]}"""
+                : Series)
+        })));
+
+        var catalog = await api.GetAllSeriesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal([("GSERIES01", "series"), ("GMTE00351664", "movie_listing")], catalog.Select(item => (item.Id, item.ContentType)));
     }
 
     [Fact]
@@ -447,6 +510,24 @@ public class GuestCatalogAccessTests
         Assert.False(result.Success);
         Assert.Equal(loggedIn ? DownloadErrorType.PremiumContent : DownloadErrorType.NotAuthenticated, result.ErrorType);
         api.VerifyNoOtherCalls();
+    }
+
+    // A refresh that fails for a passing reason keeps the session and waits minutes before its
+    // next attempt. Downloads started meanwhile must be retried, not failed for good.
+    [Fact]
+    public async Task Download_DuringATemporarySignInFailure_IsRetriedInsteadOfFailingForGood()
+    {
+        var auth = Guest();
+        auth.SetupGet(value => value.SessionError).Returns("Crunchyroll did not answer the sign-in refresh.");
+        auth.Setup(value => value.AuthenticateAsync(true, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var download = new DownloadService(auth.Object, Mock.Of<ICrunchyrollApiService>());
+
+        var result = await download.DownloadEpisodeAsync(new EpisodeInfo { Id = "GEPISODE1" }, new CruncharrConfig(), cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(DownloadErrorType.NetworkError, result.ErrorType);
+        Assert.True(QueueService.IsRetryableDownloadError(result.ErrorType!.Value));
+        Assert.False(QueueService.IsRetryableDownloadError(DownloadErrorType.NotAuthenticated));
     }
 
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

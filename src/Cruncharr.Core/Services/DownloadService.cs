@@ -700,7 +700,13 @@ public class DownloadService : IDownloadService
         {
             if (!await _auth.AuthenticateAsync(true, cancellationToken))
             {
-                return new DownloadResult { Success = false, ErrorMessage = "Authentication failed. Please log in to your Crunchyroll account.", ErrorType = DownloadErrorType.NotAuthenticated };
+                // SessionError means the account is still signed in and only the refresh failed
+                // (network, Cloudflare, a 5xx). The sign-in then waits minutes before its next
+                // attempt, and every download started meanwhile used to end in a permanent
+                // error. As a network error the queue retries it and holds the other items back.
+                return _auth.SessionError != null
+                    ? new DownloadResult { Success = false, ErrorMessage = $"Crunchyroll sign-in is temporarily unavailable: {_auth.SessionError}", ErrorType = DownloadErrorType.NetworkError }
+                    : new DownloadResult { Success = false, ErrorMessage = "Authentication failed. Please log in to your Crunchyroll account.", ErrorType = DownloadErrorType.NotAuthenticated };
             }
             if (!_auth.Profile.HasPremium)
             {
@@ -2056,6 +2062,9 @@ public class DownloadService : IDownloadService
                                     $"Muxing failed for audio locale '{locale}'.",
                                     DownloadErrorType.Unknown);
                             }
+                            // The shared video is still needed by the remaining groups.
+                            RecordTempFootprint(tempDir);
+                            DeleteMuxedInputs(group == groups[^1] ? groupMediaFiles : group.Select(track => track.Path), config);
 
                             // Post-process encoding for this group if configured
                             if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
@@ -2089,6 +2098,8 @@ public class DownloadService : IDownloadService
                         {
                             throw new DownloadException("Muxing failed.", DownloadErrorType.Unknown);
                         }
+                        RecordTempFootprint(tempDir);
+                        DeleteMuxedInputs(downloadedFiles, config);
 
                         // Post-process encoding if configured
                         if (config.Download.EncodeEnabled && !string.IsNullOrEmpty(config.Download.EncodingPreset) && _encodingService != null)
@@ -2902,8 +2913,27 @@ public class DownloadService : IDownloadService
         }
     }
 
+    // A streamed body is not covered by HttpClient's timeout, so a connection that stops sending
+    // would hold the download forever; it fails after this long without data and is retried.
+    private static readonly TimeSpan StreamIdleTimeout = TimeSpan.FromSeconds(60);
+
     private async Task DownloadStreamAsync(string url, string outputPath, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationToken cancellationToken, string? videoToken = null)
     {
+        using var stalled = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        stalled.CancelAfter(StreamIdleTimeout);
+        try
+        {
+            await DownloadStreamCoreAsync(url, outputPath, progress, startPercent, endPercent, stalled);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException($"The stream stopped sending data for {StreamIdleTimeout.TotalSeconds:0} seconds.");
+        }
+    }
+
+    private async Task DownloadStreamCoreAsync(string url, string outputPath, IProgress<DownloadProgress>? progress, double startPercent, double endPercent, CancellationTokenSource stalled)
+    {
+        var cancellationToken = stalled.Token;
         // Direct file download - stream to disk without buffering entire file in memory
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -2921,6 +2951,7 @@ public class DownloadService : IDownloadService
 
         while ((read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
         {
+            stalled.CancelAfter(StreamIdleTimeout);
             await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             downloaded += read;
 
@@ -3963,6 +3994,31 @@ public class DownloadService : IDownloadService
         _logger?.LogInformation("Moved output to {Dest}", destPath);
     }
 
+    // The muxed file now holds these video/audio streams. Removing them before the wait for a
+    // transcode slot (and the encode itself) halves what a finished episode keeps in the temp
+    // folder, which is often RAM: each episode used to hold its raw streams AND the muxed copy
+    // until the encode finished.
+    // Right after a mux, raw streams and the muxed file coexist: the episode's largest temp
+    // footprint, which the RAM ceiling reserves for each new download.
+    private void RecordTempFootprint(string tempDir) =>
+        _queueService?.RecordEpisodeFootprint(RamTempBudget.DirectoryBytes(tempDir));
+
+    private void DeleteMuxedInputs(IEnumerable<string> paths, CruncharrConfig config)
+    {
+        if (config.Download.NoCleanup) return;
+        foreach (var path in paths)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger?.LogWarning(ex, "Could not remove muxed stream {Path}; it is removed with the working folder", path);
+            }
+        }
+    }
+
     // Acquire a transcode slot before encoding so the CPU-heavy encode step honors the
     // separate "max simultaneous transcodes" limit (downloads/muxes stay parallel; encodes
     // serialize to the configured limit). Always released, even on cancel/failure.
@@ -4074,6 +4130,19 @@ public class DownloadService : IDownloadService
     /// percentage + ETA through the queue progress (Percent stays in the 95-99 processing
     /// band; Doing carries the human-readable "Encoding... N%"). Kills ffmpeg on cancel.
     /// </summary>
+    private static long ProcessMemory(Process process)
+    {
+        try
+        {
+            process.Refresh();
+            return process.WorkingSet64;
+        }
+        catch (InvalidOperationException)
+        {
+            return 0; // exited between progress blocks
+        }
+    }
+
     private async Task<int> RunFfmpegWithEncodeProgressAsync(string ffmpegPath, List<string> args, double? durationSeconds, IProgress<DownloadProgress>? progress, string? label, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
@@ -4109,6 +4178,7 @@ public class DownloadService : IDownloadService
         double outTimeSeconds = 0;
         double speed = 0;
         var lastReport = DateTime.MinValue;
+        long peakMemory = 0;
 
         string? line;
         while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) != null)
@@ -4129,6 +4199,7 @@ public class DownloadService : IDownloadService
                     if (double.TryParse(sVal, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var sp)) speed = sp;
                     break;
                 case "progress": // end of a stats block — report once per block, throttled
+                    peakMemory = Math.Max(peakMemory, ProcessMemory(process));
                     if (progress == null) break;
                     var now = DateTime.UtcNow;
                     if (value != "end" && (now - lastReport).TotalSeconds < 1) break;
@@ -4160,6 +4231,8 @@ public class DownloadService : IDownloadService
         }
 
         await process.WaitForExitAsync(cancellationToken);
+        // The encoder's memory, reserved by the RAM ceiling while no encode is running yet.
+        if (peakMemory > 0) _queueService?.RecordEncoderPeak(peakMemory);
         var error = await errorTask;
 
         if (process.ExitCode != 0)

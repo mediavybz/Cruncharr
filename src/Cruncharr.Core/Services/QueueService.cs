@@ -40,6 +40,12 @@ public interface IQueueService
     void ReleaseTranscodeSlot();
     void SetTranscodeLimit(int newLimit);
 
+    // Measured sizes for the RAM temp-folder ceiling: an episode's temp files at their peak, and
+    // the encoder's memory.
+    void RecordEpisodeFootprint(long bytes) { }
+    void RecordEncoderPeak(long bytes) { }
+    RamBudgetStatus? RamBudgetStatus => null;
+
     // Init-completion gate (ported from upstream c123093)
     void SetInitialized(bool initialized);
     bool IsGloballyPaused { get; }
@@ -57,6 +63,9 @@ public class QueueService : IQueueService, IDisposable
     private readonly ILogger<QueueService>? _logger;
     private ProcessingSlotManager? _processingSlots;
     private ProcessingSlotManager? _transcodeSlots;
+    private int _runningTranscodes;
+    private readonly RamTempBudget _ramBudget;
+    private int _memoryRecheckScheduled;
     private CruncharrConfig? _config;
     private CancellationToken _cancellationToken;
 
@@ -129,6 +138,7 @@ public class QueueService : IQueueService, IDisposable
     public QueueService(IServiceProvider serviceProvider, ILogger<QueueService>? logger = null, IQueuePersistenceService? persistenceService = null, INotificationService? notificationService = null)
     {
         _serviceProvider = serviceProvider;
+        _ramBudget = serviceProvider.GetService<RamTempBudget>() ?? new RamTempBudget();
         _logger = logger;
         _persistenceService = persistenceService;
         _notificationService = notificationService;
@@ -492,6 +502,11 @@ public class QueueService : IQueueService, IDisposable
     {
         var downloads = Math.Max(1, _config?.Download.SimultaneousDownloads ?? 2);
         var processingBacklog = downloads + Math.Max(1, _config?.Queue.SimultaneousProcessingJobs ?? 2);
+        // With encoding on, the transcode slots are the bottleneck. More finished episodes than one
+        // ready per slot only wait in the temp folder, which is often RAM (2026-11-11: the host ran
+        // out of memory while finished episodes queued behind a single AV1 encode).
+        if (_config?.Download.EncodeEnabled == true && !string.IsNullOrEmpty(_config.Download.EncodingPreset))
+            processingBacklog = Math.Min(processingBacklog, 2 * Math.Max(1, _config.Queue.MaxSimultaneousTranscodes));
         return Math.Max(0, Math.Min(downloads - _activeOrStarting.Count, processingBacklog - _processingPhase.Count));
     }
 
@@ -587,7 +602,8 @@ public class QueueService : IQueueService, IDisposable
         _config = config;
         _cancellationToken = cancellationToken;
         _processingSlots?.Dispose();
-        _processingSlots = new ProcessingSlotManager(config.Queue.SimultaneousProcessingJobs);
+        // A limit of 0 would hold every download at "Waiting for processing slot" forever.
+        _processingSlots = new ProcessingSlotManager(Math.Max(1, config.Queue.SimultaneousProcessingJobs));
         _transcodeSlots?.Dispose();
         _transcodeSlots = new ProcessingSlotManager(Math.Max(1, config.Queue.MaxSimultaneousTranscodes));
 
@@ -742,6 +758,21 @@ public class QueueService : IQueueService, IDisposable
 
                 if (_activeOrStarting.Contains(item.Id) || _processingPhase.Contains(item.Id))
                     continue;
+
+                // RAM temp folder: start only when the episode fits under the memory ceiling. With
+                // nothing in flight it starts anyway; waiting cannot free memory then.
+                var inFlight = _activeOrStarting.Count + _processingPhase.Count;
+                if (inFlight > 0 && !_ramBudget.HasRoomForDownload(_config.Download, toStart.Count + 1, EncodersToStart(), out var waitReason))
+                {
+                    if (item.DownloadProgress.Doing != waitReason)
+                    {
+                        item.DownloadProgress.Doing = waitReason;
+                        changed = true;
+                        _logger?.LogInformation("{Reason}; {Title} starts when memory is free", waitReason, item.Episode?.Title);
+                    }
+                    ScheduleMemoryRecheck();
+                    break;
+                }
 
                 _activeOrStarting.Add(item.Id);
                 freeSlots--;
@@ -919,6 +950,13 @@ public class QueueService : IQueueService, IDisposable
             else if (item.DownloadProgress.State == DownloadState.Queued)
             {
                 _logger?.LogInformation("Download cancelled but item re-queued; leaving it queued: {EpisodeId}", item.Episode.Id);
+            }
+            else if (outerCancellationToken.IsCancellationRequested)
+            {
+                // The app is stopping, not the user cancelling. Cancelled survives a restart as the
+                // user's choice, so every container update used to drop the download in progress.
+                // Left mid-flight, the restored queue starts it again.
+                _logger?.LogInformation("Download interrupted by shutdown; it restarts with the app: {EpisodeId}", item.Episode.Id);
             }
             else
             {
@@ -1124,7 +1162,7 @@ public class QueueService : IQueueService, IDisposable
 
     public void SetProcessingLimit(int newLimit)
     {
-        _processingSlots?.SetLimit(newLimit);
+        _processingSlots?.SetLimit(Math.Max(1, newLimit));
     }
 
     public async Task WaitForTranscodeSlotAsync(CancellationToken cancellationToken = default)
@@ -1133,11 +1171,35 @@ public class QueueService : IQueueService, IDisposable
         {
             await _transcodeSlots.WaitAsync(cancellationToken);
         }
+        Interlocked.Increment(ref _runningTranscodes);
     }
 
     public void ReleaseTranscodeSlot()
     {
+        Interlocked.Decrement(ref _runningTranscodes);
         _transcodeSlots?.Release();
+        RequestPump(); // the encoder's memory is free again
+    }
+
+    public void RecordEpisodeFootprint(long bytes) => _ramBudget.RecordEpisode(bytes);
+    public void RecordEncoderPeak(long bytes) => _ramBudget.RecordEncoder(bytes);
+    public RamBudgetStatus? RamBudgetStatus => _config == null ? null : _ramBudget.Status(_config.Download);
+
+    // Encoder slots that will start for episodes already downloaded, without another admission check.
+    private int EncodersToStart() => _config?.Download.EncodeEnabled == true && !string.IsNullOrEmpty(_config.Download.EncodingPreset)
+        ? Math.Max(0, Math.Max(1, _config.Queue.MaxSimultaneousTranscodes) - Volatile.Read(ref _runningTranscodes))
+        : 0;
+
+    // Memory also frees without a queue event (an encode's memory shrinks, another process
+    // exits), so a held download is re-checked on a timer.
+    private void ScheduleMemoryRecheck()
+    {
+        if (Interlocked.Exchange(ref _memoryRecheckScheduled, 1) == 1) return;
+        _ = Task.Delay(TimeSpan.FromSeconds(15), _cancellationToken).ContinueWith(_ =>
+        {
+            Interlocked.Exchange(ref _memoryRecheckScheduled, 0);
+            RequestPump();
+        }, TaskScheduler.Default);
     }
 
     public void SetTranscodeLimit(int newLimit)

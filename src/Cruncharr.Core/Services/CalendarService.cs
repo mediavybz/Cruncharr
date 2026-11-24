@@ -33,6 +33,10 @@ public class CalendarService : ICalendarService
     // placeholder without the user pressing Refresh (the cache previously lived until
     // restart, so the whole week went stale). 30 min balances freshness vs CR API load.
     private static readonly TimeSpan CustomCalendarTtl = TimeSpan.FromMinutes(30);
+    // The week containing today gains episodes throughout the day; a 30-minute copy hid
+    // releases for up to half an hour (e.g. a noon episode built into an 11:44 copy). Past
+    // weeks do not change, so they keep the longer lifetime.
+    private static readonly TimeSpan CurrentWeekCalendarTtl = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<string, DateTime> _calendarCacheFetchedUtc = new();
     // Immutable snapshot swapped atomically by the loader so a concurrent calendar request never
     // reads a half-cleared map while the window is rebuilt (readers take no lock). Reassigned as a
@@ -233,7 +237,7 @@ public class CalendarService : ICalendarService
         cancellationToken.ThrowIfCancellationRequested();
         var showUpcoming = _config?.Calendar?.ShowUpcomingEpisodes == true;
         var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}_{showUpcoming}";
-        var week = forceUpdate ? null : GetCachedCustomCalendar(cacheKey);
+        var week = forceUpdate ? null : GetCachedCustomCalendar(cacheKey, targetDate);
         // Only the fetch is shared. History marks belong to this response, not the cached week.
         if (week == null)
         {
@@ -252,18 +256,23 @@ public class CalendarService : ICalendarService
         return week;
     }
 
-    private CalendarWeek? GetCachedCustomCalendar(string cacheKey)
+    private CalendarWeek? GetCachedCustomCalendar(string cacheKey, DateTime targetDate)
     {
         return _calendarCache.TryGetValue(cacheKey, out var cachedWeek) &&
             _calendarCacheFetchedUtc.TryGetValue(cacheKey, out var fetchedUtc) &&
-            DateTime.UtcNow - fetchedUtc < CustomCalendarTtl
+            DateTime.UtcNow - fetchedUtc < CustomCalendarTtlFor(targetDate, DateTime.Now)
             ? cachedWeek : null;
     }
+
+    // The custom week is the seven days ending on targetDate.
+    internal static TimeSpan CustomCalendarTtlFor(DateTime targetDate, DateTime now) =>
+        targetDate.Date >= now.Date && targetDate.Date.AddDays(-6) <= now.Date
+            ? CurrentWeekCalendarTtl : CustomCalendarTtl;
 
     private async Task<CalendarWeek> BuildCustomCalendarAsync(DateTime targetDate, string language, bool forceUpdate, bool showUpcoming, CancellationToken cancellationToken)
     {
         var cacheKey = $"C_{language}_{targetDate:yyyy-MM-dd}_{showUpcoming}";
-        if (!forceUpdate && GetCachedCustomCalendar(cacheKey) is { } cachedWeek)
+        if (!forceUpdate && GetCachedCustomCalendar(cacheKey, targetDate) is { } cachedWeek)
             return cachedWeek;
 
         var week = new CalendarWeek

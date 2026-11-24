@@ -50,8 +50,185 @@ public sealed class SonarrAcquisitionTests : IDisposable
         _requests = CreateRequests();
     }
 
-    private SonarrAcquisitionService CreateRequests() => new(_sonarr, _api.Object, _history, _config,
-        statePath: Path.Combine(_directory, "requests.json"));
+    private SonarrAcquisitionService CreateRequests(TimeSpan? holdReleaseDelay = null, TimeSpan? maxHoldAfterQueue = null) => new(_sonarr, _api.Object, _history, _config,
+        statePath: Path.Combine(_directory, "requests.json"))
+    { HoldReleaseDelay = holdReleaseDelay ?? TimeSpan.Zero, MaxHoldAfterQueue = maxHoldAfterQueue ?? TimeSpan.FromHours(24) };
+
+    private string DownloadedFile(string name) => Path.Combine(_directory, "Example", name);
+
+    // Live 2026-11-24: a special TVDB does not list was first in One Piece's list, and the nine
+    // episodes behind it were never handed to Sonarr.
+    [Fact]
+    public async Task FileWithoutASonarrMatchDoesNotHoldBackTheFilesBehindIt()
+    {
+        await QueueMatchedEpisodeAsync();
+        _config.Sonarr.DownloadPath = "/incoming";
+        await _requests.RegisterImportAsync(new EpisodeInfo { Id = "GUNLISTED", SeriesId = "GSERIES" }, DownloadedFile("special.mkv"), Token);
+        await _requests.RegisterImportAsync(_episodes[1], DownloadedFile("episode2.mkv"), Token);
+
+        await _requests.SynchronizeAsync(Token);
+
+        var command = Assert.Single(_server.Writes, w => w.Path == "command").Body;
+        Assert.Equal(new[] { 102 }, command["files"]![0]!["episodeIds"]!.Values<int>());
+        var state = (await _requests.GetStatusAsync()).Single();
+        Assert.Equal("Waiting for a confirmed Sonarr episode match before importing.", state.LastError);
+        Assert.Equal(2, state.PendingImports.Count);
+
+        _server.Commands[0]["status"] = "completed";
+        var retried = CreateRequests();
+        retried.RetryNow();
+        await retried.SynchronizeAsync(Token);
+        Assert.Equal([Path.GetFullPath(DownloadedFile("special.mkv"))], (await retried.GetStatusAsync()).Single().PendingImports.Keys);
+    }
+
+    [Fact]
+    public async Task FileSonarrAlreadyHasIsFinishedWithoutAnotherImport()
+    {
+        await QueueMatchedEpisodeAsync();
+        _config.Sonarr.DownloadPath = "/incoming";
+        // No Sonarr match is needed to see that Sonarr has the file.
+        await _requests.RegisterImportAsync(new EpisodeInfo { Id = "GUNLISTED", SeriesId = "GSERIES" }, DownloadedFile("special.mkv"), Token);
+        _server.EpisodeFiles.Add("/incoming/Example/special.mkv");
+
+        await _requests.SynchronizeAsync(Token);
+
+        Assert.DoesNotContain(_server.Writes, w => w.Path == "command");
+        var state = (await _requests.GetStatusAsync()).Single();
+        Assert.Empty(state.PendingImports);
+        Assert.Null(state.LastError);
+    }
+
+    [Fact]
+    public async Task DownloadQueuedUnderADubsIdImportsAsHistorysEpisode()
+    {
+        await QueueMatchedEpisodeAsync();
+        _config.Sonarr.DownloadPath = "/incoming";
+        _api.Setup(a => a.ParseEpisodeByIdAsync("GEPISODE1ENUS", null, false, It.IsAny<CancellationToken>())).ReturnsAsync(new EpisodeInfo
+        {
+            Id = "GEPISODE1ENUS",
+            SeriesId = "GSERIES",
+            Versions = [new EpisodeVersion { Guid = "GEPISODE1", AudioLocale = "ja-JP" }, new EpisodeVersion { Guid = "GEPISODE1ENUS", AudioLocale = "en-US" }]
+        });
+        await _requests.RegisterImportAsync(new EpisodeInfo { Id = "GEPISODE1ENUS", SeriesId = "GSERIES" }, DownloadedFile("dub.mkv"), Token);
+
+        await _requests.SynchronizeAsync(Token);
+
+        var command = Assert.Single(_server.Writes, w => w.Path == "command").Body;
+        Assert.Equal(new[] { 101 }, command["files"]![0]!["episodeIds"]!.Values<int>());
+        Assert.Null((await _requests.GetStatusAsync()).Single().LastError);
+    }
+
+    // Sonarr answers 404 for an episode whose series was removed. In one batch that failed the
+    // release of every other held episode, on every pass.
+    [Fact]
+    public async Task HeldEpisodeRemovedFromSonarrDoesNotBlockTheOthers()
+    {
+        await QueueMatchedEpisodeAsync();
+        await _requests.HoldQueuedEpisodesAsync(["GEPISODE1", "GEPISODE2"], Token);
+        Assert.Equal([101, 102], _server.Unmonitored.Order());
+        _server.RemovedEpisodes.Add(101);
+
+        await _requests.HoldQueuedEpisodesAsync([], Token);
+        Assert.Equal([101], _server.Unmonitored);
+
+        var writes = _server.Writes.Count;
+        await CreateRequests().HoldQueuedEpisodesAsync([], Token);
+        Assert.Equal(writes, _server.Writes.Count);
+    }
+
+    [Fact]
+    public async Task ImportThatNeverFinishesStopsHoldingTheEpisodeAfterTheLimit()
+    {
+        await QueueMatchedEpisodeAsync();
+        await _requests.HoldQueuedEpisodesAsync(["GEPISODE1"], Token);
+        await _requests.RegisterImportAsync(_episodes[0], DownloadedFile("episode.mkv"), Token);
+
+        await CreateRequests().HoldQueuedEpisodesAsync([], Token);
+        Assert.Empty(MonitorWrites(true));
+
+        await CreateRequests(maxHoldAfterQueue: TimeSpan.Zero).HoldQueuedEpisodesAsync([], Token);
+        Assert.Equal(new[] { 101 }, Assert.Single(MonitorWrites(true)).Values<int>());
+    }
+
+    private IEnumerable<JToken> MonitorWrites(bool monitored) =>
+        _server.Writes.Where(w => w.Path == "episode/monitor" && w.Body["monitored"]!.Value<bool>() == monitored).Select(w => w.Body["episodeIds"]!);
+
+    private async Task QueueMatchedEpisodeAsync()
+    {
+        _server.Library.Add(_server.Series());
+        _config.Sonarr.UnmonitorPremiumRequests = true;
+        await _requests.PrepareAsync(new EpisodeInfo { Id = "GEPISODE1" }, true, cancellationToken: Token);
+        await _history.MatchHistoryEpisodesWithSonarrAsync("GSERIES");
+    }
+
+    [Fact]
+    public async Task QueuedEpisodeStaysUnmonitoredUntilCruncharrsImportFinishes()
+    {
+        await QueueMatchedEpisodeAsync();
+        await _requests.HoldQueuedEpisodesAsync(["GEPISODE1"], Token);
+        Assert.Equal(new[] { 101 }, Assert.Single(MonitorWrites(false)).Values<int>());
+        Assert.Contains(101, _server.Unmonitored);
+
+        _config.Sonarr.DownloadPath = "/incoming";
+        await _requests.RegisterImportAsync(_episodes[0], Path.Combine(_directory, "Example", "episode.mkv"), Token);
+        await _requests.HoldQueuedEpisodesAsync([], Token);
+        Assert.Empty(MonitorWrites(true));
+
+        await _requests.SynchronizeAsync(Token);
+        _server.Commands.Single(c => c["name"]!.Value<string>() == "ManualImport")["status"] = "completed";
+        await _requests.SynchronizeAsync(Token);
+        // A restart must not forget which episodes Cruncharr unmonitored.
+        await CreateRequests().HoldQueuedEpisodesAsync([], Token);
+        Assert.Equal(new[] { 101 }, Assert.Single(MonitorWrites(true)).Values<int>());
+        Assert.DoesNotContain(101, _server.Unmonitored);
+    }
+
+    [Fact]
+    public async Task FailedOrRemovedDownloadIsMonitoredAgainAfterTheDelay()
+    {
+        await QueueMatchedEpisodeAsync();
+        var requests = CreateRequests(TimeSpan.FromMinutes(10));
+        await requests.HoldQueuedEpisodesAsync(["GEPISODE1"], Token);
+        await requests.HoldQueuedEpisodesAsync([], Token);
+        Assert.Empty(MonitorWrites(true));
+
+        await CreateRequests().HoldQueuedEpisodesAsync([], Token);
+        Assert.Single(MonitorWrites(true));
+    }
+
+    [Fact]
+    public async Task EpisodeTheUserLeftUnmonitoredIsNotMonitoredAfterward()
+    {
+        await QueueMatchedEpisodeAsync();
+        _server.Unmonitored.Add(101);
+        await _requests.HoldQueuedEpisodesAsync(["GEPISODE1"], Token);
+        await _requests.HoldQueuedEpisodesAsync([], Token);
+        Assert.All(MonitorWrites(false).Concat(MonitorWrites(true)), ids => Assert.Empty(ids));
+        Assert.Contains(101, _server.Unmonitored);
+    }
+
+    [Fact]
+    public void FinishedQueueItemsAreNotHeldButRetriesAre()
+    {
+        QueueItem Item(string id, DownloadState state, DateTimeOffset? retryAt = null) =>
+            new() { Episode = new EpisodeInfo { Id = id }, DownloadProgress = new DownloadProgress { State = state, RetryAtUtc = retryAt } };
+        var held = Cruncharr.API.Services.SonarrSyncService.QueuedEpisodeIds([
+            Item("queued", DownloadState.Queued), Item("paused", DownloadState.Paused), Item("transcoding", DownloadState.Processing),
+            Item("done", DownloadState.Done), Item("removed", DownloadState.Cancelled), Item("failed", DownloadState.Error),
+            Item("retrying", DownloadState.Error, DateTimeOffset.UtcNow.AddMinutes(5))]);
+        Assert.Equal(["paused", "queued", "retrying", "transcoding"], held.Order());
+    }
+
+    [Fact]
+    public async Task TurningTheSettingOffReleasesHeldEpisodes()
+    {
+        await QueueMatchedEpisodeAsync();
+        await _requests.HoldQueuedEpisodesAsync(["GEPISODE1"], Token);
+        _config.Sonarr.UnmonitorPremiumRequests = false;
+        await _requests.HoldQueuedEpisodesAsync(["GEPISODE1"], Token);
+        Assert.Single(MonitorWrites(true));
+        Assert.Empty(_server.Unmonitored);
+    }
 
     [Fact]
     public async Task PremiumRegistersUnmonitoredSeriesAndNeverSearches()
@@ -297,6 +474,27 @@ public sealed class SonarrAcquisitionTests : IDisposable
     }
 
     [Fact]
+    public async Task FileStatusRefreshSavesHistoryOnlyWhenAStatusChanged()
+    {
+        await QueueMatchedEpisodeAsync();
+        var path = Path.Combine(_directory, "history.json");
+        await _history.RefreshSonarrFileStatusAsync(Token);
+        var unchanged = DateTime.UtcNow.AddHours(-1);
+        File.SetLastWriteTimeUtc(path, unchanged);
+
+        _sonarr.InvalidateCache();
+        await _history.RefreshSonarrFileStatusAsync(Token);
+        Assert.Equal(unchanged, File.GetLastWriteTimeUtc(path));
+
+        _server.Files.Add(101);
+        _sonarr.InvalidateCache();
+        await _history.RefreshSonarrFileStatusAsync(Token);
+        Assert.NotEqual(unchanged, File.GetLastWriteTimeUtc(path));
+        var reloaded = new HistoryService(path, sonarrService: _sonarr, apiService: _api.Object, config: _config);
+        Assert.True((await reloaded.GetHistorySeriesAsync()).Single().Seasons.Single().EpisodesList[0].SonarrHasFile);
+    }
+
+    [Fact]
     public async Task SonarrOutagePreservesPreviouslyConfirmedFiles()
     {
         _server.Files.Add(101);
@@ -352,6 +550,9 @@ public sealed class SonarrAcquisitionTests : IDisposable
         public JArray Lookup { get; } = [new JObject { ["tvdbId"] = 100, ["title"] = "The Example", ["year"] = 2020, ["seasons"] = new JArray(new JObject { ["seasonNumber"] = 1 }) }];
         public JArray Commands { get; } = [];
         public HashSet<int> Files { get; } = [];
+        public HashSet<int> Unmonitored { get; } = [];
+        public List<string> EpisodeFiles { get; } = [];
+        public HashSet<int> RemovedEpisodes { get; } = [];
         public bool FailAddResponse { get; set; }
         public bool FailSearchResponse { get; set; }
         public bool FailReads { get; set; }
@@ -403,9 +604,16 @@ public sealed class SonarrAcquisitionTests : IDisposable
                 absoluteEpisodeNumber = n,
                 title = $"An Adventure with Character {n}",
                 hasFile = Files.Contains(100 + n),
-                monitored = true
+                monitored = !Unmonitored.Contains(100 + n)
             }));
-            else if (path == "episode/monitor") result = new JArray();
+            else if (path == "episodefile") result = JArray.FromObject(EpisodeFiles.Select(file => new { path = file }));
+            else if (path == "episode/monitor")
+            {
+                if (body["episodeIds"]!.Values<int>().Any(RemovedEpisodes.Contains)) return new HttpResponseMessage(HttpStatusCode.NotFound);
+                foreach (var id in body["episodeIds"]!.Values<int>())
+                    if (body["monitored"]!.Value<bool>()) Unmonitored.Remove(id); else Unmonitored.Add(id);
+                result = new JArray();
+            }
             else if (path == "manualimport" && method == "GET") result = new JArray(new JObject
             {
                 ["path"] = Uri.UnescapeDataString(request.RequestUri.Query.Split("folder=")[1].Split('&')[0]),

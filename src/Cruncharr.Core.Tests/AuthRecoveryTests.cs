@@ -57,6 +57,89 @@ public class AuthRecoveryTests
         Assert.Equal("account", scope.Auth.Token?.access_token);
     }
 
+    // History refreshes authenticate once per series; a fresh signed-in session must not rotate
+    // its refresh token each time (2026-11-06: ~50 rotations an hour before the session was revoked).
+    [Fact]
+    public async Task FreshSignedInSession_IsReusedUntilItNeedsRefreshing()
+    {
+        using var scope = new AuthScope();
+        scope.SetToken(new CrToken { access_token = "account", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(30) });
+        typeof(CrunchyrollAuthService).GetProperty(nameof(scope.Auth.Profile))!.SetValue(scope.Auth, new CrProfile { Username = "viewer" });
+        var grants = 0;
+        scope.Respond((request, _) =>
+        {
+            if (request.RequestUri!.AbsoluteUri == ApiUrls.Auth) grants++;
+            return Task.FromResult(request.RequestUri.AbsoluteUri == ApiUrls.Auth ? Status(HttpStatusCode.OK, AccountToken) : Status(HttpStatusCode.NotFound));
+        });
+
+        for (var i = 0; i < 3; i++)
+            Assert.True(await scope.Auth.AuthenticateAsync(true, TestContext.Current.CancellationToken));
+        Assert.Equal(0, grants);
+
+        scope.SetToken(new CrToken { access_token = "old", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(-1) });
+        await scope.Auth.AuthenticateAsync(true, TestContext.Current.CancellationToken);
+        Assert.Equal(1, grants);
+        Assert.Equal("account", scope.Auth.Token?.access_token);
+    }
+
+    // 2026-11-06: Crunchyroll retired TV 3.75.0 mid-session. The saved login was still valid, but
+    // every refresh failed until a restart looked up 3.76.0. A refresh now does that itself.
+    [Fact]
+    public async Task RetiredClientDuringRefresh_UpdatesTheClientAndKeepsTheSession()
+    {
+        using var scope = new AuthScope();
+        var retired = scope.Auth.StreamEndpoint.Authorization;
+        const string updated = "Basic dXBkYXRlZC10djpzZWNyZXQ=";
+        scope.SetToken(new CrToken { access_token = "old", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(-1) });
+        var grants = new List<string>();
+        var updateChecks = 0;
+        scope.Respond((request, _) =>
+        {
+            if (request.RequestUri!.Host == "codeberg.org")
+            {
+                updateChecks++;
+                return Task.FromResult(Status(HttpStatusCode.OK, $$"""[{"type":"tv","version_name":"99.0.0","version_code":"1","Authorization":"{{updated}}"}]"""));
+            }
+            if (request.RequestUri.AbsoluteUri != ApiUrls.Auth) return Task.FromResult(Status(HttpStatusCode.NotFound));
+            var auth = request.Headers.GetValues("Authorization").Single();
+            grants.Add(auth);
+            return Task.FromResult(auth == updated
+                ? Status(HttpStatusCode.OK, AccountToken)
+                : Status(HttpStatusCode.Unauthorized, """{"code":"auth.obtain_access_token.client_inactive","error":"invalid_client"}"""));
+        });
+
+        Assert.True(await scope.Auth.RefreshTokenAsync(true, TestContext.Current.CancellationToken, force: true));
+
+        Assert.Equal([retired!, updated], grants);
+        Assert.Equal(1, updateChecks);
+        Assert.Equal("account", scope.Auth.Token?.access_token);
+        Assert.Null(scope.Auth.SessionError);
+    }
+
+    // A rejected refresh is not retried by every following request (about 170 rejected sign-ins
+    // an hour on 2026-11-06); the session is kept and the next attempt waits.
+    [Fact]
+    public async Task RejectedRefresh_WaitsBeforeTheNextAttempt()
+    {
+        using var scope = new AuthScope();
+        scope.SetToken(new CrToken { access_token = "old", refresh_token = "saved", account_id = "acct", device_id = "dev", expires = DateTime.Now.AddMinutes(-1) });
+        var attempts = 0;
+        scope.Respond((request, _) =>
+        {
+            if (request.RequestUri!.AbsoluteUri == ApiUrls.Auth) attempts++;
+            return Task.FromResult(Status(HttpStatusCode.Unauthorized, """{"error":"unauthorized"}"""));
+        });
+
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.False(await scope.Auth.RefreshTokenAsync(true, TestContext.Current.CancellationToken));
+            await scope.Auth.AuthenticateAsync(true, TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(1, attempts);
+        Assert.Equal("saved", scope.Auth.Token?.refresh_token);
+    }
+
     [Fact]
     public async Task RetiredTvClient_RetriesTheUpdatedTvClientBeforeMobile()
     {

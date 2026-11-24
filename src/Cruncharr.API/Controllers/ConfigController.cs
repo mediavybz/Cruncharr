@@ -192,6 +192,7 @@ public class ConfigController : ControllerBase
                 OrganizeIntoFolders = _config.Download?.OrganizeIntoFolders ?? true,
                 TempDirectory = _config.Download?.TempDirectory ?? "/downloads/temp",
                 UseTempFolder = _config.Download?.UseTempFolder ?? false,
+                TempMemoryLimitGb = _config.Download?.TempMemoryLimitGb ?? 0,
                 Filename = _config.Download?.Filename ?? "{seriesTitle} - S{season}E{episode} - {title} [{height}p]",
                 FilenameTemplate = _config.Download?.FilenameTemplate ?? "{seriesTitle} - S{season}E{episode} - {title} [{height}p]",
                 FilenameWhitespaceSubstitute = _config.Download?.FilenameWhitespaceSubstitute ?? "",
@@ -531,6 +532,7 @@ public class ConfigController : ControllerBase
         Range(candidate.Download.PartSize, 1, 1000, "Download threads");
         Range(candidate.Download.RetryAttempts, 0, 100, "Retry attempts");
         Range(candidate.Download.DownloadSpeedLimit, 0, int.MaxValue, "Speed limit");
+        Range(candidate.Download.TempMemoryLimitGb, 0, 1024, "RAM limit");
         Range(candidate.History.AutoRefreshIntervalMinutes, 0, 1440, "History refresh interval");
         if (candidate.History.AutoRefreshMode is not (0 or 1 or 50)) throw new ArgumentException("Invalid history refresh mode.");
         Range(candidate.Appearance.BackgroundImageOpacity, 0, 1, "Background opacity");
@@ -669,6 +671,7 @@ public class ConfigController : ControllerBase
             if (dl.OrganizeIntoFolders.HasValue) _config.Download.OrganizeIntoFolders = dl.OrganizeIntoFolders.Value;
             if (!string.IsNullOrEmpty(dl.TempDirectory)) _config.Download.TempDirectory = ValidatePath(dl.TempDirectory, nameof(dl.TempDirectory));
             if (dl.UseTempFolder.HasValue) _config.Download.UseTempFolder = dl.UseTempFolder.Value;
+            if (dl.TempMemoryLimitGb.HasValue) _config.Download.TempMemoryLimitGb = dl.TempMemoryLimitGb.Value;
             if (!string.IsNullOrEmpty(dl.Filename)) _config.Download.Filename = dl.Filename;
             if (dl.FilenameTemplate != null) _config.Download.FilenameTemplate = dl.FilenameTemplate;
             if (dl.FilenameWhitespaceSubstitute != null) _config.Download.FilenameWhitespaceSubstitute = dl.FilenameWhitespaceSubstitute;
@@ -950,6 +953,7 @@ public class DownloadUpdateConfig
     public bool? OrganizeIntoFolders { get; set; }
     public string? TempDirectory { get; set; }
     public bool? UseTempFolder { get; set; }
+    public double? TempMemoryLimitGb { get; set; }
     public string? Filename { get; set; }
     public string? FilenameTemplate { get; set; }
     public string? FilenameWhitespaceSubstitute { get; set; }

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using Cruncharr.Core.Utils;
 
 namespace Cruncharr.Core.Services;
 
@@ -49,6 +50,82 @@ public sealed class SonarrTitleIndex
     public IReadOnlyList<SonarrSeries> Exact(string title) => _exact.GetValueOrDefault(Normalize(title)) ?? [];
     public SonarrSeries? FindExact(string title) => Exact(title) is { Count: 1 } matches &&
         (_editions.GetValueOrDefault(Normalize(title))?.Count ?? 0) <= 1 ? matches[0] : null;
+
+    // Crunchyroll lists a franchise's films or OVAs as their own show ("Puella Magi Madoka Magica
+    // Movies"); TVDB files them as season 0 of the franchise series. When the title is such a
+    // collection and exactly one series is named exactly like the franchise, that series is the
+    // match. Which special each film is still needs episode evidence before anything is imported.
+    public SonarrSeries? FindCollectionParent(string title)
+    {
+        // The year alone does not make a collection: "Hunter x Hunter (2011)" is an edition, and
+        // binding it to "Hunter x Hunter" needs episode evidence like any other edition.
+        var edition = WithoutYear(title).Trim();
+        var franchise = CollectionSuffix.Replace(edition, "");
+        return franchise.Length < edition.Length && Normalize(franchise).Length >= 4 ? FindExact(franchise) : null;
+    }
+
+    // Crunchyroll lists many films as their own one-video show ("Overlord: The Dark Hero"), while
+    // TVDB files them as a special of the franchise (Overlord S00E11 "Movie: The Dark Hero").
+    // That special is the season 0 entry whose title names the same film once the series name and
+    // words such as "movie" are set aside, and whose running time fits: TVDB also lists short
+    // companion clips under the film's name ("The Dark Hero - Theater Manners", 2 minutes).
+    // Returns null when no special qualifies or the two closest are equally close.
+    public static SonarrEpisode? FindFilmSpecial(string filmTitle, int filmMinutes, string? seriesTitle, IEnumerable<SonarrEpisode> episodes)
+    {
+        var seriesWords = FilmWords(seriesTitle);
+        var film = FilmWords(filmTitle);
+        film.ExceptWith(seriesWords);
+        var closest = episodes
+            .Where(episode => episode.SeasonNumber == 0 && !string.IsNullOrWhiteSpace(episode.Title) && RuntimeFits(filmMinutes, episode.Runtime))
+            .Select(episode =>
+            {
+                var special = FilmWords(episode.Title);
+                special.ExceptWith(seriesWords);
+                return (Episode: episode, Score: Normalize(episode.Title) == Normalize(filmTitle) ? 1.0 : WordAgreement(film, special));
+            })
+            .Where(candidate => candidate.Score >= 0.6)
+            .OrderByDescending(candidate => candidate.Score)
+            .Take(2).ToList();
+        return closest.Count == 1 || closest.Count == 2 && closest[0].Score > closest[1].Score ? closest[0].Episode : null;
+    }
+
+    // A film and a clip about it can differ tenfold; editions and recap cuts stay within ~40%.
+    private static bool RuntimeFits(int filmMinutes, int specialMinutes) =>
+        filmMinutes <= 0 || specialMinutes <= 0 || (double)Math.Min(filmMinutes, specialMinutes) / Math.Max(filmMinutes, specialMinutes) >= 0.6;
+
+    private static readonly HashSet<string> FilmFillerWords = new("the a an of and to in on at that movie movies film films".Split(' '));
+
+    // Stems make "Life That Burns" and "Recap 2: Burning Life" agree.
+    private static HashSet<string> FilmWords(string? title) => Regex.Matches((title ?? "").ToLowerInvariant(), @"[\p{L}\p{N}]+")
+        .Select(match => Stem(Normalize(match.Value))).Where(word => word.Length > 0 && !FilmFillerWords.Contains(word)).ToHashSet();
+
+    private static string Stem(string word) =>
+        word.Length >= 6 && word.EndsWith("ing", StringComparison.Ordinal) ? word[..^3] :
+        word.Length >= 5 && (word.EndsWith("ed", StringComparison.Ordinal) || word.EndsWith("es", StringComparison.Ordinal)) ? word[..^2] :
+        word.Length >= 4 && word.EndsWith('s') && !word.EndsWith("ss", StringComparison.Ordinal) ? word[..^1] : word;
+
+    // Dice agreement of two word sets. Long words may differ by a letter or two between
+    // translations ("Judgement"/"Judgment", "Alabasta"/"Arabasta"). Two films whose titles are
+    // only the series name ("PSYCHO-PASS: The Movie") agree.
+    private static double WordAgreement(HashSet<string> first, HashSet<string> second)
+    {
+        if (first.Count == 0 || second.Count == 0) return first.Count == second.Count ? 1.0 : 0.0;
+        var unmatched = second.ToList();
+        var shared = 0;
+        foreach (var word in first)
+        {
+            var partner = unmatched.FirstOrDefault(other => other == word || word.Length >= 5 && other.Length >= 5 &&
+                StringSimilarity.CalculateSimilarity(word, other) >= 0.8);
+            if (partner == null) continue;
+            unmatched.Remove(partner);
+            shared++;
+        }
+        return 2.0 * shared / (first.Count + second.Count);
+    }
+
+    private static readonly Regex CollectionSuffix = new(
+        @"\s*[-:–—]?\s*(?:the\s+)?(?:movies?|films?|specials?|ovas?|oads?)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public List<SonarrSeries> Candidates(string title)
     {

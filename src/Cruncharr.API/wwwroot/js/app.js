@@ -750,13 +750,17 @@
                 return;
             }
             popup.innerHTML = globalSearchResults.map(s => `
-                <div class="search-result-item" onclick="selectGlobalResult('${escapeJsString(s.id)}')">
+                <div class="search-result-item" onclick="${s.contentType === 'episode'
+                    ? `selectGlobalEpisode('${escapeJsString(s.seriesId || '')}', '${escapeJsString(s.id)}', '${escapeJsString((s.audioLocales || [])[0] || '')}')`
+                    : `selectGlobalResult('${escapeJsString(s.id)}')`}">
                     <div class="search-result-poster">
                         ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                     </div>
                     <div class="search-result-info">
                         <div class="search-result-title">${escapeHtml(s.title)}</div>
-                        <div class="search-result-type">${libraryIndicator(s)} ${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</div>
+                        <div class="search-result-type">${s.contentType === 'episode'
+                            ? `Episode · ${escapeHtml(s.seriesTitle || '')}`
+                            : `${libraryIndicator(s)} ${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}`}</div>
                         <div class="search-result-desc">${escapeHtml(s.description || '')}</div>
                     </div>
                 </div>
@@ -832,6 +836,14 @@
             const input = document.getElementById('global-search');
             if (input) input.value = '';
             selectBrowseResult(seriesId);
+        }
+
+        // An episode found by name opens its show with that episode selected, like a pasted link.
+        function selectGlobalEpisode(seriesId, episodeId, audioLocale) {
+            closeGlobalSearch();
+            const input = document.getElementById('global-search');
+            if (input) input.value = '';
+            selectBrowseResult(seriesId, { episodeId, audioLocale });
         }
 
         document.addEventListener('click', (e) => {
@@ -2104,13 +2116,13 @@
             return series.map(s => `
                 <div class="history-poster clickable" onclick="selectBrowseResult('${escapeJsString(s.id)}')">
                     <div class="history-poster-img">
-                        <span class="poster-type-badge">Series</span>
+                        <span class="poster-type-badge">${s.contentType === 'movie_listing' ? 'Movie' : 'Series'}</span>
                         ${libraryIndicator(s)}
                         ${(s.coverArtUrl || s.thumbnailUrl) && isSafeUrl(s.coverArtUrl || s.thumbnailUrl) ? `<img loading="lazy" decoding="async" ${imageSourceAttributes(s.coverArtUrl || s.thumbnailUrl)} alt="" onerror="this.outerHTML='📺'">` : '📺'}
                     </div>
                     <div class="history-poster-info">
                         <div class="history-poster-title" title="${escapeHtmlAttribute(s.title)}">${escapeHtml(s.title)}</div>
-                        <div class="history-poster-meta">${s.episodeCount == null ? 'Episode count unavailable' : s.episodeCount === 0 ? 'No episodes currently listed' : `${s.episodeCount} episode(s)`}</div>
+                        <div class="history-poster-meta">${s.contentType === 'movie_listing' ? 'Movie' : s.episodeCount == null ? 'Episode count unavailable' : s.episodeCount === 0 ? 'No episodes currently listed' : `${s.episodeCount} episode(s)`}</div>
                     </div>
                 </div>
             `).join('');
@@ -3370,6 +3382,9 @@
             const shows = summary.shows || [];
             const missing = shows.reduce((total, show) => total + (show.missingFromBaseline || 0), 0);
             const noun = count => count === 1 ? 'episode' : 'episodes';
+            if (summary.autoAdded?.length) {
+                showToast(`New shows added: ${summary.autoAdded.join(', ')}`, 'success');
+            }
             if (summary.failed) {
                 showToast(`${summary.added} ${noun(summary.added)} added, but ${summary.failed} of ${shows.length} shows could not be checked. See Settings → Scheduler.`, 'error');
             } else if (summary.added) {
@@ -3414,8 +3429,13 @@
                         <p>Open a series from Browse, Search or History and choose <strong>Schedule new episodes</strong>. Only episodes released after you subscribe are added; use <strong>Download missing</strong> to also queue older episodes that have no file. Series and season language settings apply; existing Sonarr files are skipped.</p>
                         <div class="setting-row"><div><div class="setting-label">Enable scheduler</div><div class="setting-desc">Pause or resume checks for all subscriptions.</div></div><label class="toggle-switch"><input id="setting-scheduler-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                         <div class="setting-row"><div><div class="setting-label">Check every (minutes)</div><div class="setting-desc">New releases enter the queue at the next check. Default: 15 minutes.</div></div><input class="form-input w-100" id="setting-scheduler-interval" type="number" min="1" max="1440" value="${state.intervalMinutes}"></div>
+                        <div class="setting-row"><div><div class="setting-label">Automatically add new shows</div><div class="setting-desc">When a new series releases its first episode with one of the audio languages below, schedule it with that audio and send it to Sonarr. Only shows that premiere after you turn this on are added.</div></div><label class="toggle-switch"><input id="setting-scheduler-autoadd" type="checkbox" ${state.autoAddNewSeries ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+                        <div class="setting-row"><div><div class="setting-label">Audio (dub) for new shows</div><div class="setting-desc">The spoken language a new show must premiere in, for example English for English dubs or Japanese for the original audio. Hold Ctrl or Cmd to choose more than one.</div></div><select class="form-select" id="setting-scheduler-autoadd-langs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}" ${(state.autoAddLanguages || []).includes(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</select></div>
+                        <div class="setting-row"><div><div class="setting-label">Subtitles for new shows</div><div class="setting-desc">Subtitles to download with these shows, for example English with Japanese audio. Leave none selected to use the Softsubs Languages setting.</div></div><select class="form-select" id="setting-scheduler-autoadd-subs" multiple style="min-width:180px; min-height:80px;">${LANG_OPTIONS.map(o => `<option value="${escapeHtmlAttribute(o.value)}" ${(state.autoAddSubtitles || []).includes(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</select></div>
                         <p role="status" id="scheduler-summary">${escapeHtml(schedulerStatusText(state))}</p>
                         ${state.lastRun ? `<p class="setting-desc">Last check: ${escapeHtml(new Date(state.lastRun).toLocaleString())} · ${state.lastQueuedCount} added to queue</p>` : ''}
+                        ${state.lastRunSummary?.autoAdded?.length ? `<p class="setting-desc">New shows added: ${state.lastRunSummary.autoAdded.map(title => escapeHtml(title)).join(', ')}</p>` : ''}
+                        ${state.lastRunSummary?.autoAddError ? `<p role="alert">${escapeHtml(state.lastRunSummary.autoAddError)}</p>` : ''}
                         ${state.lastRunSummary?.shows?.length ? `<ul class="setting-desc">${state.lastRunSummary.shows.map(show => `<li${show.error ? ' role="alert"' : ''}><strong>${escapeHtml(show.title)}</strong>: ${escapeHtml(schedulerShowLine(show))}</li>`).join('')}</ul>` : ''}
                         ${state.lastError ? `<p role="alert">${escapeHtml(state.lastError)}</p>` : ''}
                         <button class="header-btn" id="btn-scheduler-run" onclick="triggerScheduler()">Run now</button>
@@ -3428,9 +3448,13 @@
             const interval = document.getElementById('setting-scheduler-interval');
             if (!interval || !interval.reportValidity()) return false;
             try {
+                const selectedValues = id => [...(document.getElementById(id)?.selectedOptions || [])].map(option => option.value);
                 const state = await schedulerRequest('settings', 'POST', {
                     enabled: document.getElementById('setting-scheduler-enabled').checked,
-                    intervalMinutes: Number(interval.value)
+                    intervalMinutes: Number(interval.value),
+                    autoAddNewSeries: document.getElementById('setting-scheduler-autoadd')?.checked ?? false,
+                    autoAddLanguages: selectedValues('setting-scheduler-autoadd-langs'),
+                    autoAddSubtitles: selectedValues('setting-scheduler-autoadd-subs')
                 });
                 const summary = document.getElementById('scheduler-summary');
                 if (summary) summary.textContent = schedulerStatusText(state);
@@ -3763,6 +3787,7 @@
                                 <div class="setting-row"><div><div class="setting-label">Organize Into Folders</div><div class="setting-desc">Save as &lt;output&gt;/Series Title/Season NN/file (Sonarr/Plex layout) instead of all in the root</div></div><label class="toggle-switch"><input type="checkbox" id="setting-organize-folders" ${dl.organizeIntoFolders!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Temp Directory</div><div class="setting-desc">Working dir for downloads + muxing/transcoding when "Use Temp Folder" is on. Point at a RAM disk (tmpfs) to keep that I/O off your SSD.</div></div><input type="text" class="form-input w-250" id="setting-temp-dir" value="${escapeHtmlAttribute(dl.tempDirectory||'/tmp/cruncharr')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Use Temp Folder</div><div class="setting-desc">Download, mux and encode in the Temp Directory, then move the finished file to the output folder. Off = work directly in the output folder.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-use-temp" ${dl.useTempFolder?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">RAM Limit (GB)</div><div class="setting-desc">Only when the Temp Directory is a RAM disk (tmpfs): new downloads wait until Cruncharr's memory, including the encoder and temp files, fits under this limit. 0 = automatic (a quarter of available memory).</div></div><input type="number" class="form-input w-100" id="setting-temp-memory-limit" min="0" max="1024" step="0.5" value="${Number(dl.tempMemoryLimitGb || 0)}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Part Size</div><div class="setting-desc">Download chunk size in MB (larger = fewer requests, more memory)</div></div><input type="number" class="form-input w-80" id="setting-part-size" value="${escapeHtmlAttribute(dl.partSize ?? 10)}" min="1"></div>
                                 <div class="setting-row"><div><div class="setting-label">Download Delay (seconds)</div><div class="setting-desc">Delay before each download</div></div><input type="number" class="form-input w-100" id="setting-download-delay" value="${escapeHtmlAttribute(dl.downloadDelaySeconds||0)}" min="0"></div>
                                 <div class="setting-row"><div><div class="setting-label">Delay Between Dubs</div><div class="setting-desc">Apply the delay per dub instead of per episode</div></div><label class="toggle-switch"><input type="checkbox" id="setting-download-delay-dub-based" ${dl.downloadDelayUseDubBased?'checked':''}><span class="toggle-slider"></span></label></div>
@@ -3921,7 +3946,7 @@
                                 <div class="setting-row"><div><div class="setting-label">URL Base</div></div><input type="text" class="form-input w-200" id="setting-sonarr-urlbase" value="${escapeHtmlAttribute(s.urlBase||'')}"></div>
                                 <div class="setting-row"><div><div class="setting-label">Register Cruncharr downloads in Sonarr</div><div class="setting-desc">Add the series before downloading and submit completed files for import. Newly added series start unmonitored, with no automatic search.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-auto-add" ${s.autoAddSeries!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Use Sonarr without Premium</div><div class="setting-desc">Send selected episodes to Sonarr when Crunchyroll Premium is unavailable. Sonarr monitors and searches those episodes using its configured sources.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-guest-search" ${s.searchWithoutPremium!==false?'checked':''}><span class="toggle-slider"></span></label></div>
-                                <div class="setting-row"><div><div class="setting-label">Turn off Sonarr monitoring for Premium requests</div><div class="setting-desc">Also turn off monitoring for an existing show while Cruncharr supplies it. Existing downloads already queued in Sonarr are unaffected.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-unmonitor" ${s.unmonitorPremiumRequests!==false?'checked':''}><span class="toggle-slider"></span></label></div>
+                                <div class="setting-row"><div><div class="setting-label">Turn off Sonarr monitoring for Premium requests</div><div class="setting-desc">Also turn off monitoring for an existing show while Cruncharr supplies it, and for each episode while it waits in the Cruncharr queue. An episode is monitored again once its file is imported, or if its download fails or is removed. Downloads already queued in Sonarr are unaffected.</div></div><label class="toggle-switch"><input type="checkbox" id="setting-sonarr-unmonitor" ${s.unmonitorPremiumRequests!==false?'checked':''}><span class="toggle-slider"></span></label></div>
                                 <div class="setting-row"><div><div class="setting-label">Quality profile for new Sonarr series</div><div class="setting-desc">Automatic uses the most common profile in the current Sonarr library.</div></div><select class="form-select" id="setting-sonarr-profile"><option value="${Number(s.qualityProfileId)||0}">${s.qualityProfileId?'Saved profile':'Automatic'}</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Root folder for new Sonarr series</div><div class="setting-desc">Automatic uses the folder containing the most existing Sonarr series.</div></div><select class="form-select" id="setting-sonarr-root"><option value="${escapeHtmlAttribute(s.rootFolderPath||'')}">${escapeHtml(s.rootFolderPath||'Automatic')}</option></select></div>
                                 <div class="setting-row"><div><div class="setting-label">Cruncharr download folder as seen by Sonarr</div><div class="setting-desc">Leave blank when both apps see the same paths. Otherwise enter Sonarr's path to Cruncharr's download folder. Imports copy files into Sonarr's library.</div></div><input class="form-input w-300" id="setting-sonarr-download-path" value="${escapeHtmlAttribute(s.downloadPath||'')}" placeholder="Same path in both apps"></div>
@@ -4225,6 +4250,8 @@
                     if (tempDir !== undefined) dl.tempDirectory = tempDir;
                     const useTemp = getFieldValue('setting-use-temp', 'bool');
                     if (useTemp !== undefined) dl.useTempFolder = useTemp;
+                    const tempMemoryLimit = getFieldValue('setting-temp-memory-limit', 'float');
+                    if (tempMemoryLimit !== undefined) dl.tempMemoryLimitGb = tempMemoryLimit;
                     const partSize = getFieldValue('setting-part-size', 'int');
                     if (partSize !== undefined) dl.partSize = partSize;
                     const downloadDelay = getFieldValue('setting-download-delay', 'int');

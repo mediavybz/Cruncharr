@@ -201,7 +201,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             .ThenBy(value => value.Index)
             .Take(200);
 
-        return ordered.Select(value => new SeriesInfo
+        var shows = ordered.Select(value => new SeriesInfo
         {
             Id = value.Candidate.Item.Id,
             ContentType = value.Candidate.Group,
@@ -211,7 +211,36 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
             CoverArtUrl = ExtractBestImage(value.Candidate.Item.Images, "poster_tall"),
             ThumbnailUrl = ExtractBestImage(value.Candidate.Item.Images, "poster_wide")
         }).ToList();
+
+        // Episodes after the shows: an OVA, special or single episode can be what someone looks
+        // for by name ("Japanese Hospitality (The Attendant Is a Dragon)" is an OVA of Miss
+        // Kobayashi's Dragon Maid), and Crunchyroll's search already returns them.
+        var episodes = groups
+            .Where(group => string.Equals(group.Type, "episode", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(group => group.Items ?? [])
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.EpisodeMetadata?.SeriesId))
+            // Each dubbed version of an episode is its own search hit; list the episode once.
+            .DistinctBy(item => (item.EpisodeMetadata!.SeriesId, item.Title))
+            .Select((item, index) => new { Item = item, Index = index })
+            .OrderBy(value => SearchRelevance(value.Item.Title, normalizedQuery))
+            .ThenBy(value => value.Index)
+            .Take(MaxEpisodeSearchResults)
+            .Select(value => new SeriesInfo
+            {
+                Id = value.Item.Id,
+                ContentType = "episode",
+                Title = value.Item.Title,
+                Description = value.Item.Description,
+                Images = ExtractImageUrls(value.Item.Images),
+                ThumbnailUrl = ExtractBestImage(value.Item.Images, "thumbnail"),
+                SeriesId = value.Item.EpisodeMetadata!.SeriesId,
+                SeriesTitle = value.Item.EpisodeMetadata.SeriesTitle,
+                AudioLocales = string.IsNullOrEmpty(value.Item.EpisodeMetadata.AudioLocale) ? [] : [value.Item.EpisodeMetadata.AudioLocale]
+            });
+        return shows.Concat(episodes).ToList();
     }
+
+    private const int MaxEpisodeSearchResults = 25;
 
     private static int SearchRelevance(string? title, string query)
     {
@@ -370,6 +399,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Versions = ep.Versions?.Select(MapEpisodeVersion).ToList(),
                 Images = ExtractImageUrls(ep.Images),
                 ThumbnailUrl = ExtractBestImage(ep.Images, "thumbnail") ?? ExtractBestImage(ep.Images, "episode_thumbnail"),
+                DurationMs = ep.DurationMs,
                 SubtitleLocales = ep.SubtitleLocales ?? new List<string>()
             };
         }
@@ -658,6 +688,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                 Images = ExtractImageUrls(episode.Images),
                 ThumbnailUrl = ExtractBestImage(episode.Images, "thumbnail") ?? ExtractBestImage(episode.Images, "episode_thumbnail"),
                 CoverArtUrl = ExtractBestImage(episode.Images, "poster_tall"),
+                DurationMs = episode.DurationMs,
                 SubtitleLocales = episode.SubtitleLocales ?? new List<string>()
             };
         }
@@ -805,6 +836,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
                     ThumbnailUrl = ExtractBestImage(e.Images, "thumbnail") ?? ExtractBestImage(e.Images, "episode_thumbnail"),
                     CoverArtUrl = ExtractBestImage(e.Images, "poster_tall"),
                     Versions = e.Versions?.Select(MapEpisodeVersion).ToList(),
+                    DurationMs = e.DurationMs,
                     SubtitleLocales = e.SubtitleLocales ?? new List<string>()
                 };
             }).ToList();
@@ -892,6 +924,19 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
     }
 
     // [PT] Ported from upstream CrunchyEpisode.IsRegularEpisodeNumber
+    // Groups one episode's dubbed versions (separate seasons that share the season identifier)
+    // under one key. Several episodes of a season can share a non-numeric label such as "OVA" or
+    // "SP": Miss Kobayashi's Dragon Maid's two OVAs merged into one entry and the second was never
+    // listed (2026-11-13). Such labels are grouped together with their episode_number, which the
+    // dubbed versions of one episode share. Null means neither is known.
+    internal static string? EpisodeGroupLabel(string? episodeLabel, int? episodeNumber)
+    {
+        if (string.IsNullOrEmpty(episodeLabel)) return episodeNumber?.ToString(CultureInfo.InvariantCulture);
+        return IsRegularEpisodeNumber(episodeLabel) || episodeNumber == null
+            ? episodeLabel
+            : $"{episodeLabel}#{episodeNumber.Value.ToString(CultureInfo.InvariantCulture)}";
+    }
+
     internal static bool IsRegularEpisodeNumber(string? episode)
     {
         return !string.IsNullOrWhiteSpace(episode) &&
@@ -1135,9 +1180,7 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
             foreach (var episode in seasonData)
             {
-                string episodeNum =
-                    (episode.Episode != string.Empty ? episode.Episode : (episode.EpisodeNumber != null ? episode.EpisodeNumber + "" : $"F{fallbackIndex++}"))
-                    ?? string.Empty;
+                string episodeNum = EpisodeGroupLabel(episode.Episode, episode.EpisodeNumber) ?? $"F{fallbackIndex++}";
 
                 var seasonIdentifier = !string.IsNullOrEmpty(s.Identifier)
                     ? (s.Identifier.Split('|').Length > 1 ? s.Identifier.Split('|')[1] : $"S{episode.SeasonNumber}")
@@ -1624,73 +1667,81 @@ public class CrunchyrollApiService : ICrunchyrollApiService, IDisposable
 
         var complete = new List<SeriesInfo>();
         var seenIds = new HashSet<string>(StringComparer.Ordinal);
-        var total = 0;
-        var i = 0;
-
-        do
+        // Films are their own catalog type on Crunchyroll ("movie_listing"); Browse listed only
+        // series, so a film could be found by search but never browsed (2026-11-13).
+        foreach (var contentType in new[] { "series", "movie_listing" })
         {
-            var queryParams = new NameValueCollection{
+            var total = 0;
+            var i = 0;
+            var seenInType = new HashSet<string>(StringComparer.Ordinal);
+
+            do
+            {
+                var queryParams = new NameValueCollection{
                 { "start", i.ToString() },
                 { "n", "100" },
-                { "type", "series" },
+                { "type", contentType },
                 { "sort_by", "alphabetical" }
             };
 
-            if (!string.IsNullOrEmpty(crLocale))
-            {
-                queryParams["locale"] = crLocale;
-            }
-
-            var uriBuilder = new UriBuilder(ApiUrls.Browse(true))
-            {
-                Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
-            };
-
-            var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, accessToken);
-            var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
-
-            if (!isOk)
-            {
-                _logger?.LogError("GetAllSeries request failed: {Error}", error);
-                throw new HttpRequestException("Crunchyroll catalog is unavailable. Please try again.");
-            }
-
-            try
-            {
-                var result = JsonConvert.DeserializeObject<CrBrowseSeriesBase>(content);
-                if (result?.Data == null || (result.Data.Count == 0 && i < result.Total))
-                    throw new JsonException("Incomplete Crunchyroll catalog response.");
-
-                total = result.Total;
-                var added = 0;
-                foreach (var item in result.Data)
+                if (!string.IsNullOrEmpty(crLocale))
                 {
-                    if (string.IsNullOrWhiteSpace(item.Id) || !seenIds.Add(item.Id)) continue;
-                    added++;
-                    complete.Add(new SeriesInfo
-                    {
-                        Id = item.Id,
-                        Title = item.Title,
-                        Description = item.Description,
-                        Images = ExtractImageUrls(item.Images),
-                        CoverArtUrl = ExtractBestImage(item.Images, "poster_tall"),
-                        ThumbnailUrl = ExtractBestImage(item.Images, "poster_wide"),
-                        EpisodeCount = item.SeriesMetadata?.EpisodeCount,
-                        AudioLocales = item.SeriesMetadata?.AudioLocales ?? new List<string>(),
-                        MaturityRatings = item.SeriesMetadata?.MaturityRatings ?? new List<string>()
-                    });
+                    queryParams["locale"] = crLocale;
                 }
-                if (result.Data.Count > 0 && added == 0)
-                    throw new JsonException("Crunchyroll catalog pagination did not advance.");
-                i += result.Data.Count;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Failed to parse GetAllSeries results");
-                throw;
-            }
 
-        } while (i < total);
+                var uriBuilder = new UriBuilder(ApiUrls.Browse(true))
+                {
+                    Query = string.Join("&", queryParams.AllKeys.Select(k => $"{k}={HttpUtility.UrlEncode(queryParams[k])}"))
+                };
+
+                var request = HttpClientWrapper.CreateRequest(uriBuilder.ToString(), HttpMethod.Get, true, accessToken);
+                var (isOk, content, error) = await _httpClient.SendRequestAsync(request, cancellationToken: cancellationToken);
+
+                if (!isOk)
+                {
+                    _logger?.LogError("GetAllSeries request failed: {Error}", error);
+                    throw new HttpRequestException("Crunchyroll catalog is unavailable. Please try again.");
+                }
+
+                try
+                {
+                    var result = JsonConvert.DeserializeObject<CrBrowseSeriesBase>(content);
+                    if (result?.Data == null || (result.Data.Count == 0 && i < result.Total))
+                        throw new JsonException("Incomplete Crunchyroll catalog response.");
+
+                    total = result.Total;
+                    var added = 0;
+                    foreach (var item in result.Data)
+                    {
+                        if (string.IsNullOrWhiteSpace(item.Id) || !seenInType.Add(item.Id)) continue;
+                        added++;
+                        if (!seenIds.Add(item.Id)) continue; // listed under the other type already
+                        complete.Add(new SeriesInfo
+                        {
+                            Id = item.Id,
+                            ContentType = contentType,
+                            Title = item.Title,
+                            Description = item.Description,
+                            Images = ExtractImageUrls(item.Images),
+                            CoverArtUrl = ExtractBestImage(item.Images, "poster_tall"),
+                            ThumbnailUrl = ExtractBestImage(item.Images, "poster_wide"),
+                            EpisodeCount = item.SeriesMetadata?.EpisodeCount,
+                            AudioLocales = item.SeriesMetadata?.AudioLocales ?? new List<string>(),
+                            MaturityRatings = item.SeriesMetadata?.MaturityRatings ?? new List<string>()
+                        });
+                    }
+                    if (result.Data.Count > 0 && added == 0)
+                        throw new JsonException("Crunchyroll catalog pagination did not advance.");
+                    i += result.Data.Count;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Failed to parse GetAllSeries results");
+                    throw;
+                }
+
+            } while (i < total);
+        }
 
         return complete;
     }
@@ -2146,6 +2197,8 @@ public class CrSearchItem
     public string Id { get; set; } = "";
     public string Title { get; set; } = "";
     public string Description { get; set; } = "";
+    [JsonProperty("episode_metadata")]
+    public CrBrowseEpisodeMetaData? EpisodeMetadata { get; set; }
     [JsonConverter(typeof(SearchImagesConverter))]
     public Dictionary<string, List<List<object>>>? Images { get; set; }
 }

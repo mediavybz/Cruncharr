@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Cruncharr.Core.Configuration;
@@ -548,6 +549,7 @@ public class HistoryService : IHistoryService, IDisposable
             SpecialEpisode = IsSpecialEpisode(episode),
             IsEpisodeAvailableOnStreamingService = true,
             ThumbnailImageUrl = episode.ThumbnailUrl,
+            DurationMs = episode.DurationMs,
             EpisodeType = EpisodeType.Episode,
             EpisodeSeriesType = SeriesType.Series,
             HistoryEpisodeAvailableDubLang = GetAvailableDubLocales(episode),
@@ -565,6 +567,7 @@ public class HistoryService : IHistoryService, IDisposable
         historyEpisode.SpecialEpisode = IsSpecialEpisode(episode);
         historyEpisode.IsEpisodeAvailableOnStreamingService = true;
         historyEpisode.ThumbnailImageUrl = episode.ThumbnailUrl;
+        if (episode.DurationMs > 0) historyEpisode.DurationMs = episode.DurationMs;
         historyEpisode.EpisodeSeriesType = SeriesType.Series;
         // Update available dub/sub metadata for existing episodes
         foreach (var locale in GetAvailableDubLocales(episode).Where(locale =>
@@ -925,14 +928,18 @@ public class HistoryService : IHistoryService, IDisposable
             var current = snapshot.SelectMany(s => s.Seasons).SelectMany(s => s.EpisodesList)
                 .Where(e => !string.IsNullOrEmpty(e.SonarrEpisodeId)).GroupBy(e => e.SonarrEpisodeId!)
                 .ToDictionary(g => g.Key, g => g.First());
+            var changed = false;
             foreach (var episode in _historyList.Where(s => !failures.Contains(s.SonarrSeriesId ?? ""))
                          .SelectMany(s => s.Seasons).SelectMany(s => s.EpisodesList))
                 if (episode.SonarrEpisodeId != null && current.TryGetValue(episode.SonarrEpisodeId, out var fresh))
                 {
-                    episode.SonarrHasFile = files.Contains(episode.EpisodeId ?? "");
+                    var hasFile = files.Contains(episode.EpisodeId ?? "");
+                    changed |= episode.SonarrHasFile != hasFile || episode.SonarrIsMonitored != fresh.SonarrIsMonitored;
+                    episode.SonarrHasFile = hasFile;
                     episode.SonarrIsMonitored = fresh.SonarrIsMonitored;
                 }
-            await SaveRichHistoryAsync(throwOnError: true);
+            // History is several megabytes; rewriting it when nothing changed was pure churn.
+            if (changed) await SaveRichHistoryAsync(throwOnError: true);
         }
         finally { _lock.Release(); }
     }
@@ -1052,6 +1059,7 @@ public class HistoryService : IHistoryService, IDisposable
 
         // Find series and parse Sonarr ID under lock
         int sonarrSeriesId;
+        bool isFilm;
         await _lock.WaitAsync();
         try
         {
@@ -1062,6 +1070,7 @@ public class HistoryService : IHistoryService, IDisposable
             {
                 return;
             }
+            isFilm = IsFilm(historySeries);
         }
         finally
         {
@@ -1082,6 +1091,10 @@ public class HistoryService : IHistoryService, IDisposable
 
         if (episodes.Count == 0)
             throw new InvalidOperationException("Sonarr returned no episodes. Existing matches were preserved.");
+        // A film's special is found by setting the franchise name aside, so it needs the series title.
+        var filmSeriesTitle = isFilm
+            ? (await _sonarrService.GetSeriesAsync(_config.Sonarr))?.FirstOrDefault(series => series.Id == sonarrSeriesId)?.Title
+            : null;
 
         var nextAirDate = GetNextAirDate(episodes);
         var episodesById = episodes.ToDictionary(episode => episode.Id);
@@ -1135,6 +1148,16 @@ public class HistoryService : IHistoryService, IDisposable
                     historyEpisode.ClearSonarrEpisodeData();
                     episodesToMatch.Add(historyEpisode);
                 }
+            }
+
+            // Crunchyroll lists the film on its own; TVDB files it as a special of this series.
+            // Every dub of the film is the same video and takes the same special.
+            if (filmSeriesTitle != null && episodesToMatch.Count > 0 &&
+                SonarrTitleIndex.FindFilmSpecial(episodesToMatch[0].EpisodeTitle!, allHistoryEpisodes.Max(e => e.DurationMs) / 60_000,
+                    filmSeriesTitle, episodes) is { } special)
+            {
+                foreach (var film in episodesToMatch) film.AssignSonarrEpisodeData(special);
+                episodesToMatch.Clear();
             }
 
             var titleAvailableEpisodes = episodes
@@ -1359,29 +1382,45 @@ public class HistoryService : IHistoryService, IDisposable
             IsSpecialHistoryEpisode(historySeries, historyEpisode) ||
             !season.EpisodesList.Any(other => int.TryParse(other.SonarrSeasonNumber, out var number) && number > 0);
 
-        foreach (var historySeason in historySeries.Seasons.Where(historySeason =>
-                     historySeason.EpisodesList.Any(historyEpisode =>
-                         failed.Contains(historyEpisode) &&
-                         IsSeasonZeroCandidate(historySeason, historyEpisode))))
-        {
-            var sourceEpisodes = historySeason.EpisodesList
-                .Where(historyEpisode =>
-                    failed.Contains(historyEpisode) &&
-                    IsSeasonZeroCandidate(historySeason, historyEpisode))
-                .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.Episode))
-                .ToList();
-            if (sourceEpisodes.Count == 0) continue;
+        List<HistoryEpisode> SeasonZeroSources(HistorySeason historySeason) => historySeason.EpisodesList
+            .Where(historyEpisode => failed.Contains(historyEpisode) && IsSeasonZeroCandidate(historySeason, historyEpisode))
+            .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.Episode))
+            .ToList();
 
+        // A film collection ("Puella Magi Madoka Magica Movies") lists each film as its own
+        // one-episode season. Alone, each film needs a near-exact title, which translated film
+        // titles rarely have; in release order together they are compared like any run of
+        // specials, and each film must still land on its own best-scoring special. Only a show
+        // that is entirely films is grouped: a long series also lists unrelated one-off specials
+        // as seasons, and aligning those by order paired the wrong ones.
+        var filmCollection = historySeries.Seasons.Count > 1 && historySeries.Seasons.All(season => season.EpisodesList.Count == 1);
+        if (filmCollection)
+        {
+            var films = historySeries.Seasons.SelectMany(SeasonZeroSources)
+                .OrderBy(historyEpisode => ParseEpisodeOrdinal(historyEpisode.EpisodeSeasonNum)).ToList();
+            if (films.Count > 0) AlignWithSeasonZero(films, requireBestTarget: films.Count > 1);
+        }
+        else
+        {
+            foreach (var historySeason in historySeries.Seasons)
+            {
+                var sourceEpisodes = SeasonZeroSources(historySeason);
+                if (sourceEpisodes.Count > 0) AlignWithSeasonZero(sourceEpisodes);
+            }
+        }
+
+        void AlignWithSeasonZero(List<HistoryEpisode> sourceEpisodes, bool requireBestTarget = false)
+        {
             var targetEpisodes = sonarrEpisodes
                 .Where(sonarrEpisode =>
                     sonarrEpisode.SeasonNumber == 0 &&
                     !usedSonarrEpisodeIds.Contains(sonarrEpisode.Id))
                 .OrderBy(sonarrEpisode => sonarrEpisode.EpisodeNumber)
                 .ToList();
-            if (targetEpisodes.Count < sourceEpisodes.Count) continue;
+            if (targetEpisodes.Count < sourceEpisodes.Count) return;
 
             var alignment = FindBestOrderedSpecialAlignment(sourceEpisodes, targetEpisodes);
-            if (alignment.Count != sourceEpisodes.Count) continue;
+            if (alignment.Count != sourceEpisodes.Count) return;
 
             var scores = alignment
                 .Select(pair => CalculateEpisodeEvidenceScore(pair.HistoryEpisode, pair.SonarrEpisode))
@@ -1392,11 +1431,13 @@ public class HistoryService : IHistoryService, IDisposable
                   scores.Average() >= 0.25;
             if (!hasEnoughEvidence)
             {
-                continue;
+                return;
             }
 
             foreach (var pair in alignment)
             {
+                if (requireBestTarget && targetEpisodes.MaxBy(target => CalculateEpisodeEvidenceScore(pair.HistoryEpisode, target)) != pair.SonarrEpisode)
+                    continue;
                 if (!TryAssignSonarrEpisode(pair.HistoryEpisode, pair.SonarrEpisode, usedSonarrEpisodeIds))
                 {
                     continue;
@@ -1508,6 +1549,14 @@ public class HistoryService : IHistoryService, IDisposable
         return alignment;
     }
 
+    // One video, however many dubbed seasons list it: a film or a one-off OVA.
+    internal static bool IsFilm(HistorySeries series)
+    {
+        var titles = series.Seasons.SelectMany(season => season.EpisodesList)
+            .Select(episode => SonarrTitleIndex.Normalize(episode.EpisodeTitle)).Distinct().ToList();
+        return titles is [{ Length: > 0 }];
+    }
+
     private static double CalculateEpisodeEvidenceScore(
         HistoryEpisode historyEpisode,
         SonarrEpisode sonarrEpisode)
@@ -1553,8 +1602,8 @@ public class HistoryService : IHistoryService, IDisposable
     internal static bool ContainsTitlePhrase(string? first, string? second)
     {
         static string[] Words(string? value) => string.IsNullOrWhiteSpace(value) ? [] :
-            System.Text.RegularExpressions.Regex.Matches(value, @"[\p{L}\p{N}]+")
-                .Select(match => match.Value.ToLowerInvariant()).ToArray();
+            TitleWordsCache.GetValue(value, text => WordPattern.Matches(text)
+                .Select(match => match.Value.ToLowerInvariant()).ToArray());
         var firstWords = Words(first);
         var secondWords = Words(second);
         var (shorter, longer) = firstWords.Length <= secondWords.Length ? (firstWords, secondWords) : (secondWords, firstWords);
@@ -1575,15 +1624,36 @@ public class HistoryService : IHistoryService, IDisposable
 
     // Trailing ellipses/periods are styling ("Like Flights..." on TVDB), not part of the title.
     private static string TitleForComparison(string title) =>
-        title.Trim().TrimEnd('.', '…', ' ').ToLowerInvariant();
+        ComparisonTitleCache.GetValue(title, text => text.Trim().TrimEnd('.', '…', ' ').ToLowerInvariant());
 
     private static bool IsGenericEpisodeTitle(string? title) =>
         !string.IsNullOrWhiteSpace(title) &&
-        System.Text.RegularExpressions.Regex.IsMatch(
-            title.Trim(),
-            @"^episode\s+\d+(?:\.\d+)?$",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        GenericTitleCache.GetValue(title, text => GenericTitlePattern.IsMatch(text.Trim()) ? GenericTitle : NotGenericTitle) == GenericTitle;
+
+    // Matching a long series scores every saved episode against every Sonarr episode (One Piece:
+    // about 1.6 million pairs) while holding the History lock. Each score re-tokenized both
+    // descriptions with a regex: 1.5-3 minutes of CPU per refresh, during which Calendar, History
+    // and Library requests waited and failed (2026-11-06). The same episode strings recur across
+    // those pairs, so their derived forms are computed once per string instance. Weak keys let
+    // entries go away with the episodes; cached values are never modified.
+    private static readonly ConditionalWeakTable<string, Dictionary<string, int>> TokenCountCache = new();
+    private static readonly ConditionalWeakTable<string, string[]> TitleWordsCache = new();
+    private static readonly ConditionalWeakTable<string, string> ComparisonTitleCache = new();
+    private static readonly ConditionalWeakTable<string, object> GenericTitleCache = new();
+    private static readonly object GenericTitle = new();
+    private static readonly object NotGenericTitle = new();
+    private static readonly System.Text.RegularExpressions.Regex WordPattern = new(
+        @"[\p{L}\p{N}]+", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex GenericTitlePattern = new(
+        @"^episode\s+\d+(?:\.\d+)?$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant |
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly HashSet<string> OverviewStopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "a", "an", "the", "and", "or", "to", "of", "in", "on", "for", "with",
+        "from", "is", "are", "was", "were", "be", "by", "as", "at", "it", "this",
+        "that", "they", "them", "his", "her", "he", "she", "him"
+    };
 
     private static bool ShouldKeepStoredSonarrMatch(
         HistoryEpisode historyEpisode,
@@ -1602,6 +1672,14 @@ public class HistoryService : IHistoryService, IDisposable
             return true;
         }
 
+        var storedScore = CalculateEpisodeEvidenceScore(historyEpisode, storedEpisode);
+        // Reconsider weak saved identities through the corroborated numbering pass. Older
+        // versions accepted matching numbers even when the provider described a different cut.
+        if (storedScore < 0.8) return false;
+        // Scores never exceed 1, so no alternative can beat a stored score this strong by the 0.15
+        // required below. Skip scoring it against every Sonarr episode (1,100+ for One Piece).
+        if (storedScore >= 0.86) return true;
+
         var candidates = isSpecial
             ? allEpisodes.Where(episode => episode.SeasonNumber == 0)
             : allEpisodes;
@@ -1613,10 +1691,6 @@ public class HistoryService : IHistoryService, IDisposable
             })
             .OrderByDescending(candidate => candidate.Score)
             .FirstOrDefault();
-        var storedScore = CalculateEpisodeEvidenceScore(historyEpisode, storedEpisode);
-        // Reconsider weak saved identities through the corroborated numbering pass. Older
-        // versions accepted matching numbers even when the provider described a different cut.
-        if (storedScore < 0.8) return false;
         if (best == null || best.Episode.Id == storedEpisode.Id) return true;
 
         // Only replace a persisted identity when metadata provides a decisive better answer. This
@@ -1626,27 +1700,18 @@ public class HistoryService : IHistoryService, IDisposable
 
     private static double CalculateNormalizedTokenCosine(string? source, string? target)
     {
-        static Dictionary<string, int> TokenCounts(string? value)
-        {
-            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrWhiteSpace(value)) return counts;
-            var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        static Dictionary<string, int> TokenCounts(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? [] : TokenCountCache.GetValue(value, text =>
             {
-                "a", "an", "the", "and", "or", "to", "of", "in", "on", "for", "with",
-                "from", "is", "are", "was", "were", "be", "by", "as", "at", "it", "this",
-                "that", "they", "them", "his", "her", "he", "she", "him"
-            };
-
-            foreach (System.Text.RegularExpressions.Match match in
-                     System.Text.RegularExpressions.Regex.Matches(value, @"[\p{L}\p{N}]+"))
-            {
-                var token = match.Value.ToLowerInvariant();
-                if (stopWords.Contains(token)) continue;
-                counts[token] = counts.GetValueOrDefault(token) + 1;
-            }
-
-            return counts;
-        }
+                var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (System.Text.RegularExpressions.Match match in WordPattern.Matches(text))
+                {
+                    var token = match.Value.ToLowerInvariant();
+                    if (OverviewStopWords.Contains(token)) continue;
+                    counts[token] = counts.GetValueOrDefault(token) + 1;
+                }
+                return counts;
+            });
 
         var sourceTokens = TokenCounts(source);
         var targetTokens = TokenCounts(target);

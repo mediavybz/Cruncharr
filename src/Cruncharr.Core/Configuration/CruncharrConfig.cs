@@ -394,6 +394,12 @@ public class DownloadConfig
     [YamlMember(Alias = "use_temp_folder", ApplyNamingConventions = false)]
     public bool UseTempFolder { get; set; } = false;
 
+    // Ceiling for Cruncharr's memory while the temp folder is in RAM (tmpfs); new downloads wait
+    // until they fit. 0 = automatic (a quarter of the memory available to the app). Not applied
+    // to a temp folder on disk.
+    [YamlMember(Alias = "temp_memory_limit_gb", ApplyNamingConventions = false)]
+    public double TempMemoryLimitGb { get; set; } = 0;
+
     [YamlMember(Alias = "filename_template", ApplyNamingConventions = false)]
     public string FilenameTemplate { get; set; } = "{SeriesTitle} - S{season:00}E{episode:00} - {EpisodeTitle}";
 

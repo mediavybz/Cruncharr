@@ -75,6 +75,27 @@ numbers and episode evidence agree. This also works when the two Crunchyroll
 editions share a title but Sonarr uses a different translation. Entries within the
 same provider season retain separate episode identities.
 
+## Films listed on their own
+
+Crunchyroll lists many films as a show of their own ("Overlord: The Dark Hero").
+TVDB usually files the same film as a special of its franchise (Overlord S00E11,
+"Movie: The Dark Hero"). A Crunchyroll listing with a single video belongs to a
+Sonarr series when that series has a season 0 special for the film. The titles
+are compared with the series name and words such as "movie" set aside, and the
+running times must be close. TVDB lists short companion clips under a film's
+name ("The Dark Hero - Theater Manners", 2 minutes), and the running-time check
+keeps those out. When two specials are equally close, the film stays unmatched.
+
+The film is then downloaded as a normal Crunchyroll item and imported as that
+special. If TVDB has no special for the film yet, the request status says so. The
+file stays in the download folder, and the import is retried until TVDB adds the
+special. A film that TVDB lists only as a movie is not a TV episode, so Sonarr
+cannot import it; Radarr can.
+
+On November 13, 2026, 55 Crunchyroll films had a franchise series in the audited
+Sonarr library. The rule matched 50 of them to the correct special. None of the
+other five had a special in TVDB.
+
 After updating the testing image, refresh affected History series to apply these
 rules. **Match Episodes** explicitly rematches all episodes in the selected series.
 Browse and Search verify their badges without requiring a History entry.

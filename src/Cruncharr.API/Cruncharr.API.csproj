@@ -6,9 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-    <Version>1.0.87</Version>
-    <AssemblyVersion>$(Version).0</AssemblyVersion>
-    <FileVersion>$(Version).0</FileVersion>
+    <!-- Stable releases use the plain number; the testing channel uses the next number with a
+         "-beta" suffix, so the two channels never show the same version. -->
+    <Version>1.0.88</Version>
+    <AssemblyVersion>$(Version.Split('-')[0]).0</AssemblyVersion>
+    <FileVersion>$(Version.Split('-')[0]).0</FileVersion>
     <!-- Web projects default to the server GC: one heap per core (20 on the Unraid host), sized
          for throughput and slow to return memory. Measured 2026-11-18, it committed about three
          times the live data and held over 1 GB while idle, all counted against the RAM

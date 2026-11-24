@@ -57,8 +57,11 @@ public sealed class SonarrTitleIndex
     // match. Which special each film is still needs episode evidence before anything is imported.
     public SonarrSeries? FindCollectionParent(string title)
     {
-        var franchise = CollectionSuffix.Replace(WithoutYear(title), "");
-        return franchise.Length < title.Trim().Length && Normalize(franchise).Length >= 4 ? FindExact(franchise) : null;
+        // The year alone does not make a collection: "Hunter x Hunter (2011)" is an edition, and
+        // binding it to "Hunter x Hunter" needs episode evidence like any other edition.
+        var edition = WithoutYear(title).Trim();
+        var franchise = CollectionSuffix.Replace(edition, "");
+        return franchise.Length < edition.Length && Normalize(franchise).Length >= 4 ? FindExact(franchise) : null;
     }
 
     // Crunchyroll lists many films as their own one-video show ("Overlord: The Dark Hero"), while

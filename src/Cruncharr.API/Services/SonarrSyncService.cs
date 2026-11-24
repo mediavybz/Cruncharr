@@ -10,11 +10,11 @@ public sealed class SonarrSyncService(ISonarrAcquisitionService requests, IQueue
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            try
-            {
-                await requests.HoldQueuedEpisodesAsync(QueuedEpisodeIds(queue.GetQueue()), stoppingToken);
-                await requests.SynchronizeAsync(stoppingToken);
-            }
+            // Separate attempts: a hold that cannot be changed must not stop imports and searches.
+            try { await requests.HoldQueuedEpisodesAsync(QueuedEpisodeIds(queue.GetQueue()), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception ex) { logger.LogWarning(ex, "Sonarr monitoring holds will retry"); }
+            try { await requests.SynchronizeAsync(stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { logger.LogWarning(ex, "Sonarr synchronization will retry"); }
         }

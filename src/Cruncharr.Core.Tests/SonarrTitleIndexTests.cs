@@ -117,6 +117,8 @@ public class SonarrTitleIndexTests
     [InlineData("Puella Magi Madoka Magica", null)] // no collection suffix
     [InlineData("Magia Record Movies", null)]       // the franchise is only part of a series title
     [InlineData("Movies", null)]
+    [InlineData("Attack on Titan (2013)", null)]    // a year names an edition, not a collection
+    [InlineData("Attack on Titan Movies (2013)", 7)]
     public void FilmCollectionsResolveToTheirFranchiseSeries(string title, int? expected)
     {
         var index = new SonarrTitleIndex(

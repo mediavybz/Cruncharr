@@ -512,6 +512,24 @@ public class GuestCatalogAccessTests
         api.VerifyNoOtherCalls();
     }
 
+    // A refresh that fails for a passing reason keeps the session and waits minutes before its
+    // next attempt. Downloads started meanwhile must be retried, not failed for good.
+    [Fact]
+    public async Task Download_DuringATemporarySignInFailure_IsRetriedInsteadOfFailingForGood()
+    {
+        var auth = Guest();
+        auth.SetupGet(value => value.SessionError).Returns("Crunchyroll did not answer the sign-in refresh.");
+        auth.Setup(value => value.AuthenticateAsync(true, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var download = new DownloadService(auth.Object, Mock.Of<ICrunchyrollApiService>());
+
+        var result = await download.DownloadEpisodeAsync(new EpisodeInfo { Id = "GEPISODE1" }, new CruncharrConfig(), cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(DownloadErrorType.NetworkError, result.ErrorType);
+        Assert.True(QueueService.IsRetryableDownloadError(result.ErrorType!.Value));
+        Assert.False(QueueService.IsRetryableDownloadError(DownloadErrorType.NotAuthenticated));
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);

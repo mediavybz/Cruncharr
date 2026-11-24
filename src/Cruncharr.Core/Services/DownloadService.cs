@@ -700,7 +700,13 @@ public class DownloadService : IDownloadService
         {
             if (!await _auth.AuthenticateAsync(true, cancellationToken))
             {
-                return new DownloadResult { Success = false, ErrorMessage = "Authentication failed. Please log in to your Crunchyroll account.", ErrorType = DownloadErrorType.NotAuthenticated };
+                // SessionError means the account is still signed in and only the refresh failed
+                // (network, Cloudflare, a 5xx). The sign-in then waits minutes before its next
+                // attempt, and every download started meanwhile used to end in a permanent
+                // error. As a network error the queue retries it and holds the other items back.
+                return _auth.SessionError != null
+                    ? new DownloadResult { Success = false, ErrorMessage = $"Crunchyroll sign-in is temporarily unavailable: {_auth.SessionError}", ErrorType = DownloadErrorType.NetworkError }
+                    : new DownloadResult { Success = false, ErrorMessage = "Authentication failed. Please log in to your Crunchyroll account.", ErrorType = DownloadErrorType.NotAuthenticated };
             }
             if (!_auth.Profile.HasPremium)
             {

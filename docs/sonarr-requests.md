@@ -20,7 +20,8 @@ episode can wait behind other downloads and transcodes, and Sonarr's RSS feed pr
 grabbed and imported a second copy during that wait. Monitoring is restored about ten
 minutes after the episode leaves the queue, once its Sonarr import has finished. A failed
 or removed download is restored the same way, so Sonarr can still fetch the episode.
-Episodes are held only after History has matched them to a Sonarr episode. The holds are
+If the import has still not finished a day after the episode left the queue, monitoring
+is restored anyway. Episodes are held only after History has matched them to a Sonarr episode. The holds are
 saved in `sonarr-monitoring-holds.json` beside the configuration, and turning the setting
 off restores every held episode.
 
@@ -30,10 +31,16 @@ Choose a **quality profile** and **root folder** for new series. Automatic selec
 
 Imports use the confirmed Sonarr series and episode IDs, even when the filename alone is unrecognized. Sonarr inspects the file before import; rejections stay pending and appear in request status. Imports copy into the Sonarr library. Files already inside the series folder use a rescan and need recognizable filenames; enable **Sonarr Naming / TVDB Numbering** when writing directly into the Sonarr series folder. Raw tracks produced with Skip Muxing are not submitted as completed episodes.
 
+Each completed file is submitted on its own. A file without a confirmed Sonarr episode stays
+pending and is retried, and the other files of the show are imported meanwhile. A pending
+file that Sonarr already lists, for example after its own disk scan of the series folder, is
+marked done without another import. A download queued under a dub's own episode ID is
+imported as the episode History lists.
+
 ## Background status
 
 Pending searches and imports survive restarts in `/config/sonarr-requests.json`. A worker checks them every ten seconds and retries failed requests after a minute. It waits for Sonarr to finish populating a newly added series before matching episodes. Only confirmed episode identities are searched; unmatched selections stay pending.
 
-**Settings → Sonarr → Refresh status** shows each request, missing metadata or import errors, pending work, and Sonarr's episode/file counts. Browse badges and History file status refresh in the background, roughly once per minute. An import scan completing does not itself prove that Sonarr accepted a file: the displayed file counts come from Sonarr. Inspect Sonarr's import logs if a scan completes without increasing the count.
+**Settings → Sonarr → Refresh status** shows each request, missing metadata or import errors, pending work, and Sonarr's episode/file counts. Saved Browse badges and History file status refresh in the background about every ten minutes; opening History reads the current file status from Sonarr. An import scan completing does not itself prove that Sonarr accepted a file: the displayed file counts come from Sonarr. Inspect Sonarr's import logs if a scan completes without increasing the count.
 
 **Schedule new episodes** uses the same account-based routing for future releases. Explicit Cruncharr subscriptions continue to run when Premium registration unmonitors a Sonarr series. Guest searches use Sonarr's language and quality rules; Cruncharr's dub/subtitle selections apply to Cruncharr downloads.

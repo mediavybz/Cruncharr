@@ -779,7 +779,9 @@ public class HlsDownloader
             request.Headers.Add("User-Agent", ApiUrls.FirefoxUserAgent);
         }
 
-        var idleTimeout = TimeSpan.FromMilliseconds(timeout > 0 ? timeout : 15_000);
+        // The setting was ignored before it became this idle timeout, so an old hand-set value
+        // (say 30, meant as seconds) must not fail every part.
+        var idleTimeout = TimeSpan.FromMilliseconds(timeout > 0 ? Math.Max(timeout, 5_000) : 15_000);
         return await SendRequestWithRetry(request, partIndex, segOffset, isKey, retryCount, idleTimeout, cancellationToken);
     }
 

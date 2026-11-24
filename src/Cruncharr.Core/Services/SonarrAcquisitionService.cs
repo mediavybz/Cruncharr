@@ -74,6 +74,9 @@ public sealed class SonarrAcquisitionService(
     // A finished download reports Done before it registers its Sonarr import, so a hold outlives
     // the queue entry by this long.
     internal TimeSpan HoldReleaseDelay { get; init; } = TimeSpan.FromMinutes(10);
+    // An import that still has not finished after this long is not coming soon; Sonarr may then
+    // fetch the episode itself rather than be kept from it indefinitely.
+    internal TimeSpan MaxHoldAfterQueue { get; init; } = TimeSpan.FromHours(24);
     private DateTime _lastLibrarySync;
     // Re-reads every matched show's episodes from Sonarr. Every minute this was about 80 full
     // episode lists and a History save per minute, a constant churn of memory and Sonarr load.
@@ -264,14 +267,32 @@ public sealed class SonarrAcquisitionService(
             var importing = _state!.Where(s => s.Server == Server).SelectMany(s => s.ImportEpisodeIds.Values).ToHashSet();
             // Dub editions share one Sonarr episode; it is released when none of them is still held.
             var released = holds.GroupBy(h => h.SonarrEpisodeId)
-                .Where(group => group.All(h => !queued.Contains(h.EpisodeId) && !importing.Contains(h.EpisodeId) && now - h.LastQueuedUtc >= HoldReleaseDelay))
+                .Where(group => group.All(h => !queued.Contains(h.EpisodeId) && now - h.LastQueuedUtc >= HoldReleaseDelay &&
+                    (!importing.Contains(h.EpisodeId) || now - h.LastQueuedUtc >= MaxHoldAfterQueue)))
                 .ToList();
-            if (released.Count > 0)
+            // One request per episode: Sonarr rejects a whole batch when one of its episodes no
+            // longer exists (its series was removed), and no hold in it would ever be released.
+            Exception? firstFailure = null;
+            foreach (var group in released)
             {
-                await sonarr.SetEpisodeMonitoringAsync(released.Where(g => g.Any(h => h.Unmonitored)).Select(g => g.Key).ToList(), true, config.Sonarr, cancellationToken);
-                foreach (var hold in released.SelectMany(g => g)) _holds.Remove(hold);
+                try
+                {
+                    if (group.Any(h => h.Unmonitored))
+                        await sonarr.SetEpisodeMonitoringAsync([group.Key], true, config.Sonarr, cancellationToken);
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    logger?.LogInformation("Sonarr no longer has held episode {EpisodeId}; nothing to monitor again", group.Key);
+                }
+                catch (HttpRequestException ex)
+                {
+                    firstFailure ??= ex;
+                    continue;
+                }
+                foreach (var hold in group) _holds.Remove(hold);
                 await SaveHoldsAsync();
             }
+            if (firstFailure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(firstFailure);
         }
         finally { _gate.Release(); }
     }
@@ -312,6 +333,83 @@ public sealed class SonarrAcquisitionService(
         await SaveHoldsAsync();
         await sonarr.SetEpisodeMonitoringAsync(request, false, config.Sonarr, cancellationToken);
         logger?.LogInformation("Holding {Count} queued episodes from Sonarr searches", matched.Count);
+    }
+
+    // Each file is imported on its own. One file without a Sonarr match (a special TVDB does not
+    // list) used to end the pass, so every later file of the show waited behind it: on
+    // 2026-11-24 nine One Piece episodes sat behind one special, their holds never released.
+    private async Task ImportPendingFilesAsync(SonarrAcquisitionState link, CancellationToken cancellationToken)
+    {
+        if (link.PendingImports.Count == 0) return;
+        var series = (await history.GetHistorySeriesAsync()).FirstOrDefault(s => s.SeriesId == link.SeriesId);
+        // Sonarr's own disk scan also picks up a file saved straight into its library folder.
+        var inSonarr = link.PendingImports.Values.Any(command => command == null)
+            ? await sonarr.GetEpisodeFilePathsAsync(link.SonarrSeriesId, config.Sonarr, cancellationToken)
+            : [];
+        Exception? firstFailure = null;
+        foreach (var path in link.PendingImports.Keys.ToList())
+        {
+            try
+            {
+                if (link.PendingImports[path] == null)
+                {
+                    var mapped = MapImportPath(path, config.Download.OutputDirectory, config.Sonarr.DownloadPath);
+                    if (inSonarr.Contains(mapped))
+                    {
+                        FinishImport(link, path);
+                        continue;
+                    }
+                    var episodeId = await ConfirmedEpisodeIdAsync(link, path, series, cancellationToken);
+                    link.PendingImports[path] = await sonarr.ImportFileAsync(mapped, link.SonarrSeriesId, config.Sonarr, cancellationToken, episodeId);
+                    link.ConsecutiveFailures = 0;
+                    await SaveAsync();
+                }
+                var status = await sonarr.GetCommandStatusAsync(link.PendingImports[path]!.Value, config.Sonarr, cancellationToken);
+                if (status is "failed" or "aborted" or "cancelled" or "missing")
+                {
+                    link.PendingImports[path] = null;
+                    throw new InvalidOperationException("Sonarr could not import the download. Check the download path mapping and Sonarr logs.");
+                }
+                if (status == "completed") FinishImport(link, path);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) { firstFailure ??= ex; }
+        }
+        // The caller records the reason and schedules the retry for the files still waiting.
+        if (firstFailure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(firstFailure);
+    }
+
+    private void FinishImport(SonarrAcquisitionState link, string path)
+    {
+        link.PendingImports.Remove(path);
+        link.ImportEpisodeIds.Remove(path);
+        sonarr.InvalidateCache();
+        link.NeedsEpisodeMatch = true;
+        link.Status = "Sonarr import scan completed";
+        // Progress: the files still waiting are retried soon instead of after the full backoff.
+        link.ConsecutiveFailures = 0;
+    }
+
+    private async Task<int> ConfirmedEpisodeIdAsync(SonarrAcquisitionState link, string path, HistorySeries? series, CancellationToken cancellationToken)
+    {
+        var sourceId = link.ImportEpisodeIds.GetValueOrDefault(path);
+        var episodes = series?.Seasons.SelectMany(s => s.EpisodesList).ToList() ?? [];
+        var source = episodes.FirstOrDefault(e => e.EpisodeId == sourceId);
+        if (source == null && !string.IsNullOrEmpty(sourceId))
+        {
+            // Queued under a dub's own id, while History lists the episode under another edition's.
+            var editions = (await api.ParseEpisodeByIdAsync(sourceId, null, false, cancellationToken))?.Versions?
+                .Select(version => version.Guid).ToHashSet() ?? [];
+            source = episodes.FirstOrDefault(e => editions.Contains(e.EpisodeId ?? ""));
+            if (source != null) link.ImportEpisodeIds[path] = source.EpisodeId!;
+        }
+        if (int.TryParse(source?.SonarrEpisodeId, out var episodeId)) return episodeId;
+        link.NeedsEpisodeMatch = true;
+        // Retries continue, so the import happens once TVDB adds the special. A new show with one
+        // episode so far is also one video, but not feature-length.
+        throw new InvalidOperationException(series != null && HistoryService.IsFilm(series) && source?.DurationMs >= 40 * 60_000
+            ? "TVDB does not list this film as a special of the Sonarr series yet. The file stays in the download folder and is imported once TVDB adds it."
+            : "Waiting for a confirmed Sonarr episode match before importing.");
     }
 
     private async Task SaveHoldsAsync()
@@ -395,41 +493,7 @@ public sealed class SonarrAcquisitionService(
                         await history.MatchHistoryEpisodesWithSonarrAsync(link.SeriesId);
                         link.NeedsEpisodeMatch = false;
                     }
-                    foreach (var path in link.PendingImports.Keys.ToList())
-                    {
-                        if (link.PendingImports[path] == null)
-                        {
-                            var mapped = MapImportPath(path, config.Download.OutputDirectory, config.Sonarr.DownloadPath);
-                            var sourceId = link.ImportEpisodeIds.GetValueOrDefault(path);
-                            var sourceSeries = (await history.GetHistorySeriesAsync()).FirstOrDefault(s => s.SeriesId == link.SeriesId);
-                            var source = sourceSeries?.Seasons.SelectMany(s => s.EpisodesList).FirstOrDefault(e => e.EpisodeId == sourceId);
-                            if (!int.TryParse(source?.SonarrEpisodeId, out var episodeId))
-                            {
-                                link.NeedsEpisodeMatch = true;
-                                // Retries continue, so the import happens once TVDB adds the special. A new
-                                // show with one episode so far is also one video, but not feature-length.
-                                throw new InvalidOperationException(sourceSeries != null && HistoryService.IsFilm(sourceSeries) && source!.DurationMs >= 40 * 60_000
-                                    ? "TVDB does not list this film as a special of the Sonarr series yet. The file stays in the download folder and is imported once TVDB adds it."
-                                    : "Waiting for a confirmed Sonarr episode match before importing.");
-                            }
-                            link.PendingImports[path] = await sonarr.ImportFileAsync(mapped, link.SonarrSeriesId, config.Sonarr, cancellationToken, episodeId);
-                            await SaveAsync();
-                        }
-                        var status = await sonarr.GetCommandStatusAsync(link.PendingImports[path]!.Value, config.Sonarr, cancellationToken);
-                        if (status is "failed" or "aborted" or "cancelled" or "missing")
-                        {
-                            link.PendingImports[path] = null;
-                            throw new InvalidOperationException("Sonarr could not import the download. Check the download path mapping and Sonarr logs.");
-                        }
-                        if (status == "completed")
-                        {
-                            link.PendingImports.Remove(path);
-                            link.ImportEpisodeIds.Remove(path);
-                            sonarr.InvalidateCache();
-                            link.NeedsEpisodeMatch = true;
-                            link.Status = "Sonarr import scan completed";
-                        }
-                    }
+                    await ImportPendingFilesAsync(link, cancellationToken);
                     if (link.NeedsEpisodeMatch && link.PendingEpisodes.Count == 0)
                     {
                         var episodes = await sonarr.GetCurrentEpisodesAsync(link.SonarrSeriesId, config.Sonarr, false, cancellationToken);

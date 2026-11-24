@@ -142,6 +142,13 @@ public partial class SonarrService
         _ => null
     };
 
+    // Full paths, as Sonarr sees them, of the video files it has for a series.
+    public async Task<HashSet<string>> GetEpisodeFilePathsAsync(int seriesId, SonarrConfig config, CancellationToken cancellationToken = default)
+    {
+        var files = await RequestJsonAsync(HttpMethod.Get, $"episodefile?seriesId={seriesId}", config, cancellationToken: cancellationToken);
+        return files.Select(file => ((string?)file["path"] ?? "").Replace('\\', '/')).Where(path => path.Length > 0).ToHashSet(StringComparer.Ordinal);
+    }
+
     public async Task<int> ImportFileAsync(string path, int seriesId, SonarrConfig config, CancellationToken cancellationToken = default, int? episodeId = null)
     {
         var series = await RequestJsonAsync(HttpMethod.Get, $"series/{seriesId}", config, cancellationToken: cancellationToken);

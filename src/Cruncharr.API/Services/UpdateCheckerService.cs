@@ -86,7 +86,7 @@ public class UpdateCheckerService : BackgroundService
         }
     }
 
-    private static bool IsNewerVersion(string latest, string current)
+    public static bool IsNewerVersion(string latest, string current)
     {
         var l = ParseSemver(latest);
         var c = ParseSemver(current);
@@ -116,7 +116,9 @@ public class UpdateCheckerService : BackgroundService
         {
             var prerelease = version.Substring(dashIndex + 1);
             var match = System.Text.RegularExpressions.Regex.Match(prerelease, @"\d+");
-            if (match.Success) prereleaseNum = int.Parse(match.Value);
+            // A suffix without a number ("1.0.89-beta") is still a pre-release: the stable
+            // release of the same number is newer.
+            prereleaseNum = match.Success ? int.Parse(match.Value) : 0;
             version = version.Substring(0, dashIndex);
         }
 

@@ -8,7 +8,7 @@
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
     <!-- Stable releases use the plain number; the testing channel uses the next number with a
          "-beta" suffix, so the two channels never show the same version. -->
-    <Version>1.0.88</Version>
+    <Version>1.0.89-beta</Version>
     <AssemblyVersion>$(Version.Split('-')[0]).0</AssemblyVersion>
     <FileVersion>$(Version.Split('-')[0]).0</FileVersion>
     <!-- Web projects default to the server GC: one heap per core (20 on the Unraid host), sized

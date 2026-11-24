@@ -326,6 +326,15 @@ public class SecurityRegressionTests
         }
     }
 
+    // Testing builds carry the next version with a "-beta" suffix; stable builds the plain number.
+    [Theory]
+    [InlineData("1.0.89", "1.0.89-beta+0123abc", true)]   // the stable release of a beta is newer
+    [InlineData("1.0.88", "1.0.89-beta+0123abc", false)]  // an older stable is not
+    [InlineData("1.0.89", "1.0.88+0123abc", true)]
+    [InlineData("1.0.88", "1.0.88+0123abc", false)]
+    public void UpdateChecker_ComparesBetaAndStableVersions(string latest, string current, bool newer) =>
+        Assert.Equal(newer, UpdateCheckerService.IsNewerVersion(latest, current));
+
     [Fact]
     public async Task UpdateChecker_RemainsAliveWhenDisabled()
     {
